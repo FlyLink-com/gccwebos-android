@@ -20,12 +20,29 @@ test -s "$APK" && test -s "$TEST_APK"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/progress.log"; }
 log 'SDK image installation'
 timeout 300 "$SDKMANAGER" --sdk_root="$SDK_ROOT" emulator "$SYSTEM_IMAGE" 2>&1 | tee "$OUT/sdk-install.log"
-# This changes only the hosted runner's ephemeral device permission.
+# Bind AVD creation and lookup to the same isolated directory. Never reuse a
+# hosted runner's pre-existing emulator profile or a developer's AVD.
+AVD_ROOT="$(mktemp -d "${RUNNER_TEMP:-/tmp}/gccwebos-m0-avd.XXXXXX")"
+export ANDROID_USER_HOME="$AVD_ROOT/.android"
+export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+export ANDROID_SDK_HOME="$AVD_ROOT"
+mkdir -p "$ANDROID_AVD_HOME"
+printf '%s\n' "ANDROID_USER_HOME=$ANDROID_USER_HOME" "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" > "$OUT/avd-paths.log"
 log 'KVM and AVD preparation'
+# This changes only the hosted runner's ephemeral device permission.
 test -c /dev/kvm
 sudo chmod a+rw /dev/kvm
 timeout 30 "$EMULATOR" -accel-check 2>&1 | tee "$OUT/acceleration.log"
-printf 'no\n' | timeout 60 "$AVDMANAGER" create avd --force --name gccwebos-m0 --package "$SYSTEM_IMAGE"
+printf 'no\n' | timeout 60 "$AVDMANAGER" --verbose create avd --force \
+  --name gccwebos-m0 --package "$SYSTEM_IMAGE" --device pixel_7 \
+  --path "$ANDROID_AVD_HOME/gccwebos-m0.avd" 2>&1 | tee "$OUT/avd-create.log"
+timeout 30 "$AVDMANAGER" list avd 2>&1 | tee "$OUT/avd-manager-list.log"
+test -s "$ANDROID_AVD_HOME/gccwebos-m0.ini"
+test -s "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini"
+timeout 30 "$EMULATOR" -list-avds 2>&1 | tee "$OUT/avd-emulator-list.log"
+grep -Fxq gccwebos-m0 "$OUT/avd-emulator-list.log"
+log 'AVD exists and is discoverable; launching emulator'
 "$EMULATOR" -avd gccwebos-m0 -port 5554 -no-window -no-audio -no-boot-anim \
   -no-snapshot -gpu swiftshader_indirect -camera-back none -camera-front none \
   -accel on -cores 2 -memory 2048 > "$OUT/emulator.log" 2>&1 &
@@ -47,6 +64,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Offline adb commands must not wait indefinitely, including inside cleanup.
 adb() { timeout 45 "$ADB" -s emulator-5554 "$@"; }
+sleep 1
+kill -0 "$EMU_PID" || { cat "$OUT/emulator.log"; exit 1; }
 log 'Waiting for emulator transport'
 timeout 180 "$ADB" -s emulator-5554 wait-for-device
 log 'Waiting for Android boot completion'

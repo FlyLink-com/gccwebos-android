@@ -43,5 +43,10 @@ for directory in ('main', 'release'):
 root_build = (ROOT / 'build.gradle.kts').read_text()
 assert 'version "9.2.0"' in root_build and 'version "2.3.10"' in root_build
 assert 'id("org.jetbrains.kotlin.android")' not in root_build
+# Preserve the SDK alignment gate introduced by the separately merged PR #2.
+app_build = (ROOT / 'app/build.gradle.kts').read_text()
+workflow = (ROOT / '.github/workflows/android.yml').read_text()
+assert 'compileSdk = 36' in app_build and 'targetSdk = 36' in app_build
+assert '"platforms;android-36"' in workflow, 'CI SDK must match compileSdk'
 print('PASS M0 source presence, checksums, XML, compiler declarations and debug separation')
 print('NOT RUN by this check: Gradle, Android Lint, APK signing, device or backend tests')

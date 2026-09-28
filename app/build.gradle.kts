@@ -5,7 +5,6 @@ plugins {
 
 android {
     namespace = "com.gccwebos.android"
-    // M0 CI could not resolve platforms;android-37. Keep target/min SDK unchanged.
     compileSdk = 36
     buildToolsVersion = "36.0.0"
 
@@ -37,10 +36,11 @@ android {
     lint { abortOnError = true }
 }
 
-// Resolve a dependency notation through DependencyHandler, not Project scope.
-val composeBom = dependencies.platform("androidx.compose:compose-bom:2026.06.01")
+// Pinned to an official documented stable BOM. Original 2026.09.00 was not
+// dependency-resolved here; see CHANGELOG.md. No dynamic dependency versions.
+val composeBom = "androidx.compose:compose-bom:2026.06.01"
 dependencies {
-    implementation(composeBom)
+    implementation(platform(composeBom))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
@@ -48,7 +48,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-    androidTestImplementation(composeBom)
+    androidTestImplementation(platform(composeBom))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test:runner:1.6.2")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

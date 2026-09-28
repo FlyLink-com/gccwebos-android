@@ -1,0 +1,8 @@
+Command: git diff --check
+Basis: local git import of unchanged uploaded ZIP
+Exit: 0
+Result: PASS
+Note: no remote repository was modified.
+warning: in the working copy of 'build.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'gradlew.bat', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/bootstrap-wrapper.ps1', LF will be replaced by CRLF the next time Git touches it

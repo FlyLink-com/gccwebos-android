@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Run only after successful Gradle tasks. Never create a success manifest without a real APK."""
+from __future__ import annotations
+from datetime import datetime, timezone
+import hashlib
+import json
+import subprocess
+from pathlib import Path
+import xml.etree.ElementTree as ET
+from zipfile import ZipFile
+
+ROOT = Path(__file__).resolve().parents[1]
+APK = ROOT / 'app/build/outputs/apk/debug/app-debug.apk'
+OUT = ROOT / '.build-output'
+if not APK.is_file() or APK.stat().st_size == 0:
+    raise SystemExit('No Debug APK exists. No success manifest was created.')
+with ZipFile(APK) as archive:
+    if archive.testzip() is not None:
+        raise SystemExit('Corrupt APK')
+    for required in ('AndroidManifest.xml', 'classes.dex', 'resources.arsc'):
+        if required not in archive.namelist():
+            raise SystemExit(f'Incomplete APK: {required} missing')
+xml_files = list((ROOT / 'app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'))
+if not xml_files:
+    raise SystemExit('No Gradle unit test XML. Offline diagnostics do not satisfy this gate.')
+counts = dict(tests=0, failures=0, errors=0, skipped=0)
+for path in xml_files:
+    suite = ET.parse(path).getroot()
+    for key in counts:
+        counts[key] += int(suite.get(key, '0'))
+if counts['tests'] < 53 or any(counts[key] for key in ('failures', 'errors', 'skipped')):
+    raise SystemExit(f'Unit test gate not satisfied: {counts}')
+lint_path = ROOT / 'app/build/reports/lint-results-debug.xml'
+if not lint_path.is_file():
+    raise SystemExit('No Android Lint XML')
+issues = ET.parse(lint_path).getroot().findall('issue')
+if any(issue.get('severity', '').lower() in ('fatal', 'error') for issue in issues):
+    raise SystemExit('Android Lint errors remain')
+try:
+    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+except (OSError, subprocess.CalledProcessError):
+    revision = None
+OUT.mkdir(exist_ok=True)
+manifest = {
+    'created_at_utc': datetime.now(timezone.utc).isoformat(),
+    'revision': revision,
+    'artifact': str(APK.relative_to(ROOT)),
+    'sha256': hashlib.sha256(APK.read_bytes()).hexdigest(),
+    'bytes': APK.stat().st_size,
+    'variant': 'debug',
+    'application_id': 'com.gccwebos.android.debug',
+    'version_name': '0.1.1-m0-debug',
+    'unit_tests': counts,
+    'lint_error_count': 0,
+    'lint_warning_count': sum(i.get('severity', '').lower() == 'warning' for i in issues),
+    'device_tests': 'not_run_by_this_collector',
+    'real_vpn': 'not_integrated',
+    'production_or_store_release': False,
+}
+(OUT / 'build-manifest.json').write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')
+print(json.dumps(manifest, indent=2, ensure_ascii=False))

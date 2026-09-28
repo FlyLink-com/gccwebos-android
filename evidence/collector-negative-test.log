@@ -1,0 +1,2 @@
+PASS: APK-less evidence collector refuses success manifest.
+No Debug APK exists. No success manifest was created.

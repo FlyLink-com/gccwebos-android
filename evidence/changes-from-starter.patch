@@ -1,0 +1,2142 @@
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..66322ca
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,10 @@
++* text=auto
++*.kt text eol=lf
++*.kts text eol=lf
++*.sh text eol=lf
++*.md text eol=lf
++*.yml text eol=lf
++gradlew text eol=lf
++gradlew.bat text eol=crlf
++*.ps1 text eol=crlf
++*.jar binary
+diff --git a/.github/workflows/android.yml b/.github/workflows/android.yml
+new file mode 100644
+index 0000000..2f5156f
+--- /dev/null
++++ b/.github/workflows/android.yml
+@@ -0,0 +1,68 @@
++name: Android M0 build
++on:
++  workflow_dispatch:
++  pull_request:
++  push:
++    branches: [main, master]
++permissions:
++  contents: read
++concurrency:
++  group: android-m0-${{ github.ref }}
++  cancel-in-progress: true
++jobs:
++  validate:
++    runs-on: ubuntu-24.04
++    timeout-minutes: 30
++    steps:
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, resolved 2026-09-28
++        with:
++          persist-credentials: false
++      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
++        with:
++          distribution: temurin
++          java-version: '17'
++      - name: Install explicit SDK packages
++        shell: bash
++        run: |
++          set -euo pipefail
++          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
++          test -n "$SDK_ROOT"
++          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
++          test -x "$SDKMANAGER"
++          # Hosted runner SDK license state is used; no account/payment/production credentials.
++          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-37" "build-tools;36.0.0" "platform-tools"
++          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
++      - name: Verify bootstrap and build
++        shell: bash
++        run: |
++          set -euo pipefail
++          chmod +x gradlew build.sh scripts/*.sh
++          python3 scripts/verify_source.py
++          ./build.sh
++          # Compile the instrumented test package; this does NOT execute device tests.
++          ./gradlew --no-daemon --console=plain :app:assembleDebugAndroidTest
++          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk | tee .build-output/apk-signature.log
++          python3 scripts/collect_build_evidence.py
++      - name: Attach Debug APK after successful validation
++        if: success()
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
++        with:
++          name: gccwebos-m0-debug-${{ github.sha }}
++          path: |
++            app/build/outputs/apk/debug/*.apk
++            .build-output/build-manifest.json
++          include-hidden-files: true
++          if-no-files-found: error
++          retention-days: 14
++      - name: Attach validation logs even on failure
++        if: always()
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
++        with:
++          name: gccwebos-m0-reports-${{ github.sha }}
++          path: |
++            .build-output/*.log
++            app/build/test-results/
++            app/build/reports/
++          include-hidden-files: true
++          if-no-files-found: warn
++          retention-days: 14
+diff --git a/.gitignore b/.gitignore
+index 21d77fe..203f5ae 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,3 +10,10 @@ captures/
+ *.apk
+ *.aab
+ *.log
++
++.build-output/
++.local-tests/
++*.tmp
++
++__pycache__/
++*.pyc
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+new file mode 100644
+index 0000000..c134a54
+--- /dev/null
++++ b/CHANGELOG.md
+@@ -0,0 +1,35 @@
++# 0.1.1-m0 · 2026-09-28
++
++## 输入与边界
++
++输入：`gccwebos-android-starter (1).zip`，SHA-256 `62ad7f4667bd313f9e0530af95ff9ef0bc466c9f8d02e1424f20f5209b85289e`。原 ZIP 未覆盖。
++
++本次是本地 Android 客户端源码实现；不新建或修改真实后台、账户、价格、订单、节点、密钥或线上部署。仓库只在工作目录初始化本地基线用于 diff，无远程提交。
++
++## 代码修复
++
++- 短时命令锁与隧道生命周期互斥分离。连接时的长挂起不再挡住取消命令。
++- 新命令取消旧任务；旧任务完成资源清理后，下一任务才能接管全局隧道。
++- 排队阶段就被取消的任务会等待其**具体前驱**完成清理，不等待或误停更晚的新连接。
++- 对部分启动失败、探测异常、调用方取消、生命周期取消与每阶段超时补齐清理。
++- 清理超时／异常保留“可能仍在运行”的安全状态，显示 `CLEANUP_FAILED`，不能假称已断开，也不能直接启动另一个隧道。
++- 新增 `switchLine()`、`reconnect()`、`close()`；相同有效连接的普通 connect 保持幂等。
++- `AuthorizedConfig` 不再是暴露 ByteArray 默认字符串输出的 data class；增加安全拷贝、redacted 字符串和 close 清零。
++- 原有四入口保留，追加可保存导航、滚动布局、资源字符串和测试标签。
++- 仅 Debug 源集添加有显著“模拟／未建立 VPN”标识的本地诊断，不开放首页真实连接按钮。
++
++## 构建变化（本轮新增的实现选择）
++
++- Compose Compiler 从 2.2.10 改为 2.3.10，对齐 AGP 9.2 的内置 Kotlin；没有添加重复 `kotlin-android` 插件。
++- Compose BOM 从原包 2026.09.00 改为官方说明可确认的 2026.06.01。未成功读取 Maven 元数据，不宣称原版本不存在，也未验证新依赖解析通过。
++- compileSdk 37、targetSdk 36、minSdk 26、AGP 9.2.0、Gradle 9.4.1、Activity 1.12.4、coroutines 1.10.2 保留。
++- versionCode 改为 2；versionName 改为 `0.1.1-m0`；debug 加 `.debug` 应用 ID 后缀及 `-debug` 版本后缀。
++- 添加 Windows/Linux 构建与 Wrapper 校验引导。官方二进制 JAR 未能下载，不制造替代／假 JAR。
++- CI Action 固定到本轮读取的 commit；权限仅 contents:read，无发布、部署或生产签名动作。CI 未执行。
++
++## 验证
++
++- 本轮编译生产协调器并执行 53 项同源离线 JVM 行为用例，见构建报告。
++- 两项 Android UI 测试、Gradle/JUnit/Lint、APK 签名和真机测试未运行。
++- 实际 Android 构建在 Wrapper 下载阶段失败：`curl: (6) Could not resolve host: raw.githubusercontent.com`。
++- M0 仍为**实现已推进、Android 构建与接口合同门槛未完成**。
+diff --git a/README.md b/README.md
+index ead7313..b7e4997 100644
+--- a/README.md
++++ b/README.md
+@@ -1,68 +1,103 @@
+-# GCC Web OS Android VPN
++# gccwebos Android · 0.1.1-m0
+ 
+-面向用户的原生 Android VPN 客户端。用户在 App 中完成邮箱注册登录、购买月卡或年卡、选择线路、一键连接、查看订单与推荐；账户、价格、权益、订单和节点授权由 `proxy-gateway-minimal` 控制面决定。
++基于用户上传的 `gccwebos-android-starter (1).zip` 进行增量实现，保留单一 `app` 模块、四入口和 Gateway 分层。
+ 
+-> 当前源码是 M0 工程与可测试的连接协调器，还不是可连接的 APK。连接页明确显示未接入测试环境，按钮不可用；没有将占位 UI 伪装成 VPN。服务端接口依据 `2dea45fc` 的文档初步核对，生产部署与安卓真机尚未验证。
++**这是首轮构建源码包，不是 APK，也不是可连接的 VPN 产品。** 本轮已实现连接协调器修复、同源回归用例、Debug 工程自检和构建入口。Android 构建因当前环境无法解析依赖下载域名而停止；没有 Android SDK，未执行 Gradle 的编译／JUnit／Lint 阶段，未做真机验收。准确状态见 [BUILD_STATUS](docs/BUILD_STATUS.md)。M0 的“APK、CI 实际运行、接口合同确认”仍未完成。
+ 
+-## 发布路线
++## 本轮已有的代码
+ 
+-首版：官网／TG 分发签名 APK，小范围真机测试。Google Play 作为独立分发渠道准备，付款、订阅和商店声明在上架前单独实现和验收。安装来源由构建渠道明确标识；客户端不能通过换入口绕过对应渠道规则。
++| 范围 | 实现 |
++| --- | --- |
++| 连接协调器 | 取消在途连接；按尝试隔离结果；异常与部分启动清理；换线；重连；生命周期取消时关闭连接；清理失败时阻止启动新隧道 |
++| 配置材料 | 防御性字节拷贝、安全字符串表示、关闭后清零、禁止从已关闭对象取材料 |
++| 四入口 | 连接／线路／套餐／我的；状态恢复、滚动布局与测试标签。真实连接仍明确禁用 |
++| Debug 自检 | “我的”内提供**仅本地模拟**的工程控制：正常、配置等待、探测失败、无套餐；可运行、取消、换线、重连。无网络／TUN／真实账户 |
++| Release 分离 | 模拟网关仅在 `src/debug`；release 源集为空实现，不带模拟控制或测试节点 |
++| 测试 | 53 项同源行为用例，通过隔离 JVM 执行；JUnit 参数化入口已写好；另有 2 项 Android UI 测试源文件，尚未运行 |
++| 构建 | 固定依赖版本、Windows/Linux 入口、官方 Wrapper 校验引导、CI 构建／报告／Debug APK 收集工作流 |
+ 
+-## 产品入口
++本轮没有创建远程仓库、提交 GitHub、启动远程 CI、修改后台、使用真实节点、操作支付或生产系统。
+ 
+-| 入口 | 第一版功能 |
+-| --- | --- |
+-| 连接 | 一键连接／断开、当前线路、套餐、到期时间、流量、故障原因 |
+-| 线路 | 自动选择、账户可用线路、延迟与维护状态、切换 |
+-| 套餐 | 服务端商品与报价、月卡／年卡、购买与续费、开通进度 |
+-| 我的 | 邮箱账户、商品订单、充值记录、钱包、邀请推荐、支持与设置 |
++## 第一次构建（Windows）
++
++准备 JDK 17、Android SDK Platform 37、Build Tools 36.0.0。通过 Android Studio SDK Manager 安装所需组件并自行确认 SDK 许可。设置 `JAVA_HOME`，SDK 通过 `ANDROID_HOME` 或本地 `local.properties` 指定。构建时需要访问 Gradle、Google Maven、Maven Central 与官方 Wrapper 来源。
+ 
+-注册和登录属于进入流程，不占底部导航。套餐有效期与每周期额度分别展示，不能将年度套餐的每月额度写成全年总量。
++在解压后的 `gccwebos-android` 目录运行：
+ 
+-## 工程结构目标
++```powershell
++powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
++```
++
++这仅对本次 PowerShell 进程使用执行策略，不修改系统永久策略。成功后才会存在：
+ 
+ ```text
+-app/                  应用入口、导航、依赖装配、分发渠道配置
+-core/model/           业务状态、错误码、不可变模型
+-core/network/         API 客户端、认证刷新、重试与幂等键
+-core/storage/         加密会话与非敏感偏好
+-core/designsystem/    Compose 主题和组件
+-feature/auth/         邮箱验证、注册、登录、退出
+-feature/connect/      连接主页和连接状态
+-feature/lines/        自动与手动线路
+-feature/plans/        商品、购买、权益、流量
+-feature/orders/       商品订单、充值订单
+-feature/referral/     分享、邀请码、奖励
+-feature/profile/      账户、支持、设置
+-vpn/                  VpnService、内核适配、隧道与网络状态
+-docs/                 接口合同、开发顺序与验收
++app/build/outputs/apk/debug/app-debug.apk
+ ```
+ 
+-先建单一 `app` 模块加清晰包结构，代码规模增长后再拆 Gradle 模块。技术栈：Kotlin、Jetpack Compose、协程与 Flow、Android `VpnService`、经过协议兼容与许可证审查的内核。当前固定 AGP 9.2.0 / Gradle 9.4.1 / JDK 17 / Compose BOM 2026.09.00。应用 ID `com.gccwebos.android` 为暂定，首次分发前确认品牌与签名身份。
++Debug 应用 ID 为 `com.gccwebos.android.debug`，版本为 `0.1.1-m0-debug`，避免覆盖未来正式版。Gradle 自动产生本地 Debug 签名；本包不包含签名私钥。不同机器生成的 Debug 签名可能不同，不能当成正式升级签名。
+ 
+-## 当前代码
++## 第一次构建（Linux／macOS）
+ 
+-- `app/src/main/.../MainActivity.kt`：连接／线路／套餐／我的四入口。没有真实数据时明确标记未接入。
+-- `app/src/main/.../core/ConnectionCoordinator.kt`：将认证、权益、配置、系统授权、隧道和流量检查分开；只在最后的流量检查成功后进入 `Connected`。
+-- `app/src/test/.../ConnectionCoordinatorTest.kt`：检查“无套餐不得启动隧道”和“流量不可用不得显示已连接”。
++```bash
++chmod +x gradlew build.sh scripts/*.sh
++./build.sh
++```
+ 
+-当前环境没有 Android SDK、Gradle 分发包或 wrapper JAR，因而未执行 Android 构建。`gradle/wrapper/gradle-wrapper.properties` 已锁定分发版本；首次在 Android Studio／有 Gradle 的环境生成并提交 `gradlew`、`gradlew.bat`、`gradle-wrapper.jar`，然后运行 `./gradlew assembleDebug testDebugUnitTest`。不要以这份源代码包冒充已验证的 APK。
++实际执行：
+ 
+-## 不可变原则
++```bash
++./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
++```
++
++有连接的设备或模拟器时，可另外执行 `./gradlew :app:connectedDebugAndroidTest`。这不是本轮已经运行的命令。
++
++## Wrapper 的准确状态
+ 
+-1. 后台是价格、权益、订单、推荐奖励与可用线路的唯一事实来源；APK 不包含管理密钥，也不创建第二套账户或账本。
+-2. 客户端只接收当前账户可用的线路与短期连接配置；节点管理、凭据轮换由服务端处理。
+-3. `已购买`、`已开通`、`隧道已建立`、`实际可用` 是不同状态。只有真实流量验证通过才显示“已连接”。
+-4. 支付返回、超时和重复点击均重新查询服务端；购买请求使用稳定幂等键。客户端跳转结果不能直接授予权益。
+-5. 流量采集未完成和数据过期分别显示；未知值不得写作 `0 GB`。
++`gradlew`、`gradlew.bat` 是本项目的校验引导启动器，并非假称为 Gradle 自动生成的原脚本。**二进制 `gradle-wrapper.jar` 因下载限制没有装入本包**；首次运行启动器将从 `gradle/gradle` 官方仓库下载它，先与固定 SHA-256 对比，再交给官方 Wrapper 下载校验过的 Gradle 9.4.1 分发包。已有文件校验不匹配时立即停止，不执行、不自动覆盖。
+ 
+-## 开始开发
++引导完成后可把已验证的 JAR 提交到 Android 客户端自己的仓库；后续可用 Gradle 9.4.1 的 `wrapper` 任务重新生成标准脚本。不能将“存在下载脚本”记作本轮已取得 JAR 或已运行 Gradle。
+ 
+-依次执行 [开发里程碑](docs/roadmap.md)；首先与后台负责人逐项确认 [接口合同](docs/backend-contracts.md)，再实现 [状态与连接架构](docs/architecture.md)。第一个可运行交付物是测试账户在真机上完成连接、断开和网络切换恢复，并提供脱敏日志。
++## 固定工具链
++
++| 项目 | 本包配置 |
++| --- | --- |
++| Android Gradle Plugin | 9.2.0（保留原包） |
++| Gradle 分发 | 9.4.1，固定 SHA-256 |
++| Kotlin／Compose Compiler | AGP 内置 Kotlin 对齐 Compose Compiler 2.3.10 |
++| Compose BOM | 2026.06.01：改用本轮官方文档可确认的版本，非“2026.09.00 不存在”的断言 |
++| Activity Compose | 1.12.4（保留） |
++| Coroutines | 1.10.2（保留） |
++| compile / target / min SDK | 37 / 36 / 26（保留） |
++| Java 字节码目标 | 17 |
++
++当前网络环境不能完成 Maven 解析，以上是工程固定输入，不是已解析的构建依赖清单。变更理由和官方来源见 [CHANGELOG](CHANGELOG.md) 与 [工具链来源](docs/TOOLCHAIN_SOURCES.md)。
++
++## 离线诊断与正式验证区别
++
++有 Kotlin CLI 和本地 Coroutines JAR 时：
++
++```bash
++./scripts/test-core-offline.sh
++```
++
++脚本编译原始生产 `ConnectionCoordinator.kt` 和与 JUnit 共用的 `ConnectionCases.kt`，不会复制另一套协调器。输出 `.local-tests/core-tests.xml` 与日志。**本轮实际工具是 Kotlin 1.9.0／JDK 21.0.11 和本地协程 JAR，而不是目标 Kotlin 2.3.10／coroutines 1.10.2**。53/53 只证明该边界的控制流回归，不替代 Android Gradle、UI 或真机验收。准确 JAR 哈希随证据提供。
++
++## 工程与后续范围
++
++```text
++app/src/main/.../core/         生产连接状态与网关合同
++app/src/main/.../MainActivity  四入口，真实功能明确未接入
++app/src/debug/.../             仅 Debug 的本地模拟控制
++app/src/release/.../           排除模拟控制的实现
++app/src/test/.../              同源行为用例与 JUnit 入口
++app/src/androidTest/.../       真实设备／模拟器 UI 用例（未运行）
++scripts/                      引导、验证与证据收集
++.github/workflows/android.yml  准备好的 CI，未触发
++```
+ 
+-## 文档
++M1 继续依赖获准的原生认证、账户权益、授权线路／配置、内核许可证与隔离测试节点。本包**没有** `VpnService`、协议内核、邮箱登录 API、真实套餐／支付／订单／推荐归因接入，不新增第二套后台或财务账本。自动网络恢复、系统撤销授权、DNS／IPv6／流量路径验证仍需 M1 真机完成。
+ 
+-- [架构与状态](docs/architecture.md)
+-- [后台接口合同](docs/backend-contracts.md)
+-- [开发顺序与验收](docs/roadmap.md)
+-- [具体任务清单](TASKS.md)
++- [连接协调器合同与迁移](docs/connection-coordinator.md)
++- [原有接口合同](docs/backend-contracts.md)
++- [原有开发里程碑](docs/roadmap.md)
++- [任务清单](TASKS.md)
+diff --git a/TASKS.md b/TASKS.md
+index 6996436..9662eef 100644
+--- a/TASKS.md
++++ b/TASKS.md
+@@ -1,10 +1,12 @@
+-# GCC Web OS Android 开发任务清单
++> 2026-09-28 增量状态：本轮仅在本地修改 Android 源码。下表的后台能力、Issue 状态和生产事实沿用输入包的待确认语义，未作新鲜盘点。53 项 JVM 诊断已通过，但尚未得到 APK，不将 M0 标记为全部完成。
++
++# gccwebos Android 开发任务清单
+ 
+ 状态：`待做` / `阻塞` / `进行中` / `完成`。每项完成时附 PR、构建结果和真机证据。后台任务进入 `proxy-gateway-minimal`，客户端任务进入本仓库。
+ 
+ | 优先级 | 仓库 | 任务 | 完成标准 | 依赖／状态 |
+ | --- | --- | --- | --- | --- |
+-| P0 | Android | 建立 Gradle wrapper、CI 和基础工程 | `assembleDebug`、`testDebugUnitTest` 通过；产物可安装；无签名密钥入库 | 本包已有工程源码，wrapper JAR 和脚本待生成；待做 |
++| P0 | Android | 建立 Gradle wrapper、CI 和基础工程 | `assembleDebug`、`testDebugUnitTest` 通过；产物可安装；无签名密钥入库 | 0.1.1-m0：源码、引导脚本与 CI 已写；53 项离线同源行为测试通过；Wrapper JAR 下载／Gradle 构建／APK／远程 CI 未完成；进行中 |
+ | P0 | Backend | 确认原生邮箱注册／登录合同 | 明确注册、邮箱验证、密码、二次验证、会话恢复／撤销、限流与错误码；隔离测试环境有端到端样例 | 当前认证边界文档对公开邮箱注册与密码登录仍有放行门槛；阻塞 |
+ | P0 | Backend | 输出账户资源合同 | 核对 `/api/portal/resources/current/overview` 的 DTO、原生认证方式和部署状态；未采集／实测零／过期样例齐备 | 源码可见但非生产验收；待做 |
+ | P0 | Backend | 授权线路与短期连接配置合同 | 只返回账户获准线路；定义配置生命周期、撤销、轮换、协议格式及错误码；测试节点可用 | 待做 |
+@@ -22,7 +24,7 @@
+ 
+ ## 第一批建议拆成 4 个 PR
+ 
+-1. **Android/M0 工程**：wrapper + CI + 本包代码，跑通构建和两个状态测试。
++1. **Android/M0 工程**：wrapper + CI + 本包代码，推进构建，并执行同源的 53 项状态测试；离线诊断不替代 Gradle/JUnit。
+ 2. **Backend/原生合同**：认证、资源、线路／配置的审计与脱敏样例；缺口另开实现 PR。
+ 3. **Android/M1 内核实验**：独立测试界面接真实测试节点，验证授权、连接、断开和流量。
+ 4. **Android/M1 产品接入**：将内核适配给 `ConnectionCoordinator`，接连接页与线路页。
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 9b80d94..d12c029 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -6,36 +6,50 @@ plugins {
+ android {
+     namespace = "com.gccwebos.android"
+     compileSdk = 37
++    buildToolsVersion = "36.0.0"
+ 
+     defaultConfig {
+         applicationId = "com.gccwebos.android"
+         minSdk = 26
+         targetSdk = 36
+-        versionCode = 1
+-        versionName = "0.1.0"
++        versionCode = 2
++        versionName = "0.1.1-m0"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+     }
+ 
+     buildTypes {
++        debug {
++            applicationIdSuffix = ".debug"
++            versionNameSuffix = "-debug"
++        }
+         release {
+             isMinifyEnabled = false
++            isDebuggable = false
++            // No production signing credentials or automatic release signing.
+         }
+     }
+-
+     compileOptions {
+         sourceCompatibility = JavaVersion.VERSION_17
+         targetCompatibility = JavaVersion.VERSION_17
+     }
+-
+     buildFeatures { compose = true }
++    lint { abortOnError = true }
+ }
+ 
++// Pinned to an official documented stable BOM. Original 2026.09.00 was not
++// dependency-resolved here; see CHANGELOG.md. No dynamic dependency versions.
++val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
+ dependencies {
+-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
++    implementation(composeBom)
+     implementation("androidx.compose.ui:ui")
++    implementation("androidx.compose.foundation:foundation")
+     implementation("androidx.compose.material3:material3")
+     implementation("androidx.activity:activity-compose:1.12.4")
+     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+     testImplementation("junit:junit:4.13.2")
+     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
++    androidTestImplementation(composeBom)
++    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
++    androidTestImplementation("androidx.test:runner:1.6.2")
++    debugImplementation("androidx.compose.ui:ui-test-manifest")
+ }
+diff --git a/app/src/androidTest/java/com/gccwebos/android/AppShellTest.kt b/app/src/androidTest/java/com/gccwebos/android/AppShellTest.kt
+new file mode 100644
+index 0000000..069c170
+--- /dev/null
++++ b/app/src/androidTest/java/com/gccwebos/android/AppShellTest.kt
+@@ -0,0 +1,24 @@
++package com.gccwebos.android
++
++import androidx.compose.ui.test.assertExists
++import androidx.compose.ui.test.assertIsNotEnabled
++import androidx.compose.ui.test.junit4.createAndroidComposeRule
++import androidx.compose.ui.test.onNodeWithTag
++import androidx.compose.ui.test.performClick
++import org.junit.Rule
++import org.junit.Test
++
++class AppShellTest {
++    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
++
++    @Test fun realVpnIsExplicitlyUnavailable() {
++        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
++    }
++
++    @Test fun allFourDestinationsRemainAccessible() {
++        listOf("Lines", "Plans", "Profile", "Connect").forEach { name ->
++            compose.onNodeWithTag("nav-$name").performClick()
++            compose.onNodeWithTag("page-$name").assertExists()
++        }
++    }
++}
+diff --git a/app/src/debug/java/com/gccwebos/android/DebugBuildPanel.kt b/app/src/debug/java/com/gccwebos/android/DebugBuildPanel.kt
+new file mode 100644
+index 0000000..766b546
+--- /dev/null
++++ b/app/src/debug/java/com/gccwebos/android/DebugBuildPanel.kt
+@@ -0,0 +1,93 @@
++package com.gccwebos.android
++
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.material3.Button
++import androidx.compose.material3.HorizontalDivider
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.OutlinedButton
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableIntStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.platform.testTag
++import androidx.compose.ui.unit.dp
++import com.gccwebos.android.core.AccessDecision
++import com.gccwebos.android.core.AccountGateway
++import com.gccwebos.android.core.AuthorizedConfig
++import com.gccwebos.android.core.BusinessBlock
++import com.gccwebos.android.core.ConfigGateway
++import com.gccwebos.android.core.ConnectionCoordinator
++import com.gccwebos.android.core.ConnectionState
++import com.gccwebos.android.core.EntitlementGateway
++import com.gccwebos.android.core.PermissionGateway
++import com.gccwebos.android.core.TrafficProbe
++import com.gccwebos.android.core.TunnelGateway
++import kotlinx.coroutines.awaitCancellation
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.launch
++
++/** Debug-only engineering control. No socket, TUN, VpnService, account or payment is created. */
++@Composable
++internal fun DebugBuildPanel() {
++    val scope = rememberCoroutineScope()
++    val fake = remember { LocalDiagnosticGateways() }
++    val controller = remember(scope) {
++        ConnectionCoordinator(fake, fake, fake, fake, fake, fake, parentScope = scope)
++    }
++    val state by controller.state.collectAsState()
++    var scenario by remember { mutableIntStateOf(0) }
++    val scenarios = listOf("正常模拟", "配置等待（用于取消）", "流量探测失败", "无套餐阻断")
++    val busy = state is ConnectionState.Working || state == ConnectionState.Disconnecting
++    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("debug-diagnostics")) {
++        HorizontalDivider()
++        Text("仅 Debug：本地状态机自检", style = MaterialTheme.typography.titleMedium)
++        Text("以下全部为模拟。不连接互联网、不注册账户、不建立 VPN，也不表示实际服务可用。")
++        Text(scenarios[scenario])
++        OutlinedButton(enabled = !busy && state !is ConnectionState.Connected, onClick = {
++            scenario = (scenario + 1) % scenarios.size
++            fake.scenario = scenario
++        }) { Text("切换模拟场景") }
++        Text(when (val value = state) {
++            is ConnectionState.Connected -> "模拟流程完成（未建立 VPN）：${value.lineId}"
++            is ConnectionState.Working -> "模拟检查：${value.operation} / ${value.step}"
++            is ConnectionState.Blocked -> "模拟业务阻断：${value.reason}"
++            is ConnectionState.Failed -> "模拟失败：${value.reason}"
++            ConnectionState.Disconnecting -> "正在清理模拟资源"
++            ConnectionState.Disconnected -> "模拟资源已停止"
++        })
++        Button(onClick = { scope.launch { controller.connect("demo-a") } }) { Text("运行模拟 A") }
++        OutlinedButton(onClick = { scope.launch { controller.switchLine("demo-b") } }) { Text("切换模拟 B") }
++        OutlinedButton(onClick = { scope.launch { controller.reconnect() } }) { Text("模拟重连") }
++        OutlinedButton(onClick = { scope.launch { controller.disconnect() } }) { Text("取消／停止模拟") }
++    }
++}
++
++private class LocalDiagnosticGateways : AccountGateway, EntitlementGateway, ConfigGateway,
++    PermissionGateway, TunnelGateway, TrafficProbe {
++    var scenario: Int = 0
++    private var running = false
++    override suspend fun isAuthenticated(): Boolean { delay(250); return true }
++    override suspend fun current(): AccessDecision {
++        delay(250)
++        return AccessDecision(if (scenario == 3) BusinessBlock.NO_PLAN else null)
++    }
++    override suspend fun forLine(lineId: String?): AuthorizedConfig {
++        if (scenario == 1) awaitCancellation()
++        delay(250)
++        return AuthorizedConfig(lineId ?: "demo-auto", byteArrayOf())
++    }
++    override suspend fun hasVpnPermission(): Boolean { delay(250); return true }
++    override suspend fun start(config: AuthorizedConfig): Boolean {
++        running = true // An in-memory flag only; deliberately no Android VPN service.
++        delay(250)
++        return true
++    }
++    override suspend fun stop() { running = false }
++    override suspend fun isUsable(): Boolean { delay(400); return running && scenario != 2 }
++}
+diff --git a/app/src/debug/res/values/strings.xml b/app/src/debug/res/values/strings.xml
+new file mode 100644
+index 0000000..2868e2b
+--- /dev/null
++++ b/app/src/debug/res/values/strings.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources><string name="app_name">gccwebos 测试</string></resources>
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 202a0e7..95b0365 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -2,7 +2,8 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <application
+         android:allowBackup="false"
+-        android:label="GCC Web OS"
++        android:label="@string/app_name"
++        android:usesCleartextTraffic="false"
+         android:supportsRtl="true"
+         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+         <activity
+diff --git a/app/src/main/java/com/gccwebos/android/MainActivity.kt b/app/src/main/java/com/gccwebos/android/MainActivity.kt
+index 789cd67..2ad6c88 100644
+--- a/app/src/main/java/com/gccwebos/android/MainActivity.kt
++++ b/app/src/main/java/com/gccwebos/android/MainActivity.kt
+@@ -3,11 +3,15 @@ package com.gccwebos.android
+ import android.os.Bundle
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.setContent
++import androidx.activity.enableEdgeToEdge
++import androidx.annotation.StringRes
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.PaddingValues
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.verticalScroll
+ import androidx.compose.material3.Button
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.NavigationBar
+@@ -18,41 +22,46 @@ import androidx.compose.material3.Text
+ import androidx.compose.runtime.Composable
+ import androidx.compose.runtime.getValue
+ import androidx.compose.runtime.mutableStateOf
+-import androidx.compose.runtime.remember
++import androidx.compose.runtime.saveable.rememberSaveable
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.platform.testTag
++import androidx.compose.ui.res.stringResource
+ import androidx.compose.ui.unit.dp
+ 
+ class MainActivity : ComponentActivity() {
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
++        enableEdgeToEdge()
+         setContent { AppShell() }
+     }
+ }
+ 
+-private enum class Destination(val title: String) {
+-    Connect("连接"), Lines("线路"), Plans("套餐"), Profile("我的")
++private enum class Destination(@StringRes val title: Int) {
++    Connect(R.string.tab_connect), Lines(R.string.tab_lines),
++    Plans(R.string.tab_plans), Profile(R.string.tab_profile),
+ }
+ 
+ @Composable
+-private fun AppShell() {
+-    var selected by remember { mutableStateOf(Destination.Connect) }
++internal fun AppShell() {
++    var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
++    val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
+     MaterialTheme {
+         Surface {
+             Scaffold(bottomBar = {
+                 NavigationBar {
+                     Destination.entries.forEach { destination ->
++                        val title = stringResource(destination.title)
+                         NavigationBarItem(
++                            modifier = Modifier.testTag("nav-${destination.name}"),
+                             selected = destination == selected,
+-                            onClick = { selected = destination },
+-                            icon = { Text(destination.title.take(1)) },
+-                            label = { Text(destination.title) }
++                            onClick = { selectedName = destination.name },
++                            icon = { Text(title.take(1)) },
++                            label = { Text(title) },
+                         )
+                     }
+                 }
+-            }) { padding ->
+-                Page(selected, padding)
+-            }
++            }) { padding -> Page(selected, padding) }
+         }
+     }
+ }
+@@ -60,19 +69,29 @@ private fun AppShell() {
+ @Composable
+ private fun Page(destination: Destination, padding: PaddingValues) {
+     Column(
+-        modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+-        verticalArrangement = Arrangement.spacedBy(16.dp)
++        modifier = Modifier.fillMaxSize().padding(padding)
++            .verticalScroll(rememberScrollState()).padding(24.dp)
++            .testTag("page-${destination.name}"),
++        verticalArrangement = Arrangement.spacedBy(16.dp),
+     ) {
+-        Text(destination.title, style = MaterialTheme.typography.headlineMedium)
++        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.labelLarge)
++        Text(stringResource(destination.title), style = MaterialTheme.typography.headlineMedium)
++        Text(stringResource(R.string.build_stage), style = MaterialTheme.typography.bodySmall)
+         when (destination) {
+             Destination.Connect -> {
+-                Text("未接入测试环境")
+-                Text("完成原生认证、权益检查和真实 VPN 内核联调后开放连接。")
+-                Button(onClick = {}, enabled = false) { Text("连接") }
++                Text(stringResource(R.string.not_integrated))
++                Text(stringResource(R.string.connection_explanation))
++                Text(stringResource(R.string.unknown_usage))
++                Button(modifier = Modifier.testTag("vpn-connect"), onClick = {}, enabled = false) {
++                    Text(stringResource(R.string.tab_connect))
++                }
++            }
++            Destination.Lines -> Text(stringResource(R.string.lines_explanation))
++            Destination.Plans -> Text(stringResource(R.string.plans_explanation))
++            Destination.Profile -> {
++                Text(stringResource(R.string.profile_explanation))
++                DebugBuildPanel() // Implemented separately in debug/release source sets.
+             }
+-            Destination.Lines -> Text("线路由后台按当前账户授权返回；尚未接入。")
+-            Destination.Plans -> Text("月卡、年卡及报价将从后台读取；尚未接入。")
+-            Destination.Profile -> Text("账户、订单、钱包与邀请将在接口合同确认后接入。")
+         }
+     }
+ }
+diff --git a/app/src/main/java/com/gccwebos/android/core/ConnectionCoordinator.kt b/app/src/main/java/com/gccwebos/android/core/ConnectionCoordinator.kt
+index dda5af8..56b2538 100644
+--- a/app/src/main/java/com/gccwebos/android/core/ConnectionCoordinator.kt
++++ b/app/src/main/java/com/gccwebos/android/core/ConnectionCoordinator.kt
+@@ -1,36 +1,111 @@
+ package com.gccwebos.android.core
+ 
++import java.io.Closeable
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.CoroutineStart
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.NonCancellable
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.TimeoutCancellationException
++import kotlinx.coroutines.awaitCancellation
++import kotlinx.coroutines.currentCoroutineContext
++import kotlinx.coroutines.ensureActive
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import kotlinx.coroutines.launch
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
++import kotlinx.coroutines.withContext
++import kotlinx.coroutines.withTimeout
+ 
+ sealed interface ConnectionState {
+     data object Disconnected : ConnectionState
+-    data class Working(val step: Step) : ConnectionState
++    data object Disconnecting : ConnectionState
++    data class Working(val step: Step, val operation: Operation = Operation.CONNECT) : ConnectionState
+     data class Connected(val lineId: String) : ConnectionState
+     data class Blocked(val reason: BusinessBlock) : ConnectionState
+     data class Failed(val reason: Failure) : ConnectionState
+ }
+ 
++enum class Operation { CONNECT, SWITCH, RECONNECT }
+ enum class Step { ACCOUNT, ENTITLEMENT, CONFIG, PERMISSION, TUNNEL, TRAFFIC }
+ enum class BusinessBlock { UNAUTHENTICATED, NO_PLAN, PROVISIONING, EXPIRED, QUOTA_EXHAUSTED }
+-enum class Failure { NO_LINE, CONFIG_UNAVAILABLE, PERMISSION_DENIED, TUNNEL_FAILED, TRAFFIC_FAILED }
++enum class Failure {
++    NO_LINE, ACCOUNT_FAILED, ENTITLEMENT_FAILED, CONFIG_UNAVAILABLE,
++    PERMISSION_DENIED, TUNNEL_FAILED, TRAFFIC_FAILED, TIMEOUT, CLEANUP_FAILED,
++}
+ 
+ data class AccessDecision(val block: BusinessBlock? = null)
+-data class AuthorizedConfig(val lineId: String, val material: ByteArray)
++
++/**
++ * Owns a copy of secret configuration bytes. Never put configuration in logs, saved state,
++ * analytics or navigation arguments. Consumers own (and must wipe) copies they request.
++ * close() wipes the coordinator's copy, not the caller's constructor argument.
++ */
++class AuthorizedConfig(val lineId: String, material: ByteArray) : Closeable {
++    private val bytes = material.copyOf()
++    private var closed = false
++
++    init { require(lineId.isNotBlank()) { "A non-empty authorized line is required" } }
++
++    @Synchronized
++    fun copyMaterial(): ByteArray {
++        check(!closed) { "Configuration is closed" }
++        return bytes.copyOf()
++    }
++
++    @Synchronized
++    override fun close() {
++        bytes.fill(0)
++        closed = true
++    }
++
++    override fun toString(): String = "AuthorizedConfig(material=<redacted>)"
++}
+ 
+ interface AccountGateway { suspend fun isAuthenticated(): Boolean }
+ interface EntitlementGateway { suspend fun current(): AccessDecision }
+ interface ConfigGateway { suspend fun forLine(lineId: String?): AuthorizedConfig? }
+ interface PermissionGateway { suspend fun hasVpnPermission(): Boolean }
++
++/**
++ * One coordinator is the exclusive owner of a gateway instance. start/stop must cooperate
++ * with coroutine cancellation. start must return only after accepting/copying the config.
++ * A thrown/cancelled/false start may have allocated resources: stop must clean those too.
++ * stop is idempotent, and must return normally ONLY when all owned tunnel resources are gone.
++ * A native adapter must enforce its own hard timeout / fd-close boundary; coroutine timeouts
++ * cannot interrupt arbitrary blocking or cancellation-ignoring native code.
++ */
+ interface TunnelGateway {
+     suspend fun start(config: AuthorizedConfig): Boolean
+     suspend fun stop()
+ }
++
++/** Must probe the intended tunnel path in M1, never ordinary direct Internet connectivity. */
+ interface TrafficProbe { suspend fun isUsable(): Boolean }
+ 
+-/** Serializes user actions. The UI must never infer connection success from TUN startup alone. */
++data class ConnectionTimeouts(
++    val stepMillis: Long = 20_000,
++    val permissionMillis: Long = 120_000,
++    val cleanupMillis: Long = 5_000,
++) {
++    init { require(stepMillis > 0 && permissionMillis > 0 && cleanupMillis > 0) }
++}
++
++/**
++ * Latest command wins. The short monitor protects command identity, not network operations.
++ * The lifecycle mutex protects global tunnel ownership; a replacement first cancels the old
++ * worker and may acquire that mutex ONLY after old cleanup finishes. A successful worker
++ * stays alive until cancelled, so cancelling the owner's scope also stops a connected tunnel.
++ *
++ * connect()/switchLine()/reconnect() await a terminal outcome, NOT the entire tunnel lifetime.
++ * disconnect() awaits cleanup. A superseded request resolves to its own Disconnected outcome;
++ * it cannot overwrite the newer request's StateFlow. Caller cancellation cancels only its
++ * request; cancellation is never reclassified as an ordinary network failure.
++ */
+ class ConnectionCoordinator(
+     private val account: AccountGateway,
+     private val entitlement: EntitlementGateway,
+@@ -38,49 +113,233 @@ class ConnectionCoordinator(
+     private val permission: PermissionGateway,
+     private val tunnel: TunnelGateway,
+     private val probe: TrafficProbe,
++    parentScope: CoroutineScope,
++    private val timeouts: ConnectionTimeouts = ConnectionTimeouts(),
+ ) {
+-    private val mutex = Mutex()
++    private val owner = SupervisorJob(requireNotNull(parentScope.coroutineContext[Job]) {
++        "The coordinator requires a lifecycle-owned CoroutineScope"
++    })
++    private val scope = CoroutineScope(parentScope.coroutineContext + owner)
++    private val commandLock = Any()
++    private val lifecycle = Mutex()
+     private val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+-    val state: StateFlow<ConnectionState> = mutableState
+-
+-    suspend fun connect(lineId: String? = null) = mutex.withLock {
+-        if (mutableState.value is ConnectionState.Connected) return@withLock
+-        mutableState.value = ConnectionState.Working(Step.ACCOUNT)
+-        if (!account.isAuthenticated()) {
+-            mutableState.value = ConnectionState.Blocked(BusinessBlock.UNAUTHENTICATED)
+-            return@withLock
+-        }
+-        mutableState.value = ConnectionState.Working(Step.ENTITLEMENT)
+-        entitlement.current().block?.let {
+-            mutableState.value = ConnectionState.Blocked(it)
+-            return@withLock
++    val state: StateFlow<ConnectionState> = mutableState.asStateFlow()
++    private var sequence = 0L
++    private var current: Ticket? = null
++    private var closed = false
++    private var lastRequestedLine: String? = null
++    // Only accessed while holding lifecycle. True is deliberately retained on cleanup failure.
++    private var tunnelMayBeRunning = false
++
++    private class Ticket(
++        val id: Long,
++        val lineId: String?,
++        val operation: Operation,
++        val disconnect: Boolean,
++        val predecessor: Job?,
++    ) {
++        val begin = CompletableDeferred<Unit>()
++        val result = CompletableDeferred<ConnectionState>()
++        lateinit var job: Job
++    }
++
++    private class Abort(val outcome: ConnectionState) : Exception(null, null, false, false)
++
++    suspend fun connect(lineId: String? = null): ConnectionState = await(submit(lineId, Operation.CONNECT))
++
++    suspend fun switchLine(lineId: String): ConnectionState {
++        require(lineId.isNotBlank()) { "A non-empty line is required" }
++        return await(submit(lineId, Operation.SWITCH))
++    }
++
++    suspend fun reconnect(): ConnectionState = await(submit(null, Operation.RECONNECT))
++
++    suspend fun disconnect(): ConnectionState = await(submit(null, Operation.CONNECT, disconnect = true))
++
++    /** Call from the lifecycle owner. Safe to repeat. No new commands are admitted afterwards. */
++    suspend fun close(): ConnectionState {
++        val ticket = synchronized(commandLock) {
++            if (closed || !owner.isActive) {
++                closed = true
++                null
++            } else {
++                // submit's monitor is re-entrant. Reserve the final stop before closing admission.
++                val next = submit(null, Operation.CONNECT, disconnect = true)
++                closed = true
++                next
++            }
+         }
+-        mutableState.value = ConnectionState.Working(Step.CONFIG)
+-        val authorizedConfig = config.forLine(lineId) ?: run {
+-            mutableState.value = ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE)
+-            return@withLock
++        return withContext(NonCancellable) {
++            if (ticket != null) ticket.result.await()
++            owner.cancel()
++            owner.join()
++            lifecycle.withLock {
++                if (tunnelMayBeRunning) {
++                    mutableState.value = if (stopSafely()) ConnectionState.Disconnected
++                        else ConnectionState.Failed(Failure.CLEANUP_FAILED)
++                }
++            }
++            state.value
+         }
+-        mutableState.value = ConnectionState.Working(Step.PERMISSION)
+-        if (!permission.hasVpnPermission()) {
+-            mutableState.value = ConnectionState.Failed(Failure.PERMISSION_DENIED)
+-            return@withLock
++    }
++
++    private fun submit(lineId: String?, operation: Operation, disconnect: Boolean = false): Ticket {
++        val ticket = synchronized(commandLock) {
++            check(!closed && owner.isActive) { "Connection coordinator is closed" }
++            val previous = current
++            val connected = mutableState.value as? ConnectionState.Connected
++            // Only identical active ordinary connects are coalesced. Switch/reconnect are explicit.
++            if (!disconnect && operation == Operation.CONNECT && previous != null && previous.job.isActive &&
++                !previous.disconnect && (previous.lineId == lineId || (connected != null && lineId == null))) {
++                return previous
++            }
++            val resolvedLine = if (operation == Operation.RECONNECT) lastRequestedLine else lineId
++            previous?.job?.cancel(CancellationException("Superseded connection command"))
++            val next = Ticket(++sequence, resolvedLine, operation, disconnect, previous?.job)
++            if (!disconnect) lastRequestedLine = resolvedLine
++            current = next
++            mutableState.value = if (disconnect) ConnectionState.Disconnecting
++                else ConnectionState.Working(Step.ACCOUNT, operation)
++            // UND starts inside execute's try/finally before awaiting begin. Even a command
++            // cancelled before admission to lifecycle gets a cleanup-aware terminal outcome.
++            next.job = scope.launch(start = CoroutineStart.UNDISPATCHED) { execute(next) }
++            next
+         }
+-        mutableState.value = ConnectionState.Working(Step.TUNNEL)
+-        if (!tunnel.start(authorizedConfig)) {
+-            mutableState.value = ConnectionState.Failed(Failure.TUNNEL_FAILED)
+-            return@withLock
++        ticket.begin.complete(Unit)
++        return ticket
++    }
++
++    private suspend fun await(ticket: Ticket): ConnectionState = try {
++        ticket.result.await()
++    } catch (cancelled: CancellationException) {
++        ticket.job.cancel(cancelled)
++        throw cancelled
++    }
++
++    private fun publish(ticket: Ticket, value: ConnectionState) = synchronized(commandLock) {
++        if (current?.id == ticket.id) mutableState.value = value
++    }
++
++    private suspend fun checkpoint(ticket: Ticket) {
++        currentCoroutineContext().ensureActive()
++        synchronized(commandLock) {
++            if (current?.id != ticket.id) throw CancellationException("Superseded connection command")
+         }
+-        mutableState.value = ConnectionState.Working(Step.TRAFFIC)
+-        if (!probe.isUsable()) {
+-            tunnel.stop()
+-            mutableState.value = ConnectionState.Failed(Failure.TRAFFIC_FAILED)
+-            return@withLock
++    }
++
++    private suspend fun execute(ticket: Ticket) {
++        var acquired = false
++        try {
++            ticket.begin.await()
++            lifecycle.withLock {
++                acquired = true
++            var stage = Step.ACCOUNT
++            var material: AuthorizedConfig? = null
++            var ownsNewTunnel = false
++            var outcome: ConnectionState = ConnectionState.Disconnected
++            try {
++                checkpoint(ticket)
++                // A previous cleanup failure is a safety latch. A new start is forbidden until
++                // a later, explicit command successfully cleans the still-uncertain resources.
++                if (tunnelMayBeRunning && !stopSafely()) {
++                    throw Abort(ConnectionState.Failed(Failure.CLEANUP_FAILED))
++                }
++                checkpoint(ticket)
++                if (ticket.disconnect) return@withLock
++
++                suspend fun <T> step(value: Step, action: suspend () -> T): T {
++                    stage = value
++                    checkpoint(ticket)
++                    publish(ticket, ConnectionState.Working(value, ticket.operation))
++                    val budget = if (value == Step.PERMISSION) timeouts.permissionMillis else timeouts.stepMillis
++                    return withTimeout(budget) { action() }.also { checkpoint(ticket) }
++                }
++
++                if (!step(Step.ACCOUNT) { account.isAuthenticated() }) {
++                    throw Abort(ConnectionState.Blocked(BusinessBlock.UNAUTHENTICATED))
++                }
++                step(Step.ENTITLEMENT) { entitlement.current() }.block?.let {
++                    throw Abort(ConnectionState.Blocked(it))
++                }
++                // Capture ownership *inside* the timed block, before a timeout/checkpoint could
++                // discard the result. A late config is always wiped in finally.
++                val authorized = step(Step.CONFIG) { config.forLine(ticket.lineId).also { material = it } }
++                    ?: throw Abort(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE))
++                if (ticket.lineId != null && ticket.lineId != authorized.lineId) {
++                    throw Abort(ConnectionState.Failed(Failure.NO_LINE))
++                }
++                if (!step(Step.PERMISSION) { permission.hasVpnPermission() }) {
++                    throw Abort(ConnectionState.Failed(Failure.PERMISSION_DENIED))
++                }
++                val started = step(Step.TUNNEL) {
++                    ownsNewTunnel = true
++                    tunnelMayBeRunning = true // start may partially allocate, even when it fails.
++                    tunnel.start(authorized)
++                }
++                if (!started) throw Abort(ConnectionState.Failed(Failure.TUNNEL_FAILED))
++                // The adapter has copied/consumed what it needs. Avoid keeping source bytes alive.
++                authorized.close()
++                if (!step(Step.TRAFFIC) { probe.isUsable() }) {
++                    throw Abort(ConnectionState.Failed(Failure.TRAFFIC_FAILED))
++                }
++                checkpoint(ticket)
++                val connected = ConnectionState.Connected(authorized.lineId)
++                publish(ticket, connected)
++                ticket.result.complete(connected)
++                // Keep tunnel lifetime tied to owner cancellation, not to the UI awaiter.
++                awaitCancellation()
++            } catch (abort: Abort) {
++                outcome = abort.outcome
++            } catch (_: TimeoutCancellationException) {
++                outcome = ConnectionState.Failed(Failure.TIMEOUT)
++            } catch (cancelled: CancellationException) {
++                outcome = ConnectionState.Disconnected
++                throw cancelled
++            } catch (_: Exception) {
++                // Exception messages may contain URLs/credentials. Expose only our safe enum.
++                outcome = ConnectionState.Failed(when (stage) {
++                    Step.ACCOUNT -> Failure.ACCOUNT_FAILED
++                    Step.ENTITLEMENT -> Failure.ENTITLEMENT_FAILED
++                    Step.CONFIG -> Failure.CONFIG_UNAVAILABLE
++                    Step.PERMISSION -> Failure.PERMISSION_DENIED
++                    Step.TUNNEL -> Failure.TUNNEL_FAILED
++                    Step.TRAFFIC -> Failure.TRAFFIC_FAILED
++                })
++            } finally {
++                material?.close()
++                if (ownsNewTunnel && !stopSafely()) outcome = ConnectionState.Failed(Failure.CLEANUP_FAILED)
++                // Still inside lifecycle: no newer start can race old cleanup.
++                publish(ticket, outcome)
++                ticket.result.complete(outcome)
++            }
++            }
++        } finally {
++            if (!acquired) withContext(NonCancellable) {
++                publish(ticket, ConnectionState.Disconnecting)
++                // Waiting for the specific predecessor cannot block on a newer connected owner.
++                // Every cancelled queued ticket drains its predecessor before it completes.
++                ticket.predecessor?.join()
++                var outcome: ConnectionState = ConnectionState.Disconnected
++                if (lifecycle.tryLock()) {
++                    try {
++                        if (tunnelMayBeRunning) outcome = ConnectionState.Failed(Failure.CLEANUP_FAILED)
++                        publish(ticket, outcome)
++                    } finally { lifecycle.unlock() }
++                }
++                // A newer worker can own lifecycle now. Do not wait for or stop that tunnel.
++                ticket.result.complete(outcome)
++            }
+         }
+-        mutableState.value = ConnectionState.Connected(authorizedConfig.lineId)
+     }
+ 
+-    suspend fun disconnect() = mutex.withLock {
+-        tunnel.stop()
+-        mutableState.value = ConnectionState.Disconnected
++    private suspend fun stopSafely(): Boolean = withContext(NonCancellable) {
++        try {
++            withTimeout(timeouts.cleanupMillis) { tunnel.stop() }
++            tunnelMayBeRunning = false
++            true
++        } catch (_: Exception) {
++            tunnelMayBeRunning = true
++            false
++        }
+     }
+ }
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+new file mode 100644
+index 0000000..a4960d1
+--- /dev/null
++++ b/app/src/main/res/values/strings.xml
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="app_name">gccwebos</string>
++    <string name="tab_connect">连接</string>
++    <string name="tab_lines">线路</string>
++    <string name="tab_plans">套餐</string>
++    <string name="tab_profile">我的</string>
++    <string name="not_integrated">未接入测试环境</string>
++    <string name="connection_explanation">完成原生认证、权益检查和真实 VPN 内核联调后开放连接。本版本不建立 VPN 隧道。</string>
++    <string name="lines_explanation">线路由后台按当前账户授权返回；尚未接入，不展示虚构节点与延迟。</string>
++    <string name="plans_explanation">月卡、年卡及报价将从后台读取；尚未接入，不允许购买。</string>
++    <string name="profile_explanation">邮箱账户、商品订单、充值记录、钱包与邀请将在接口合同确认后接入。</string>
++    <string name="unknown_usage">剩余流量：未采集
++有效期：待后台确认</string>
++    <string name="build_stage">M0 工程版本 · 0.1.1</string>
++</resources>
+diff --git a/app/src/release/java/com/gccwebos/android/DebugBuildPanel.kt b/app/src/release/java/com/gccwebos/android/DebugBuildPanel.kt
+new file mode 100644
+index 0000000..63b1c32
+--- /dev/null
++++ b/app/src/release/java/com/gccwebos/android/DebugBuildPanel.kt
+@@ -0,0 +1,7 @@
++package com.gccwebos.android
++
++import androidx.compose.runtime.Composable
++
++/** Real releases contain neither the debug simulator nor its controls. */
++@Composable
++internal fun DebugBuildPanel() = Unit
+diff --git a/app/src/test/java/com/gccwebos/android/core/ConnectionCases.kt b/app/src/test/java/com/gccwebos/android/core/ConnectionCases.kt
+new file mode 100644
+index 0000000..7040aa7
+--- /dev/null
++++ b/app/src/test/java/com/gccwebos/android/core/ConnectionCases.kt
+@@ -0,0 +1,432 @@
++package com.gccwebos.android.core
++
++import java.io.IOException
++import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.CoroutineStart
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.NonCancellable
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitCancellation
++import kotlinx.coroutines.cancel
++import kotlinx.coroutines.cancelAndJoin
++import kotlinx.coroutines.coroutineScope
++import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.joinAll
++import kotlinx.coroutines.withContext
++import kotlinx.coroutines.withTimeout
++
++/** Identical behavioral cases are used by Gradle/JUnit and the SDK-less diagnostic runner. */
++object ConnectionCases {
++    data class Case(val name: String, val body: suspend CoroutineScope.() -> Unit)
++
++    private class Rig(scope: CoroutineScope, timeout: ConnectionTimeouts = ConnectionTimeouts()) {
++        val parent = SupervisorJob(scope.coroutineContext[Job])
++        val ownerScope = CoroutineScope(scope.coroutineContext + parent)
++        var authenticated = true
++        var block: BusinessBlock? = null
++        var permission = true
++        var startResult = true
++        var probeResult = true
++        var configNull = false
++        var wrongLine = false
++        var failStep: Step? = null
++        var waitStep: Step? = null
++        var stopFails = false
++        var stopWaits = false
++        var stopGate: CompletableDeferred<Unit>? = null
++        val entered = CompletableDeferred<Unit>()
++        val stopEntered = CompletableDeferred<Unit>()
++        val events = mutableListOf<String>()
++        val materials = mutableListOf<AuthorizedConfig>()
++        var active = false
++        var starts = 0
++        var stops = 0
++        var gate: CompletableDeferred<Unit>? = null
++        var lateConfig = false
++
++        suspend fun touch(step: Step) {
++            if (failStep == step) throw IOException("sensitive diagnostic must never escape")
++            if (waitStep == step) {
++                entered.complete(Unit)
++                awaitCancellation()
++            }
++        }
++
++        val coordinator = ConnectionCoordinator(
++            account = object : AccountGateway {
++                override suspend fun isAuthenticated(): Boolean { touch(Step.ACCOUNT); return authenticated }
++            },
++            entitlement = object : EntitlementGateway {
++                override suspend fun current(): AccessDecision { touch(Step.ENTITLEMENT); return AccessDecision(block) }
++            },
++            config = object : ConfigGateway {
++                override suspend fun forLine(lineId: String?): AuthorizedConfig? {
++                    touch(Step.CONFIG)
++                    if (lateConfig) {
++                        entered.complete(Unit)
++                        withContext(NonCancellable) { gate!!.await() }
++                    }
++                    if (configNull) return null
++                    return AuthorizedConfig(if (wrongLine) "other-line" else lineId ?: "auto-line", byteArrayOf(7, 11, 91))
++                        .also { materials += it }
++                }
++            },
++            permission = object : PermissionGateway {
++                override suspend fun hasVpnPermission(): Boolean { touch(Step.PERMISSION); return permission }
++            },
++            tunnel = object : TunnelGateway {
++                override suspend fun start(config: AuthorizedConfig): Boolean {
++                    starts++
++                    check(!active) { "overlapping global tunnel owners" }
++                    active = true // Model allocation before a possible throw/cancellation/false.
++                    events += "start:${config.lineId}"
++                    config.copyMaterial().also { check(it.contentEquals(byteArrayOf(7, 11, 91))); it.fill(0) }
++                    touch(Step.TUNNEL)
++                    return startResult
++                }
++                override suspend fun stop() {
++                    stops++
++                    events += "stop"
++                    stopEntered.complete(Unit)
++                    if (stopFails) throw IOException("cleanup failed")
++                    if (stopWaits) awaitCancellation()
++                    stopGate?.await()
++                    active = false
++                }
++            },
++            probe = object : TrafficProbe {
++                override suspend fun isUsable(): Boolean { touch(Step.TRAFFIC); return probeResult }
++            },
++            parentScope = ownerScope,
++            timeouts = timeout,
++        )
++
++        suspend fun dispose() {
++            // Never leave a deliberately non-cooperative fixture alive at test exit.
++            gate?.complete(Unit)
++            stopGate?.complete(Unit)
++            stopFails = false
++            stopWaits = false
++            coordinator.close()
++            parent.cancelAndJoin()
++        }
++    }
++
++    private suspend fun CoroutineScope.withRig(
++        timeout: ConnectionTimeouts = ConnectionTimeouts(),
++        body: suspend Rig.() -> Unit,
++    ) {
++        val rig = Rig(this, timeout)
++        try { rig.body() } finally { rig.dispose() }
++    }
++
++    private fun equal(expected: Any?, actual: Any?) {
++        check(expected == actual) { "Expected $expected, received $actual" }
++    }
++
++    val all: List<Case> = buildList {
++        add(Case("success_requires_probe_and_disconnect_releases") {
++            withRig {
++                equal(ConnectionState.Connected("line-a"), coordinator.connect("line-a"))
++                equal(true, active)
++                equal(ConnectionState.Disconnected, coordinator.disconnect())
++                equal(false, active)
++                equal(listOf("start:line-a", "stop"), events)
++            }
++        })
++        add(Case("unauthenticated_never_starts") {
++            withRig {
++                authenticated = false
++                equal(ConnectionState.Blocked(BusinessBlock.UNAUTHENTICATED), coordinator.connect())
++                equal(0, starts)
++            }
++        })
++        BusinessBlock.entries.forEach { reason ->
++            add(Case("entitlement_block_$reason") {
++                withRig { block = reason; equal(ConnectionState.Blocked(reason), coordinator.connect()); equal(0, starts) }
++            })
++        }
++        add(Case("missing_config_never_starts") {
++            withRig { configNull = true; equal(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), coordinator.connect()); equal(0, starts) }
++        })
++        add(Case("wrong_authorized_line_never_starts") {
++            withRig { wrongLine = true; equal(ConnectionState.Failed(Failure.NO_LINE), coordinator.connect("line-a")); equal(0, starts) }
++        })
++        add(Case("denied_permission_never_starts") {
++            withRig { permission = false; equal(ConnectionState.Failed(Failure.PERMISSION_DENIED), coordinator.connect()); equal(0, starts) }
++        })
++        add(Case("false_start_cleans_partial_resources") {
++            withRig {
++                startResult = false
++                equal(ConnectionState.Failed(Failure.TUNNEL_FAILED), coordinator.connect())
++                equal(false, active); equal(1, stops)
++            }
++        })
++        add(Case("false_probe_cleans_resources") {
++            withRig {
++                probeResult = false
++                equal(ConnectionState.Failed(Failure.TRAFFIC_FAILED), coordinator.connect())
++                equal(false, active); equal(1, stops)
++            }
++        })
++        val mapped = mapOf(
++            Step.ACCOUNT to Failure.ACCOUNT_FAILED, Step.ENTITLEMENT to Failure.ENTITLEMENT_FAILED,
++            Step.CONFIG to Failure.CONFIG_UNAVAILABLE, Step.PERMISSION to Failure.PERMISSION_DENIED,
++            Step.TUNNEL to Failure.TUNNEL_FAILED, Step.TRAFFIC to Failure.TRAFFIC_FAILED,
++        )
++        Step.entries.forEach { step ->
++            add(Case("exception_$step") {
++                withRig {
++                    failStep = step
++                    equal(ConnectionState.Failed(mapped.getValue(step)), coordinator.connect())
++                    equal(false, active)
++                    equal(if (step == Step.TUNNEL || step == Step.TRAFFIC) 1 else 0, stops)
++                    check(!coordinator.state.value.toString().contains("sensitive"))
++                }
++            })
++            add(Case("disconnect_cancels_pending_$step") {
++                withRig {
++                    waitStep = step
++                    coroutineScope {
++                        val old = async { coordinator.connect("line-a") }
++                        entered.await()
++                        equal(ConnectionState.Disconnected, withTimeout(1_000) { coordinator.disconnect() })
++                        equal(ConnectionState.Disconnected, old.await())
++                    }
++                    equal(false, active)
++                }
++            })
++            add(Case("caller_cancellation_cleans_$step") {
++                withRig {
++                    waitStep = step
++                    coroutineScope {
++                        val caller = launch { coordinator.connect() }
++                        entered.await()
++                        caller.cancelAndJoin()
++                        coordinator.state.first { it !is ConnectionState.Working }
++                    }
++                    equal(ConnectionState.Disconnected, coordinator.state.value)
++                    equal(false, active)
++                }
++            })
++            add(Case("timeout_$step") {
++                withRig(ConnectionTimeouts(40, 40, 100)) {
++                    waitStep = step
++                    equal(ConnectionState.Failed(Failure.TIMEOUT), coordinator.connect())
++                    equal(false, active)
++                }
++            })
++        }
++        add(Case("switch_stops_a_before_b_and_keeps_real_line") {
++            withRig {
++                coordinator.connect("line-a")
++                equal(ConnectionState.Connected("line-b"), coordinator.switchLine("line-b"))
++                equal(listOf("start:line-a", "stop", "start:line-b"), events)
++                equal(true, active)
++            }
++        })
++        add(Case("same_connection_is_idempotent") {
++            withRig {
++                coordinator.connect("line-a")
++                coordinator.connect("line-a")
++                coordinator.connect()
++                equal(1, starts); equal(ConnectionState.Connected("line-a"), coordinator.state.value)
++            }
++        })
++        add(Case("duplicate_connect_while_pending_shares_attempt") {
++            withRig {
++                waitStep = Step.CONFIG
++                coroutineScope {
++                    val first = async { coordinator.connect("line-a") }
++                    entered.await()
++                    val second = async(start = CoroutineStart.UNDISPATCHED) { coordinator.connect("line-a") }
++                    coordinator.disconnect()
++                    first.await(); second.await()
++                }
++                equal(0, starts)
++            }
++        })
++        add(Case("queued_cancellation_waits_for_previous_cleanup") {
++            withRig {
++                coordinator.connect("line-a")
++                stopGate = CompletableDeferred()
++                coroutineScope {
++                    val pending = launch(start = CoroutineStart.UNDISPATCHED) { coordinator.switchLine("line-b") }
++                    stopEntered.await()
++                    pending.cancel()
++                    coordinator.state.first { it == ConnectionState.Disconnecting }
++                    equal(true, active)
++                    check(coordinator.state.value != ConnectionState.Disconnected)
++                    stopGate!!.complete(Unit)
++                    pending.join()
++                    coordinator.state.first { it == ConnectionState.Disconnected }
++                }
++                equal(false, active); equal(1, starts)
++            }
++        })
++        add(Case("obsolete_queued_cleanup_does_not_stop_new_tunnel") {
++            withRig {
++                coordinator.connect("line-a")
++                stopGate = CompletableDeferred()
++                coroutineScope {
++                    val obsolete = launch(start = CoroutineStart.UNDISPATCHED) { coordinator.switchLine("line-b") }
++                    stopEntered.await()
++                    obsolete.cancel()
++                    val latest = async(start = CoroutineStart.UNDISPATCHED) { coordinator.switchLine("line-c") }
++                    stopGate!!.complete(Unit)
++                    equal(ConnectionState.Connected("line-c"), latest.await())
++                    obsolete.join()
++                }
++                equal(ConnectionState.Connected("line-c"), coordinator.state.value)
++                equal(true, active)
++                equal(listOf("start:line-a", "stop", "start:line-c"), events)
++            }
++        })
++        add(Case("reconnect_reuses_selection_after_cleanup") {
++            withRig {
++                coordinator.connect("line-a")
++                equal(ConnectionState.Connected("line-a"), coordinator.reconnect())
++                equal(listOf("start:line-a", "stop", "start:line-a"), events)
++            }
++        })
++        add(Case("auto_reconnect_reselects_authorized_auto") {
++            withRig {
++                coordinator.connect()
++                equal(ConnectionState.Connected("auto-line"), coordinator.reconnect())
++                equal(2, starts)
++            }
++        })
++        add(Case("failed_switch_does_not_claim_old_or_new_connected") {
++            withRig {
++                coordinator.connect("line-a")
++                configNull = true
++                equal(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), coordinator.switchLine("line-b"))
++                equal(false, active); equal(1, starts)
++            }
++        })
++        add(Case("owner_cancellation_stops_already_connected_tunnel") {
++            withRig {
++                coordinator.connect("line-a")
++                parent.cancelAndJoin()
++                equal(false, active); equal(ConnectionState.Disconnected, coordinator.state.value)
++            }
++        })
++        add(Case("cancelled_owner_rejects_new_commands") {
++            withRig {
++                parent.cancelAndJoin()
++                var rejected = false
++                try { coordinator.connect() } catch (_: IllegalStateException) { rejected = true }
++                check(rejected)
++            }
++        })
++        add(Case("late_config_cannot_restore_disconnected_state") {
++            withRig {
++                lateConfig = true; gate = CompletableDeferred()
++                coroutineScope {
++                    val pending = async { coordinator.connect() }
++                    entered.await()
++                    val stopping = async { coordinator.disconnect() }
++                    coordinator.state.first { it == ConnectionState.Disconnecting }
++                    gate!!.complete(Unit)
++                    stopping.await(); pending.await()
++                }
++                equal(ConnectionState.Disconnected, coordinator.state.value)
++                equal(0, starts)
++                materials.forEach { material ->
++                    var closed = false
++                    try { material.copyMaterial() } catch (_: IllegalStateException) { closed = true }
++                    check(closed)
++                }
++            }
++        })
++        add(Case("failed_cleanup_blocks_new_start_until_recovered") {
++            withRig {
++                coordinator.connect("line-a")
++                stopFails = true
++                equal(ConnectionState.Failed(Failure.CLEANUP_FAILED), coordinator.switchLine("line-b"))
++                equal(1, starts)
++                equal(ConnectionState.Failed(Failure.CLEANUP_FAILED), coordinator.connect("line-c"))
++                equal(1, starts)
++                stopFails = false
++                equal(ConnectionState.Disconnected, coordinator.disconnect())
++                equal(false, active)
++                equal(ConnectionState.Connected("line-c"), coordinator.connect("line-c"))
++            }
++        })
++        add(Case("cleanup_timeout_reports_uncertain_not_disconnected") {
++            withRig(ConnectionTimeouts(1_000, 1_000, 40)) {
++                coordinator.connect()
++                stopWaits = true
++                equal(ConnectionState.Failed(Failure.CLEANUP_FAILED), coordinator.disconnect())
++                equal(true, active) // Deliberately modeled adapter failure, not a real VPN.
++                stopWaits = false
++                equal(ConnectionState.Disconnected, coordinator.disconnect())
++                equal(false, active)
++            }
++        })
++        add(Case("close_is_idempotent_and_rejects_commands") {
++            withRig {
++                coordinator.connect()
++                equal(ConnectionState.Disconnected, coordinator.close())
++                equal(ConnectionState.Disconnected, coordinator.close())
++                var rejected = false
++                try { coordinator.connect() } catch (_: IllegalStateException) { rejected = true }
++                check(rejected); equal(false, active)
++            }
++        })
++        add(Case("secret_material_is_defensive_redacted_and_closed") {
++            val source = byteArrayOf(7, 11, 91)
++            val item = AuthorizedConfig("private-line-label", source)
++            source.fill(0)
++            val copy = item.copyMaterial()
++            check(copy.contentEquals(byteArrayOf(7, 11, 91)))
++            copy.fill(0)
++            check(item.copyMaterial().contentEquals(byteArrayOf(7, 11, 91)))
++            equal("AuthorizedConfig(material=<redacted>)", item.toString())
++            item.close(); item.close()
++            var rejected = false
++            try { item.copyMaterial() } catch (_: IllegalStateException) { rejected = true }
++            check(rejected)
++        })
++        add(Case("concurrent_latest_commands_never_overlap_tunnel_owners") {
++            withRig {
++                coroutineScope {
++                    val jobs = (0 until 120).map { index ->
++                        launch(Dispatchers.Default) {
++                            when (index % 4) {
++                                0 -> coordinator.connect("line-a")
++                                1 -> coordinator.switchLine("line-b")
++                                2 -> coordinator.reconnect()
++                                else -> coordinator.disconnect()
++                            }
++                        }
++                    }
++                    jobs.joinAll()
++                }
++                equal(ConnectionState.Disconnected, coordinator.disconnect())
++                equal(false, active)
++                // Each start must have an exclusive matching stop before another start.
++                var owned = false
++                events.forEach {
++                    if (it.startsWith("start:")) { check(!owned); owned = true }
++                    else if (it == "stop") owned = false
++                }
++                equal(false, owned)
++            }
++        })
++        add(Case("all_delivered_materials_closed_after_start") {
++            withRig {
++                coordinator.connect()
++                materials.forEach {
++                    var rejected = false
++                    try { it.copyMaterial() } catch (_: IllegalStateException) { rejected = true }
++                    check(rejected)
++                }
++            }
++        })
++    }
++}
+diff --git a/app/src/test/java/com/gccwebos/android/core/ConnectionCoordinatorTest.kt b/app/src/test/java/com/gccwebos/android/core/ConnectionCoordinatorTest.kt
+index c679ca7..eb48ee7 100644
+--- a/app/src/test/java/com/gccwebos/android/core/ConnectionCoordinatorTest.kt
++++ b/app/src/test/java/com/gccwebos/android/core/ConnectionCoordinatorTest.kt
+@@ -1,42 +1,18 @@
+ package com.gccwebos.android.core
+ 
+ import kotlinx.coroutines.runBlocking
+-import org.junit.Assert.assertEquals
++import kotlinx.coroutines.withTimeout
+ import org.junit.Test
++import org.junit.runner.RunWith
++import org.junit.runners.Parameterized
+ 
+-class ConnectionCoordinatorTest {
+-    @Test fun `not connected until traffic is usable`() = runBlocking {
+-        var stopped = false
+-        val coordinator = coordinator(probeUsable = false, onStop = { stopped = true })
+-        coordinator.connect()
+-        assertEquals(ConnectionState.Failed(Failure.TRAFFIC_FAILED), coordinator.state.value)
+-        assertEquals(true, stopped)
+-    }
++@RunWith(Parameterized::class)
++class ConnectionCoordinatorTest(private val name: String, private val case: ConnectionCases.Case) {
++    @Test fun runCase() = runBlocking { withTimeout(5_000) { case.body(this) } }
+ 
+-    @Test fun `no plan blocks tunnel startup`() = runBlocking {
+-        var started = false
+-        val coordinator = coordinator(block = BusinessBlock.NO_PLAN, onStart = { started = true })
+-        coordinator.connect()
+-        assertEquals(ConnectionState.Blocked(BusinessBlock.NO_PLAN), coordinator.state.value)
+-        assertEquals(false, started)
++    companion object {
++        @JvmStatic
++        @Parameterized.Parameters(name = "{0}")
++        fun cases(): Collection<Array<Any>> = ConnectionCases.all.map { arrayOf(it.name, it) }
+     }
+-
+-    private fun coordinator(
+-        block: BusinessBlock? = null,
+-        probeUsable: Boolean = true,
+-        onStart: () -> Unit = {},
+-        onStop: () -> Unit = {},
+-    ) = ConnectionCoordinator(
+-        account = object : AccountGateway { override suspend fun isAuthenticated() = true },
+-        entitlement = object : EntitlementGateway { override suspend fun current() = AccessDecision(block) },
+-        config = object : ConfigGateway {
+-            override suspend fun forLine(lineId: String?) = AuthorizedConfig("test-line", byteArrayOf())
+-        },
+-        permission = object : PermissionGateway { override suspend fun hasVpnPermission() = true },
+-        tunnel = object : TunnelGateway {
+-            override suspend fun start(config: AuthorizedConfig): Boolean { onStart(); return true }
+-            override suspend fun stop() { onStop() }
+-        },
+-        probe = object : TrafficProbe { override suspend fun isUsable() = probeUsable },
+-    )
+ }
+diff --git a/build.gradle.kts b/build.gradle.kts
+index 1f78ba7..2221b72 100644
+--- a/build.gradle.kts
++++ b/build.gradle.kts
+@@ -1,4 +1,5 @@
+ plugins {
+     id("com.android.application") version "9.2.0" apply false
+-    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10" apply false
++    // AGP 9.2's built-in Kotlin compiler is 2.3.10; do not add kotlin-android again.
++    id("org.jetbrains.kotlin.plugin.compose") version "2.3.10" apply false
+ }
+diff --git a/build.ps1 b/build.ps1
+new file mode 100644
+index 0000000..034c0c5
+--- /dev/null
++++ b/build.ps1
+@@ -0,0 +1,16 @@
++[CmdletBinding()]
++param()
++$ErrorActionPreference = 'Stop'
++Set-Location $PSScriptRoot
++$null = New-Item -ItemType Directory -Force -Path '.build-output'
++# Native stderr can contain Gradle status messages. Preserve the process exit code.
++$ErrorActionPreference = 'Continue'
++& .\gradlew.bat --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug 2>&1 |
++    Tee-Object -FilePath '.build-output/android-build.log'
++$Code = $LASTEXITCODE
++$ErrorActionPreference = 'Stop'
++if ($Code -ne 0) { throw "Android build stopped (exit $Code). See .build-output/android-build.log." }
++$Apk = 'app/build/outputs/apk/debug/app-debug.apk'
++if (-not (Test-Path $Apk)) { throw 'Gradle returned success but no Debug APK was found.' }
++Get-FileHash $Apk -Algorithm SHA256
++Write-Host "Debug APK: $Apk"
+diff --git a/build.sh b/build.sh
+new file mode 100755
+index 0000000..a8b4867
+--- /dev/null
++++ b/build.sh
+@@ -0,0 +1,8 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd -- "$(dirname -- "$0")"
++mkdir -p .build-output
++# One validation boundary. Logs are local; this never publishes or deploys anything.
++./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug \
++  2>&1 | tee .build-output/android-build.log
++printf '\n%s\n' 'Gradle tasks completed. Debug APK: app/build/outputs/apk/debug/app-debug.apk'
+diff --git a/docs/BUILD_STATUS.md b/docs/BUILD_STATUS.md
+new file mode 100644
+index 0000000..c614eee
+--- /dev/null
++++ b/docs/BUILD_STATUS.md
+@@ -0,0 +1,109 @@
++# gccwebos Android 首轮构建交付记录
++
++日期：2026-09-28
++交付版本：`0.1.1-m0`
++范围：从上传的 Android Starter 增量修改源码、构建入口和回归测试；不操作后台、账户、支付、节点或生产。
++
++## 结论
++
++**首轮源码实现与隔离 JVM 回归已完成；Android APK 构建受环境阻塞，M0 整体验收尚未完成。**
++
++交付的是可继续进行 Android 构建的工程源码和证据，不是安装包。未生成 APK/AAB，未签发正式应用，未运行 GitHub Actions；不将构建脚本存在视为构建成功。
++
++原始输入为 `gccwebos-android-starter (1).zip`，15 个实际文件。原包保持不变：
++
++```text
++SHA-256: 62ad7f4667bd313f9e0530af95ff9ef0bc466c9f8d02e1424f20f5209b85289e
++```
++
++## 本轮实际变更
++
++| 范围 | 已写入源码的内容 | 验证边界 |
++| --- | --- | --- |
++| 连接取消 | 取消在途请求；旧任务不得回写新状态；资源操作按所有者串行 | 隔离 JVM 同源用例通过 |
++| 失败清理 | 启动部分失败、探测异常、调用取消均进入清理；清理失败时阻止新隧道启动 | 隔离 JVM 同源用例通过；尚无真实 TUN |
++| 换线与重连 | 新增 `switchLine`、`reconnect`、`disconnect`、`close` 生命周期合同 | 隔离 JVM 同源用例通过；不是实际网络换线 |
++| 配置材料 | 防御性复制、日志字符串脱敏、关闭后清零并禁止再次读取 | 同源用例通过；不等于整台设备内存的安全保证 |
++| 页面 | 保留连接／线路／套餐／我的，补状态保存、滚动、资源文案与测试标签 | 静态检查；未进行 Android 编译或视觉真机验收 |
++| Debug 自检 | 仅 Debug 源集包含本地模拟面板；明确显示“未建立 VPN” | 源集分离检查；模拟网关不访问网络或生产 |
++| 工具链 | 对齐 Compose Compiler 声明、采用可核对的 BOM、固定下载校验值 | 未完成 Maven 解析；详见 CHANGELOG 与工具链来源 |
++| 构建入口 | Windows/Linux 脚本与校验引导；缺包或校验失败即停止 | Shell 语法及校验失败负例通过；PowerShell 未在 Windows 执行 |
++| CI | 准备 Debug 编译、JUnit、Lint、测试包编译、签名校验及证据上传流程 | YAML 结构解析；未推送、未触发远程执行 |
++
++## 本轮实际运行的验证
++
++生产 `ConnectionCoordinator.kt` 与 JUnit 共用的 `ConnectionCases.kt` 使用同一份源码编译，独立 CLI 入口仅负责执行，不复制协调器实现。
++
++| 检查 | 结果 |
++| --- | --- |
++| Kotlin CLI 编译核心源码和共用用例 | 完成 |
++| 53 项独立用例 | 53 通过，0 失败 |
++| 相同编译产物再次执行 5 轮 | 每轮均 53 通过，0 失败；不是新增 265 个独立用例 |
++| 配置等待／系统授权等待等各阶段取消 | 同源用例覆盖 |
++| 异常、超时、清理失败重试、旧结果返回、120 条并发命令资源互斥 | 同源用例覆盖 |
++| 不匹配的 Wrapper JAR | 确认拒绝执行且不覆盖原文件 |
++| 无 APK 时执行证据收集 | 确认失败退出，不创建成功清单 |
++| XML／YAML 基础结构检查、Shell 语法、源码检查 | 完成；不等于 Android Lint 或 CI 运行 |
++| 本地基线 `git diff --check` | 通过 |
++
++实际诊断环境：
++
++```text
++OpenJDK 21.0.11
++kotlinc-jvm 1.9.0
++本地 kotlinx-coroutines-core-jvm.jar：语义版本未确认
++JAR SHA-256: 78d6cc7135f84d692ff3752fcfd1fa1bbe0940d7df70652e4f1eaeec0c78afbb
++```
++
++这不是项目配置的 Kotlin 2.3.10／Coroutines 1.10.2 依赖解析结果。上述诊断只覆盖核心控制流，不能替代 Gradle/JUnit 任务、Compose 编译、Android UI、真实协议内核或网络可靠性验证。
++
++## APK 构建的实际结果
++
++已实际尝试：
++
++```bash
++./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
++```
++
++入口在取得官方 Wrapper JAR 时停止，退出码 **6**，日志包含：
++
++```text
++curl: (6) Could not resolve host: raw.githubusercontent.com
++```
++
++当前环境没有 Android SDK，无法解析构建依赖下载域名。Gradle 本身未启动；编译、Android 单元测试与 Lint 任务没有开始。完整失败输出在 `evidence/android-build-attempt.log`，而不是“测试失败”或“编译通过”。
++
++**`gradle-wrapper.jar` 二进制未包含在本包。** 已提供固定来源和 SHA-256 的首次运行引导，联网后下载并校验；`gradlew`/`gradlew.bat` 是项目引导入口，不冒称标准 Wrapper 二进制已经补齐。
++
++## 在具备环境的电脑继续构建
++
++准备 JDK 17、SDK Platform 37、Build Tools 36.0.0；使用 Android Studio SDK Manager 安装，并设置 `JAVA_HOME` 与 `ANDROID_HOME`，或使用本地 `local.properties` 指定 SDK。机器需要能访问 README 列出的官方依赖来源。
++
++解压并进入 `gccwebos-android` 根目录，Windows：
++
++```powershell
++powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
++```
++
++Linux/macOS：
++
++```bash
++chmod +x gradlew build.sh scripts/*.sh
++./build.sh
++```
++
++只有任务全部成功后，才以实际生成的 `app/build/outputs/apk/debug/app-debug.apk` 为安装包。不要把本 ZIP 改扩展名为 APK。首次完整依赖解析或 Android 编译仍可能暴露本环境未覆盖的问题。
++
++## 仍未实现或未验证
++
++没有真实 `VpnService`、TUN、协议内核、邮箱注册登录 API、商品／钱包／订单／推荐接口接入。真实连接按钮保持禁用；Debug 自检是假网关控制流演示，不能转发流量，也不会成为 release 功能。
++
++M1 才接原生账户合同、授权配置与真实内核，并在获准的隔离环境验证连接、断开、换线、Wi-Fi/移动网络恢复、DNS/IPv6、系统撤销授权。协程超时不能强制打断不合作的 native 阻塞；内核适配必须落实自己的资源释放与超时边界。
++
++没有运行 Windows PowerShell、Android 模拟器/真机、Google Play/签名发布、生产或支付验证。本轮未创建远程仓库、PR、提交或运行 GitHub 工作流。原包与其他项目文件未被覆盖。
++
++## 文件与证据
++
++工程内 `evidence/` 保存本轮最新 53 项结果、5 轮复跑、实际构建失败日志、环境信息和负例检查；不混入此前审查的 8 项复现或早期调试轮次。`evidence/changes-from-starter.patch` 记录源文件相对导入基线的差异。
++
++`file-inventory.json` 保存交付文件相对路径、大小和 SHA-256。清单不列自身哈希，避免自引用；ZIP 总哈希另在附件校验文件中。工程不含本地缓存、`.git`、编译器 JAR、SDK、生产密钥或虚构 APK。
+diff --git a/docs/TOOLCHAIN_SOURCES.md b/docs/TOOLCHAIN_SOURCES.md
+new file mode 100644
+index 0000000..82096c1
+--- /dev/null
++++ b/docs/TOOLCHAIN_SOURCES.md
+@@ -0,0 +1,23 @@
++# 工具链来源与验证范围
++
++本轮核对日期：2026-09-28。以下是外部官方资料，不是用户源包内容，也不构成依赖下载成功、Android 编译成功或 Google 审核证据。
++
++- AGP 9.2 兼容信息：Gradle 9.4.1、Build Tools 36.0.0、JDK 17、最高 API 37；发行记录包含 Kotlin 2.3.10 更新。
++  https://developer.android.com/build/releases/agp-9-2-0-release-notes
++- AGP 9 的内置 Kotlin：
++  https://developer.android.com/build/migrate-to-built-in-kotlin
++- Compose Compiler 与 Kotlin 版本对应；本轮官方说明中的稳定 BOM 为 2026.06.01：
++  https://developer.android.com/develop/ui/compose/setup-compose-dependencies-and-compiler
++- Gradle 官方校验值：
++  https://gradle.org/release-checksums/
++  - 9.4.1 bin ZIP：`2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb`
++  - 9.4.1 Wrapper JAR：`55243ef57851f12b070ad14f7f5bb8302daceeebc5bce5ece5fa6edb23e1145c`
++- Wrapper 引导固定来源：
++  https://raw.githubusercontent.com/gradle/gradle/v9.4.1/gradle/wrapper/gradle-wrapper.jar
++  下载后必须匹配校验值；二进制未装入本次 ZIP。
++- CI Actions 的 v4 标签本轮通过 GitHub 连接读取后固定到 SHA，不在执行时追踪可变标签：
++  - actions/checkout：`11d5960a326750d5838078e36cf38b85af677262`
++  - actions/setup-java：`cf277c60eb25467037889841efdb72551f06f6c3`
++  - actions/upload-artifact：`ea165f8d65b6e75b540449e92b4886f43607fa02`
++
++依赖许可证由各上游项目提供。本包没有重分发 Android SDK、Gradle 分发、Kotlin/Compose 二进制、真实代理内核或任何签名密钥。没有为用户自有源码虚构开源授权；公开发布前另行确定本项目 LICENSE 与依赖 notice 清单。
+diff --git a/docs/architecture.md b/docs/architecture.md
+index 077801c..69c10eb 100644
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,3 +1,5 @@
++> 本轮已实现的协调器语义、取消/资源清理边界及与原方案的差异，以 [connection-coordinator.md](connection-coordinator.md) 为准。此页保留整体目标；VpnService、热切换、网络事件和业务 API 尚未实现。
++
+ # 架构与状态
+ 
+ ## 数据流
+diff --git a/docs/connection-coordinator.md b/docs/connection-coordinator.md
+new file mode 100644
+index 0000000..1bacab1
+--- /dev/null
++++ b/docs/connection-coordinator.md
+@@ -0,0 +1,45 @@
++# ConnectionCoordinator 合同与接入
++
++## 生命周期所有者
++
++构造时新增 `parentScope: CoroutineScope`，该 scope 必须携带 Job。M1 应由 VPN 服务／应用级连接所有者持有，不能以临时页面作用域持有真实连接。Debug 自检故意使用页面作用域，离开页面即清理模拟资源。
++
++```kotlin
++val coordinator = ConnectionCoordinator(
++    account, entitlement, config, permission, tunnel, probe,
++    parentScope = serviceScope,
++)
++val outcome = coordinator.connect() // 等到失败/阻断/探测成功，不等待隧道整个生命周期
++coordinator.switchLine(authorizedLineId)
++coordinator.reconnect()
++coordinator.disconnect() // 等待旧任务清理完成
++coordinator.close() // 不再接受新命令，可重复调用
++```
++
++真实 UI 使用 `state: StateFlow`，不以旧请求的返回值覆写最新连接状态。相同在途 connect 会共享尝试，任何一个共享等待者主动取消会取消该共享尝试；需要多个无取消耦合订阅者时，只观察 StateFlow，不重复调用 connect。
++
++## 命令顺序与资源
++
++`connect`／`switchLine`／`reconnect`／`disconnect` 采用最新已提交命令优先。命令身份只在短时 monitor 内修改；完整网络检查与已连接生命周期持有的是另一把资源锁。断开先取消旧 Job，因此不会等着旧网络请求自然结束才有机会取消。
++
++旧任务在释放资源锁前完成 stop。新任务不能与旧 finally 同时操作全局 TunnelGateway。已连接任务保持存活直到取消，所以 owner scope 结束也能触发清理。
++
++换线采用**先停旧连接，再重新检查账户、权益与配置并启动新线路**的保守策略。本轮没有内核热切换，也没有“切换失败自动恢复旧节点”的承诺。新的配置必须与指定线路匹配；自动选择只消费网关返回的获准线路。`reconnect()` 重用上次选择；自动选择的上次值为 null，会重新请求自动线路。
++
++## 超时及取消合作约束
++
++每个普通阶段默认 20 秒，权限阶段 120 秒，清理阶段 5 秒，均可注入测试配置。这是本次工程默认值，不是已测得的服务性能或后台限流规则。
++
++所有 Gateway 必须支持协程取消。`withTimeout` 不能强行终止任意阻塞或忽略取消的 native 调用；M1 内核适配必须有自己的 socket 超时、fd 关闭或隔离进程终止机制。未完成 native 验证前，不宣称任何阶段在真实设备上都有硬实时停止保证。
++
++`TunnelGateway.start` 可能在返回 false、抛错或被取消前分配资源，stop 必须能清理这种半启动状态。`stop()` 要幂等，只有确认资源已释放才正常返回。stop 失败保留安全锁存，客户端显示 `CLEANUP_FAILED`，后续明确的操作会先重试清理，成功前不启动新隧道。
++
++## 配置字节
++
++`AuthorizedConfig` 接管构造输入的副本。内核适配在 start 期间用 `copyMaterial()` 取一次临时副本，读完后自行清零；不要保留对象用于之后再次读取。协调器在 start 返回后立即 close 自己的配置对象，错误和取消路径同样 close。
++
++Gateway 在未能成功返回配置对象时，必须自行清理它已分配但尚未交付的字节；协调器无法擦除从未拿到的对象。任何层都不得将真实配置、token、邮箱、IP 或请求异常详情写入日志／分析／分享。
++
++## 尚未接入的 Android 事实
++
++`PermissionGateway` 不是系统权限实现；`TrafficProbe` 不是普通 HTTPS 成功即视为 VPN 成功。真实实现仍需 VpnService.prepare、前台服务、TUN/内核、保护外连 socket、路径绑定探测、系统撤销事件及网络变更恢复。本次测试只运行内存网关。
+diff --git a/docs/roadmap.md b/docs/roadmap.md
+index 3929232..4f981d5 100644
+--- a/docs/roadmap.md
++++ b/docs/roadmap.md
+@@ -1,3 +1,5 @@
++> 0.1.1-m0 本地增量已开始：连接协调器、测试和构建入口已实现；Android 构建受环境阻塞，CI 未运行，接口合同仍待确认。M0 未全部验收，不跳到生产或 M1 真机成功结论。
++
+ # 开发顺序与验收
+ 
+ ## M0 仓库与合同
+diff --git a/gradle/wrapper/gradle-wrapper.properties b/gradle/wrapper/gradle-wrapper.properties
+index e783808..6c3f172 100644
+--- a/gradle/wrapper/gradle-wrapper.properties
++++ b/gradle/wrapper/gradle-wrapper.properties
+@@ -1 +1,8 @@
++distributionBase=GRADLE_USER_HOME
++distributionPath=wrapper/dists
+ distributionUrl=https\://services.gradle.org/distributions/gradle-9.4.1-bin.zip
++distributionSha256Sum=2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb
++networkTimeout=30000
++validateDistributionUrl=true
++zipStoreBase=GRADLE_USER_HOME
++zipStorePath=wrapper/dists
+diff --git a/gradlew b/gradlew
+new file mode 100755
+index 0000000..e14e125
+--- /dev/null
++++ b/gradlew
+@@ -0,0 +1,13 @@
++#!/usr/bin/env sh
++# gccwebos launcher. Not a byte-for-byte Gradle-generated script.
++# Bootstraps a checksum-pinned official JAR, then delegates to Gradle's wrapper.
++set -eu
++ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
++if [ -n "${JAVA_HOME:-}" ]; then JAVA="$JAVA_HOME/bin/java"; else JAVA=java; fi
++if ! command -v "$JAVA" >/dev/null 2>&1; then
++    echo 'Java is unavailable. Install JDK 17 and set JAVA_HOME.' >&2
++    exit 1
++fi
++sh "$ROOT/scripts/bootstrap-wrapper.sh"
++# Use JAVA_TOOL_OPTIONS for optional JVM flags; arguments are never eval'd.
++exec "$JAVA" -Dfile.encoding=UTF-8 -Dorg.gradle.appname=gradlew -jar "$ROOT/gradle/wrapper/gradle-wrapper.jar" "$@"
+diff --git a/gradlew.bat b/gradlew.bat
+new file mode 100644
+index 0000000..38fe051
+--- /dev/null
++++ b/gradlew.bat
+@@ -0,0 +1,17 @@
++@echo off
++setlocal
++set "ROOT=%~dp0"
++if defined JAVA_HOME (
++    set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
++) else (
++    set "JAVA_EXE=java.exe"
++)
++"%JAVA_EXE%" -version >nul 2>&1
++if errorlevel 1 (
++    echo Java is unavailable. Install JDK 17 and set JAVA_HOME. 1>&2
++    exit /b 1
++)
++powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%scripts\bootstrap-wrapper.ps1"
++if errorlevel 1 exit /b 1
++"%JAVA_EXE%" -Dfile.encoding=UTF-8 -Dorg.gradle.appname=gradlew -jar "%ROOT%gradle\wrapper\gradle-wrapper.jar" %*
++exit /b %ERRORLEVEL%
+diff --git a/scripts/bootstrap-wrapper.ps1 b/scripts/bootstrap-wrapper.ps1
+new file mode 100644
+index 0000000..7073604
+--- /dev/null
++++ b/scripts/bootstrap-wrapper.ps1
+@@ -0,0 +1,26 @@
++[CmdletBinding()]
++param()
++$ErrorActionPreference = 'Stop'
++$Root = Split-Path $PSScriptRoot -Parent
++$Jar = Join-Path $Root 'gradle/wrapper/gradle-wrapper.jar'
++$Expected = '55243ef57851f12b070ad14f7f5bb8302daceeebc5bce5ece5fa6edb23e1145c'
++$Uri = 'https://raw.githubusercontent.com/gradle/gradle/v9.4.1/gradle/wrapper/gradle-wrapper.jar'
++if (Test-Path -LiteralPath $Jar) {
++    if ((Get-FileHash -LiteralPath $Jar -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Expected) {
++        throw 'Wrapper checksum mismatch. Refusing to execute or overwrite.'
++    }
++    exit 0
++}
++$null = New-Item -ItemType Directory -Force -Path (Split-Path $Jar -Parent)
++$Temp = "$Jar.$([Guid]::NewGuid().ToString('N')).tmp"
++try {
++    Write-Host 'Fetching the checksum-pinned official Gradle 9.4.1 wrapper JAR...'
++    Invoke-WebRequest -Uri $Uri -OutFile $Temp -UseBasicParsing -TimeoutSec 90
++    if ((Get-FileHash -LiteralPath $Temp -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Expected) {
++        throw 'Downloaded wrapper checksum mismatch. Nothing will be executed.'
++    }
++    Move-Item -LiteralPath $Temp -Destination $Jar
++    Write-Host 'Official wrapper JAR SHA-256 verified.'
++} finally {
++    if (Test-Path -LiteralPath $Temp) { Remove-Item -LiteralPath $Temp -Force }
++}
+diff --git a/scripts/bootstrap-wrapper.sh b/scripts/bootstrap-wrapper.sh
+new file mode 100755
+index 0000000..ec77853
+--- /dev/null
++++ b/scripts/bootstrap-wrapper.sh
+@@ -0,0 +1,29 @@
++#!/usr/bin/env sh
++# First-party bootstrap; retrieves only the checksum-pinned official Gradle wrapper.
++set -eu
++ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
++JAR="$ROOT/gradle/wrapper/gradle-wrapper.jar"
++EXPECTED=55243ef57851f12b070ad14f7f5bb8302daceeebc5bce5ece5fa6edb23e1145c
++URL=https://raw.githubusercontent.com/gradle/gradle/v9.4.1/gradle/wrapper/gradle-wrapper.jar
++hash_file() {
++    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
++    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
++    else echo 'A SHA-256 verifier is required (sha256sum/shasum).' >&2; exit 1; fi
++}
++if [ -f "$JAR" ]; then
++    [ "$(hash_file "$JAR")" = "$EXPECTED" ] || { echo 'Wrapper checksum mismatch. Refusing to execute or overwrite.' >&2; exit 1; }
++    exit 0
++fi
++mkdir -p "$(dirname -- "$JAR")"
++TEMP=$(mktemp "${JAR}.XXXXXXXX.tmp")
++trap 'rm -f "$TEMP"' EXIT HUP INT TERM
++printf '%s\n' 'Fetching Gradle 9.4.1 wrapper JAR from the official repository...'
++if command -v curl >/dev/null 2>&1; then
++    curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 90 --retry 1 --output "$TEMP" "$URL"
++else
++    echo 'curl is required for first-time wrapper bootstrap. No files were executed.' >&2
++    exit 1
++fi
++[ "$(hash_file "$TEMP")" = "$EXPECTED" ] || { echo 'Downloaded wrapper checksum mismatch. Nothing will be executed.' >&2; exit 1; }
++mv "$TEMP" "$JAR"
++printf '%s\n' 'Official wrapper JAR SHA-256 verified.'
+diff --git a/scripts/collect_build_evidence.py b/scripts/collect_build_evidence.py
+new file mode 100644
+index 0000000..7d15246
+--- /dev/null
++++ b/scripts/collect_build_evidence.py
+@@ -0,0 +1,61 @@
++#!/usr/bin/env python3
++"""Run only after successful Gradle tasks. Never create a success manifest without a real APK."""
++from __future__ import annotations
++from datetime import datetime, timezone
++import hashlib
++import json
++import subprocess
++from pathlib import Path
++import xml.etree.ElementTree as ET
++from zipfile import ZipFile
++
++ROOT = Path(__file__).resolve().parents[1]
++APK = ROOT / 'app/build/outputs/apk/debug/app-debug.apk'
++OUT = ROOT / '.build-output'
++if not APK.is_file() or APK.stat().st_size == 0:
++    raise SystemExit('No Debug APK exists. No success manifest was created.')
++with ZipFile(APK) as archive:
++    if archive.testzip() is not None:
++        raise SystemExit('Corrupt APK')
++    for required in ('AndroidManifest.xml', 'classes.dex', 'resources.arsc'):
++        if required not in archive.namelist():
++            raise SystemExit(f'Incomplete APK: {required} missing')
++xml_files = list((ROOT / 'app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'))
++if not xml_files:
++    raise SystemExit('No Gradle unit test XML. Offline diagnostics do not satisfy this gate.')
++counts = dict(tests=0, failures=0, errors=0, skipped=0)
++for path in xml_files:
++    suite = ET.parse(path).getroot()
++    for key in counts:
++        counts[key] += int(suite.get(key, '0'))
++if counts['tests'] < 53 or any(counts[key] for key in ('failures', 'errors', 'skipped')):
++    raise SystemExit(f'Unit test gate not satisfied: {counts}')
++lint_path = ROOT / 'app/build/reports/lint-results-debug.xml'
++if not lint_path.is_file():
++    raise SystemExit('No Android Lint XML')
++issues = ET.parse(lint_path).getroot().findall('issue')
++if any(issue.get('severity', '').lower() in ('fatal', 'error') for issue in issues):
++    raise SystemExit('Android Lint errors remain')
++try:
++    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
++except (OSError, subprocess.CalledProcessError):
++    revision = None
++OUT.mkdir(exist_ok=True)
++manifest = {
++    'created_at_utc': datetime.now(timezone.utc).isoformat(),
++    'revision': revision,
++    'artifact': str(APK.relative_to(ROOT)),
++    'sha256': hashlib.sha256(APK.read_bytes()).hexdigest(),
++    'bytes': APK.stat().st_size,
++    'variant': 'debug',
++    'application_id': 'com.gccwebos.android.debug',
++    'version_name': '0.1.1-m0-debug',
++    'unit_tests': counts,
++    'lint_error_count': 0,
++    'lint_warning_count': sum(i.get('severity', '').lower() == 'warning' for i in issues),
++    'device_tests': 'not_run_by_this_collector',
++    'real_vpn': 'not_integrated',
++    'production_or_store_release': False,
++}
++(OUT / 'build-manifest.json').write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')
++print(json.dumps(manifest, indent=2, ensure_ascii=False))
+diff --git a/scripts/test-core-offline.sh b/scripts/test-core-offline.sh
+new file mode 100755
+index 0000000..0273e35
+--- /dev/null
++++ b/scripts/test-core-offline.sh
+@@ -0,0 +1,20 @@
++#!/usr/bin/env bash
++# Diagnostic fallback only. Does not replace project-locked Gradle/Android tests.
++set -euo pipefail
++cd -- "$(dirname -- "$0")/.."
++command -v kotlinc >/dev/null || { echo 'kotlinc is required.' >&2; exit 1; }
++KOTLIN_BIN=$(command -v kotlinc)
++KOTLIN_ROOT=${KOTLIN_HOME:-$(cd -- "$(dirname -- "$KOTLIN_BIN")/.." && pwd)}
++COROUTINES_JAR=${COROUTINES_JAR:-$KOTLIN_ROOT/lib/kotlinx-coroutines-core-jvm.jar}
++[ -f "$COROUTINES_JAR" ] || { echo 'Set COROUTINES_JAR to a local coroutines-core JAR.' >&2; exit 1; }
++mkdir -p .local-tests
++{
++    java -version 2>&1
++    kotlinc -version 2>&1
++    if command -v sha256sum >/dev/null; then sha256sum "$COROUTINES_JAR"; fi
++} | tee .local-tests/toolchain.txt
++kotlinc app/src/main/java/com/gccwebos/android/core/ConnectionCoordinator.kt \
++    app/src/test/java/com/gccwebos/android/core/ConnectionCases.kt tools/OfflineCoreTests.kt \
++    -cp "$COROUTINES_JAR" -include-runtime -d .local-tests/core-tests.jar
++java -cp ".local-tests/core-tests.jar:$COROUTINES_JAR" OfflineCoreTestsKt .local-tests/core-tests.xml \
++    | tee .local-tests/core-tests.log
+diff --git a/scripts/verify_source.py b/scripts/verify_source.py
+new file mode 100644
+index 0000000..86248da
+--- /dev/null
++++ b/scripts/verify_source.py
+@@ -0,0 +1,49 @@
++#!/usr/bin/env python3
++"""M0 source/package checks, not Android compilation or a complete security audit."""
++from __future__ import annotations
++import hashlib
++from pathlib import Path
++import xml.etree.ElementTree as ET
++
++ROOT = Path(__file__).resolve().parents[1]
++EXPECTED_JAR = '55243ef57851f12b070ad14f7f5bb8302daceeebc5bce5ece5fa6edb23e1145c'
++EXPECTED_DIST = '2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb'
++REQUIRED = (
++    'gradlew', 'gradlew.bat', 'build.sh', 'build.ps1',
++    'scripts/bootstrap-wrapper.sh', 'scripts/bootstrap-wrapper.ps1',
++    'gradle/wrapper/gradle-wrapper.properties', '.github/workflows/android.yml',
++    'app/src/main/java/com/gccwebos/android/core/ConnectionCoordinator.kt',
++    'app/src/test/java/com/gccwebos/android/core/ConnectionCases.kt',
++    'app/src/test/java/com/gccwebos/android/core/ConnectionCoordinatorTest.kt',
++    'app/src/debug/java/com/gccwebos/android/DebugBuildPanel.kt',
++    'app/src/release/java/com/gccwebos/android/DebugBuildPanel.kt',
++)
++for name in REQUIRED:
++    p = ROOT / name
++    if not p.is_file() or p.stat().st_size == 0:
++        raise SystemExit(f'Missing or empty source file: {name}')
++props = (ROOT / 'gradle/wrapper/gradle-wrapper.properties').read_text()
++assert 'gradle-9.4.1-bin.zip' in props and f'distributionSha256Sum={EXPECTED_DIST}' in props
++for name in ('scripts/bootstrap-wrapper.sh', 'scripts/bootstrap-wrapper.ps1'):
++    assert EXPECTED_JAR in (ROOT / name).read_text()
++jar = ROOT / 'gradle/wrapper/gradle-wrapper.jar'
++if jar.is_file():
++    assert hashlib.sha256(jar.read_bytes()).hexdigest() == EXPECTED_JAR, 'Untrusted wrapper JAR'
++    print('Wrapper JAR: present and checksum verified')
++else:
++    print('Wrapper JAR: NOT bundled; first run requires verified network bootstrap')
++for path in (ROOT / 'app/src').rglob('*.xml'):
++    ET.parse(path)
++manifest = ET.parse(ROOT / 'app/src/main/AndroidManifest.xml').getroot()
++android = '{http://schemas.android.com/apk/res/android}'
++assert manifest.find('application').get(android + 'usesCleartextTraffic') == 'false'
++assert not manifest.findall('uses-permission'), 'M0 has no real network/VPN permissions; re-review on M1 integration'
++assert not manifest.findall('.//service'), 'M0 must not expose a fake VpnService'
++for directory in ('main', 'release'):
++    for path in (ROOT / f'app/src/{directory}').rglob('*.kt'):
++        assert 'class LocalDiagnosticGateways' not in path.read_text(), 'Debug simulator leaked into production source'
++root_build = (ROOT / 'build.gradle.kts').read_text()
++assert 'version "9.2.0"' in root_build and 'version "2.3.10"' in root_build
++assert 'id("org.jetbrains.kotlin.android")' not in root_build
++print('PASS M0 source presence, checksums, XML, compiler declarations and debug separation')
++print('NOT RUN by this check: Gradle, Android Lint, APK signing, device or backend tests')
+diff --git a/tools/OfflineCoreTests.kt b/tools/OfflineCoreTests.kt
+new file mode 100644
+index 0000000..05adc8a
+--- /dev/null
++++ b/tools/OfflineCoreTests.kt
+@@ -0,0 +1,28 @@
++import com.gccwebos.android.core.ConnectionCases
++import java.io.File
++import kotlinx.coroutines.runBlocking
++import kotlinx.coroutines.withTimeout
++
++fun main(args: Array<String>) {
++    var failures = 0
++    val entries = mutableListOf<String>()
++    fun xml(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;")
++    for (case in ConnectionCases.all) {
++        val start = System.nanoTime()
++        var failure: Throwable? = null
++        try { runBlocking { withTimeout(5_000) { case.body(this) } } }
++        catch (e: Throwable) { failure = e; failures++ }
++        val elapsed = (System.nanoTime() - start) / 1e9
++        println("${if (failure == null) "PASS" else "FAIL"} ${case.name} ($elapsed s)")
++        if (failure != null) failure.printStackTrace(System.err)
++        entries += "<testcase name=\"${xml(case.name)}\" time=\"$elapsed\">" +
++            (failure?.let { "<failure message=\"${xml(it.toString())}\"/>" } ?: "") + "</testcase>"
++    }
++    println("TOTAL ${ConnectionCases.all.size}; PASS ${ConnectionCases.all.size - failures}; FAIL $failures")
++    if (args.isNotEmpty()) File(args[0]).writeText(
++        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
++        "<testsuite name=\"offline-core-diagnostics-not-android-gradle\" tests=\"${ConnectionCases.all.size}\" failures=\"$failures\">\n" +
++        entries.joinToString("\n") + "\n</testsuite>\n"
++    )
++    check(failures == 0) { "$failures cases failed" }
++}

@@ -1,0 +1,3 @@
+Wrapper JAR: NOT bundled; first run requires verified network bootstrap
+PASS M0 source presence, checksums, XML, compiler declarations and debug separation
+NOT RUN by this check: Gradle, Android Lint, APK signing, device or backend tests

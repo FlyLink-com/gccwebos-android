@@ -20,7 +20,7 @@
 
 ## 第一次构建（Windows）
 
-准备 JDK 17、Android SDK Platform 37、Build Tools 36.0.0。通过 Android Studio SDK Manager 安装所需组件并自行确认 SDK 许可。设置 `JAVA_HOME`，SDK 通过 `ANDROID_HOME` 或本地 `local.properties` 指定。构建时需要访问 Gradle、Google Maven、Maven Central 与官方 Wrapper 来源。
+准备 JDK 17、Android SDK Platform 36、Build Tools 36.0.0。通过 Android Studio SDK Manager 安装所需组件并自行确认 SDK 许可。设置 `JAVA_HOME`，SDK 通过 `ANDROID_HOME` 或本地 `local.properties` 指定。构建时需要访问 Gradle、Google Maven、Maven Central 与官方 Wrapper 来源。
 
 在解压后的 `gccwebos-android` 目录运行：
 

@@ -37,9 +37,8 @@ android {
     lint { abortOnError = true }
 }
 
-// Pinned to an official documented stable BOM. Original 2026.09.00 was not
-// dependency-resolved here; see CHANGELOG.md. No dynamic dependency versions.
-val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
+// Resolve a dependency notation through DependencyHandler, not Project scope.
+val composeBom = dependencies.platform("androidx.compose:compose-bom:2026.06.01")
 dependencies {
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")

@@ -18,6 +18,25 @@ APK='app/build/outputs/apk/debug/app-debug.apk'
 TEST_APK='app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
 test -s "$APK" && test -s "$TEST_APK"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$OUT/progress.log"; }
+# The API 36 image enforces a data-image minimum even when config.ini requests
+# 2G. Free unused preinstalled native build tools, AFTER both APKs are built.
+# Never perform this cleanup on local machines or self-hosted runners.
+log 'Inspecting ephemeral runner disk capacity'
+df -h "$SDK_ROOT" | tee "$OUT/disk-before.log"
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ] \
+  && [ "$SDK_ROOT" = /usr/local/lib/android/sdk ] \
+  && [ "$(readlink -f "$SDK_ROOT")" = "$SDK_ROOT" ]; then
+  for directory in "$SDK_ROOT/ndk" "$SDK_ROOT/cmake"; do
+    if [ -d "$directory" ] && [ ! -L "$directory" ]; then
+      du -sh "$directory" | tee -a "$OUT/removed-unused-tools.log"
+      sudo rm -rf -- "$directory"
+      test ! -e "$directory"
+    fi
+  done
+else
+  log 'No SDK cleanup: not the exact GitHub-hosted test environment'
+fi
+df -h "$SDK_ROOT" | tee "$OUT/disk-after.log"
 log 'SDK image installation'
 timeout 300 "$SDKMANAGER" --sdk_root="$SDK_ROOT" emulator "$SYSTEM_IMAGE" 2>&1 | tee "$OUT/sdk-install.log"
 # Bind AVD creation and lookup to the same isolated directory. Never reuse a
@@ -42,17 +61,6 @@ test -s "$ANDROID_AVD_HOME/gccwebos-m0.ini"
 test -s "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini"
 timeout 30 "$EMULATOR" -list-avds 2>&1 | tee "$OUT/avd-emulator-list.log"
 grep -Fxq gccwebos-m0 "$OUT/avd-emulator-list.log"
-# A blank test device does not need the Pixel profile's default 6 GiB data
-# volume. Explicitly bound only this disposable AVD to fit the hosted runner.
-python3 - "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini" <<'PYCONFIG'
-from pathlib import Path
-import sys
-p = Path(sys.argv[1])
-lines = [line for line in p.read_text().splitlines()
-         if line.split('=', 1)[0].strip() != 'disk.dataPartition.size']
-p.write_text('\n'.join(lines + ['disk.dataPartition.size=2G']) + '\n')
-PYCONFIG
-grep '^disk.dataPartition.size=' "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini" | tee "$OUT/data-partition.log"
 df -h "$ANDROID_AVD_HOME" | tee "$OUT/disk-space.log"
 log 'AVD exists and is discoverable; launching emulator'
 "$EMULATOR" -avd gccwebos-m0 -port 5554 -no-window -no-audio -no-boot-anim \

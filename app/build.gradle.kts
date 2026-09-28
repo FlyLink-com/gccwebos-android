@@ -5,7 +5,8 @@ plugins {
 
 android {
     namespace = "com.gccwebos.android"
-    compileSdk = 37
+    // M0 CI could not resolve platforms;android-37. Keep target/min SDK unchanged.
+    compileSdk = 36
     buildToolsVersion = "36.0.0"
 
     defaultConfig {

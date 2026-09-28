@@ -42,9 +42,21 @@ test -s "$ANDROID_AVD_HOME/gccwebos-m0.ini"
 test -s "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini"
 timeout 30 "$EMULATOR" -list-avds 2>&1 | tee "$OUT/avd-emulator-list.log"
 grep -Fxq gccwebos-m0 "$OUT/avd-emulator-list.log"
+# A blank test device does not need the Pixel profile's default 6 GiB data
+# volume. Explicitly bound only this disposable AVD to fit the hosted runner.
+python3 - "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini" <<'PYCONFIG'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+lines = [line for line in p.read_text().splitlines()
+         if line.split('=', 1)[0].strip() != 'disk.dataPartition.size']
+p.write_text('\n'.join(lines + ['disk.dataPartition.size=2G']) + '\n')
+PYCONFIG
+grep '^disk.dataPartition.size=' "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini" | tee "$OUT/data-partition.log"
+df -h "$ANDROID_AVD_HOME" | tee "$OUT/disk-space.log"
 log 'AVD exists and is discoverable; launching emulator'
 "$EMULATOR" -avd gccwebos-m0 -port 5554 -no-window -no-audio -no-boot-anim \
-  -no-snapshot -gpu swiftshader_indirect -camera-back none -camera-front none \
+  -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none \
   -accel on -cores 2 -memory 2048 > "$OUT/emulator.log" 2>&1 &
 EMU_PID=$!
 cleanup() {

@@ -30,7 +30,7 @@ jobs:
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           test -x "$SDKMANAGER"
           # Hosted runner SDK license state is used; no account/payment/production credentials.
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-37" "build-tools;36.0.0" "platform-tools"
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
       - name: Verify bootstrap and build
         shell: bash

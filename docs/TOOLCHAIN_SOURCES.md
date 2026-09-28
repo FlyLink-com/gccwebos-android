@@ -2,8 +2,10 @@
 
 本轮核对日期：2026-09-28。以下是外部官方资料，不是用户源包内容，也不构成依赖下载成功、Android 编译成功或 Google 审核证据。
 
-- AGP 9.2 兼容信息：Gradle 9.4.1、Build Tools 36.0.0、JDK 17、最高 API 37；发行记录包含 Kotlin 2.3.10 更新。
+- AGP 9.2 兼容信息：Gradle 9.4.1、Build Tools 36.0.0、JDK 17、最高 API 37；发行记录包含 Kotlin 2.3.10 更新。本工程选择稳定渠道的 SDK Platform 36 作为 compileSdk，与 targetSdk 36 保持一致；此前 CI 对 `platforms;android-37` 的安装失败。
   https://developer.android.com/build/releases/agp-9-2-0-release-notes
+- SDK Platform 36 的稳定渠道发布记录：
+  https://developer.android.com/tools/releases/platforms
 - AGP 9 的内置 Kotlin：
   https://developer.android.com/build/migrate-to-built-in-kotlin
 - Compose Compiler 与 Kotlin 版本对应；本轮官方说明中的稳定 BOM 为 2026.06.01：

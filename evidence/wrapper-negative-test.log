@@ -1,0 +1,2 @@
+PASS: invalid existing wrapper rejected without execution or replacement.
+Wrapper checksum mismatch. Refusing to execute or overwrite.

@@ -10,3 +10,10 @@ captures/
 *.apk
 *.aab
 *.log
+
+.build-output/
+.local-tests/
+*.tmp
+
+__pycache__/
+*.pyc

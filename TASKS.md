@@ -1,12 +1,12 @@
-> 2026-09-28 仓库状态：M0 源码已提交至 Android 仓库 PR #1；Android 构建、CI 与真机连接尚未验收。下表的后台能力、Issue 状态和生产事实沿用输入包的待确认语义，未作新鲜盘点。包内记录 53 项 JVM 诊断通过，但尚未得到 APK，不将 M0 标记为全部完成。
+> 2026-09-28 M0 验收快照：PR #1 已合并；PR #2 的 SDK 36、Compose BOM 和测试导入修复已进入 main。M0 收口在 PR #3，源码 `bceabc27cd85acdea129e3294dc3527bd40a9e8a` 的 [CI 36481854447](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36481854447) 已完整通过：Wrapper 校验、Debug、53 项 JUnit、Lint（0 错误／9 警告）、测试包编译、签名验证、API 36 模拟器安装启动和 2 项 UI 测试。结果与产物见 [BUILD_STATUS](docs/BUILD_STATUS.md)。本条只证明该精确提交的 M0 工程验收，不代表 PR 已合并、物理真机或 VPN 可用；后续提交以 PR 最新验证回执为准。下表后台能力和生产事实仍沿用输入包的待确认语义，未在 M0 重新盘点。
 
 # gccwebos Android 开发任务清单
 
-状态：`待做` / `阻塞` / `进行中` / `完成`。每项完成时附 PR、构建结果和真机证据。后台任务进入 `proxy-gateway-minimal`，客户端任务进入本仓库。
+状态：`待做` / `阻塞` / `进行中` / `完成`。每项完成时附 PR、构建结果和对应环境证据；模拟器不得写成物理真机。后台任务进入 `proxy-gateway-minimal`，客户端任务进入本仓库。
 
 | 优先级 | 仓库 | 任务 | 完成标准 | 依赖／状态 |
 | --- | --- | --- | --- | --- |
-| P0 | Android | 建立 Gradle wrapper、CI 和基础工程 | `assembleDebug`、`testDebugUnitTest`、`lintDebug` 通过；产物可安装；无签名密钥入库 | 0.1.1-m0：源码与 CI 已入 PR #1；包内 53 项离线同源行为测试通过；Wrapper JAR 下载／Gradle 构建／APK／远程 CI 未完成；进行中 |
+| P0 | Android | 建立 Gradle wrapper、CI 和基础工程 | `assembleDebug`、`testDebugUnitTest`、`lintDebug`、`assembleDebugAndroidTest` 通过；产物可安装启动；无正式签名密钥入库 | M0 工程验收完成于 PR #3 的 `bceabc27`／CI 36481854447；53 项 JUnit、2 项模拟器 UI 测试通过；Lint 9 项警告保留；合并与物理真机验收另列，不代表 VPN 可用 |
 | P0 | Backend | 确认原生邮箱注册／登录合同 | 明确注册、邮箱验证、密码、二次验证、会话恢复／撤销、限流与错误码；隔离测试环境有端到端样例 | 当前认证边界文档对公开邮箱注册与密码登录仍有放行门槛；阻塞 |
 | P0 | Backend | 输出账户资源合同 | 核对 `/api/portal/resources/current/overview` 的 DTO、原生认证方式和部署状态；未采集／实测零／过期样例齐备 | 源码可见但非生产验收；待做 |
 | P0 | Backend | 授权线路与短期连接配置合同 | 只返回账户获准线路；定义配置生命周期、撤销、轮换、协议格式及错误码；测试节点可用 | 待做 |
@@ -22,9 +22,9 @@
 | P2 | Android | 测试 APK 发布 | 签名、版本号、更新路径、隐私说明、脱敏日志、真机回归 | P0/P1；待做 |
 | P3 | Both | Google Play 渠道 | Play 购买与服务端核验、声明与数据安全、商店审核 | 测试版稳定后；待做 |
 
-## 第一批建议拆成 4 个 PR
+## 第一批建议拆成 4 个交付单元
 
-1. **Android/M0 工程**：源码和 CI 已在 PR #1；继续取得校验后的 wrapper JAR、跑通 Gradle/JUnit/Lint、生成可安装 Debug APK，并附实际 CI 日志。离线诊断不替代 Gradle/JUnit。
+1. **Android/M0 工程**：源码导入 PR #1、构建修复 PR #2、收口 PR #3。`bceabc27` 的完整 Android CI 和模拟器验收已通过；后续提交的检查、review、合并状态分别以 GitHub 原生记录为准。旧的离线诊断不替代该 CI 证据。
 2. **Backend/原生合同**：认证、资源、线路／配置的审计与脱敏样例；缺口另开实现 PR。
 3. **Android/M1 内核实验**：独立测试界面接真实测试节点，验证授权、连接、断开和流量。
 4. **Android/M1 产品接入**：将内核适配给 `ConnectionCoordinator`，接连接页与线路页。
@@ -40,12 +40,12 @@
 
 每种状态需有服务端与客户端一致的可观察结果，不用模拟 UI 截图代替隧道流量验证。
 
-## 下一轮生成顺序与交付物
+## 后续生成顺序与交付物
 
 按依赖顺序分批提交，每批给出源码、测试、构建日志和未通过项。测试环境配置与账号材料只在安全渠道交付，不提交仓库。
 
-1. **M0 构建收口（Android）**：补齐受校验的 Wrapper JAR；在 GitHub Actions 或装有 Android SDK 的机器执行 `:app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest`；修复实际编译错误。交付 CI 链接、Debug APK 的 SHA-256、签名验证输出和安装启动结果。此包只验收工程，不宣称 VPN 可用。
-2. **原生后台合同（Backend）**：在隔离环境核对邮箱验证／登录／二次验证／会话撤销、`resources/current/overview`、账户授权线路与短期配置；给出脱敏请求响应样例、错误码、过期和轮换规则。若接口缺失，在后台仓库实现并测试，保持账户和订单系统一套。
+1. **M0 构建收口（Android，已验证基线）**：Wrapper JAR 已实际入库；`bceabc27` 的四项 Gradle 验收、APK 签名、SHA-256 和模拟器安装启动已通过。下载与精确校验值见 [BUILD_STATUS](docs/BUILD_STATUS.md) 和 PR #3 最新回执。每个新 source SHA 的 CI 状态单独核验，不把旧运行冒充新提交通过；此包只验收工程，不宣称 VPN 可用。
+2. **原生后台合同（Backend，下一实现阶段）**：在隔离环境核对邮箱验证／登录／二次验证／会话撤销、`resources/current/overview`、账户授权线路与短期配置；给出脱敏请求响应样例、错误码、过期和轮换规则。若接口缺失，在后台仓库实现并测试，保持账户和订单系统一套。
 3. **真实连接实验（Android）**：选定协议内核并记录版本、许可证及格式映射；接 `VpnService`、前台服务、系统授权、TUN 和回环保护，在获准测试节点验证连接、断开、换线、DNS／IPv6、Wi-Fi／蜂窝切换。交付两款真机日志与实际流量验证；未通过前不启用正式连接按钮。
 4. **产品接入（Android）**：按后台合同接原生登录与安全会话、资源首页和授权线路；把真实连接网关接入协调器。分别显示未采集、实测零、数据过期、开通中、到期、额度不足和隧道失败。
 5. **商业与推荐（Both）**：核对服务端商品报价、商品订单、充值订单、支付回跳后查询与幂等；再接月卡年卡、钱包、订单和续费。最后接安装归因、邀请码兜底、奖励查询与支持入口。

@@ -1,5 +1,7 @@
 # M1 原生账户与自动交付
 
+> 此页记录原 M1 基线。后续的下载、受限配置投影、setupAvailable 恢复修复和当前兼容性边界见 [自动订阅导入](automatic-subscription-import.md)；生产 VPN 仍未开放。
+
 ## 已实现
 
 - 密码登录前展示服务端人机验证题，支持 TOTP 二次验证；挑战到期后重新登录

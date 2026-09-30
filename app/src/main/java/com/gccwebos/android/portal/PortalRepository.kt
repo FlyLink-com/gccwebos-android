@@ -3,6 +3,11 @@ package com.gccwebos.android.portal
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import com.gccwebos.android.core.AuthorizedConfig
+import com.gccwebos.android.vpn.SafeProxyConfig
+import com.gccwebos.android.vpn.UnsafeProxyConfiguration
 import org.json.JSONObject
 import java.time.Instant
 import java.util.UUID
@@ -11,10 +16,15 @@ import java.util.concurrent.atomic.AtomicLong
 /** One delivery at a time, scoped to the exact account, session and resource. */
 class PortalRepository(private val transport: PortalTransport, private val store: DeliveryStore,
     private val policy: OriginPolicy, private val elapsed: () -> Long,
-    private val now: () -> Instant = Instant::now) {
+    private val now: () -> Instant = Instant::now,
+    private val subscription: SubscriptionSource = SubscriptionTransport(policy)) {
     private val mutex = Mutex()
     private val generation = AtomicLong()
     private var session: Session? = null
+    private var imported: AuthorizedConfig? = null
+    private var importedUntil: Instant? = null
+    private var importedGeneration: Long? = null
+    private fun invalidateImport() { imported?.close(); imported = null; importedUntil = null; importedGeneration = null }
     private var totpExpiry: Pair<String, Long>? = null
 
     suspend fun humanChallenge(): HumanChallenge = guarded {
@@ -27,6 +37,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
     }
     suspend fun login(account: String, password: String, challenge: HumanChallenge, answer: String): LoginResult = mutex.withLock {
         guarded {
+            invalidateImport()
             val epoch = generation.get()
             if (elapsed() >= challenge.expiresElapsed) throw PortalFailure(PortalFailure.Reason.LOGIN_FAILED)
             totpExpiry = null
@@ -60,6 +71,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
         }
     }
     private fun acceptSession(body: String): LoginResult.Authenticated {
+        invalidateImport()
         val value = PortalJson.session(JSONObject(body), elapsed())
         require(value.valid(now(), elapsed()))
         val prior = store.read()
@@ -68,12 +80,65 @@ class PortalRepository(private val transport: PortalTransport, private val store
         session = value
         return LoginResult.Authenticated(value)
     }
-    suspend fun refresh(): Resource = mutex.withLock {
+    suspend fun refresh(): Resource = mutex.withLock { guarded { refreshLocked() } }
+    private suspend fun refreshLocked(epoch: Long = generation.get()): Resource {
+        // Failed or superseded refreshes must not leave an old profile eligible for use.
+        invalidateImport()
+        checkGeneration(epoch); val active = activeSession()
+        val response = transport.request("/api/portal/resources/current/overview", session = active.token)
+        expect(response, setOf(200)); checkGeneration(epoch); activeSession()
+        return PortalJson.resource(response.body)
+    }
+
+    /** Called after sign-in and on explicit refresh. No production connection or VPN permission. */
+    suspend fun refreshAndImport(onResource: (Resource) -> Unit = {},
+        onDeliveryReceived: () -> Unit = {}): ImportSnapshot = mutex.withLock {
         guarded {
-            val epoch = generation.get(); val active = activeSession()
-            val response = transport.request("/api/portal/resources/current/overview", session = active.token)
-            expect(response, setOf(200)); checkGeneration(epoch); activeSession()
-            PortalJson.resource(response.body)
+            val epoch = generation.get()
+            val resource = refreshLocked(epoch)
+            onResource(resource)
+            checkGeneration(epoch)
+            val inactive = when {
+                resource == Resource.None -> ImportStatus.NO_RESOURCE
+                resource == Resource.Reconciliation -> ImportStatus.RECONCILIATION
+                resource is Resource.Available && resource.validUntil <= now() -> ImportStatus.EXPIRED
+                resource is Resource.Available && resource.usage.status in setOf("measured", "measured_zero") &&
+                    resource.usage.remainingBytes == 0L -> ImportStatus.QUOTA_EXHAUSTED
+                else -> null
+            }
+            if (inactive != null) return@guarded ImportSnapshot(resource, inactive)
+            resource as Resource.Available
+            val record = acquireLocked(resource, epoch)
+                ?: return@guarded ImportSnapshot(resource, ImportStatus.WAITING_DELIVERY)
+            checkGeneration(epoch); activeSession()
+            onDeliveryReceived()
+            val raw = subscription.download(requireNotNull(record.url))
+            try {
+                checkGeneration(epoch); activeSession(); currentCoroutineContext().ensureActive()
+                if (resource.validUntil <= now()) return@guarded ImportSnapshot(resource, ImportStatus.EXPIRED)
+                val projected = try { SafeProxyConfig.project(raw, 0) }
+                    catch (_: UnsafeProxyConfiguration) { return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION) }
+                try {
+                    checkGeneration(epoch); activeSession(); currentCoroutineContext().ensureActive()
+                    imported = AuthorizedConfig(resource.reference + ":default", projected)
+                    importedUntil = resource.validUntil
+                    importedGeneration = epoch
+                } finally { projected.fill(0) }
+                ImportSnapshot(resource, ImportStatus.IMPORTED)
+            } finally { raw.fill(0) }
+        }
+    }
+
+    /** Fresh in-memory projection only; not evidence that a tunnel was started or traffic verified.
+     * Consumers own/close their copy. Production VPN remains separately gated off.
+     */
+    suspend fun copyImportedConfig(): AuthorizedConfig? = mutex.withLock {
+        guarded {
+            activeSession()
+            if (importedGeneration != generation.get() || importedUntil?.let { it <= now() } != false) { invalidateImport(); return@guarded null }
+            val value = imported ?: return@guarded null
+            val bytes = value.copyMaterial()
+            try { AuthorizedConfig(value.lineId, bytes) } finally { bytes.fill(0) }
         }
     }
 
@@ -86,7 +151,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
             if (expectedSession != null && expectedSession != sessionBinding(active.token)) throw CancellationException("Commerce session changed")
             val response = transport.commerce(path, body, active.token, key)
             checkGeneration(epoch); activeSession()
-            if (response.status == 401) { session = null; throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED) }
+            if (response.status == 401) { invalidateImport(); session = null; throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED) }
             response
         }
     }
@@ -96,27 +161,34 @@ class PortalRepository(private val transport: PortalTransport, private val store
         sessionBinding(Secret(activeSession().accountId))
     }
     suspend fun acquire(resource: Resource.Available): Unit = mutex.withLock {
-        guarded {
-            require(resource.setupAvailable && resource.validUntil > now())
-            val epoch = generation.get(); val active = activeSession()
+        guarded { acquireLocked(resource); Unit }
+    }
+    private suspend fun acquireLocked(resource: Resource.Available, epoch: Long = generation.get()): DeliveryRecord? {
+            require(resource.validUntil > now())
+            checkGeneration(epoch); val active = activeSession()
             var record = store.read()
             if (record != null && record.accountId != active.accountId) {
                 // A confirmed new login must never adopt another account's material.
                 store.clear(); record = null
             }
-            if (record != null && record.resource != resource.reference) { store.clear(); record = null }
+            if (record != null && record.resource != resource.reference) {
+                // A renewal can change resourceRef without issuing new delivery material.
+                // Preserve the receipt; no verified stable delivery identity permits rebinding it.
+                throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED)
+            }
             if (record != null && record.sessionBinding != sessionBinding(active.token)) {
                 // Ack is session-bound. Do not silently create a second claim or lose recoverable material.
                 if (record.pendingAck || record.url == null) throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED)
                 policy.subscription(requireNotNull(record.url).value)
-                return@guarded // Existing acknowledged material is retained for this same account/resource.
+                return record // Existing acknowledged material is retained for this same account/resource.
             }
             if (record == null) {
+                if (!resource.setupAvailable) return null
                 record = DeliveryRecord(active.accountId, sessionBinding(active.token), resource.reference, UUID.randomUUID().toString())
                 store.save(record) // Persist idempotency key BEFORE first attempt.
             }
             if (record.url == null) {
-                activeSession()
+                checkGeneration(epoch); activeSession()
                 val response = transport.request("/api/portal/resources/current/setup",
                     JSONObject().put("idempotencyKey", record.operationKey).toString(), active.token)
                 expect(response, setOf(200)); checkGeneration(epoch); activeSession()
@@ -128,25 +200,27 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 val response = transport.request("/api/portal/resources/current/setup/ack",
                     JSONObject().put("handoffRef", requireNotNull(record.handoff).value).toString(), active.token)
                 expect(response, setOf(204)); checkGeneration(epoch); activeSession()
-                store.save(DeliveryRecord(record.accountId, record.sessionBinding, record.resource, record.operationKey,
-                    record.url, record.handoff, false))
+                record = DeliveryRecord(record.accountId, record.sessionBinding, record.resource, record.operationKey,
+                    record.url, record.handoff, false)
+                store.save(record)
             }
-        }
+            return record
     }
+
     /** Cancels authentication without destroying an earlier durable subscription. */
     suspend fun cancelAuthentication() {
         generation.incrementAndGet()
-        mutex.withLock { session = null; totpExpiry = null }
+        mutex.withLock { invalidateImport(); session = null; totpExpiry = null }
     }
     /** Local sign-out only. There is no verified native server revocation endpoint. */
     suspend fun logout() {
         generation.incrementAndGet()
-        mutex.withLock { session = null; totpExpiry = null; store.clear() }
+        mutex.withLock { invalidateImport(); session = null; totpExpiry = null; store.clear() }
     }
     private fun activeSession(): Session {
         val value = session
         if (value == null || !value.valid(now(), elapsed())) {
-            session = null; throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED)
+            invalidateImport(); session = null; throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED)
         }
         return value
     }
@@ -157,7 +231,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
         if (response.status in accepted) return
         val reason = when(response.status) {
             400, 401 -> if(protected && response.status == 401) {
-                session = null; PortalFailure.Reason.SESSION_EXPIRED
+                invalidateImport(); session = null; PortalFailure.Reason.SESSION_EXPIRED
             } else PortalFailure.Reason.LOGIN_FAILED
             409 -> PortalFailure.Reason.RECONCILIATION
             429 -> PortalFailure.Reason.RATE_LIMITED

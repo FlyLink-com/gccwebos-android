@@ -212,13 +212,25 @@ class RealTunAcceptanceTest {
     }
     private fun clickText(text: String) {
         await("visible $text") {
-            val matches = automation.rootInActiveWindow?.findAccessibilityNodeInfosByText(text) ?: emptyList()
+            // Compose virtual nodes do not implement provider-side text search. Walk the
+            // actual accessibility children, as UIAutomator does, instead of guessing coordinates.
+            val matches = visibleNodes().filter { it.text?.toString() == text || it.contentDescription?.toString() == text }
             matches.any { found ->
                 var node: AccessibilityNodeInfo? = found
                 while (node != null && !node.isClickable) node = node.parent
-                node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+                node?.takeIf { it.isEnabled }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
             }
         }
+    }
+    private fun visibleNodes(): List<AccessibilityNodeInfo> {
+        val root = automation.rootInActiveWindow ?: return emptyList()
+        val result = mutableListOf<AccessibilityNodeInfo>()
+        fun visit(node: AccessibilityNodeInfo, depth: Int) {
+            if (depth > 20 || result.size >= 500) return
+            result += node
+            for (index in 0 until node.childCount) node.getChild(index)?.let { visit(it, depth + 1) }
+        }
+        visit(root, 0); return result
     }
     private fun udp(host: String, port: Int, bytes: ByteArray): ByteArray = DatagramSocket().use { socket ->
         socket.soTimeout = 8000
@@ -245,6 +257,12 @@ class RealTunAcceptanceTest {
         screenshot("failure"); throw AssertionError("Timed out: $label; states=$states")
     }
     private fun screenshot(label: String) {
+        // Only the isolated engineering screen/system consent is used here; no account UI.
+        val nodes = JSONArray(visibleNodes().map { node -> JSONObject()
+            .put("package", node.packageName?.toString()).put("text", node.text?.toString()?.take(400))
+            .put("description", node.contentDescription?.toString()?.take(400))
+            .put("viewId", node.viewIdResourceName).put("clickable", node.isClickable).put("enabled", node.isEnabled) })
+        File(output, "$label-accessibility.json").writeText(nodes.toString(2))
         automation.takeScreenshot()?.let { bitmap ->
             FileOutputStream(File(output, "$label.png")).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             bitmap.recycle()

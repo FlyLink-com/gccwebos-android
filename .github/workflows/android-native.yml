@@ -109,6 +109,21 @@ jobs:
             | tee .build-output/native/fresh-runtime-apks-before.sha256
           bash scripts/real-tun-runtime-api33.sh
           sha256sum -c .build-output/native/fresh-runtime-apks-before.sha256
+      - name: Retain small real-TUN diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-real-tun-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            .build-output/runtime-api33/device/real-tun-evidence/
+            .build-output/runtime-api33/device/real-tun-instrumentation.log
+            .build-output/runtime-api33/device/connectivity-final.log
+            .build-output/runtime-api33/device/crash.log
+            .build-output/native/source-commit.txt
+            .build-output/native/fresh-runtime-apks-before.sha256
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
       - name: Retain source, native and Android evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

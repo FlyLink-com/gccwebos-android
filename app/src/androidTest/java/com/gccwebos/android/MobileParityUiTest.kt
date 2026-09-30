@@ -114,16 +114,36 @@ class MobileParityUiTest {
                 }
             }
         }
+        val localUrl = Secret("https://sub.invalid/sub/a/synthetic")
+        val profiles = MemoryLocalProfileStore().apply {
+            val saved = CachedSubscription(sessionBinding(localUrl), """proxies:
+  - name: Synthetic local TOTP node
+    type: ss
+    server: 192.0.2.10
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+""".toByteArray(), Instant.parse("2099-09-30T00:00:00Z"), localUrl)
+            try { save(saved) } finally { saved.close() }
+        }
         compose.setContent {
             val scope = rememberCoroutineScope()
-            state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}), scope).apply {
-                account = "fixture@example.invalid"; password = "synthetic"; answer = "3"; challenge = HumanChallenge("synthetic", "1 + 2")
+            state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}, profiles = profiles), scope).apply {
+                account = "fixture@example.invalid"; password = "synthetic"; answer = "3"; challenge = HumanChallenge("synthetic", "1 + 2"); restore()
             } }
             AppShell(state, autoLoadCommerce = false)
         }
+        compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
         compose.runOnIdle { state.login() }
         compose.waitUntil(10_000) { state.factorReference != null && !state.busy }
-        compose.runOnIdle { state.onForeground(); assertEquals("synthetic-totp", state.factorReference); assertEquals(1, calls.size) }
+        compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
+        compose.onNodeWithTag("totp-code").performScrollTo().assertIsDisplayed()
+        capture("local-subscription-totp-pending")
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
+        compose.runOnIdle { state.restoreAccount(); state.onForeground(); assertEquals("synthetic-totp", state.factorReference); assertEquals(1, calls.size) }
         compose.onNodeWithTag("totp-code").performScrollTo().performTextInput("123456")
         compose.runOnIdle { state.totp() }
         compose.waitUntil(10_000) { state.authenticated && !state.busy }

@@ -134,7 +134,7 @@ class SubscriptionWalletUiTest {
 
     @Test fun launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage() {
         launchShell { authenticated = false }
-        compose.onNodeWithTag("brand-name").assertTextEquals("clash|飞连")
+        compose.onNodeWithTag("brand-name").assertTextEquals("飞连vpn")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.gccwebos.android.debug", context.packageName)
         assertEquals("飞连vpn", context.packageManager.getApplicationLabel(context.applicationInfo).toString())
@@ -159,7 +159,9 @@ class SubscriptionWalletUiTest {
 
     @Test fun signedOutLoadingErrorAndUnknownNeverShowNoSubscriptionModal() {
         launchShell { authenticated = false; resource = Resource.None }
-        compose.onNodeWithText("登录后查看资源").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("login-screen").assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("login-account").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.runOnIdle { account.authenticated = true; account.busy = true }
         compose.onNodeWithText("正在读取资源").performScrollTo().assertIsDisplayed()
@@ -245,7 +247,7 @@ class SubscriptionWalletUiTest {
         capture("none-font-200")
         compose.onNodeWithTag("guidance-dismiss").performClick()
         compose.runOnIdle { account.resource = available(days = 365) }
-        compose.onNodeWithTag("brand-name").performScrollTo().assertTextEquals("clash|飞连")
+        compose.onNodeWithTag("brand-name").performScrollTo().assertTextEquals("飞连vpn")
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertIsDisplayed()
         capture("countdown-font-200")
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()

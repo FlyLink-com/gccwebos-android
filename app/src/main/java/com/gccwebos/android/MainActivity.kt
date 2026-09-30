@@ -266,7 +266,7 @@ private fun BrandHeader() {
         Image(painterResource(R.drawable.brand_robot_avatar), contentDescription = null,
             modifier = Modifier.size(42.dp), contentScale = ContentScale.Fit)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("clash|飞连", style = MaterialTheme.typography.titleLarge,
+            Text("飞连vpn", style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag("brand-name"))
             Box(Modifier.width(112.dp).height(3.dp).background(Brush.horizontalGradient(
                 listOf(androidx.compose.ui.graphics.Color(0xFFFF27DF), Brand.Blue, Brand.Cyan))))

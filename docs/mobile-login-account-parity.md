@@ -31,7 +31,7 @@ The browser's seven-day Cookie mode is a separate contract. Its DTO exposes cont
 - Plans/data-pack tabs display only validated server-returned offers. No local catalog, invented price or unpublished package is seeded. Data packs have traffic GB without fabricated duration/monthly quota
 - Shopping, recharge and plan-schedule history preserve payment/fulfillment distinctions. Legacy orders require `?limit=20` with paired `afterCreatedAt`/`afterOrderRef`. Wallet ledger requires `?limit=20` with paired `afterOccurredAt`/`afterEntryRef`; strict deltas, ordering and bound cursors are checked. No other query shapes are admitted
 - Recharge retains version-2 offers, integer money/exponent formatting, original durable operation keys, explicit confirmation, trusted payment URLs and authoritative status refresh. Browser return never implies credited payment
-- User-visible mark is `clash|飞连`; app label is `飞连vpn`. Real API domains, package IDs and technical/license identities remain unchanged
+- User-visible mark is `飞连vpn`; app label is `飞连vpn`. Real API domains, package IDs and technical/license identities remain unchanged
 
 Sources: mobile `src/main.jsx`, `src/login.jsx`, `src/panels.jsx`, `src/mine.jsx`, `src/api/read-client.mjs`, `src/api/current-resource.mjs`, `src/api/upstream/commerce/commerce-client.ts`, and the wallet/recharge clients. Visual tokens remain grounded in `src/style.css`, `src/components/button-tokens.css` and `src/components/alipay-visual.css`; further overall concept design is separately reviewed.
 
@@ -57,3 +57,13 @@ The follow-up integrates accepted main `cded4a5` without altering its debug-only
 - F4: the current app session retains only the selected offer reference across navigation and payment browser return. My provides a return action; Plans resolves the current server catalog and explicitly fetches a fresh quote before a separately confirmed purchase. Signout/account change clears the selection. Process death does not restore this convenience selection; durable pending purchase/recharge recovery remains unchanged. No price, balance, quote or purchase instruction is retained by this shortcut
 
 These changes resolve the actionable native flow gaps within the stated scope. They do not claim pixel-identical frontend parity, process-persistent convenience selection, production payment completion, or passed Android instrumentation before its exact-head receipt.
+
+## Final branding and interrupted authentication follow-up
+
+The latest user choice replaces all visible marks with `飞连vpn`, including the launcher, hoodie, lounge and native text. Original image identities and mechanically encoded resources are recorded in branding-assets.json.
+
+Head b3bb94fe passed Gradle/JUnit/Lint and fresh native host/ABI/release-exclusion stages. API36 stopped before installation on a warm-boot system ANR. API33 ran 59 tests with two fixture/obsolete-gate assertion failures; real-TUN acceptance was not reached. The subsequent correction clears the seeded account before input and asserts the actual no-local signed-out login gate, preserving the rest of both tests. Bounded failure-cleanup now retains UI screenshots without weakening exit status.
+
+A pending TOTP challenge now prevents account restoration from replacing its ticket when an existing local subscription permits page navigation. Regression covers local subscription -> TOTP -> Profile/security -> Connect -> Profile -> foreground return -> completion, plus explicit cancel and original expiry bounds. TOTP tickets are never persisted as sessions.
+
+JNI reuse is retargeted only to the exact b3bb94fe artifact11114730030 (archive SHA256 b50311e89d1a2a8a438f3ef4c6ea85bb7d2b3fdc8019d6356249c5f623890efc). Existing source-object, native-tree, repository/run/size/digest, packet-proof and both ABI library hash checks are unchanged. Its two UI failures remain failures; no APK or device result is reused. Final-head app/test APK compilation and device tests remain mandatory.

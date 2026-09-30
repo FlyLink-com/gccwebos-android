@@ -364,7 +364,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         val valid = quote.expiresAt > now && quote.purchaseAvailability == "available"
         AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, title = { Text(if (quote.offer.category == "data_pack") "确认购买${quote.offer.trafficGb} GB流量包" else "确认购买${quote.offer.durationDays}天套餐") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("服务平台：clash|飞连 · portal.gccwebos.com")
+                Text("服务平台：飞连vpn · portal.gccwebos.com")
                 Text("本次扣除：${formatCoins(quote.amountUnits)}")
                 Text(if (quote.offer.category == "data_pack") "流量：${quote.offer.trafficGb} GB；永久有效，用完为止" else "每月流量：${quote.offer.monthlyTrafficGb} GB")
                 Text("报价有效至：${localTime(quote.expiresAt)}")
@@ -377,7 +377,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     }
     selectedRecharge?.let { offer ->
         AlertDialog(onDismissRequest = { selectedRecharge = null }, title = { Text("确认创建充值订单") },
-            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState())) { Text("向 clash|飞连（portal.gccwebos.com）充值 ${formatCoins(offer.paidCoinUnits)}，应付 ${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)}。创建后还需主动打开支付页面，是否到账以服务器查询为准。") } },
+            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState())) { Text("向 飞连vpn（portal.gccwebos.com）充值 ${formatCoins(offer.paidCoinUnits)}，应付 ${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)}。创建后还需主动打开支付页面，是否到账以服务器查询为准。") } },
             confirmButton = { TextButton(onClick = { selectedRecharge = null; state.confirmRecharge(offer) }, enabled = !state.busy, modifier = Modifier.testTag("recharge-confirm")) { Text("创建充值订单") } },
             dismissButton = { TextButton(onClick = { selectedRecharge = null }, modifier = Modifier.testTag("recharge-cancel")) { Text("取消") } })
     }
@@ -386,7 +386,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         val current = state.canOpenPayment(order, now)
         AlertDialog(onDismissRequest = { paymentReview = null }, title = { Text("核对付款信息") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("服务平台：clash|飞连 · portal.gccwebos.com")
+                Text("服务平台：飞连vpn · portal.gccwebos.com")
                 Text("本次一次性充值：${formatCoins(order.expectedPaidCoinUnits)}")
                 Text("服务器确认应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
                 Text("支付方式：${order.paymentMethod}；通道：${order.adapterKey}")

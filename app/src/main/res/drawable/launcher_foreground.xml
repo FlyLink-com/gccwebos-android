@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Approved robot and clash|飞连 wordmark, uniformly scaled inside the adaptive safe zone. -->
+<!-- Approved robot and 飞连vpn wordmark, uniformly scaled inside the adaptive safe zone. -->
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
     android:insetLeft="17%" android:insetTop="17%" android:insetRight="17%" android:insetBottom="17%">
     <bitmap android:src="@drawable/launcher_user_robot" android:gravity="fill" />

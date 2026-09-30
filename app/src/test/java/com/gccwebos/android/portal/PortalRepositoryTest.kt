@@ -1,6 +1,9 @@
 package com.gccwebos.android.portal
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.*
 import org.junit.Test
 import org.json.JSONObject
@@ -121,6 +124,37 @@ class PortalRepositoryTest {
         val body = JSONObject(wire.calls.single().second!!)
         assertFalse(body.getBoolean("rememberMe")); assertNull(wire.calls.single().third)
         assertEquals(setOf("accountId","password","rememberMe","humanVerification"),body.keys().asSequence().toSet())
+    }
+    @Test fun cancelledAccountLoginCannotPublishLateTotpTicketIntoNewAccount() = runTest {
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>(); val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var count = 0
+        val wire = object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                require(path == "/api/portal/password/session")
+                if (++count == 1) {
+                    started.complete(Unit); kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { release.await() }
+                    return WireResponse(202,"""{"challenge":{"status":"second_factor_required","challengeRef":"old-mfa","availableFactors":["totp"],"expiresAt":"2026-09-30T00:05:00.000Z"}}""")
+                }
+                return loginResponse("native_new_account")
+            }
+        }
+        val saved = MemorySessionStore(); val repo = PortalRepository(wire, Store(), policy, {0}, {now}, sessions = saved)
+        val old = async { runCatching { repo.login("old", "synthetic", HumanChallenge("c", "prompt"), "3") } }
+        started.await(); val reset = launch { repo.cancelAuthentication() }; runCurrent(); release.complete(Unit)
+        assertTrue(old.await().exceptionOrNull() is kotlinx.coroutines.CancellationException); reset.join()
+        assertNull(saved.read())
+        repo.login("new", "synthetic", HumanChallenge("d", "prompt"), "3")
+        try { repo.totp("old-mfa", "123456"); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.LOGIN_FAILED, failure.reason) }
+        assertEquals(2, count); assertNotNull(repo.commerceSessionBinding())
+    }
+    @Test fun explicitAuthenticationCancelRemovesTotpTicketAndNeverPersistsIt() = runTest {
+        val wire = Wire(); val saved = MemorySessionStore()
+        val repo = PortalRepository(wire, Store(), policy, {0}, {now}, sessions = saved)
+        wire.replies += WireResponse(202,"""{"challenge":{"status":"second_factor_required","challengeRef":"mfa","availableFactors":["totp"],"expiresAt":"2026-09-30T00:05:00.000Z"}}""")
+        repo.login("a", "synthetic", HumanChallenge("c", "prompt"), "3")
+        assertNull(saved.read()); repo.cancelAuthentication()
+        try { repo.totp("mfa", "123456"); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.LOGIN_FAILED, failure.reason) }
+        assertEquals(1, wire.calls.size); assertNull(saved.read())
     }
     @Test fun totpChallengeDoesNotCreateSession() = runTest {
         val wire = Wire(); val repo = PortalRepository(wire,Store(),policy,{0},{now})

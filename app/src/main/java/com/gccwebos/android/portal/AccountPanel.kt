@@ -95,7 +95,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun restoreAccount() = checkAccount(force = false)
     private fun revalidateAccount() = checkAccount(force = true)
     private fun checkAccount(force: Boolean) {
-        if (busy || (authenticated && !force)) return
+        if (busy || factorReference != null || (authenticated && !force)) return
         expiryTask?.cancel(); authenticated = false; security = null
         restoring = true; restorationPending = true
         run {

@@ -10,10 +10,10 @@ import subprocess
 import sys
 from zipfile import ZipFile
 
-SOURCE = 'b56b185461e8aa0f1cdbee4fa5ac290520fe13a8'
-ARTIFACT_ID = 11105785156
-RUN_ID = 36726935683
-ZIP_SHA = '60d9cbc2425551e2c69cd925ee894e262432d70bc0c7eab282e30f8a747a20bd'
+SOURCE = 'b3bb94fe73aa39e03fd25e4b7fc7ef4ba5ab7987'
+ARTIFACT_ID = 11114730030
+RUN_ID = 36746157076
+ZIP_SHA = 'b50311e89d1a2a8a438f3ef4c6ea85bb7d2b3fdc8019d6356249c5f623890efc'
 NATIVE_TREE = '1d19e7c69ec3e0b8b9450a404c80d97d17831f25'
 LIBRARIES = {
     'arm64-v8a': 'efe638604b4f54f76fbba85649027f6b72f67b0dab5d5c18d248a1de7e5920bb',
@@ -42,7 +42,7 @@ def digest(stream):
 
 def verify_metadata(metadata):
     assert metadata['id'] == ARTIFACT_ID and not metadata['expired']
-    assert metadata['size_in_bytes'] == 105212799 and metadata['digest'] == 'sha256:' + ZIP_SHA
+    assert metadata['size_in_bytes'] == 105666028 and metadata['digest'] == 'sha256:' + ZIP_SHA
     assert metadata['workflow_run']['id'] == RUN_ID and metadata['workflow_run']['head_sha'] == SOURCE
     assert metadata['workflow_run']['repository_id'] == 1393547812
 

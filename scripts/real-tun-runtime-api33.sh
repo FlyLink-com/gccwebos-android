@@ -90,6 +90,7 @@ cleanup() {
   timeout 5 "$ADB" -s emulator-5554 shell dumpsys activity lastanr > "$OUT/last-anr.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 shell dumpsys window > "$OUT/window-state.log" 2>&1
   timeout 10 "$ADB" -s emulator-5554 pull "/sdcard/Android/data/$APP_ID/files/real-tun-evidence" "$OUT/" > "$OUT/real-tun-pull.log" 2>&1
+  timeout 10 "$ADB" -s emulator-5554 pull "/sdcard/Android/data/$APP_ID/files/ui-evidence" "$OUT/" > "$OUT/ui-evidence-cleanup-pull.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 shell dumpsys connectivity > "$OUT/connectivity-final.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 shell df -h /data > "$OUT/device-disk.log" 2>&1
   df -h "$SDK_ROOT" > "$OUT/host-disk-final.log" 2>&1

@@ -1,6 +1,13 @@
 package com.gccwebos.android
 
 import android.os.Bundle
+import com.gccwebos.android.update.UpdatePanel
+import com.gccwebos.android.portal.AccountController
+import com.gccwebos.android.portal.AccountPanel
+import com.gccwebos.android.portal.productionRepository
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -44,6 +51,9 @@ private enum class Destination(@StringRes val title: Int) {
 
 @Composable
 internal fun AppShell() {
+    val context = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    val account = remember { AccountController(productionRepository(context), scope) }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
     MaterialTheme {
@@ -61,13 +71,13 @@ internal fun AppShell() {
                         )
                     }
                 }
-            }) { padding -> Page(selected, padding) }
+            }) { padding -> Page(selected, padding, account) }
         }
     }
 }
 
 @Composable
-private fun Page(destination: Destination, padding: PaddingValues) {
+private fun Page(destination: Destination, padding: PaddingValues, account: AccountController) {
     Column(
         modifier = Modifier.fillMaxSize().padding(padding)
             .verticalScroll(rememberScrollState()).padding(24.dp)
@@ -89,7 +99,8 @@ private fun Page(destination: Destination, padding: PaddingValues) {
             Destination.Lines -> Text(stringResource(R.string.lines_explanation))
             Destination.Plans -> Text(stringResource(R.string.plans_explanation))
             Destination.Profile -> {
-                Text(stringResource(R.string.profile_explanation))
+                AccountPanel(account)
+                UpdatePanel()
                 DebugBuildPanel() // Implemented separately in debug/release source sets.
             }
         }

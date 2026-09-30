@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
+import re
 import subprocess
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -28,7 +30,7 @@ for path in xml_files:
     suite = ET.parse(path).getroot()
     for key in counts:
         counts[key] += int(suite.get(key, '0'))
-if counts['tests'] < 53 or any(counts[key] for key in ('failures', 'errors', 'skipped')):
+if counts['tests'] < 102 or any(counts[key] for key in ('failures', 'errors', 'skipped')):
     raise SystemExit(f'Unit test gate not satisfied: {counts}')
 lint_path = ROOT / 'app/build/reports/lint-results-debug.xml'
 if not lint_path.is_file():
@@ -40,6 +42,15 @@ try:
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
 except (OSError, subprocess.CalledProcessError):
     revision = None
+# Read package identity from the actual compiled APK, not a stale source constant.
+sdk = os.environ.get('ANDROID_HOME') or os.environ.get('ANDROID_SDK_ROOT')
+if not sdk:
+    raise SystemExit('ANDROID_HOME or ANDROID_SDK_ROOT is required to verify APK identity')
+aapt = Path(sdk) / 'build-tools/36.0.0/aapt2'
+badging = subprocess.check_output([str(aapt), 'dump', 'badging', str(APK)], text=True)
+package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging, re.MULTILINE)
+if package is None or package.group(1) != 'com.gccwebos.android.debug':
+    raise SystemExit('Unexpected or missing compiled APK identity')
 OUT.mkdir(exist_ok=True)
 manifest = {
     'created_at_utc': datetime.now(timezone.utc).isoformat(),
@@ -48,8 +59,9 @@ manifest = {
     'sha256': hashlib.sha256(APK.read_bytes()).hexdigest(),
     'bytes': APK.stat().st_size,
     'variant': 'debug',
-    'application_id': 'com.gccwebos.android.debug',
-    'version_name': '0.1.1-m0-debug',
+    'application_id': package.group(1),
+    'version_code': int(package.group(2)),
+    'version_name': package.group(3),
     'unit_tests': counts,
     'lint_error_count': 0,
     'lint_warning_count': sum(i.get('severity', '').lower() == 'warning' for i in issues),

@@ -1,0 +1,181 @@
+{
+  "notice": "SYNTHETIC ONLY. No live credentials or network requests. YAML intentionally has no usable proxy.",
+  "resources": {
+    "none": {
+      "resource": {
+        "state": "none"
+      }
+    },
+    "reconciliation": {
+      "resource": {
+        "state": "reconciliation_required"
+      }
+    },
+    "pending": {
+      "resource": {
+        "state": "available",
+        "plan": {
+          "id": "synthetic_plan",
+          "durationDays": 30,
+          "monthlyTrafficGb": 1
+        },
+        "validUntil": "2026-10-30T00:00:00.000Z",
+        "setupAvailable": true,
+        "resourceRef": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "usage": {
+          "totalBytes": 1024,
+          "usedBytes": null,
+          "remainingBytes": null,
+          "collectionStatus": "pending",
+          "updatedAt": null,
+          "cycleStartedAt": "2026-09-30T00:00:00.000Z",
+          "cycleEndsAt": "2026-10-30T00:00:00.000Z"
+        }
+      }
+    },
+    "measured_zero": {
+      "resource": {
+        "state": "available",
+        "plan": {
+          "id": "synthetic_plan",
+          "durationDays": 30,
+          "monthlyTrafficGb": 1
+        },
+        "validUntil": "2026-10-30T00:00:00.000Z",
+        "setupAvailable": true,
+        "resourceRef": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "usage": {
+          "totalBytes": 1024,
+          "usedBytes": 0,
+          "remainingBytes": 1024,
+          "collectionStatus": "measured_zero",
+          "updatedAt": "2026-09-30T00:05:00.000Z",
+          "cycleStartedAt": "2026-09-30T00:00:00.000Z",
+          "cycleEndsAt": "2026-10-30T00:00:00.000Z"
+        }
+      }
+    },
+    "measured": {
+      "resource": {
+        "state": "available",
+        "plan": {
+          "id": "synthetic_plan",
+          "durationDays": 30,
+          "monthlyTrafficGb": 1
+        },
+        "validUntil": "2026-10-30T00:00:00.000Z",
+        "setupAvailable": true,
+        "resourceRef": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "usage": {
+          "totalBytes": 1024,
+          "usedBytes": 300,
+          "remainingBytes": 724,
+          "collectionStatus": "measured",
+          "updatedAt": "2026-09-30T00:05:00.000Z",
+          "cycleStartedAt": "2026-09-30T00:00:00.000Z",
+          "cycleEndsAt": "2026-10-30T00:00:00.000Z"
+        }
+      }
+    },
+    "stale": {
+      "resource": {
+        "state": "available",
+        "plan": {
+          "id": "synthetic_plan",
+          "durationDays": 30,
+          "monthlyTrafficGb": 1
+        },
+        "validUntil": "2026-10-30T00:00:00.000Z",
+        "setupAvailable": true,
+        "resourceRef": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "usage": {
+          "totalBytes": 1024,
+          "usedBytes": 300,
+          "remainingBytes": 724,
+          "collectionStatus": "stale",
+          "updatedAt": "2026-09-30T00:05:00.000Z",
+          "cycleStartedAt": "2026-09-30T00:00:00.000Z",
+          "cycleEndsAt": "2026-10-30T00:00:00.000Z"
+        }
+      }
+    },
+    "zero_quota": {
+      "resource": {
+        "state": "available",
+        "plan": {
+          "id": "synthetic_plan",
+          "durationDays": 30,
+          "monthlyTrafficGb": 1
+        },
+        "validUntil": "2026-10-30T00:00:00.000Z",
+        "setupAvailable": true,
+        "resourceRef": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "usage": {
+          "totalBytes": 0,
+          "usedBytes": 0,
+          "remainingBytes": null,
+          "collectionStatus": "measured",
+          "updatedAt": "2026-09-30T00:05:00.000Z",
+          "cycleStartedAt": "2026-09-30T00:00:00.000Z",
+          "cycleEndsAt": "2026-10-30T00:00:00.000Z"
+        }
+      }
+    },
+    "over_quota": {
+      "resource": {
+        "state": "available",
+        "plan": {
+          "id": "synthetic_plan",
+          "durationDays": 30,
+          "monthlyTrafficGb": 1
+        },
+        "validUntil": "2026-10-30T00:00:00.000Z",
+        "setupAvailable": true,
+        "resourceRef": "resource_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "usage": {
+          "totalBytes": 1024,
+          "usedBytes": 2048,
+          "remainingBytes": 0,
+          "collectionStatus": "measured",
+          "updatedAt": "2026-09-30T00:05:00.000Z",
+          "cycleStartedAt": "2026-09-30T00:00:00.000Z",
+          "cycleEndsAt": "2026-10-30T00:00:00.000Z"
+        }
+      }
+    }
+  },
+  "session": {
+    "sessionRef": "portal_session_SYNTHETIC_NOT_VALID",
+    "accountId": "account_synthetic",
+    "authMethod": "totp",
+    "status": "active",
+    "issuedAt": "2026-09-30T00:00:00.000Z",
+    "expiresAt": "2026-09-30T00:30:00.000Z",
+    "safety": {
+      "totpCodeReturned": false,
+      "encryptedTotpSecretReturned": false,
+      "rawEntryTokenReturned": false,
+      "runtimeDbMutated": false
+    }
+  },
+  "delivery": {
+    "delivery": {
+      "handoffRef": "handoff_synthetic_not_valid",
+      "kind": "subscription_url",
+      "subscriptionUrl": "https://subscription.example.invalid/sub/a/SYNTHETIC_NOT_A_CREDENTIAL"
+    }
+  },
+  "rejectedUrls": [
+    "http://subscription.example.invalid/sub/a/test",
+    "https://evil.example.invalid/sub/a/test",
+    "https://user:pass@subscription.example.invalid/sub/a/test",
+    "https://subscription.example.invalid/sub/a/test#secret",
+    "https://subscription.example.invalid/sub/a/test?token=secret",
+    "https://subscription.example.invalid/sub/a/../test",
+    "https://subscription.example.invalid/sub/a/%2Ftest",
+    "https://subscription.example.invalid:443/sub/a/test",
+    "https://subscription.example.invalid/sub/a/test\n",
+    "https://subscription.example.invalid/sub/clash.yaml?token=test"
+  ],
+  "syntheticYaml": "# synthetic incompatible-format fixture; not a usable tunnel\nproxies: []\nproxy-groups: []\nrules: []\n"
+}

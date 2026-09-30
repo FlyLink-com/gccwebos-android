@@ -1,3 +1,11 @@
+# gccwebos Android · 0.2.0-m1
+
+原生账户、资源与自动订阅交付切片，叠加 PR #3 的已验证 M0 基线。新增密码／TOTP 登录、严格资源 DTO、Keystore 加密交付与确认、账户加载/重试、官网更新检查。真实 VPN 仍禁用；商品购买和协议内核未接入。
+
+实现、安全边界、生产地址来源与测试说明见 [M1 账户集成](docs/native-account-m1.md) 和 [官网更新](docs/official-updates.md)。本分支不自动合并、部署或发布正式签名 APK。
+
+## 以下为历史 M0 基线记录
+
 # gccwebos Android · 0.1.1-m0
 
 原生 Android M0 工程：单一 `app` 模块、连接／线路／套餐／我的四入口和 Gateway 分层。**本阶段只验证工程可构建、可安装、可启动，不代表 VPN 或后台业务已经接入。** 真实连接按钮保持禁用；Debug 自检明确是本地模拟。

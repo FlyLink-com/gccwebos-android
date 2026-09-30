@@ -69,7 +69,11 @@ jobs:
             2>&1 | tee .build-output/native/android-build.log
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk \
             | tee .build-output/native/apk-signature.txt
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 app/build/outputs/apk/debug/app-debug.apk \
+            | tee .build-output/native/apk-alignment.txt
           python3 scripts/verify_native_apks.py
+          python3 scripts/collect_build_evidence.py
+          cp .build-output/build-manifest.json .build-output/native/build-manifest.json
           sha256sum app/build/outputs/apk/debug/*.apk | tee .build-output/native/apks.sha256
       - name: Load actual JNI library and check guarded app on emulator
         run: bash scripts/m0-emulator-smoke.sh

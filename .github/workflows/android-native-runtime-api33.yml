@@ -1,0 +1,105 @@
+name: Native runtime API33 (immutable APK)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/android-native-runtime-api33.yml'
+      - 'scripts/native-runtime-api33.sh'
+      - 'scripts/materialize-native-runtime.py'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: native-runtime-api33-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  immutable-native-api33:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Fetch exact immutable source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/runtime-api33
+          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11085461506 \
+            > "$RUNNER_TEMP/native-artifact-metadata.json"
+          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11085461506/zip \
+            > "$RUNNER_TEMP/native-source-artifact.zip"
+          python3 scripts/materialize-native-runtime.py \
+            "$RUNNER_TEMP/native-source-artifact.zip" "$RUNNER_TEMP/native-artifact-metadata.json"
+      - name: Verify saved APK signatures, package metadata and alignment
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" 'build-tools;36.0.0' 'platform-tools'
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk \
+            | tee .build-output/runtime-api33/runtime-apk-signature.txt
+          "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            | tee .build-output/runtime-api33/runtime-test-apk-signature.txt
+          "$SDK_ROOT/build-tools/36.0.0/aapt2" dump badging app/build/outputs/apk/debug/app-debug.apk \
+            > .build-output/runtime-api33/runtime-apk-badging.txt
+          python3 - <<'PYCODE'
+          import re
+          from pathlib import Path
+          root = Path('.build-output/runtime-api33')
+          badging = (root / 'runtime-apk-badging.txt').read_text()
+          assert "sdkVersion:'26'" in badging and "targetSdkVersion:'36'" in badging
+          assert "package: name='com.gccwebos.android.debug' versionCode='4' versionName='0.2.1-ui-debug'" in badging
+          pattern = r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)'
+          app = re.findall(pattern, (root / 'runtime-apk-signature.txt').read_text())
+          test = re.findall(pattern, (root / 'runtime-test-apk-signature.txt').read_text())
+          assert len(app) == 1 and app == test, 'App/test signing certificates differ'
+          PYCODE
+          "$SDK_ROOT/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk
+      - name: Run the same native APK on official Android13 API33
+        env:
+          REQUIRE_NATIVE_JNI: 'true'
+        run: bash scripts/native-runtime-api33.sh
+      - name: Record distinct binary and harness results
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/runtime-api33
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path('.build-output/runtime-api33/provenance.json')
+          data = json.loads(path.read_text()) if path.exists() else {'provenance_verified': False}
+          data['runtime_status'] = os.environ['JOB_STATUS']
+          data['api36_status'] = 'still_blocked_in_prior_run_not_retested_here'
+          data['physical_device_tested'] = False
+          data['real_tun_traffic_tested'] = False
+          Path('.build-output/runtime-api33/result.json').write_text(json.dumps(data, indent=2) + '\n')
+          PY
+          # Lossless compression keeps full diagnostics while making evidence portable.
+          find .build-output/runtime-api33 -type f -name '*.log' -size +2M -exec gzip '{}' \;
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [p for p in Path('.build-output/runtime-api33').rglob('*') if p.is_file()]
+          assert not any(p.suffix in ('.apk', '.so', '.aar', '.zip') for p in files)
+          assert sum(p.stat().st_size for p in files) < 28 * 1024 * 1024, 'Small evidence bundle exceeds safe transfer budget'
+          PY
+      - name: Upload small runtime-only evidence (no APK or native libraries)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-native-api33-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .build-output/runtime-api33/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

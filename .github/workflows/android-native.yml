@@ -44,11 +44,12 @@ jobs:
         run: |
           set -euo pipefail
           bash native/scripts/prepare.sh 2>&1 | tee .build-output/native/prepare.log
-      - name: Export exact-head Kotlin protocol contract goldens
+      - name: Export Kotlin goldens and compile gated acceptance harness
         run: |
           set -euo pipefail
           chmod +x gradlew
-          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest --tests "*ProtocolContractTest" \
+          ./gradlew --no-daemon --console=plain -PnativeVpnLab=true -PnativeTunAcceptance=true \
+            :app:testDebugUnitTest --tests "*ProtocolContractTest" :app:assembleDebugAndroidTest :app:lintDebug \
             2>&1 | tee .build-output/native/kotlin-contract.log
       - name: Real packet-path tests with loopback-only fixtures
         env:
@@ -74,7 +75,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew scripts/*.sh
-          ./gradlew --no-daemon --console=plain -PnativeVpnLab=true \
+          ./gradlew --no-daemon --console=plain -PnativeVpnLab=true -PnativeTunAcceptance=true \
             :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest :app:assembleRelease \
             2>&1 | tee .build-output/native/android-build.log
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk \
@@ -88,6 +89,7 @@ jobs:
       - name: Load freshly built JNI APK on Android13 API33
         env:
           REQUIRE_NATIVE_JNI: 'true'
+          REQUIRE_REAL_TUN: 'true'
         run: |
           set -euo pipefail
           # Only disposable compiler/module caches. Keep artifacts and all verification receipts.

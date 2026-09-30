@@ -77,7 +77,9 @@ class LabVpnService : VpnService(), SocketProtector {
         }, {
             val descriptor = Builder().setSession("GCC isolated native lab")
                 .setMtu(1500).addAddress("172.19.0.1", 30).addDnsServer("172.19.0.2")
-                .addRoute("0.0.0.0", 0).addAddress("fdfe:dcba:9876::1", 126).addRoute("::", 0)
+                // Only synthetic acceptance destinations, never a global/default route.
+                .addRoute("198.18.0.10", 32).addRoute("172.19.0.2", 32)
+                .addAddress("fdfe:dcba:9876::1", 126).addRoute("2001:db8::10", 128)
                 .addAllowedApplication(packageName) // Never capture other applications in this milestone.
                 .setUnderlyingNetworks(arrayOf(requireNotNull(underlying)))
                 .setBlocking(false).establish() ?: throw IllegalStateException("VPN permission absent")
@@ -90,11 +92,15 @@ class LabVpnService : VpnService(), SocketProtector {
             if (state == VpnLabState.CLEANUP_FAILED || state == VpnLabState.FAILED) main.post { stopSession() }
         })
         session = next
-        // Service accepts no credentials/URLs/config from Intent, storage, IPC, account or production.
+        // No Intent/account/production config. An additional acceptance-only build flag permits
+        // a single-use app-private ephemeral loopback fixture, only on a disposable emulator.
         commands.execute {
             try {
-                val yaml = LAB_YAML.toByteArray(Charsets.UTF_8)
-                val config = try { SafeProxyConfig.project(yaml, 0) } finally { yaml.fill(0) }
+                val config = if (BuildConfig.NATIVE_TUN_ACCEPTANCE) LabAcceptanceConfig.consume(this)
+                    else {
+                        val yaml = LAB_YAML.toByteArray(Charsets.UTF_8)
+                        try { SafeProxyConfig.project(yaml, 0) } finally { yaml.fill(0) }
+                    }
                 next.start(config)
             } catch (_: Exception) { announce("LAB_START_FAILED"); main.post { stopSession() } }
         }
@@ -111,7 +117,7 @@ class LabVpnService : VpnService(), SocketProtector {
             !stopping.get()
         } catch (_: Exception) { false }
     }
-    override fun onRevoke() { stopSession(); super.onRevoke() }
+    override fun onRevoke() { announce("REVOKED"); stopSession(); super.onRevoke() }
     override fun onTaskRemoved(rootIntent: Intent?) { stopSession(); super.onTaskRemoved(rootIntent) }
     override fun onDestroy() { stopSession(); super.onDestroy() }
 
@@ -140,7 +146,7 @@ class LabVpnService : VpnService(), SocketProtector {
         if (isolatedProcess) Process.killProcess(Process.myPid())
     }
     private fun announce(state: String) {
-        sendBroadcast(Intent(ACTION_STATE).setPackage(packageName).putExtra("state", state), "$packageName.permission.VPN_LAB_STATE")
+        sendBroadcast(Intent(ACTION_STATE).setPackage(packageName).putExtra("state", state).putExtra("pid", Process.myPid()), "$packageName.permission.VPN_LAB_STATE")
     }
     private fun foreground() {
         val manager = getSystemService(NotificationManager::class.java)

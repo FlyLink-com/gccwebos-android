@@ -24,10 +24,14 @@ android {
             versionNameSuffix = "-debug"
             val nativeLab = providers.gradleProperty("nativeVpnLab").orNull == "true"
             buildConfigField("boolean", "NATIVE_VPN_LAB", nativeLab.toString())
+            val realTun = providers.gradleProperty("nativeTunAcceptance").orNull == "true"
+            require(!realTun || nativeLab) { "Real TUN acceptance requires nativeVpnLab" }
+            buildConfigField("boolean", "NATIVE_TUN_ACCEPTANCE", realTun.toString())
             manifestPlaceholders["nativeVpnLabEnabled"] = nativeLab.toString()
         }
         release {
             buildConfigField("boolean", "NATIVE_VPN_LAB", "false")
+            buildConfigField("boolean", "NATIVE_TUN_ACCEPTANCE", "false")
             isMinifyEnabled = false
             isDebuggable = false
             // No production signing credentials or automatic release signing.
@@ -40,6 +44,11 @@ android {
     buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = true }
     sourceSets.getByName("test").resources.srcDir("../native/bridge/testdata")
+    sourceSets.getByName("test").java.srcDir("src/acceptanceFixtures/java")
+    if (providers.gradleProperty("nativeTunAcceptance").orNull == "true") {
+        sourceSets.getByName("androidTest").java.srcDirs("src/acceptanceTest/java", "src/acceptanceFixtures/java")
+        sourceSets.getByName("androidTest").manifest.srcFile("src/acceptanceTest/AndroidManifest.xml")
+    }
 }
 
 // Pinned to an official documented stable BOM. Original 2026.09.00 was not

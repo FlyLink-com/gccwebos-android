@@ -101,7 +101,8 @@ class NativeVpnLabActivity : ComponentActivity() {
         try { startForegroundService(Intent(this, LabVpnService::class.java).setAction(LabVpnService.ACTION_START)) }
         catch (_: Exception) { requested = false; status = "系统拒绝启动，未建立实验 VPN" }
     }
-    private fun stopLab() {
+    /** The same explicit Stop handler is exercised by the opt-in emulator acceptance test. */
+    fun stopLab() {
         permissionAttempt.cancel()
         if (!requested) { status = "已取消启动；授权结果不会自动建立 VPN"; return }
         requested = false

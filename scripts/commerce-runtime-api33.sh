@@ -179,6 +179,15 @@ for case in \
   rechargeDialogCancelsWithoutCreatingAnOrderAtLargeFont \
   paymentReviewCanOpenAndCancelWithoutAnExternalPaymentIntent; do
   mkdir -p "$FRAMES/$case"
+  target_scale=1.0
+  case "$case" in
+    *LargeFont*|largeFont*|paymentReview*) target_scale=2.0 ;;
+  esac
+  # Real platform font scaling reaches separate Dialog windows as well as the Activity.
+  adb shell settings put system font_scale "$target_scale"
+  adb shell settings get system font_scale | tee "$FRAMES/$case/system-font-scale.txt"
+  grep -Fxq "$target_scale" "$FRAMES/$case/system-font-scale.txt"
+  sleep 1
   timeout 120 "$ADB" -s emulator-5554 shell am instrument -w -r \
     -e class "com.gccwebos.android.SubscriptionWalletUiTest#$case" "$TEST_RUNNER" \
     > "$FRAMES/$case/instrumentation.log" 2>&1 &
@@ -195,6 +204,8 @@ for case in \
   if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_STATUS_CODE: -[1-4]' "$FRAMES/$case/instrumentation.log"; then exit 1; fi
   (( count > 0 ))
 done
+adb shell settings put system font_scale 1.0
+sleep 1
 log 'Relaunching after tests'
 adb shell am start -W -n "$ACTIVITY" > "$OUT/relaunch.log"
 sleep 2

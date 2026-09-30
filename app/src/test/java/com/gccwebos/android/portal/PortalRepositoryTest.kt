@@ -185,4 +185,18 @@ class PortalRepositoryTest {
         try { repo.refresh(); fail() } catch(f: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED,f.reason) }
     }
 
+
+    @Test fun oldCommerceSessionCannotDispatchAfterReplacementLogin() = runTest {
+        val wire = Wire(); val repo = PortalRepository(wire,Store(),policy,{0},{now})
+        login(repo,wire)
+        val oldBinding = repo.commerceSessionBinding()
+        repo.logout()
+        wire.replies += loginResponse("replacement_fixture")
+        repo.login("fixture@example.invalid","synthetic",HumanChallenge("challenge","1+2"),"3")
+        val count = wire.calls.size
+        try { repo.commerce("/api/portal/coins/wallet", expectedSession=oldBinding); fail() }
+        catch (_: kotlinx.coroutines.CancellationException) { }
+        assertEquals(count,wire.calls.size)
+        assertNotEquals(oldBinding,repo.commerceSessionBinding())
+    }
 }

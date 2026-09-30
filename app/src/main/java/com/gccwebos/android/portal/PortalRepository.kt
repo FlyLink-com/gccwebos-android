@@ -76,6 +76,25 @@ class PortalRepository(private val transport: PortalTransport, private val store
             PortalJson.resource(response.body)
         }
     }
+
+    /** Commerce shares the authenticated session but cannot read or mutate delivery credentials. */
+    suspend fun commerce(path: String, body: String? = null, key: String? = null, expectedSession: String? = null): WireResponse = mutex.withLock {
+        guarded {
+            require(path.startsWith("/api/portal/commerce/") || path.startsWith("/api/portal/catalog/") ||
+                path.startsWith("/api/portal/coins/"))
+            val epoch = generation.get(); val active = activeSession()
+            if (expectedSession != null && expectedSession != sessionBinding(active.token)) throw CancellationException("Commerce session changed")
+            val response = transport.commerce(path, body, active.token, key)
+            checkGeneration(epoch); activeSession()
+            if (response.status == 401) { session = null; throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED) }
+            response
+        }
+    }
+    suspend fun commerceSessionBinding(): String = mutex.withLock { sessionBinding(activeSession().token) }
+    suspend fun commerceAccountBinding(): String = mutex.withLock {
+        // Stable account-scoped recovery survives reauthentication without saving account PII or tokens.
+        sessionBinding(Secret(activeSession().accountId))
+    }
     suspend fun acquire(resource: Resource.Available): Unit = mutex.withLock {
         guarded {
             require(resource.setupAvailable && resource.validUntil > now())

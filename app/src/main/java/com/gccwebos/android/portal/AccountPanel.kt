@@ -47,6 +47,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     var code by mutableStateOf("")
     var challenge by mutableStateOf<HumanChallenge?>(null)
     var factorReference by mutableStateOf<String?>(null)
+    var authSessionGeneration by mutableStateOf(0L)
     var authenticated by mutableStateOf(false)
     var busy by mutableStateOf(false)
     var clearing by mutableStateOf(false)
@@ -64,7 +65,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         val submittedAnswer = answer; answer = ""
         run {
             when(val result = repository.login(account.trim(), submittedPassword, human, submittedAnswer)) {
-                is LoginResult.Authenticated -> { authenticated = true; challenge = null; loadResource() }
+                is LoginResult.Authenticated -> { authenticated = true; authSessionGeneration++; challenge = null; loadResource() }
                 is LoginResult.TotpRequired -> { factorReference = result.reference; challenge = null }
             }
         }
@@ -74,10 +75,15 @@ internal class AccountController(private val repository: PortalRepository, priva
         val submitted = code; code = ""
         run {
             repository.totp(reference, submitted)
-            factorReference = null; authenticated = true; loadResource()
+            factorReference = null; authenticated = true; authSessionGeneration++; loadResource()
         }
     }
     fun refresh() = run { loadResource() }
+    suspend fun commerce(path: String, body: String? = null, key: String? = null, expectedSession: String? = null) = repository.commerce(path, body, key, expectedSession)
+    suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
+    suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
+    fun commerceSessionExpired() { authenticated = false; resource = null; deliveryReady = false; error = "登录已到期，请重新登录" }
+
     private suspend fun loadResource() {
         deliveryReady = false
         val current = repository.refresh(); resource = current

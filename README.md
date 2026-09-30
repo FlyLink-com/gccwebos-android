@@ -1,3 +1,9 @@
+# clash飞连vpn · 0.3.0-commerce-draft
+
+独立叠加草稿：响应式订阅状态、钱包余额与充值、服务器三套餐报价及订单恢复。范围、来源与安全边界见 [订阅与钱包](docs/subscription-wallet-draft.md)。未合并、未发布，不开启生产 VPN；无真实付款测试。
+
+## 历史基线
+
 # gccwebos Android · 0.2.1-ui
 
 在原生账户／订阅与隔离VPN实验室基础上，适配用户指定的 gccwebos-mobile 视觉和真实套餐参数。四入口均为 Jetpack Compose；原字标、机器人和场景保持来源像素；未知／过期用量保持明确状态。

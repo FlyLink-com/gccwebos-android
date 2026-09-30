@@ -13,9 +13,20 @@ import java.io.IOException
 class WireResponse(val status: Int, val body: String) { override fun toString() = "WireResponse(status=$status)" }
 interface PortalTransport {
     suspend fun request(path: String, body: String? = null, session: Secret? = null): WireResponse
+    suspend fun commerce(path: String, body: String?, session: Secret, key: String?): WireResponse =
+        if (key == null) request(path, body, session) else throw PortalFailure(PortalFailure.Reason.PROTOCOL)
 }
 class HttpsPortalTransport(private val policy: OriginPolicy) : PortalTransport {
     private val client = isolatedClient()
+    override suspend fun commerce(path: String, body: String?, session: Secret, key: String?): WireResponse = withContext(Dispatchers.IO) {
+        val builder = Request.Builder().url(policy.apiUrl(path)).header("Accept", "application/json")
+            .header("Cache-Control", "no-store").header("X-Portal-Session", session.value)
+        if (path == "/api/portal/coins/recharge/offers") builder.header("X-Portal-Recharge-Offers-Version", "2")
+        if (key != null) { require(Regex("[A-Za-z0-9._:-]{1,128}").matches(key)); builder.header("Idempotency-Key", key) }
+        if (body != null) builder.post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+        executeBounded(client, builder.build(), 262144)
+    }
+
     override suspend fun request(path: String, body: String?, session: Secret?): WireResponse = withContext(Dispatchers.IO) {
         val builder = Request.Builder().url(policy.apiUrl(path)).header("Accept", "application/json")
             .header("Cache-Control", "no-store")

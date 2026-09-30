@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Layout-only reuse of the authorized avatar; the source PNG pixels are unchanged. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:width="72dp" android:height="72dp" android:gravity="center">
+        <bitmap android:src="@drawable/brand_robot_avatar" android:gravity="fill" />
+    </item>
+</layer-list>

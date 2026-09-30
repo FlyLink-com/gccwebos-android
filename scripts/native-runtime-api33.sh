@@ -197,4 +197,3 @@ adb shell wm density reset
 sha256sum "$APK" "$TEST_APK" | tee "$OUT/installed-apks.sha256"
 printf '%s\n' 'PASS: same Debug APK installed and launched on API 33 emulator (same prebuilt source-pinned APK); instrumentation passed.' \
   'NOT TESTED: physical devices, real TUN traffic, backend, payments. API36 remains environment-blocked.' | tee "$OUT/result.log"
-

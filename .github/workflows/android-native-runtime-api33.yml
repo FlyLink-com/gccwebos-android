@@ -56,7 +56,14 @@ jobs:
           from pathlib import Path
           root = Path('.build-output/runtime-api33')
           badging = (root / 'runtime-apk-badging.txt').read_text()
-          assert "sdkVersion:'26'" in badging and "targetSdkVersion:'36'" in badging
+          def sdk_value(name):
+              match = re.search(r'^' + name + r":'(\d+)'$", badging, re.MULTILINE)
+              assert match, 'Missing exact SDK metadata: ' + name
+              return int(match.group(1))
+          assert sdk_value('minSdkVersion') == 26
+          assert sdk_value('targetSdkVersion') == 36
+          compile_sdk = re.search(r"\bcompileSdkVersion='(\d+)'", badging)
+          assert compile_sdk and int(compile_sdk.group(1)) == 36
           assert "package: name='com.gccwebos.android.debug' versionCode='4' versionName='0.2.1-ui-debug'" in badging
           pattern = r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)'
           app = re.findall(pattern, (root / 'runtime-apk-signature.txt').read_text())

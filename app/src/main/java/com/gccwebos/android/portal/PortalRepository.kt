@@ -116,11 +116,14 @@ class PortalRepository(private val transport: PortalTransport, private val store
             try {
                 checkGeneration(epoch); activeSession(); currentCoroutineContext().ensureActive()
                 if (resource.validUntil <= now()) return@guarded ImportSnapshot(resource, ImportStatus.EXPIRED)
+                // Offline compatibility preview only: list order is not a stable line ID or
+                // server recommendation. Production has no gateway/service consuming this profile.
+                // Every node is validated even though only index 0 is retained for this preview.
                 val projected = try { SafeProxyConfig.project(raw, 0) }
                     catch (_: UnsafeProxyConfiguration) { return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION) }
                 try {
                     checkGeneration(epoch); activeSession(); currentCoroutineContext().ensureActive()
-                    imported = AuthorizedConfig(resource.reference + ":default", projected)
+                    imported = AuthorizedConfig(resource.reference + ":offline-preview-index-0", projected)
                     importedUntil = resource.validUntil
                     importedGeneration = epoch
                 } finally { projected.fill(0) }

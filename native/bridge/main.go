@@ -33,7 +33,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const coreVersion = "mihomo/v1.19.31@ab405bad5beeeac8b003bb01f60f134f6df54471;gcc-bridge/1"
+const coreVersion = "mihomo/v1.19.31@ab405bad5beeeac8b003bb01f60f134f6df54471;gcc-bridge/2"
 const maxConfigBytes = 65536
 
 var lifecycle sync.Mutex
@@ -67,6 +67,13 @@ func protectSocket(network, address string, conn syscall.RawConn) error {
 }
 
 func makeConfig(input inputConfig) (*config.Config, error) {
+	if err := validateInput(input); err != nil {
+		return nil, errConfig
+	}
+	proxy, err := safeProxyMap(input.Proxies[0])
+	if err != nil {
+		return nil, errConfig
+	}
 	raw := config.DefaultRawConfig()
 	raw.Mode = tunnel.Rule
 	raw.IPv6 = false // IPv6 is captured by the Android TUN and rejected inside it.
@@ -96,11 +103,14 @@ func makeConfig(input inputConfig) (*config.Config, error) {
 	raw.DNS.DefaultNameserver = []string{"1.1.1.1"} // Literal proxy endpoint needs no bootstrap.
 	raw.DNS.ProxyServerNameserver = nil
 	raw.DNS.DirectNameServer = nil
-	p := input.Proxies[0]
-	raw.Proxy = []map[string]any{{"name": p.Name, "type": "ss", "server": p.Server, "port": p.Port, "cipher": p.Cipher, "password": p.Password, "udp": p.UDP}}
+	raw.Proxy = []map[string]any{proxy}
 	raw.ProxyGroup = nil
 	raw.Rule = []string{"IP-CIDR6,::/0,REJECT,no-resolve", "MATCH,GCC_SELECTED_PROXY", "MATCH,REJECT"}
-	return config.ParseRawConfig(raw)
+	cfg, err := config.ParseRawConfig(raw)
+	if err != nil {
+		return nil, errConfig // Never return upstream errors containing config or secrets.
+	}
+	return cfg, nil
 }
 
 func startEngine(buf []byte, home string, fd int) (result string) {

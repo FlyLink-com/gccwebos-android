@@ -18,4 +18,4 @@ print(' '.join(names))
 PY
 )
 # Deliberate word splitting: names are validated JVM class identifiers.
-java -cp ".local-tests/all-tests.jar:app/src/test/resources:$CP" org.junit.runner.JUnitCore $CLASSES | tee .local-tests/all-tests.log
+java -cp ".local-tests/all-tests.jar:app/src/test/resources:native/bridge/testdata:$CP" org.junit.runner.JUnitCore $CLASSES | tee .local-tests/all-tests.log

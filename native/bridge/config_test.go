@@ -14,14 +14,13 @@ import (
 	"testing"
 )
 
-const fixtureConfig = `{"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}`
+const fixtureConfig = `{"schemaVersion":1,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}`
 
 func TestStrictConfig(t *testing.T) {
 	if _, err := parseInput([]byte(fixtureConfig)); err != nil {
 		t.Fatal(err)
 	}
 	tests := []string{
-		strings.Replace(fixtureConfig, `"udp":true`, `"udp":false`, 1),
 		``, `[]`, `null`, `{}`, fixtureConfig + `{}`, strings.Repeat("a", 65537),
 		strings.Replace(fixtureConfig, `"proxies":`, `"external-controller":"127.0.0.1:9090","proxies":`, 1),
 		strings.Replace(fixtureConfig, `"rules":`, `"proxy-providers":{},"rules":`, 1),

@@ -1,0 +1,47 @@
+mixed-port: 7897
+allow-lan: false
+mode: global
+proxy-providers:
+  "globalcircle-pool":
+    type: http
+    url: "https://fixtures.example.invalid/provider.yaml"
+    path: "./providers/globalcircle-pool.yaml"
+    interval: 3600
+    health-check:
+      enable: true
+      url: "https://www.gstatic.com/generate_204"
+      interval: 300
+      lazy: true
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    lazy: true
+    use:
+      - "globalcircle-pool"
+  - name: WEAK-NETWORK
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    lazy: true
+    tolerance: 50
+    use:
+      - "globalcircle-pool"
+  - name: FALLBACK
+    type: fallback
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    lazy: true
+    use:
+      - "globalcircle-pool"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - AUTO
+      - WEAK-NETWORK
+      - FALLBACK
+    use:
+      - "globalcircle-pool"
+rules:
+  - MATCH,GLOBAL

@@ -1,0 +1,16 @@
+{
+  "servers": [
+    {
+      "host": "192.0.2.10",
+      "port": 443,
+      "name": "Synthetic HY2",
+      "protocol": "hysteria2",
+      "password": "synthetic-only",
+      "sni": "fixture.example.invalid",
+      "skipCertVerify": false,
+      "alpn": [
+        "h3"
+      ]
+    }
+  ]
+}

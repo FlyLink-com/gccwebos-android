@@ -1,3 +1,5 @@
+> Offline protocol contract v1: bounded SS AEAD, VLESS TCP TLS/Reality, Hysteria2 and TUIC v5 projection; production VPN remains disabled. See [support limits and evidence](docs/offline-protocol-contract.md).
+
 # clash飞连vpn · 0.3.0-commerce-draft
 
 独立叠加草稿：响应式订阅状态、钱包余额与充值、服务器三套餐报价及订单恢复。范围、来源与安全边界见 [订阅与钱包](docs/subscription-wallet-draft.md)。未合并、未发布，不开启生产 VPN；无真实付款测试。

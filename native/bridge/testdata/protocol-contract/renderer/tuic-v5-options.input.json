@@ -1,0 +1,27 @@
+{
+  "servers": [
+    {
+      "host": "192.0.2.10",
+      "port": 443,
+      "name": "Synthetic TUIC options",
+      "protocol": "tuic",
+      "uuid": "22222222-2222-4222-8222-222222222222",
+      "password": "synthetic-only",
+      "sni": "fixture.example.invalid",
+      "udpRelayMode": "native",
+      "congestionController": "bbr",
+      "bbrProfile": "standard",
+      "alpn": [
+        "h3"
+      ],
+      "disableSni": false,
+      "reduceRtt": false,
+      "requestTimeout": 8000,
+      "heartbeatInterval": 10000,
+      "maxUdpRelayPacketSize": 1252,
+      "fastOpen": false,
+      "skipCertVerify": false,
+      "maxOpenStreams": 100
+    }
+  ]
+}

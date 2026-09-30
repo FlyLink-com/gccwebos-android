@@ -18,13 +18,13 @@ proxies:
 class SafeProxyConfigTest {
     @Test fun onlySelectedProxyAndOwnedRuleReachCore() {
         val value = JSONObject(String(SafeProxyConfig.project((fixture + "\nport: 9999\ndns: {enable: true, nameserver: [https://evil.example/dns-query]}\nrules: [MATCH,DIRECT]\n").toByteArray(), 0)))
-        assertEquals(setOf("proxies", "rules"), value.keys().asSequence().toSet())
+        assertEquals(setOf("schemaVersion", "proxies", "rules"), value.keys().asSequence().toSet())
         assertEquals("MATCH,GCC_SELECTED_PROXY", value.getJSONArray("rules").getString(0))
         assertEquals("GCC_SELECTED_PROXY", value.getJSONArray("proxies").getJSONObject(0).getString("name"))
         assertFalse(value.toString().contains("evil.example"))
     }
     @Test fun rejectsProviderControllerScriptAndFileDirectives() {
-        for (key in listOf("proxy-providers", "rule-providers", "external-controller", "external-ui", "external-ui-url", "geox-url", "script", "listeners", "tun", "secret", "profile")) {
+        for (key in listOf("proxy-providers", "rule-providers", "external-controller", "external-ui", "external-ui-url", "geox-url", "script", "listeners", "tun", "secret")) {
             invalid(fixture + "\n$key: {}")
         }
     }

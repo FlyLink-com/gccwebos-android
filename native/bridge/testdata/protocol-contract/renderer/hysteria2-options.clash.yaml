@@ -1,0 +1,42 @@
+mixed-port: 7897
+allow-lan: false
+mode: global
+proxies:
+  - name: "Synthetic HY2 options"
+    type: hysteria2
+    server: "192.0.2.10"
+    port: 443
+    password: "synthetic-only"
+    ports: "443,8443-8445"
+    hop-interval: 30
+    up: "100 Mbps"
+    down: "200 Mbps"
+    obfs: "salamander"
+    obfs-password: "synthetic-obfs-only"
+    sni: "fixture.example.invalid"
+    skip-cert-verify: false
+    fingerprint: "1111111111111111111111111111111111111111111111111111111111111111"
+    alpn:
+      - "h3"
+    bbr-profile: "standard"
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic HY2 options"
+  - name: FALLBACK
+    type: fallback
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic HY2 options"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - AUTO
+      - FALLBACK
+      - "Synthetic HY2 options"
+rules:
+  - MATCH,GLOBAL

@@ -51,17 +51,20 @@ is mandatory before another successful start.
 Despite the parameter name, `configYaml` accepts only strict UTF-8 JSON (a YAML
 subset), max64KiB. Duplicate keys, unknown root/nested keys, plugins, providers,
 management listeners, geodata/rule inputs and nonliteral IPv4 proxy endpoints are
-rejected. The single proxy name, type, routing policy and allowed AEAD ciphers are
-fixed. UDP must be true. Example:
+rejected. The proxy name and routing policy are fixed. Versioned protocol shapes
+are limited to SS AEAD, VLESS TCP TLS/Reality, Hysteria2 and TUIC v5; see
+[the strict field and unsupported-shape matrix](../docs/offline-protocol-contract.md).
+Explicit SS/VLESS UDP=false is preserved; HY2/TUIC have intrinsic UDP support.
+This parsing support does not enable production VPN or prove interoperability. Example:
 
 ```json
-{"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}
+{"schemaVersion":1,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}
 ```
 
 The native layer constructs its own full config. All controller/inbound socket
 ports, providers, NTP, profile persistence, geodata update URLs, sniffer and external
 UI are disabled. DNS is hijacked in process and sent as TCP DNS to `1.1.1.1:53`
-**through the selected SS proxy**. Because the proxy endpoint must be literal IPv4,
+**through the selected proxy**. Because the proxy endpoint must be literal IPv4,
 there is no proxy-hostname bootstrap query. Host tests answer this destination in a
 loopback encrypted fixture; they never dial 1.1.1.1 or another external server.
 

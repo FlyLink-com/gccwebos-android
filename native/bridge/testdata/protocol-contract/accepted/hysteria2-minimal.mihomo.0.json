@@ -1,0 +1,1 @@
+{"schemaVersion":1,"proxies":[{"server":"192.0.2.10","password":"synthetic-only","skip-cert-verify":false,"alpn":["h3"],"port":443,"name":"GCC_SELECTED_PROXY","type":"hysteria2","sni":"fixture.example.invalid"}],"rules":["MATCH,GCC_SELECTED_PROXY"]}

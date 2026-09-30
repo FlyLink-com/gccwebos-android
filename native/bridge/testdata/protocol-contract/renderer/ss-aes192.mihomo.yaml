@@ -1,0 +1,37 @@
+mixed-port: 7897
+allow-lan: false
+mode: rule
+log-level: warning
+unified-delay: true
+tcp-concurrent: true
+global-client-fingerprint: chrome
+profile:
+  store-selected: true
+proxies:
+  - name: "Synthetic SS AES192"
+    type: ss
+    server: "192.0.2.10"
+    port: 443
+    cipher: "aes-192-gcm"
+    password: "synthetic-only"
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic SS AES192"
+  - name: FALLBACK
+    type: fallback
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic SS AES192"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - AUTO
+      - FALLBACK
+      - "Synthetic SS AES192"
+rules:
+  - MATCH,GLOBAL

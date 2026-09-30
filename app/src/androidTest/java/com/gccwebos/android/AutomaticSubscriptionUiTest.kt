@@ -22,7 +22,7 @@ class AutomaticSubscriptionUiTest {
     private val paths = mutableListOf<String>()
     private var downloads = 0
 
-    private fun launch(none: Boolean = false, supported: Boolean = true, downloadFails: Boolean = false) {
+    private fun launch(none: Boolean = false, supported: Boolean = true, downloadFails: Boolean = false, source: String? = null) {
         val now = Instant.parse("2026-09-30T00:00:00Z")
         val wire = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
@@ -47,14 +47,14 @@ class AutomaticSubscriptionUiTest {
                 downloads++
                 assertFalse(store.value!!.pendingAck)
                 if (downloadFails) throw PortalFailure(PortalFailure.Reason.NETWORK)
-                """proxies:
+                (source ?: """proxies:
   - name: synthetic
     type: ${if (supported) "ss" else "vless"}
     server: 192.0.2.1
     port: 443
     cipher: aes-128-gcm
     password: synthetic-only
-""".toByteArray()
+""").toByteArray()
             })
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -67,6 +67,45 @@ class AutomaticSubscriptionUiTest {
         compose.runOnIdle { account.login() }
         compose.waitUntil(10_000) { account.authenticated && !account.busy }
     }
+    private fun importedProtocol(type: String, fields: String) {
+        launch(source = """unified-delay: true
+profile: {store-selected: true}
+proxies:
+  - name: synthetic
+    type: $type
+    server: 192.0.2.10
+    port: 443
+""" + fields.trimIndent().prependIndent("    ") + "\n")
+        compose.onNodeWithText(subscriptionImportMessage(ImportStatus.IMPORTED)).assertExists()
+        compose.runOnIdle { assertEquals(1, downloads); assertTrue(account.deliveryReceived) }
+        compose.onNodeWithText("已连接", substring = false).assertDoesNotExist()
+    }
+    @Test fun vlessTlsImportsOfflineWithoutClaimingConnection() = importedProtocol("vless", """
+        uuid: 11111111-1111-4111-8111-111111111111
+        tls: true
+        network: tcp
+        servername: fixture.example.invalid
+        udp: false
+    """)
+    @Test fun vlessRealityImportsOfflineWithoutClaimingConnection() = importedProtocol("vless", """
+        uuid: 11111111-1111-4111-8111-111111111111
+        tls: true
+        servername: fixture.example.invalid
+        client-fingerprint: chrome
+        reality-opts:
+          public-key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE
+          short-id: "0123456789abcdef"
+    """)
+    @Test fun hysteria2ImportsOfflineWithoutClaimingConnection() = importedProtocol("hysteria2", """
+        password: synthetic-only
+        sni: fixture.example.invalid
+        up: "100 Mbps"
+    """)
+    @Test fun tuicV5ImportsOfflineWithoutClaimingConnection() = importedProtocol("tuic", """
+        uuid: 22222222-2222-4222-8222-222222222222
+        password: synthetic-only
+        sni: fixture.example.invalid
+    """)
     @Test fun noPlanLoginShowsAuthoritativeEmptyStateWithoutClaiming() {
         launch(none = true)
         compose.onNodeWithText(subscriptionImportMessage(ImportStatus.NO_RESOURCE)).assertExists()

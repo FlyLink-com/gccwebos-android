@@ -13,7 +13,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class EncryptedDeliveryStore(context: Context) : DeliveryStore {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "portal-delivery.bin"))
+    private val directory = context.noBackupFilesDir
+    private val file = AtomicFile(File(directory, "portal-delivery.bin"))
     private val alias = "gccwebos.portal.delivery.v1"
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -66,7 +67,8 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
                 output.fd.sync() // AtomicFile alone suppresses some sync/close errors on older API levels.
                 file.finishWrite(output)
             } catch (failure: Exception) { file.failWrite(output); throw failure }
-                val received = read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+            syncDirectory()
+            val received = read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
                 require(received.accountId == record.accountId && received.sessionBinding == record.sessionBinding &&
                     received.resource == record.resource && received.operationKey == record.operationKey &&
                     received.url?.value == record.url?.value && received.handoff?.value == record.handoff?.value &&
@@ -75,8 +77,14 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
     }
     override fun clear() = storage {
         file.delete()
+        syncDirectory()
         require(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists() && !File(file.baseFile.path + ".new").exists())
         Unit
+    }
+    private fun syncDirectory() {
+        val fd = android.system.Os.open(directory.path,
+            android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_DIRECTORY, 0)
+        try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }
     }
     private inline fun <T> storage(block: () -> T): T = try { block() }
         catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }

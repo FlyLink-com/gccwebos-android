@@ -108,7 +108,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请重新获取验证题并登录" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
                     PortalFailure.Reason.RECOVERY_REQUIRED -> "上次交付需要恢复，请稍后重试或联系支持；不会重复领取"
-                    PortalFailure.Reason.STORAGE -> "安全保存失败，尚未确认交付，请重试"
+                    PortalFailure.Reason.STORAGE -> "本地安全存储失败，交付状态需要恢复，请重试"
                     PortalFailure.Reason.RATE_LIMITED -> "请求过于频繁，请稍后重试"
                     PortalFailure.Reason.NETWORK -> "网络连接失败，请重试"
                     PortalFailure.Reason.PROTOCOL -> "服务响应格式不受支持，请稍后重试"

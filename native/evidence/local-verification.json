@@ -1,0 +1,49 @@
+{
+  "status": "PASS_NATIVE_HOST_AND_ANDROID_CROSS_BUILD",
+  "android_runtime_verified": false,
+  "source_commit": "ab405bad5beeeac8b003bb01f60f134f6df54471",
+  "upstream_patch": "patches/0001-owned-tun-fd.patch",
+  "go_tests": [
+    "strict_input_rejection",
+    "controlled_core_config",
+    "tun_safety_defaults",
+    "invalid_fd_home",
+    "50_failed_initialization_fd_reuse_gc_cycles"
+  ],
+  "host_packet_path": [
+    "ipv4_tcp_http_over_shadowsocks_aead",
+    "ipv4_udp_echo_over_shadowsocks_aead",
+    "dns_hijack_via_proxy_tcp",
+    "deny_protector_no_successful_outbound",
+    "ipv6_and_icmp_no_outbound",
+    "caller_tun_fd_preserved",
+    "fresh_process_required_after_stop"
+  ],
+  "network_scope": "loopback fixture only; synthetic destinations never forwarded",
+  "abis": {
+    "arm64-v8a": {
+      "path": "build/jniLibs/arm64-v8a/libgccmihomo.so",
+      "sha256": "f51962ce7d89df3ab75d54ceea716b88e12a7837f0323b06aaf6c0cbee34096c",
+      "bytes": 62029128,
+      "minimum_api": 26,
+      "elf_load_alignment": 16384,
+      "jni_symbols": [
+        "nativeStart",
+        "nativeStop",
+        "nativeVersion"
+      ]
+    },
+    "x86_64": {
+      "path": "build/jniLibs/x86_64/libgccmihomo.so",
+      "sha256": "0a2a1fb4bd965e460da32bd35297fb6fae7d7319293a9647e55c8f12b6869a9b",
+      "bytes": 66829480,
+      "minimum_api": 26,
+      "elf_load_alignment": 16384,
+      "jni_symbols": [
+        "nativeStart",
+        "nativeStop",
+        "nativeVersion"
+      ]
+    }
+  }
+}

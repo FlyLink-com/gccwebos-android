@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.core.AccessDecision
 import com.gccwebos.android.core.AccountGateway
@@ -32,9 +33,10 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Debug-only engineering control. No socket, TUN, VpnService, account or payment is created. */
+/** Mock state-machine diagnostics; separately gated native lab opens an explicit permission screen. */
 @Composable
 internal fun DebugBuildPanel() {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val fake = remember { LocalDiagnosticGateways() }
     val controller = remember(scope) {
@@ -45,6 +47,11 @@ internal fun DebugBuildPanel() {
     val scenarios = listOf("正常模拟", "配置等待（用于取消）", "流量探测失败", "无套餐阻断")
     val busy = state is ConnectionState.Working || state == ConnectionState.Disconnecting
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag("debug-diagnostics")) {
+        if (BuildConfig.NATIVE_VPN_LAB) {
+            OutlinedButton(onClick = {
+                context.startActivity(android.content.Intent(context, com.gccwebos.android.vpn.NativeVpnLabActivity::class.java))
+            }) { Text("打开原生 VPN 隔离实验（真实 TUN）") }
+        }
         HorizontalDivider()
         Text("仅 Debug：本地状态机自检", style = MaterialTheme.typography.titleMedium)
         Text("以下全部为模拟。不连接互联网、不注册账户、不建立 VPN，也不表示实际服务可用。")

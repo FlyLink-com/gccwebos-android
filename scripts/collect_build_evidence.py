@@ -16,9 +16,17 @@ APK = ROOT / 'app/build/outputs/apk/debug/app-debug.apk'
 OUT = ROOT / '.build-output'
 if not APK.is_file() or APK.stat().st_size == 0:
     raise SystemExit('No Debug APK exists. No success manifest was created.')
+native_libraries = {}
 with ZipFile(APK) as archive:
     if archive.testzip() is not None:
         raise SystemExit('Corrupt APK')
+    for name in archive.namelist():
+        if re.fullmatch(r'lib/(arm64-v8a|x86_64)/libgccmihomo\.so', name):
+            digest = hashlib.sha256()
+            with archive.open(name) as library:
+                for chunk in iter(lambda: library.read(1024 * 1024), b''):
+                    digest.update(chunk)
+            native_libraries[name] = digest.hexdigest()
     for required in ('AndroidManifest.xml', 'classes.dex', 'resources.arsc'):
         if required not in archive.namelist():
             raise SystemExit(f'Incomplete APK: {required} missing')
@@ -30,7 +38,7 @@ for path in xml_files:
     suite = ET.parse(path).getroot()
     for key in counts:
         counts[key] += int(suite.get(key, '0'))
-if counts['tests'] < 102 or any(counts[key] for key in ('failures', 'errors', 'skipped')):
+if counts['tests'] < 123 or any(counts[key] for key in ('failures', 'errors', 'skipped')):
     raise SystemExit(f'Unit test gate not satisfied: {counts}')
 lint_path = ROOT / 'app/build/reports/lint-results-debug.xml'
 if not lint_path.is_file():
@@ -66,7 +74,9 @@ manifest = {
     'lint_error_count': 0,
     'lint_warning_count': sum(i.get('severity', '').lower() == 'warning' for i in issues),
     'device_tests': 'not_run_by_this_collector',
-    'real_vpn': 'not_integrated',
+    'native_engine_embedded': bool(native_libraries),
+    'native_libraries_sha256': native_libraries,
+    'real_vpn': 'debug_lab_only_runtime_unverified' if native_libraries else 'not_integrated',
     'production_or_store_release': False,
 }
 (OUT / 'build-manifest.json').write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')

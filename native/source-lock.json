@@ -1,0 +1,41 @@
+{
+  "mihomo": {
+    "version": "v1.19.31",
+    "commit": "ab405bad5beeeac8b003bb01f60f134f6df54471",
+    "archive": "https://codeload.github.com/MetaCubeX/mihomo/tar.gz/ab405bad5beeeac8b003bb01f60f134f6df54471",
+    "sha256": "adb7a6e4207e8ca44567330e1d563163112787d3044d848305b2bfeff0282590",
+    "license": "GPL-3.0",
+    "patches": [
+      {
+        "path": "patches/0001-owned-tun-fd.patch",
+        "sha256": "0915c5e0c16f735ca7c00720a39efc2650a3a0196bfcc3191a6b84bd964a331d"
+      }
+    ]
+  },
+  "cmfa_reference": {
+    "commit": "559594d4f99600d592757b23b2ee8e9b924512e4",
+    "archive": "https://codeload.github.com/MetaCubeX/ClashMetaForAndroid/tar.gz/559594d4f99600d592757b23b2ee8e9b924512e4",
+    "sha256": "4e290c261d66abdea985b86a9217c77d7c09534c78dfa36295ce925588cc0bf2",
+    "compiled": false
+  },
+  "go": {
+    "version": "go1.27.1",
+    "archive": "https://go.dev/dl/go1.27.1.linux-amd64.tar.gz",
+    "sha256": "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+  },
+  "ndk": {
+    "version": "r29",
+    "revision": "29.0.14206865",
+    "archive": "https://dl.google.com/android/repository/android-ndk-r29-linux.zip",
+    "sha1_official": "87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b",
+    "sha256_downloaded": "4abbbcdc842f3d4879206e9695d52709603e52dd68d3c1fff04b3b5e7a308ecf"
+  },
+  "go_mod_sha256": "4d43f64f4a247b387d69064957a818027bc805fb40462ba5fc28608678448025",
+  "go_sum_sha256": "c2a24109c2bba3591f93812f0bb601d2b5a4da91782a4b7bb84143882afbea90",
+  "build_tags": [
+    "cmfa",
+    "with_gvisor"
+  ],
+  "min_api": 26,
+  "elf_max_page_size": 16384
+}

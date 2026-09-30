@@ -40,6 +40,28 @@ assert not manifest.findall('.//service'), 'M0 must not expose a fake VpnService
 for directory in ('main', 'release'):
     for path in (ROOT / f'app/src/{directory}').rglob('*.kt'):
         assert 'class LocalDiagnosticGateways' not in path.read_text(), 'Debug simulator leaked into production source'
+# Native lab is an opt-in debug-only service. Keep the release/main permission boundary intact.
+lab_path = ROOT / 'app/src/debug/AndroidManifest.xml'
+if lab_path.exists():
+    lab = ET.parse(lab_path).getroot()
+    assert {p.get(android + 'name') for p in lab.findall('uses-permission')} == {
+        'android.permission.ACCESS_NETWORK_STATE', 'android.permission.FOREGROUND_SERVICE',
+        'android.permission.FOREGROUND_SERVICE_SPECIAL_USE', 'android.permission.POST_NOTIFICATIONS',
+        '${applicationId}.permission.VPN_LAB_STATE'}
+    service = lab.find('.//service')
+    assert service is not None and service.get(android + 'name') == '.vpn.LabVpnService'
+    assert service.get(android + 'permission') == 'android.permission.BIND_VPN_SERVICE'
+    assert service.get(android + 'exported') == 'false'
+    assert service.get(android + 'process') == ':vpn'
+    assert service.get(android + 'enabled') == '${nativeVpnLabEnabled}'
+    assert service.get(android + 'foregroundServiceType') == 'specialUse'
+    permission = lab.find('permission')
+    assert permission.get(android + 'protectionLevel') == 'signature'
+    lab_source = (ROOT / 'app/src/debug/java/com/gccwebos/android/vpn/LabVpnService.kt').read_text()
+    assert '.addAllowedApplication(packageName)' in lab_source
+    assert '.allowBypass(' not in lab_source and '.allowFamily(' not in lab_source
+    assert 'START_NOT_STICKY' in lab_source and 'stopSession()' in lab_source
+    assert not (ROOT / 'app/src/main/jniLibs').exists(), 'Native lab binaries must not enter release source set'
 root_build = (ROOT / 'build.gradle.kts').read_text()
 assert 'version "9.2.0"' in root_build and 'version "2.3.10"' in root_build
 assert 'id("org.jetbrains.kotlin.android")' not in root_build
@@ -48,5 +70,5 @@ app_build = (ROOT / 'app/build.gradle.kts').read_text()
 workflow = (ROOT / '.github/workflows/android.yml').read_text()
 assert 'compileSdk = 36' in app_build and 'targetSdk = 36' in app_build
 assert '"platforms;android-36"' in workflow, 'CI SDK must match compileSdk'
-print('PASS M1 source presence, checksums, XML, compiler declarations and debug separation')
+print('PASS M1/M2 source presence, checksums, XML, compiler declarations and debug separation')
 print('NOT RUN by this check: Gradle, Android Lint, APK signing, device or backend tests')

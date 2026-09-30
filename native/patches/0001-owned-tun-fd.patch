@@ -1,0 +1,58 @@
+--- a/listener/sing_tun/server.go
++++ b/listener/sing_tun/server.go
+@@ -134,6 +134,22 @@
+ }
+ 
+ func New(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Listener, err error) {
++	return newWithOwnership(options, tunnel, nil, additions...)
++}
++
++// NewWithOwnedFD transfers FileDescriptor on entry, including error paths. Added by
++// GCC Web OS Android bridge: caller must not close the transferred descriptor.
++func NewWithOwnedFD(options LC.Tun, tunnel C.Tunnel, additions ...inbound.Addition) (l *Listener, err error) {
++	unclaimed := options.FileDescriptor > 0
++	defer func() {
++		if unclaimed {
++			_ = os.NewFile(uintptr(options.FileDescriptor), "gcc-tun-unclaimed").Close()
++		}
++	}()
++	return newWithOwnership(options, tunnel, func() { unclaimed = false }, additions...)
++}
++
++func newWithOwnership(options LC.Tun, tunnel C.Tunnel, claimFD func(), additions ...inbound.Addition) (l *Listener, err error) {
+ 	if len(additions) == 0 {
+ 		additions = []inbound.Addition{
+ 			inbound.WithInName("DEFAULT-TUN"),
+@@ -482,6 +498,12 @@
+ 		return
+ 	}
+ 
++	// tunIf now owns the descriptor; publish ownership before fallible stack setup.
++	if claimFD != nil {
++		claimFD()
++	}
++	l.tunIf = tunIf
++
+ 	l.dnsServerIp = dnsServerIp
+ 	// after tun.New sing-tun has set DNS to TUN interface
+ 	resolver.AddSystemDnsBlacklist(dnsServerIp...)
+@@ -499,18 +521,16 @@
+ 		InterfaceFinder:        interfaceFinder,
+ 		EnforceBindInterface:   EnforceBindInterface,
+ 	}
+-	l.tunIf = tunIf
+-
+ 	tunStack, err := tun.NewStack(strings.ToLower(options.Stack.String()), stackOptions)
+ 	if err != nil {
+ 		return
+ 	}
+ 
++	l.tunStack = tunStack
+ 	err = tunStack.Start()
+ 	if err != nil {
+ 		return
+ 	}
+-	l.tunStack = tunStack
+ 
+ 	if l.autoRedirect != nil {
+ 		if len(l.options.RouteAddressSet) > 0 && len(l.routeAddressSet) == 0 {

@@ -53,7 +53,8 @@ internal class AccountController(private val repository: PortalRepository, priva
     var clearing by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var resource by mutableStateOf<Resource?>(null)
-    var deliveryReady by mutableStateOf(false)
+    var deliveryReceived by mutableStateOf(false)
+    var importStatus by mutableStateOf<ImportStatus?>(null)
     private var task: Job? = null
     private var operation = 0L
     fun challenge() = run {
@@ -82,22 +83,21 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerce(path: String, body: String? = null, key: String? = null, expectedSession: String? = null) = repository.commerce(path, body, key, expectedSession)
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
-    fun commerceSessionExpired() { authenticated = false; resource = null; deliveryReady = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { authenticated = false; resource = null; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource() {
-        deliveryReady = false
-        val current = repository.refresh(); resource = current
-        if (current is Resource.Available && current.setupAvailable) {
-            repository.acquire(current); deliveryReady = true
-        }
+        importStatus = null; deliveryReceived = false; resource = null
+        val snapshot = repository.refreshAndImport(onResource = { resource = it }, onDeliveryReceived = { deliveryReceived = true })
+        resource = snapshot.resource; importStatus = snapshot.status
     }
+
     fun logout() = reset(clearLocal = true)
     fun cancelAuthentication() = reset(clearLocal = false)
     private fun reset(clearLocal: Boolean) {
         val current = ++operation
         task?.cancel()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
-        authenticated = false; resource = null; deliveryReady = false
+        authenticated = false; resource = null; importStatus = null; deliveryReceived = false
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch {
@@ -119,7 +119,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             catch (failure: PortalFailure) {
                 if (current != operation) return@launch
                 error = when(failure.reason) {
-                    PortalFailure.Reason.SESSION_EXPIRED -> { authenticated = false; resource = null; "登录已到期，请重新登录" }
+                    PortalFailure.Reason.SESSION_EXPIRED -> { authenticated = false; resource = null; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请重新获取验证题并登录" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
                     PortalFailure.Reason.RECOVERY_REQUIRED -> "上次交付需要恢复，请稍后重试或联系支持；不会重复领取"
@@ -127,6 +127,8 @@ internal class AccountController(private val repository: PortalRepository, priva
                     PortalFailure.Reason.RATE_LIMITED -> "请求过于频繁，请稍后重试"
                     PortalFailure.Reason.NETWORK -> "网络连接失败，请重试"
                     PortalFailure.Reason.PROTOCOL -> "服务响应格式不受支持，请稍后重试"
+                    PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE -> "订阅暂不可用，请确认账户权益后重试"
+                    PortalFailure.Reason.SUBSCRIPTION_REVOKED -> "订阅已失效，请刷新权益或联系支持"
                     else -> "服务暂不可用，请稍后重试"
                 }
             } finally { if (current == operation) busy = false }
@@ -155,7 +157,10 @@ internal fun AccountPanel(state: AccountController) {
                 .semantics { liveRegion = LiveRegionMode.Polite })
         if (state.authenticated) {
             ResourceCard(state, showOperationState = false)
-            if (state.deliveryReady) SupportingText("订阅已安全保存；生产 VPN 尚未开放，暂不能连接")
+            state.importStatus?.let { status -> SupportingText(subscriptionImportMessage(status)) }
+            if (state.deliveryReceived && state.importStatus == null) SupportingText(
+                if (state.busy) "订阅已安全保存，正在下载并校验配置"
+                else "订阅已安全保存；自动导入尚未完成，可刷新重试")
             BrandButton("刷新／重试", state::refresh, enabled = !state.busy, modifier = Modifier.testTag("account-refresh"))
             TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("本地退出并清除订阅") }
@@ -195,4 +200,14 @@ internal fun AccountPanel(state: AccountController) {
         } },
         confirmButton = { TextButton(onClick = { confirmReset = false; state.logout() }, modifier = Modifier.testTag("reset-confirm")) { Text("确认清除") } },
         dismissButton = { TextButton(onClick = { confirmReset = false }, modifier = Modifier.testTag("reset-cancel")) { Text("取消") } })
+}
+
+internal fun subscriptionImportMessage(status: ImportStatus): String = when (status) {
+    ImportStatus.NO_RESOURCE -> "账户暂无可导入资源；开通后刷新即可自动接收"
+    ImportStatus.RECONCILIATION -> "资源正在对账，暂不导入"
+    ImportStatus.EXPIRED -> "资源已到期，暂不导入"
+    ImportStatus.QUOTA_EXHAUSTED -> "当前流量已用尽，暂不导入"
+    ImportStatus.WAITING_DELIVERY -> "等待服务器交付；若曾清除本地订阅，请联系支持恢复"
+    ImportStatus.UNSUPPORTED_CONFIGURATION -> "订阅已安全保存，但配置暂不兼容当前内核；不会尝试连接"
+    ImportStatus.IMPORTED -> "订阅已自动导入并通过当前内核格式校验；生产 VPN 尚未开放，暂不能连接"
 }

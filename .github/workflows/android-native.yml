@@ -77,7 +77,7 @@ jobs:
           python3 scripts/collect_build_evidence.py
           cp .build-output/build-manifest.json .build-output/native/build-manifest.json
           sha256sum app/build/outputs/apk/debug/*.apk | tee .build-output/native/apks.sha256
-      - name: Load actual JNI library and check guarded app on emulator
+      - name: Load freshly built JNI APK on Android13 API33
         env:
           REQUIRE_NATIVE_JNI: 'true'
         run: |
@@ -90,7 +90,13 @@ jobs:
               "$PWD/native/toolchain/go/bin/go" clean -cache -modcache \
               2>&1 | tee .build-output/native/cache-clean.log
           fi
-          bash scripts/m0-emulator-smoke.sh
+          # Run the freshly built and hashed APKs above, not the old artifact materializer.
+          # API36 UI coverage remains a separate standard workflow; known host ANRs
+          # must not be mislabeled as an app/JNI failure or silently ignored.
+          sha256sum app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            | tee .build-output/native/fresh-runtime-apks-before.sha256
+          bash scripts/native-runtime-api33.sh
+          sha256sum -c .build-output/native/fresh-runtime-apks-before.sha256
       - name: Retain source, native and Android evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -99,6 +105,7 @@ jobs:
           path: |
             .build-output/native/
             .build-output/device/
+            .build-output/runtime-api33/
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/androidTest/debug/*.apk
             app/build/test-results/

@@ -34,8 +34,10 @@ The source catalog contains three plans: 30 days / 20 Coins, 30 days / 30 Coins,
 
 All added unit and UI fixtures are synthetic/offline and fail if a UI test makes a network call. No production login, quote, purchase, top-up, provider capture or backend mutation was performed.
 
-The fixed-artifact `android-native-runtime-api33.yml` verifies the **older** immutable native APK and is not evidence for this new app source. This slice does not change that workflow or its watched harness files. Standard Android and native-build workflows must build fresh artifacts for this commit. Source validation and offline JVM tests are not substitutes for Gradle/Lint, Android instrumentation, JNI runtime or a funded physical-device commerce test.
+The fixed-artifact `android-native-runtime-api33.yml` verifies the **older** immutable native APK and is not evidence for this new app source. This slice does not change that workflow or its watched harness files. Standard Android and native-build workflows build fresh artifacts for this commit. The native-build workflow runs its own newly compiled APK/test APK with the already verified API33 script and checks the APK hashes before/after execution; it never invokes the old-artifact materializer. Standard UI coverage remains on API36. Source validation and offline JVM tests are not substitutes for Gradle/Lint, Android instrumentation, JNI runtime or a funded physical-device commerce test.
 
 No paid/funded account or real VPN/TUN traffic was tested. Resource-to-engine automatic production import remains a subsequent integration gate; existing secure setup delivery is preserved.
 
 Local diagnostic result: Kotlin 2.3.10/JVM 17 compilation and **193 JUnit tests passed**, including 19 commerce repository recovery tests, 18 strict commerce projection tests and existing account/core/update/VPN safety tests. Reproduce with `KOTLIN_TOOLS_DIR=<verified jars> bash scripts/test-domain-offline.sh`. Android-specific Compose/AtomicFile code is excluded from this fallback and must pass the normal Gradle/Lint/instrumentation gate.
+
+Five additional Android-only persistence fixtures exercise recreation/readback, result update/removal, corruption/size rejection and storage path boundaries. These are authored tests awaiting CI, not claims of device success or simulated fsync failure coverage.

@@ -44,7 +44,7 @@ class CommerceRepositoryTest {
         val result=repo.purchase(quote)
         assertEquals("order_fixture_plan",result.ref)
         val call=wire.calls.last(); assertEquals("operation_fixture",call.key)
-        assertEquals(setOf("quoteRef"),JSONObject(call.body!!).keySet())
+        assertEquals(setOf("quoteRef"),JSONObject(call.body!!).keys().asSequence().toSet())
         assertEquals(result.ref,repo.pending("purchase")!!.resultRef)
     }
     @Test fun storageFailurePreventsPurchasePost() = runTest {
@@ -116,7 +116,7 @@ class CommerceRepositoryTest {
         wire.observer={assertNotNull(repo.pending("recharge"))}
         wire.replies+=WireResponse(201,CommerceFixtures.rechargeOrder);repo.recharge(topup)
         val call=wire.calls.last();assertNull(call.key)
-        assertEquals(setOf("offerRef","idempotencyKey"),JSONObject(call.body!!).keySet())
+        assertEquals(setOf("offerRef","idempotencyKey"),JSONObject(call.body!!).keys().asSequence().toSet())
         assertEquals("operation_fixture",JSONObject(call.body).getString("idempotencyKey"))
     }
     @Test fun resumeOnlyReadsKnownRechargeAndNeverPaysOrCaptures() = runTest {

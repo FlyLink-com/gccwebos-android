@@ -1,0 +1,90 @@
+name: Commerce ordinary APK API33 (immutable)
+on:
+  push:
+    branches: ['ci/commerce-api33-56481']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: commerce-ordinary-api33-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ordinary-api33:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Fetch exact new ordinary commerce artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11089909601 > "$RUNNER_TEMP/commerce-artifact.json"
+          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11089909601/zip > "$RUNNER_TEMP/commerce-artifact.zip"
+          python3 scripts/materialize-commerce-runtime.py "$RUNNER_TEMP/commerce-artifact.zip" "$RUNNER_TEMP/commerce-artifact.json"
+      - name: Verify current APK signatures and alignment
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" 'build-tools;36.0.0' 'platform-tools'
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk | tee .build-output/runtime-api33/app-signature.txt
+          "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee .build-output/runtime-api33/test-signature.txt
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          expected=['17d62e0cfb8d6a9889fbc8eb0f5cda0ca8a27d6e06d23784b9a0fa79fa5b4b6d']
+          for name in ['app','test']:
+              assert re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)', Path(f'.build-output/runtime-api33/{name}-signature.txt').read_text()) == expected
+          PY
+          "$SDK_ROOT/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk
+      - name: Run same ordinary APK on API33 without rebuilding
+        env:
+          REQUIRE_NATIVE_JNI: 'false'
+        run: bash scripts/commerce-runtime-api33.sh
+      - name: Verify exact test coverage and only expected non-native skip
+        run: |
+          python3 - <<'PY'
+          import re,json
+          from pathlib import Path
+          text=Path('.build-output/runtime-api33/device/instrumentation.log').read_text()
+          results=re.findall(r'INSTRUMENTATION_STATUS: test=([^\r\n]+)\r?\nINSTRUMENTATION_STATUS_CODE: (-?\d+)',text)
+          terminal=[(name,int(code)) for name,code in results if int(code)!=1]
+          expected='actualJniLibraryLoadsAndRejectsUnsafeInputWithoutTakingCallerFd'
+          assert len(terminal)==32,terminal
+          assert [name for name,code in terminal if code==-4]==[expected],terminal
+          assert sum(code==0 for _,code in terminal)==31,terminal
+          assert all(code in (0,-4) for _,code in terminal),terminal
+          out=Path('.build-output/runtime-api33/new-ordinary-provenance.json')
+          value=json.loads(out.read_text());value.update({'api33_tests':32,'passed':31,'expected_non_native_skips':1,'api36_status':'not_validated_by_this_api33_run'})
+          out.write_text(json.dumps(value,indent=2)+'\n')
+          PY
+      - name: Retain small exact-binary runtime evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: commerce-ordinary-api33-evidence-${{ github.sha }}
+          path: |
+            .build-output/runtime-api33/
+            !.build-output/runtime-api33/device/dialog-frames/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain full display dialog frames separately
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: commerce-dialog-display-frames-${{ github.sha }}
+          path: .build-output/runtime-api33/device/dialog-frames/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

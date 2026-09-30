@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mechanical conversion of the user Library SVG; no icon redesign. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+<path android:pathData="M6.0,10.0 h12.0 a2.0,2.0 0 0,1 2.0,2.0 v8.0 a2.0,2.0 0 0,1 -2.0,2.0 h-12.0 a2.0,2.0 0 0,1 -2.0,-2.0 v-8.0 a2.0,2.0 0 0,1 2.0,-2.0 Z" android:fillColor="@android:color/transparent" android:strokeColor="#F2F6FF" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+<path android:pathData="M8 10V6a4 4 0 0 1 8 0v4" android:fillColor="@android:color/transparent" android:strokeColor="#F2F6FF" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+</vector>

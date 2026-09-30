@@ -1,0 +1,62 @@
+{
+  "source_repository": "gccltd/gccwebos-mobile",
+  "source_commit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+  "supplemental_library_file_id": "libfile_bcdfea45572c81919fa8d0d0a568b58d",
+  "assets": [
+    {
+      "path": "app/src/main/res/drawable/brand_arrow.xml",
+      "size_bytes": 502,
+      "sha256": "7a2606ccb728f8737fdbc785f9a37047239761604aba21f847959df30b80281b"
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_globe.xml",
+      "size_bytes": 994,
+      "sha256": "01b2fb12a6097dd4298d0175fdcbea4c08fb81b79651edfe91a3681a22035a1b"
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_lock.xml",
+      "size_bytes": 827,
+      "sha256": "547ec3d94684fdc2160005c551aff388e2752619d3745e5f3e4d6bcfe8648428"
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_plane.xml",
+      "size_bytes": 516,
+      "sha256": "bbaa5885756b0ada92d0de583bf58a0052c87565c6f9ba2701d5e7c1a2ade258"
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_receipt.xml",
+      "size_bytes": 825,
+      "sha256": "3c78c9a5adb5ac572efc1636c9ffdee3c3e1dc35507b40548aa04c0a15773290"
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_shield.xml",
+      "size_bytes": 728,
+      "sha256": "e2be147e2d3271d03857b5d332674062957ba7b33c8c37a115bab6bc78c82553"
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_user.xml",
+      "size_bytes": 749,
+      "sha256": "5375dd92a23e2a97bea7196aa71210fbb60ad129509edc30e516df2a42589670"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_lounge.webp",
+      "size_bytes": 293430,
+      "sha256": "f5a891007163f856822ece297a51802f46c3f865a5a971407096dd2bdcf8d5f0"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_robot_avatar.png",
+      "size_bytes": 57119,
+      "sha256": "c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_robot_welcome.webp",
+      "size_bytes": 360442,
+      "sha256": "4274b8e42cd16acf3281b187481715b73f75b596d474733710f5d4821f6c354c"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_wordmark.png",
+      "size_bytes": 19710,
+      "sha256": "86d0228b90c47fed1bbd136bbf7f584da30e3a325bbc9b662ca217d36f36fbb4"
+    }
+  ]
+}

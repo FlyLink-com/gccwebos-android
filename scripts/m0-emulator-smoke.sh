@@ -72,6 +72,7 @@ cleanup() {
   set +e
   log "Cleanup (original status $result)"
   timeout 5 "$ADB" -s emulator-5554 logcat -b crash -d > "$OUT/crash.log" 2>&1
+  timeout 5 "$ADB" -s emulator-5554 logcat -b main -b system -b events -d > "$OUT/main-system-events.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 emu kill >/dev/null 2>&1
   kill "$EMU_PID" >/dev/null 2>&1
   sleep 1
@@ -120,8 +121,24 @@ adb shell pidof "$APP_ID" | tee "$OUT/app-pid.log"
 test -s "$OUT/app-pid.log"
 adb exec-out screencap -p > "$OUT/launch.png"
 log 'Capturing UI hierarchy'
+# A green test process is insufficient if System UI or another window covers the app.
+verify_foreground() {
+  local label="$1"
+  adb shell dumpsys window windows > "$OUT/$label-window-state.log"
+  grep -E 'mCurrentFocus|mFocusedApp' "$OUT/$label-window-state.log" > "$OUT/$label-foreground.log"
+  grep -q "$APP_ID" "$OUT/$label-foreground.log"
+  if grep -Eiq 'Application Not Responding|Application Error|isn.t responding' "$OUT/$label-foreground.log"; then
+    log 'FAIL: an error window covers the app'
+    return 1
+  fi
+}
+verify_foreground launch
 adb shell uiautomator dump /sdcard/m0-window.xml > "$OUT/ui-dump.log"
 adb pull /sdcard/m0-window.xml "$OUT/window.xml"
+grep -q "package=\"$APP_ID\"" "$OUT/window.xml"
+if grep -Eiq 'isn.t responding|keeps stopping|无响应|停止运行' "$OUT/window.xml"; then
+  log 'FAIL: system error dialog in launch capture'; exit 1
+fi
 log 'Running instrumented tests'
 timeout 240 "$ADB" -s emulator-5554 shell am instrument -w -r "$TEST_RUNNER" \
   | tee "$OUT/instrumentation.log"
@@ -132,7 +149,26 @@ adb shell am start -W -n "$ACTIVITY" > "$OUT/relaunch.log"
 sleep 2
 adb shell pidof "$APP_ID" > "$OUT/final-pid.log"
 test -s "$OUT/final-pid.log"
+verify_foreground final
 adb exec-out screencap -p > "$OUT/final.png"
+adb pull "/sdcard/Android/data/$APP_ID/files/ui-evidence" "$OUT/" > "$OUT/ui-evidence-pull.log"
+# Capture actual narrow-phone and tablet rendering; reset only this disposable AVD.
+for profile in narrow tablet; do
+  if [ "$profile" = narrow ]; then size=640x1280; density=320; else size=1600x2560; density=240; fi
+  adb shell wm size "$size"
+  adb shell wm density "$density"
+  adb shell am force-stop "$APP_ID"
+  adb shell am start -W -n "$ACTIVITY" > "$OUT/$profile-launch.log"
+  sleep 3
+  verify_foreground "$profile"
+  adb exec-out screencap -p > "$OUT/$profile.png"
+  adb shell uiautomator dump /sdcard/ui-profile.xml > "$OUT/$profile-ui-dump.log"
+  adb pull /sdcard/ui-profile.xml "$OUT/$profile.xml"
+  grep -q "package=\"$APP_ID\"" "$OUT/$profile.xml"
+done
+adb shell wm size reset
+adb shell wm density reset
+adb logcat -b main -b system -b events -d > "$OUT/main-system-events.log"
 sha256sum "$APK" "$TEST_APK" | tee "$OUT/installed-apks.sha256"
 printf '%s\n' 'PASS: same Debug APK installed and launched on API 36 emulator; instrumentation passed.' \
   'NOT TESTED: physical devices, real VPN, backend, payments.' | tee "$OUT/result.log"

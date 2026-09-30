@@ -176,4 +176,13 @@ class PortalRepositoryTest {
         resources.keys().forEach { key -> PortalJson.resource(resources.getJSONObject(key).toString()) }
     }
 
+    @Test fun cancellingAuthenticationPreservesDurableSubscription() = runTest {
+        val wire = Wire(); val store = Store(); val repo = PortalRepository(wire,store,policy,{0},{now})
+        val receipt = DeliveryRecord("fixture@example.invalid","hash",resource.reference,"existing-key")
+        store.value = receipt
+        repo.cancelAuthentication()
+        assertSame(receipt,store.value); assertTrue(wire.calls.isEmpty())
+        try { repo.refresh(); fail() } catch(f: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED,f.reason) }
+    }
+
 }

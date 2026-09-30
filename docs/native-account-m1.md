@@ -31,6 +31,6 @@
 
 ## 验证
 
-本地 JDK21 + Kotlin CLI2.3.10/JUnit4.13.2：101 项通过（原协调器53、账户交付24、更新24）。这是真实 Kotlin/JUnit 运行，但不替代 Android Gradle/SDK 编译。
+本地 JDK21 + Kotlin CLI2.3.10/JUnit4.13.2：102 项通过（原协调器53、账户交付25、更新24）。这是真实 Kotlin/JUnit 运行，但不替代 Android Gradle/SDK 编译。
 
 新增3项 Android instrumentation：Keystore 加密往返与退出清理、AtomicFile `.bak` 崩溃恢复、超大记录不覆盖旧值。原2项 UI 测试保留。CI 将执行 Debug 编译、全部 JUnit、Lint、测试 APK 编译、模拟器安装和 instrumentation；以精确提交的运行结果为准。未运行真机/生产端到端/VPN。

@@ -76,7 +76,9 @@ internal class AccountController(private val repository: PortalRepository, priva
             repository.acquire(current); deliveryReady = true
         }
     }
-    fun logout() {
+    fun logout() = reset(clearLocal = true)
+    fun cancelAuthentication() = reset(clearLocal = false)
+    private fun reset(clearLocal: Boolean) {
         val current = ++operation
         task?.cancel()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
@@ -84,7 +86,10 @@ internal class AccountController(private val repository: PortalRepository, priva
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch {
-            try { repository.logout(); error = null }
+            try {
+                if (clearLocal) repository.logout() else repository.cancelAuthentication()
+                error = null
+            }
             catch (_: PortalFailure) { error = "本地安全存储清理失败，请重试退出" }
             finally { if (current == operation) { busy = false; clearing = false } }
         }
@@ -148,7 +153,7 @@ internal fun AccountPanel(state: AccountController) {
             OutlinedTextField(state.code, { state.code = it }, enabled = !state.busy,
                 label = { Text("TOTP 验证码") }, visualTransformation = PasswordVisualTransformation())
             Button(onClick = state::totp, enabled = !state.busy && state.code.isNotBlank()) { Text("验证并登录") }
-            Button(onClick = state::logout, enabled = !state.clearing) { Text("取消验证") }
+            Button(onClick = state::cancelAuthentication, enabled = !state.clearing) { Text("取消验证") }
         } else {
             OutlinedTextField(state.account, { state.account = it }, label = { Text("账号／邮箱") }, enabled = !state.busy, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(state.password, { state.password = it }, label = { Text("密码") }, enabled = !state.busy,

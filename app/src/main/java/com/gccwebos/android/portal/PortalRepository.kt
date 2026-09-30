@@ -114,6 +114,11 @@ class PortalRepository(private val transport: PortalTransport, private val store
             }
         }
     }
+    /** Cancels authentication without destroying an earlier durable subscription. */
+    suspend fun cancelAuthentication() {
+        generation.incrementAndGet()
+        mutex.withLock { session = null; totpExpiry = null }
+    }
     /** Local sign-out only. There is no verified native server revocation endpoint. */
     suspend fun logout() {
         generation.incrementAndGet()

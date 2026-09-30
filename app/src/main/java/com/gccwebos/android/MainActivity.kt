@@ -269,13 +269,15 @@ private fun NoResourceGuidance(onDismiss: () -> Unit, openPlans: () -> Unit, ope
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
             Text("服务器已确认当前账号暂无资源。可以查看套餐购买，或先到钱包充值；到账与资源发放以服务器确认为准。")
         } },
-        confirmButton = { Column {
+        confirmButton = { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = openPlans, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 .testTag("guidance-plans")) { Text("查看套餐") }
             TextButton(onClick = openWallet, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 .testTag("guidance-wallet")) { Text("前往钱包充值") }
+            // Keep all three actions in one measured column. Separate AlertDialog action slots
+            // can overlap a full-width multi-row confirm slot at real system font_scale=2.0.
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .testTag("guidance-dismiss")) { Text("稍后再说") }
         } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)
-            .testTag("guidance-dismiss")) { Text("稍后再说") } },
     )
 }

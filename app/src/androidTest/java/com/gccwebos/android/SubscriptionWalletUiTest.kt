@@ -15,7 +15,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -118,14 +117,12 @@ class SubscriptionWalletUiTest {
         compose.waitForIdle()
         val directory = File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null), "ui-evidence")
         directory.mkdirs()
-        // Dialogs add a second root/window. Capture every rendered root rather than assuming one.
-        val roots = compose.onAllNodes(isRoot())
-        val count = roots.fetchSemanticsNodes().size
-        repeat(count) { index ->
-            File(directory, "subscription-$name-root-$index.png").outputStream().use {
-                roots[index].captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it)
-            }
+        // Full display includes separate Dialog windows; root PixelCopy can capture the backdrop instead.
+        val screenshot = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+        File(directory, "subscription-$name-display.png").outputStream().use {
+            screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)
         }
+        screenshot.recycle()
     }
 
     private fun available(days: Long = 30, status: String = "measured") = Resource.Available(
@@ -241,6 +238,10 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("guidance-plans").assertIsDisplayed()
         compose.onNodeWithTag("guidance-wallet").assertIsDisplayed()
         compose.onNodeWithTag("guidance-dismiss").assertIsDisplayed()
+        val actions = listOf("guidance-plans", "guidance-wallet", "guidance-dismiss")
+            .map { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
+        assertTrue("Plan and wallet action bounds must not overlap", actions[0].bottom <= actions[1].top)
+        assertTrue("Wallet and dismiss action bounds must not overlap", actions[1].bottom <= actions[2].top)
         capture("none-font-200")
         compose.onNodeWithTag("guidance-dismiss").performClick()
         compose.runOnIdle { account.resource = available(days = 365) }

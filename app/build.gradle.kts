@@ -21,8 +21,12 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            val nativeLab = providers.gradleProperty("nativeVpnLab").orNull == "true"
+            buildConfigField("boolean", "NATIVE_VPN_LAB", nativeLab.toString())
+            manifestPlaceholders["nativeVpnLabEnabled"] = nativeLab.toString()
         }
         release {
+            buildConfigField("boolean", "NATIVE_VPN_LAB", "false")
             isMinifyEnabled = false
             isDebuggable = false
             // No production signing credentials or automatic release signing.
@@ -47,6 +51,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.snakeyaml:snakeyaml-engine:2.9")
     testImplementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

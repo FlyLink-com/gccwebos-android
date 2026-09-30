@@ -83,8 +83,11 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
     }
     private fun syncDirectory() {
         val fd = android.system.Os.open(directory.path,
-            android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_DIRECTORY, 0)
-        try { android.system.Os.fsync(fd) } finally { android.system.Os.close(fd) }
+            android.system.OsConstants.O_RDONLY, 0)
+        try {
+            require(android.system.OsConstants.S_ISDIR(android.system.Os.fstat(fd).st_mode))
+            android.system.Os.fsync(fd)
+        } finally { android.system.Os.close(fd) }
     }
     private inline fun <T> storage(block: () -> T): T = try { block() }
         catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }

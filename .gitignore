@@ -17,3 +17,9 @@ captures/
 
 __pycache__/
 *.pyc
+
+# Reproducibly generated native lab artifacts, never check in toolchains or APK libraries
+app/src/debug/jniLibs/
+.native-venv/
+native/third_party/
+native/toolchain/

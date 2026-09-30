@@ -1,0 +1,92 @@
+name: Native VPN isolated build
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'native/**'
+      - 'app/**'
+      - 'scripts/verify_source.py'
+      - '.github/workflows/android-native.yml'
+permissions:
+  contents: read
+concurrency:
+  group: android-native-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify source boundary and record identity
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/native
+          git rev-parse HEAD | tee .build-output/native/source-commit.txt
+          python3 scripts/verify_source.py
+      - name: Install pinned Android native toolchain
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" \
+            "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+      - name: Verify pinned upstream and Go dependency graph
+        run: bash native/scripts/prepare.sh 2>&1 | tee .build-output/native/prepare.log
+      - name: Real packet-path tests with loopback-only fixtures
+        run: |
+          set -euo pipefail
+          python3 -m venv .native-venv
+          source .native-venv/bin/activate
+          python3 -m pip install -r native/scripts/requirements-host-test.txt
+          bash native/scripts/test-host.sh 2>&1 | tee .build-output/native/packet-tests.log
+      - name: Cross-build arm64-v8a and x86_64
+        run: |
+          set -euo pipefail
+          bash native/scripts/build-native.sh arm64-v8a x86_64 2>&1 | tee .build-output/native/build.log
+          mkdir -p app/src/debug/jniLibs/{arm64-v8a,x86_64}
+          for abi in arm64-v8a x86_64; do
+            cp "native/build/jniLibs/$abi/libgccmihomo.so" "app/src/debug/jniLibs/$abi/"
+            cp "native/build/jniLibs/$abi/elf-program-headers.txt" ".build-output/native/$abi-elf-program-headers.txt"
+            cp "native/build/jniLibs/$abi/elf-dynamic.txt" ".build-output/native/$abi-elf-dynamic.txt"
+          done
+          sha256sum app/src/debug/jniLibs/*/*.so | tee .build-output/native/libraries.sha256
+      - name: Compile opt-in lab APK and verify release exclusion
+        run: |
+          set -euo pipefail
+          chmod +x gradlew scripts/*.sh
+          ./gradlew --no-daemon --console=plain -PnativeVpnLab=true \
+            :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest :app:assembleRelease \
+            2>&1 | tee .build-output/native/android-build.log
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk \
+            | tee .build-output/native/apk-signature.txt
+          python3 scripts/verify_native_apks.py
+          sha256sum app/build/outputs/apk/debug/*.apk | tee .build-output/native/apks.sha256
+      - name: Load actual JNI library and check guarded app on emulator
+        run: bash scripts/m0-emulator-smoke.sh
+      - name: Retain source, native and Android evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-native-vpn-lab-${{ github.sha }}
+          path: |
+            .build-output/native/
+            .build-output/device/
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/androidTest/debug/*.apk
+            app/build/test-results/
+            app/build/reports/
+            native/build/jniLibs/
+            native/notices/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

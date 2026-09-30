@@ -4,7 +4,7 @@
 
 沿用原生 Kotlin/Compose 工程，叠加在 M1 账户／资源／官网更新之上。生产“连接”仍禁用。本切片不使用账户订阅、不接生产节点、不修改后台或服务端配置。
 
-原生依赖目标：官方 Mihomo `v1.19.31`，commit `ab405bad5beeeac8b003bb01f60f134f6df54471`；CMFA 源码参考 `559594d4f99600d592757b23b2ee8e9b924512e4`。不使用同名默认分支、不下载第三方未知预编译 AAR。原生 bridge、固定工具链、GPL notices 和构建／包路径证据正在独立构建并补齐；本说明不能作为已完成内核集成的声明。
+原生依赖目标：官方 Mihomo `v1.19.31`，commit `ab405bad5beeeac8b003bb01f60f134f6df54471`；CMFA 源码参考 `559594d4f99600d592757b23b2ee8e9b924512e4`。不使用同名默认分支、不下载第三方未知预编译 AAR。原生 bridge、固定工具链、GPL notices 和构建／包路径证据已保存于 native/。两个ABI已本地交叉构建；这不代表Android设备VPN验收完成。
 
 ## 安全门
 
@@ -26,8 +26,10 @@ SafeProxyConfig 严格解析有界UTF-8 YAML（64KiB、深度8、事件8192、�
 
 ## 验证与未完成项
 
-已通过19项新增JVM用例：恶意YAML与敏感信息脱敏、配置投影、取消/迟到权限、TUN和native部分启动清理、停机失败保险与FD所有权。
+已通过21项新增JVM用例：恶意YAML与敏感信息脱敏、配置投影、取消/迟到权限、TUN和native部分启动清理、停机失败保险与FD所有权。
 
-仍需完整Android编译/Lint、原生ABI构建、真实packet-path隔离测试、Android模拟器JNI加载/TUN/权限/停止、物理设备DNS/IPv6/Wi-Fi蜂窝切换。当前“源码检查通过”不能替代这些验证。尤其Android将loopback socket绑定物理Network的兼容性需实测；失败时保留fail closed，不能为了跑通删除protect。
+已通过真实gVisor→SS AEAD回环fixture的TCP HTTP、UDP echo与代理DNS包路径；拒绝protect时无外连，IPv6/ICMP不创建外连socket。arm64-v8a与x86_64 .so已构建并校验JNI导出和16KiB ELF对齐。回执见native/evidence。
+
+仍需完整Android编译/Lint、Android模拟器JNI加载/TUN/权限/停止、物理设备DNS/IPv6/Wi-Fi蜂窝切换。当前“源码检查通过”不能替代这些验证。尤其Android将loopback socket绑定物理Network的兼容性需实测；失败时保留fail closed，不能为了跑通删除protect。
 
 GPL客户端分发时的完整对应源码、许可证及第三方notice必须随发布准备；用户许可方向确认不代表可以将所有仓库公开。正式包签名和公开发布仍另行审批。

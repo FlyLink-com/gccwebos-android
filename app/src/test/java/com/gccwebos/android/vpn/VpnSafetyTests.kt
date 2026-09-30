@@ -86,6 +86,25 @@ class NativeVpnSessionTest {
         session.start(byteArrayOf(1)); session.stop(); session.start(byteArrayOf(1)); assertEquals(1, engine.starts)
         assertEquals(VpnLabState.CLEANUP_FAILED, states.last()); assertTrue(tun.closed)
     }
+    @Test fun missingJniSymbolDuringStartStillClosesNativeAndTun() {
+        val tun = Tun(); var stops = 0; val states = mutableListOf<VpnLabState>()
+        val engine = object : NativeEngine {
+            override fun start(config: ByteArray, tunFd: Int) { throw UnsatisfiedLinkError("missing symbol") }
+            override fun stop() { stops++ }
+        }
+        NativeVpnSession(engine, { tun }, states::add).start(byteArrayOf(1))
+        assertTrue(tun.closed); assertEquals(1, stops); assertTrue(states.contains(VpnLabState.FAILED))
+    }
+    @Test fun missingStopJniSymbolClosesCallerAndLatchesFailure() {
+        val tun = Tun(); val states = mutableListOf<VpnLabState>()
+        val engine = object : NativeEngine {
+            override fun start(config: ByteArray, tunFd: Int) = Unit
+            override fun stop() { throw UnsatisfiedLinkError("missing stop") }
+        }
+        val session = NativeVpnSession(engine, { tun }, states::add)
+        session.start(byteArrayOf(1)); session.stop()
+        assertTrue(tun.closed); assertEquals(VpnLabState.CLEANUP_FAILED, states.last())
+    }
     @Test fun stoppedBeforeAdmissionAllocatesNothing() {
         val engine = Engine(); val session = NativeVpnSession(engine, { error("must not open") }, {})
         session.requestStop(); session.start(byteArrayOf(1)); assertEquals(0, engine.starts)

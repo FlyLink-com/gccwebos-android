@@ -1,0 +1,3 @@
+ok  	com.gccwebos.android/mihomobridge/bridge	0.155s
+{"case": "success", "result": "PASS", "protected": 3, "rejected": 0, "fixture_destinations": [["198.18.0.10", 18080, "tcp"], ["198.18.0.10", 18081, "udp"], ["1.1.1.1", 53, "tcp"]], "caller_fd_preserved": true, "restart_requires_fresh_process": true, "ipv6_icmp_no_outbound": true}
+{"case": "deny", "result": "PASS", "protected": 0, "rejected": 6, "fixture_destinations": [], "caller_fd_preserved": true, "restart_requires_fresh_process": true, "ipv6_icmp_no_outbound": "not_tested"}

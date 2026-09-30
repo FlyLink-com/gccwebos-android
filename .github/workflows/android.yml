@@ -12,15 +12,42 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, resolved 2026-09-28
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
           java-version: '17'
+      - name: Record source identity and verify Wrapper
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git rev-parse HEAD | tee .build-output/source-commit.log
+          git diff --check HEAD^ HEAD
+          chmod +x gradlew build.sh scripts/*.sh
+          sh scripts/bootstrap-wrapper.sh 2>&1 | tee .build-output/wrapper.log
+          python3 scripts/verify_source.py | tee .build-output/source-validation.log
+          sha256sum gradle/wrapper/gradle-wrapper.jar | tee .build-output/wrapper.sha256
+          git archive --format=zip HEAD -o .build-output/source.zip
+      - name: Retain verified Wrapper bytes
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-m0-wrapper-${{ steps.source.outputs.sha }}
+          path: |
+            gradle/wrapper/
+            .build-output/wrapper.sha256
+            .build-output/source.zip
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
       - name: Install explicit SDK packages
         shell: bash
         run: |
@@ -29,38 +56,48 @@ jobs:
           test -n "$SDK_ROOT"
           SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           test -x "$SDKMANAGER"
-          # Hosted runner SDK license state is used; no account/payment/production credentials.
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36" "build-tools;36.0.0" "platform-tools" 2>&1 | tee .build-output/sdk-install.log
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-      - name: Verify bootstrap and build
+          java -version 2>&1 | tee .build-output/java.log
+          ./gradlew --version 2>&1 | tee .build-output/gradle-version.log
+      - name: Debug build, JUnit, Lint and test APK compilation
+        id: build
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x gradlew build.sh scripts/*.sh
-          python3 scripts/verify_source.py
           ./build.sh
-          # Compile the instrumented test package; this does NOT execute device tests.
-          ./gradlew --no-daemon --console=plain :app:assembleDebugAndroidTest
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk | tee .build-output/apk-signature.log
-          python3 scripts/collect_build_evidence.py
-      - name: Attach Debug APK after successful validation
-        if: success()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          ./gradlew --no-daemon --console=plain :app:assembleDebugAndroidTest 2>&1 | tee .build-output/android-test-build.log
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk | tee .build-output/apk-signature.log
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee .build-output/test-apk-signature.log
+          sha256sum app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk | tee .build-output/apks.sha256
+          python3 scripts/collect_build_evidence.py | tee .build-output/manifest.log
+      - name: Attach verified build artifacts
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: gccwebos-m0-debug-${{ github.sha }}
+          name: gccwebos-m0-debug-${{ steps.source.outputs.sha }}
           path: |
             app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/androidTest/debug/*.apk
             .build-output/build-manifest.json
+            .build-output/apks.sha256
+            .build-output/*signature.log
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
-      - name: Attach validation logs even on failure
+      - name: Install, launch and test the same APK on an emulator
+        if: steps.build.outcome == 'success'
+        shell: bash
+        run: bash scripts/m0-emulator-smoke.sh
+      - name: Attach logs and actual device evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: gccwebos-m0-reports-${{ github.sha }}
+          name: gccwebos-m0-reports-${{ steps.source.outputs.sha }}
           path: |
             .build-output/*.log
+            .build-output/*.sha256
+            .build-output/device/
             app/build/test-results/
             app/build/reports/
           include-hidden-files: true

@@ -1,109 +1,74 @@
-# gccwebos Android 首轮构建交付记录
+# M0 构建收口记录
 
-日期：2026-09-28
-交付版本：`0.1.1-m0`
-范围：从上传的 Android Starter 增量修改源码、构建入口和回归测试；不操作后台、账户、支付、节点或生产。
+范围：Android 工程、Debug 构建、JUnit、Lint、测试包编译、签名与安装启动；不接入真实 VPN 或后台。起始基线为 PR #1 的 `dbd4b86700b4ca88eaa0b9bb64caf6201ee6d753`。PR #2 合入 `main@abb7b7c717a5911b88f1883d17cb99e28f3aaaea` 的修复已保留，M0 收口集中在 [PR #3](https://github.com/gccwebos-com/gccwebos-android/pull/3)。本记录不自动合并 main 或发布。
 
-## 结论
+## 已验证的完整 M0 运行
 
-**首轮源码实现与隔离 JVM 回归已完成；Android APK 构建受环境阻塞，M0 整体验收尚未完成。**
+- 验证源码：`bceabc27cd85acdea129e3294dc3527bd40a9e8a`。
+- 源码 tree：`500ef1e574eb1b656e3b7073195479f5ec8a3179`。
+- [CI 36481854447](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36481854447)，attempt 1，`success`；2026-09-28 20:49–20:59 UTC。
+- [validate job 109129158659](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36481854447/job/109129158659)。checkout 为上述真实 PR head，不混用 GitHub 合并测试 ref。
+- 环境：Ubuntu 24.04 hosted runner、Temurin JDK 17.0.20.1、Gradle 9.4.1、SDK Platform 36、Build Tools 36.0.0；应用 min/target/compile SDK 为 26/36/36。
 
-交付的是可继续进行 Android 构建的工程源码和证据，不是安装包。未生成 APK/AAB，未签发正式应用，未运行 GitHub Actions；不将构建脚本存在视为构建成功。
-
-原始输入为 `gccwebos-android-starter (1).zip`，15 个实际文件。原包保持不变：
-
-```text
-SHA-256: 62ad7f4667bd313f9e0530af95ff9ef0bc466c9f8d02e1424f20f5209b85289e
-```
-
-## 本轮实际变更
-
-| 范围 | 已写入源码的内容 | 验证边界 |
-| --- | --- | --- |
-| 连接取消 | 取消在途请求；旧任务不得回写新状态；资源操作按所有者串行 | 隔离 JVM 同源用例通过 |
-| 失败清理 | 启动部分失败、探测异常、调用取消均进入清理；清理失败时阻止新隧道启动 | 隔离 JVM 同源用例通过；尚无真实 TUN |
-| 换线与重连 | 新增 `switchLine`、`reconnect`、`disconnect`、`close` 生命周期合同 | 隔离 JVM 同源用例通过；不是实际网络换线 |
-| 配置材料 | 防御性复制、日志字符串脱敏、关闭后清零并禁止再次读取 | 同源用例通过；不等于整台设备内存的安全保证 |
-| 页面 | 保留连接／线路／套餐／我的，补状态保存、滚动、资源文案与测试标签 | 静态检查；未进行 Android 编译或视觉真机验收 |
-| Debug 自检 | 仅 Debug 源集包含本地模拟面板；明确显示“未建立 VPN” | 源集分离检查；模拟网关不访问网络或生产 |
-| 工具链 | 对齐 Compose Compiler 声明、采用可核对的 BOM、固定下载校验值 | 未完成 Maven 解析；详见 CHANGELOG 与工具链来源 |
-| 构建入口 | Windows/Linux 脚本与校验引导；缺包或校验失败即停止 | Shell 语法及校验失败负例通过；PowerShell 未在 Windows 执行 |
-| CI | 准备 Debug 编译、JUnit、Lint、测试包编译、签名校验及证据上传流程 | YAML 结构解析；未推送、未触发远程执行 |
-
-## 本轮实际运行的验证
-
-生产 `ConnectionCoordinator.kt` 与 JUnit 共用的 `ConnectionCases.kt` 使用同一份源码编译，独立 CLI 入口仅负责执行，不复制协调器实现。
-
-| 检查 | 结果 |
+| 验收项 | 同一次运行中的结果 |
 | --- | --- |
-| Kotlin CLI 编译核心源码和共用用例 | 完成 |
-| 53 项独立用例 | 53 通过，0 失败 |
-| 相同编译产物再次执行 5 轮 | 每轮均 53 通过，0 失败；不是新增 265 个独立用例 |
-| 配置等待／系统授权等待等各阶段取消 | 同源用例覆盖 |
-| 异常、超时、清理失败重试、旧结果返回、120 条并发命令资源互斥 | 同源用例覆盖 |
-| 不匹配的 Wrapper JAR | 确认拒绝执行且不覆盖原文件 |
-| 无 APK 时执行证据收集 | 确认失败退出，不创建成功清单 |
-| XML／YAML 基础结构检查、Shell 语法、源码检查 | 完成；不等于 Android Lint 或 CI 运行 |
-| 本地基线 `git diff --check` | 通过 |
+| 已入库 Wrapper JAR | 48,966 字节；SHA-256 校验通过；分发包固定校验值 |
+| `:app:assembleDebug` | 通过，生成实际 Debug APK |
+| `:app:testDebugUnitTest` | 53 项，0 失败、0 错误、0 跳过 |
+| `:app:lintDebug` | 通过，0 错误、9 警告；不是零警告 |
+| `:app:assembleDebugAndroidTest` | 通过，生成测试 APK |
+| APK 与测试 APK 签名 | `apksigner verify --verbose --print-certs` 均通过；v2=true；Android Debug 证书 |
+| 安装／启动 | 两个 `adb install -r` 均为 Success；主 Activity 冷启动 Status: ok；进程存在 |
+| instrumentation | API 36、google_apis/x86_64、Pixel 7 AVD；`OK (2 tests)` |
+| APK 一致性 | 构建后与安装验证后的两份 APK SHA-256 分别一致 |
 
-实际诊断环境：
+UI 用例为 `allFourDestinationsRemainAccessible` 和 `realVpnIsExplicitlyUnavailable`。启动与测试后截图由 emulator `screencap` 收集，路径为报告包内 `.build-output/device/launch.png` 和 `final.png`；此文不是对截图像素做过人工视觉验收的声明。模拟器不是物理真机，测试没有证明真实 VPN 可用。
+
+## APK 身份与下载
+
+以下哈希属于上述运行的具体文件，不是 ZIP 哈希，也不是未来重建文件的承诺。
+
+| 文件 | 身份 |
+| --- | --- |
+| `app/build/outputs/apk/debug/app-debug.apk` | 11,456,549 字节；`com.gccwebos.android.debug`；`0.1.1-m0-debug` |
+| Debug APK SHA-256 | `e0e273bf2c3226e887cd034cc4b1fe607f83d07f4502db5a0088ec56d08f0a2d` |
+| `app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk` SHA-256 | `f035633ba0b863925c9c61d05a769745092713d8c14807a0f17dda3a464a5190` |
+| Debug 签名证书 SHA-256 | `cf8823a036dceeacb505259dac36013ecf635512d398f3dc2b454d9d845d6363` |
+
+- [Debug APK／测试 APK／签名／校验清单](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36481854447/artifacts/10997049620)。artifact ZIP SHA-256：`d7741d145444783d1e4939a172a9a0a7121db16d1d5744de12fe9d7cd64d69f2`。
+- [JUnit、Lint、安装启动、UI 层级和截图报告](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36481854447/artifacts/10997461073)。artifact ZIP SHA-256：`1a69de796ad14a80b9ac1a5b708d63a31856e47f4cf126d3e1ef87f39d926ca2`。
+- [精确源码归档与 Wrapper](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36481854447/artifacts/10997038493)。artifact ZIP SHA-256：`241fb6e336afd5b31ea2e66d90b1cd5377a42e049f12be1daf4d05d99873e3c1`。
+
+三份 artifact 在本次读取时 `expired=false`，元数据到期时间为 2026-10-12 UTC，不能当作永久下载链接。私有仓库需有权限的 GitHub 登录。Debug 签名不作为正式升级签名；未发布 Release、未提供正式签名密钥。
+
+## Wrapper 来源
+
+源码内 `gradle/wrapper/gradle-wrapper.jar` 的 SHA-256：
 
 ```text
-OpenJDK 21.0.11
-kotlinc-jvm 1.9.0
-本地 kotlinx-coroutines-core-jvm.jar：语义版本未确认
-JAR SHA-256: 78d6cc7135f84d692ff3752fcfd1fa1bbe0940d7df70652e4f1eaeec0c78afbb
+55243ef57851f12b070ad14f7f5bb8302daceeebc5bce5ece5fa6edb23e1145c
 ```
 
-这不是项目配置的 Kotlin 2.3.10／Coroutines 1.10.2 依赖解析结果。上述诊断只覆盖核心控制流，不能替代 Gradle/JUnit 任务、Compose 编译、Android UI、真实协议内核或网络可靠性验证。
+与 [Gradle 官方校验表](https://gradle.org/release-checksums/) 的 9.4.1 Wrapper JAR 值一致。Gradle 9.4.1 binary ZIP 的固定 SHA-256 为 `2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6cb`。不把“引导脚本存在”当作 JAR 已取得；本次源码中存在实际 JAR，CI 使用并校验了它。
 
-## APK 构建的实际结果
+## 过程证据与修复
 
-已实际尝试：
+| 源码／运行 | 实际结果 |
+| --- | --- |
+| [main 初次运行](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36472813849) | SDK Manager 找不到 `platforms;android-37`，未进入编译 |
+| [7de92e47](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36474064401) | SDK 36 与 Wrapper 校验成功；Gradle DSL 的顶层 `platform()` 无法解析 |
+| [1c34cd59](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36474548312) | Debug、53 项 JUnit、Lint 通过；测试包编译发现无效 `assertExists` import；并非完整 CI 成功 |
+| [Wrapper 物化回执](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36474548451) | 经校验的官方字节存入不可变 Git blob；临时写入工作流随后删除 |
+| [bceabc27 最终完整运行](https://github.com/gccwebos-com/gccwebos-android/actions/runs/36481854447) | 所有 M0 CI 步骤完成，结果为 success |
 
-```bash
-./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
-```
+最终保留 PR #2 的修复：SDK Platform 36；在 `dependencies` 作用域内调用 `platform(composeBom)`；删除无效 `assertExists` import，保留成员调用。PR #3 补入 Wrapper JAR、精确提交取证和模拟器验证，并固定隔离 AVD 的创建／查找路径；仅在明确识别的 GitHub-hosted 临时 runner 上于 APK 构建后移除未使用的 NDK/CMake，解决模拟器镜像的磁盘不足。没有清理开发者机器或 self-hosted 环境。
 
-入口在取得官方 Wrapper JAR 时停止，退出码 **6**，日志包含：
+## 验证复用与未执行项
 
-```text
-curl: (6) Could not resolve host: raw.githubusercontent.com
-```
+本次收口读取并核对已有完整成功运行的源码、日志、artifact 元数据与官方 Wrapper 校验值，不将历史 CI 说成本地新跑。本地环境未安装 Android SDK 且 Gradle 域名解析失败；没有在本地下载 APK 重算哈希。上文 APK 哈希与签名来自同一次 CI 的实际输出；artifact ZIP digest 来自 GitHub 元数据。
 
-当前环境没有 Android SDK，无法解析构建依赖下载域名。Gradle 本身未启动；编译、Android 单元测试与 Lint 任务没有开始。完整失败输出在 `evidence/android-build-attempt.log`，而不是“测试失败”或“编译通过”。
+本记录及 TASKS 的后续文档提交不改变已验证应用代码或工作流，但每个新 source SHA 的最新 CI 状态仍需独立核对。PR #3 的最新验证回执记录后续运行，不能将 `bceabc27` 的哈希套到其他运行。
 
-**`gradle-wrapper.jar` 二进制未包含在本包。** 已提供固定来源和 SHA-256 的首次运行引导，联网后下载并校验；`gradlew`/`gradlew.bat` 是项目引导入口，不冒称标准 Wrapper 二进制已经补齐。
+保留 9 项 Lint 警告及日志中的 Kotlin annotation target、Compose 测试 API 弃用提示；没有通过关闭 Lint 隐藏它们。物理真机、真实 VPN／TUN、后台、节点、支付、推荐归因、正式签名和商店发布均未验收。本轮不自动合并或发布。
 
-## 在具备环境的电脑继续构建
-
-准备 JDK 17、SDK Platform 37、Build Tools 36.0.0；使用 Android Studio SDK Manager 安装，并设置 `JAVA_HOME` 与 `ANDROID_HOME`，或使用本地 `local.properties` 指定 SDK。机器需要能访问 README 列出的官方依赖来源。
-
-解压并进入 `gccwebos-android` 根目录，Windows：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-```
-
-Linux/macOS：
-
-```bash
-chmod +x gradlew build.sh scripts/*.sh
-./build.sh
-```
-
-只有任务全部成功后，才以实际生成的 `app/build/outputs/apk/debug/app-debug.apk` 为安装包。不要把本 ZIP 改扩展名为 APK。首次完整依赖解析或 Android 编译仍可能暴露本环境未覆盖的问题。
-
-## 仍未实现或未验证
-
-没有真实 `VpnService`、TUN、协议内核、邮箱注册登录 API、商品／钱包／订单／推荐接口接入。真实连接按钮保持禁用；Debug 自检是假网关控制流演示，不能转发流量，也不会成为 release 功能。
-
-M1 才接原生账户合同、授权配置与真实内核，并在获准的隔离环境验证连接、断开、换线、Wi-Fi/移动网络恢复、DNS/IPv6、系统撤销授权。协程超时不能强制打断不合作的 native 阻塞；内核适配必须落实自己的资源释放与超时边界。
-
-没有运行 Windows PowerShell、Android 模拟器/真机、Google Play/签名发布、生产或支付验证。本轮未创建远程仓库、PR、提交或运行 GitHub 工作流。原包与其他项目文件未被覆盖。
-
-## 文件与证据
-
-工程内 `evidence/` 保存本轮最新 53 项结果、5 轮复跑、实际构建失败日志、环境信息和负例检查；不混入此前审查的 8 项复现或早期调试轮次。`evidence/changes-from-starter.patch` 记录源文件相对导入基线的差异。
-
-`file-inventory.json` 保存交付文件相对路径、大小和 SHA-256。清单不列自身哈希，避免自引用；ZIP 总哈希另在附件校验文件中。工程不含本地缓存、`.git`、编译器 JAR、SDK、生产密钥或虚构 APK。
+[初始 ZIP 的离线诊断与构建阻塞历史](../evidence/initial-build-status.md) 原文保留；其中“未取得 Wrapper／未运行 CI”等属于导入当时的历史，不代表本次已验证基线。

@@ -11,7 +11,8 @@ EXPECTED_DIST = '2ab2958f2a1e51120c326cad6f385153bb11ee93b3c216c5fccebfdfbb7ec6c
 REQUIRED = (
     'gradlew', 'gradlew.bat', 'build.sh', 'build.ps1',
     'scripts/bootstrap-wrapper.sh', 'scripts/bootstrap-wrapper.ps1',
-    'gradle/wrapper/gradle-wrapper.properties', '.github/workflows/android.yml',
+    'gradle/wrapper/gradle-wrapper.properties', 'gradle/wrapper/gradle-wrapper.jar',
+    '.github/workflows/android.yml',
     'app/src/main/java/com/gccwebos/android/core/ConnectionCoordinator.kt',
     'app/src/test/java/com/gccwebos/android/core/ConnectionCases.kt',
     'app/src/test/java/com/gccwebos/android/core/ConnectionCoordinatorTest.kt',
@@ -27,11 +28,8 @@ assert 'gradle-9.4.1-bin.zip' in props and f'distributionSha256Sum={EXPECTED_DIS
 for name in ('scripts/bootstrap-wrapper.sh', 'scripts/bootstrap-wrapper.ps1'):
     assert EXPECTED_JAR in (ROOT / name).read_text()
 jar = ROOT / 'gradle/wrapper/gradle-wrapper.jar'
-if jar.is_file():
-    assert hashlib.sha256(jar.read_bytes()).hexdigest() == EXPECTED_JAR, 'Untrusted wrapper JAR'
-    print('Wrapper JAR: present and checksum verified')
-else:
-    print('Wrapper JAR: NOT bundled; first run requires verified network bootstrap')
+assert hashlib.sha256(jar.read_bytes()).hexdigest() == EXPECTED_JAR, 'Untrusted wrapper JAR'
+print('Wrapper JAR: bundled and checksum verified')
 for path in (ROOT / 'app/src').rglob('*.xml'):
     ET.parse(path)
 manifest = ET.parse(ROOT / 'app/src/main/AndroidManifest.xml').getroot()
@@ -45,6 +43,7 @@ for directory in ('main', 'release'):
 root_build = (ROOT / 'build.gradle.kts').read_text()
 assert 'version "9.2.0"' in root_build and 'version "2.3.10"' in root_build
 assert 'id("org.jetbrains.kotlin.android")' not in root_build
+# Preserve the SDK alignment gate introduced by the separately merged PR #2.
 app_build = (ROOT / 'app/build.gradle.kts').read_text()
 workflow = (ROOT / '.github/workflows/android.yml').read_text()
 assert 'compileSdk = 36' in app_build and 'targetSdk = 36' in app_build

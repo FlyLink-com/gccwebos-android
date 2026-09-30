@@ -40,6 +40,12 @@
 - 无测量速度、假节点、假110 Coins、假商品价格或示例订单
 - 生产连接按钮保持禁用，保留 `vpn-connect` 测试标签。PR5的实验室 VPN 功能仍仅 Debug 且默认关闭
 
+## 可访问性与测试环境
+
+账号异步状态／错误使用同一个 polite live region，避免嵌套资源卡重复播报。原生控件保留名称、选中、禁用与触控语义；离线语义断言不冒充人工TalkBack验收。
+
+API36 Google APIs镜像在2CPU CI runner上发生了App启动前的SystemUI/KeyguardService和GMS启动ANR。前景门禁正确拒绝该轮，未点击关闭或绕过弹窗。后续采用同API36的纯AOSP `system-images;android-36;default;x86_64`，由Google官方系统镜像元数据确认存在；继续保留全部ANR与真实窗口门禁。
+
 ## 验证方式
 
 - `scripts/verify_source.py`：源码、XML、Wrapper校验及debug/release边界

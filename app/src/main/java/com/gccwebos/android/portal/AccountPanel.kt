@@ -23,6 +23,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -134,9 +137,18 @@ internal fun AccountPanel(state: AccountController) {
             style = MaterialTheme.typography.titleLarge)
         SupportingText("会话到期后需要重新登录。订阅由服务器确认权益后自动领取，无需手动导入。")
         if (state.busy) CircularProgressIndicator(modifier = Modifier.testTag("account-loading"))
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("account-error")) }
+        val statusMessage = state.error ?: when {
+            state.busy -> "正在处理，请稍候"
+            state.authenticated -> "登录成功，可查看当前资源"
+            state.factorReference != null -> "需要身份验证器中的动态验证码"
+            else -> "请登录你的账号"
+        }
+        Text(statusMessage, style = MaterialTheme.typography.bodyMedium,
+            color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
+            modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
+                .semantics { liveRegion = LiveRegionMode.Polite })
         if (state.authenticated) {
-            ResourceCard(state)
+            ResourceCard(state, showOperationState = false)
             if (state.deliveryReady) SupportingText("订阅已安全保存；生产 VPN 尚未开放，暂不能连接")
             BrandButton("刷新／重试", state::refresh, enabled = !state.busy, modifier = Modifier.testTag("account-refresh"))
             TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,

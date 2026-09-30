@@ -10,7 +10,8 @@ SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
 ADB="$SDK_ROOT/platform-tools/adb"
 EMULATOR="$SDK_ROOT/emulator/emulator"
-SYSTEM_IMAGE='system-images;android-36;google_apis;x86_64'
+# Pure API 36 AOSP: this app does not use Google services. Keep all ANR/foreground gates.
+SYSTEM_IMAGE='system-images;android-36;default;x86_64'
 APP_ID='com.gccwebos.android.debug'
 ACTIVITY="$APP_ID/com.gccwebos.android.MainActivity"
 TEST_RUNNER="$APP_ID.test/androidx.test.runner.AndroidJUnitRunner"

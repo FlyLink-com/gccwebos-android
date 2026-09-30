@@ -16,6 +16,8 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.unit.Density
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
@@ -107,6 +109,10 @@ class BrandUiTest {
             state = controller
             GccTheme { Column(Modifier.verticalScroll(rememberScrollState())) { AccountPanel(controller) } }
         }
+        compose.onNodeWithTag("account-status").assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        compose.runOnIdle { state.error = "离线测试错误" }
+        compose.onNodeWithTag("account-error").assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        compose.onAllNodesWithText("离线测试错误").assertCountEquals(1)
         compose.onNodeWithTag("totp-cancel").performScrollTo().performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertNull(state.factorReference); assertNotNull(store.value) }

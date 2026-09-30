@@ -23,6 +23,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -191,11 +194,12 @@ private fun PageTitle(title: String, detail: String) {
 }
 
 @Composable
-internal fun ResourceCard(state: AccountController) {
+internal fun ResourceCard(state: AccountController, showOperationState: Boolean = true) {
     val display = resourcePresentation(state.authenticated, state.resource)
     BrandCard(Modifier.testTag("resource-card")) {
         Eyebrow("当前资源")
-        Text(display.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(display.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+            modifier = if (showOperationState) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier)
         SupportingText(display.detail)
         display.facts.forEach { (label, value) ->
             HorizontalDivider(color = Brand.Border)
@@ -204,8 +208,9 @@ internal fun ResourceCard(state: AccountController) {
                 Text(value, style = MaterialTheme.typography.bodyLarge)
             }
         }
-        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (showOperationState && state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
+        if (showOperationState) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.testTag("resource-error").semantics { liveRegion = LiveRegionMode.Polite }) }
     }
 }
 

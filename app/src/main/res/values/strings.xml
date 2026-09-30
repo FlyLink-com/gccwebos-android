@@ -12,5 +12,5 @@
     <string name="profile_explanation">邮箱账户、商品订单、充值记录、钱包与邀请将在接口合同确认后接入。</string>
     <string name="unknown_usage">剩余流量：未采集
 有效期：待后台确认</string>
-    <string name="build_stage">M0 工程版本 · 0.1.1</string>
+    <string name="build_stage">M1 工程版本 · 0.2.0</string>
 </resources>

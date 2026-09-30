@@ -35,7 +35,7 @@ for path in (ROOT / 'app/src').rglob('*.xml'):
 manifest = ET.parse(ROOT / 'app/src/main/AndroidManifest.xml').getroot()
 android = '{http://schemas.android.com/apk/res/android}'
 assert manifest.find('application').get(android + 'usesCleartextTraffic') == 'false'
-assert not manifest.findall('uses-permission'), 'M0 has no real network/VPN permissions; re-review on M1 integration'
+assert {p.get(android + 'name') for p in manifest.findall('uses-permission')} == {'android.permission.INTERNET'}, 'M1 only permits HTTPS API/update access; VPN remains gated'
 assert not manifest.findall('.//service'), 'M0 must not expose a fake VpnService'
 for directory in ('main', 'release'):
     for path in (ROOT / f'app/src/{directory}').rglob('*.kt'):
@@ -48,5 +48,5 @@ app_build = (ROOT / 'app/build.gradle.kts').read_text()
 workflow = (ROOT / '.github/workflows/android.yml').read_text()
 assert 'compileSdk = 36' in app_build and 'targetSdk = 36' in app_build
 assert '"platforms;android-36"' in workflow, 'CI SDK must match compileSdk'
-print('PASS M0 source presence, checksums, XML, compiler declarations and debug separation')
+print('PASS M1 source presence, checksums, XML, compiler declarations and debug separation')
 print('NOT RUN by this check: Gradle, Android Lint, APK signing, device or backend tests')

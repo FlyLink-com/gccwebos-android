@@ -50,7 +50,7 @@ jobs:
       - name: Run same ordinary APK on API33 without rebuilding
         env:
           REQUIRE_NATIVE_JNI: 'false'
-        run: bash scripts/native-runtime-api33.sh
+        run: bash scripts/commerce-runtime-api33.sh
       - name: Verify exact test coverage and only expected non-native skip
         run: |
           python3 - <<'PY'
@@ -73,7 +73,18 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: commerce-ordinary-api33-evidence-${{ github.sha }}
-          path: .build-output/runtime-api33/
+          path: |
+            .build-output/runtime-api33/
+            !.build-output/runtime-api33/device/dialog-frames/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain full display dialog frames separately
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: commerce-dialog-display-frames-${{ github.sha }}
+          path: .build-output/runtime-api33/device/dialog-frames/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

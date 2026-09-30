@@ -20,7 +20,8 @@ sealed interface Resource {
     data object None : Resource
     data object Reconciliation : Resource
     data class Available(val reference: String, val plan: String, val validUntil: Instant,
-                         val setupAvailable: Boolean, val usage: Usage) : Resource
+                         val setupAvailable: Boolean, val usage: Usage,
+                         val durationDays: Long? = null, val monthlyTrafficGb: Double? = null) : Resource
 }
 data class Usage(val totalBytes: Long, val usedBytes: Long?, val remainingBytes: Long?,
                  val status: String, val updatedAt: Instant?) {

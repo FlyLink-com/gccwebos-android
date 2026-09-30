@@ -10,7 +10,8 @@ SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 AVDMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
 ADB="$SDK_ROOT/platform-tools/adb"
 EMULATOR="$SDK_ROOT/emulator/emulator"
-SYSTEM_IMAGE='system-images;android-36;google_apis;x86_64'
+# Pure API 36 AOSP: this app does not use Google services. Keep all ANR/foreground gates.
+SYSTEM_IMAGE='system-images;android-36;default;x86_64'
 APP_ID='com.gccwebos.android.debug'
 ACTIVITY="$APP_ID/com.gccwebos.android.MainActivity"
 TEST_RUNNER="$APP_ID.test/androidx.test.runner.AndroidJUnitRunner"
@@ -175,6 +176,23 @@ adb exec-out screencap -p > "$OUT/final.png"
 adb shell uiautomator dump /sdcard/m0-final-window.xml > "$OUT/final-ui-dump.log"
 adb pull /sdcard/m0-final-window.xml "$OUT/final-window.xml"
 verify_ui_xml "$OUT/final-window.xml"
+adb pull "/sdcard/Android/data/$APP_ID/files/ui-evidence" "$OUT/" > "$OUT/ui-evidence-pull.log"
+# Capture actual narrow-phone and tablet rendering; reset only this disposable AVD.
+for profile in narrow tablet; do
+  if [ "$profile" = narrow ]; then size=640x1280; density=320; else size=1600x2560; density=240; fi
+  adb shell wm size "$size"
+  adb shell wm density "$density"
+  adb shell am force-stop "$APP_ID"
+  adb shell am start -W -n "$ACTIVITY" > "$OUT/$profile-launch.log"
+  sleep 3
+  verify_foreground "$profile"
+  adb exec-out screencap -p > "$OUT/$profile.png"
+  adb shell uiautomator dump /sdcard/ui-profile.xml > "$OUT/$profile-ui-dump.log"
+  adb pull /sdcard/ui-profile.xml "$OUT/$profile.xml"
+  verify_ui_xml "$OUT/$profile.xml"
+done
+adb shell wm size reset
+adb shell wm density reset
 sha256sum "$APK" "$TEST_APK" | tee "$OUT/installed-apks.sha256"
 printf '%s\n' 'PASS: same Debug APK installed and launched on API 36 emulator; instrumentation passed.' \
   'NOT TESTED: physical devices, real VPN, backend, payments.' | tee "$OUT/result.log"

@@ -11,12 +11,21 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.gccwebos.android.ResourceCard
+import com.gccwebos.android.design.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -122,56 +131,62 @@ internal class AccountController(private val repository: PortalRepository, priva
 @Composable
 internal fun AccountPanel(state: AccountController) {
     var confirmReset by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.testTag("account-panel")) {
-        Text("账户与资源")
-        Text("会话到期后需要重新登录。订阅由服务器确认权益后自动领取，无需手动导入。")
+    BrandCard(Modifier.testTag("account-panel")) {
+        Eyebrow("账户与资源")
+        Text(if (state.authenticated) "已登录" else if (state.factorReference != null) "完成身份验证" else "欢迎回来",
+            style = MaterialTheme.typography.titleLarge)
+        SupportingText("会话到期后需要重新登录。订阅由服务器确认权益后自动领取，无需手动导入。")
         if (state.busy) CircularProgressIndicator(modifier = Modifier.testTag("account-loading"))
-        state.error?.let { Text(it, modifier = Modifier.testTag("account-error")) }
+        val statusMessage = state.error ?: when {
+            state.busy -> "正在处理，请稍候"
+            state.authenticated -> "登录成功，可查看当前资源"
+            state.factorReference != null -> "需要身份验证器中的动态验证码"
+            else -> "请登录你的账号"
+        }
+        Text(statusMessage, style = MaterialTheme.typography.bodyMedium,
+            color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
+            modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
+                .semantics { liveRegion = LiveRegionMode.Polite })
         if (state.authenticated) {
-            when(val resource = state.resource) {
-                Resource.None -> Text("暂无已发放资源")
-                Resource.Reconciliation -> Text("资源正在对账，暂不能领取配置")
-                is Resource.Available -> {
-                    Text("套餐：${resource.plan}")
-                    Text("有效期：${resource.validUntil}")
-                    Text(when(resource.usage.status) {
-                        "pending" -> "用量尚未采集"
-                        "stale" -> "用量数据已过期：${resource.usage.usedBytes} 字节"
-                        else -> "已用：${resource.usage.usedBytes} 字节"
-                    })
-                    Text(resource.usage.remainingBytes?.let { "剩余：$it 字节" } ?: "剩余额度暂不可确定")
-                    resource.usage.updatedAt?.let { Text("采集时间：$it") }
-                }
-                null -> Text("等待读取资源")
-            }
-            if (state.deliveryReady) Text("订阅已安全保存；VPN 内核尚未接入，暂不能连接")
-            Button(onClick = state::refresh, enabled = !state.busy, modifier = Modifier.testTag("account-refresh")) { Text("刷新／重试") }
-            Button(onClick = { confirmReset = true }, enabled = !state.clearing) { Text("本地退出并清除订阅") }
-            Text("本地退出不等于服务器撤销会话或已发放凭据")
+            ResourceCard(state, showOperationState = false)
+            if (state.deliveryReady) SupportingText("订阅已安全保存；生产 VPN 尚未开放，暂不能连接")
+            BrandButton("刷新／重试", state::refresh, enabled = !state.busy, modifier = Modifier.testTag("account-refresh"))
+            TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("本地退出并清除订阅") }
+            SupportingText("本地退出不等于服务器撤销会话或已发放凭据")
         } else if (state.factorReference != null) {
-            Text("请输入身份验证器中的 TOTP 验证码")
+            SupportingText("请输入身份验证器中的 TOTP 验证码")
             OutlinedTextField(state.code, { state.code = it }, enabled = !state.busy,
-                label = { Text("TOTP 验证码") }, visualTransformation = PasswordVisualTransformation())
-            Button(onClick = state::totp, enabled = !state.busy && state.code.isNotBlank()) { Text("验证并登录") }
-            Button(onClick = state::cancelAuthentication, enabled = !state.clearing) { Text("取消验证") }
+                label = { Text("TOTP 验证码") }, visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().testTag("totp-code"))
+            BrandButton("验证并登录", state::totp, enabled = !state.busy && state.code.isNotBlank())
+            TextButton(onClick = state::cancelAuthentication, enabled = !state.clearing,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("totp-cancel")) { Text("取消验证") }
         } else {
-            OutlinedTextField(state.account, { state.account = it }, label = { Text("账号／邮箱") }, enabled = !state.busy, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(state.account, { state.account = it }, label = { Text("账号／邮箱") }, enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth().testTag("login-account"))
             OutlinedTextField(state.password, { state.password = it }, label = { Text("密码") }, enabled = !state.busy,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().testTag("login-password"))
             state.challenge?.let { challenge ->
-                Text(challenge.prompt)
-                OutlinedTextField(state.answer, { state.answer = it }, label = { Text("验证题答案") }, enabled = !state.busy)
+                SupportingText(challenge.prompt)
+                OutlinedTextField(state.answer, { state.answer = it }, label = { Text("验证题答案") }, enabled = !state.busy,
+                    modifier = Modifier.fillMaxWidth().testTag("login-answer"))
             }
-            Button(onClick = state::challenge, enabled = !state.busy) { Text("获取／更换验证题") }
-            Button(onClick = state::login, enabled = !state.busy && state.challenge != null && state.account.isNotBlank() && state.password.isNotBlank() && state.answer.isNotBlank()) { Text("登录") }
+            TextButton(onClick = state::challenge, enabled = !state.busy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("login-challenge")) { Text("获取／更换验证题") }
+            BrandButton("登录", state::login, enabled = !state.busy && state.challenge != null && state.account.isNotBlank() && state.password.isNotBlank() && state.answer.isNotBlank(),
+                modifier = Modifier.testTag("login-submit"))
         }
         if (!state.authenticated) {
-            TextButton(onClick = { confirmReset = true }, enabled = !state.clearing) { Text("清除本地订阅并重置登录") }
+            TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅并重置登录") }
         }
     }
     if (confirmReset) AlertDialog(onDismissRequest = { confirmReset = false },
         title = { Text("清除本地登录与订阅？") },
-        text = { Text("已领取的订阅删除后可能需要联系客服恢复。此操作仅清除本机材料，不会撤销服务器会话或凭据。") },
-        confirmButton = { TextButton(onClick = { confirmReset = false; state.logout() }) { Text("确认清除") } },
-        dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("取消") } })
+        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+            Text("已领取的订阅删除后可能需要联系客服恢复。此操作仅清除本机材料，不会撤销服务器会话或凭据。")
+        } },
+        confirmButton = { TextButton(onClick = { confirmReset = false; state.logout() }, modifier = Modifier.testTag("reset-confirm")) { Text("确认清除") } },
+        dismissButton = { TextButton(onClick = { confirmReset = false }, modifier = Modifier.testTag("reset-cancel")) { Text("取消") } })
 }

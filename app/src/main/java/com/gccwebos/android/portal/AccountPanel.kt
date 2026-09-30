@@ -209,5 +209,5 @@ internal fun subscriptionImportMessage(status: ImportStatus): String = when (sta
     ImportStatus.QUOTA_EXHAUSTED -> "当前流量已用尽，暂不导入"
     ImportStatus.WAITING_DELIVERY -> "等待服务器交付；若曾清除本地订阅，请联系支持恢复"
     ImportStatus.UNSUPPORTED_CONFIGURATION -> "订阅已安全保存，但配置暂不兼容当前内核；不会尝试连接"
-    ImportStatus.IMPORTED -> "订阅已自动导入并通过当前内核格式校验；生产 VPN 尚未开放，暂不能连接"
+    ImportStatus.IMPORTED -> "订阅已通过离线兼容性校验，首条线路已导入预览；生产 VPN 尚未开放，暂不能连接"
 }

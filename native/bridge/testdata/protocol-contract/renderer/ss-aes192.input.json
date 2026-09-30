@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "host": "192.0.2.10",
+      "port": 443,
+      "name": "Synthetic SS AES192",
+      "protocol": "ss",
+      "method": "aes-192-gcm",
+      "password": "synthetic-only"
+    }
+  ]
+}

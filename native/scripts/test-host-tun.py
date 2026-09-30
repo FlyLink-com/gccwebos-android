@@ -110,7 +110,7 @@ def scenario(mode):
  @CALLBACK
  def protect(fd,ctx):protected.append(fd);return 0 if mode=='deny' else 1
  lib.gcc_set_protector.argtypes=[CALLBACK,ctypes.c_void_p];lib.gcc_set_protector(protect,None)
- cfg=json.dumps({'proxies':[{'name':'GCC_SELECTED_PROXY','type':'ss','server':'127.0.0.1','port':port,'cipher':'aes-128-gcm','password':PASSWORD.decode(),'udp':True}],'rules':['MATCH,GCC_SELECTED_PROXY']}).encode()
+ cfg=json.dumps({'schemaVersion':1,'proxies':[{'name':'GCC_SELECTED_PROXY','type':'ss','server':'127.0.0.1','port':port,'cipher':'aes-128-gcm','password':PASSWORD.decode(),'udp':True}],'rules':['MATCH,GCC_SELECTED_PROXY']}).encode()
  left,right=socket.socketpair(socket.AF_UNIX,socket.SOCK_DGRAM);right.settimeout(5)
  home=tempfile.TemporaryDirectory()
  ptr=lib.GCCStart(cfg,len(cfg),home.name.encode(),left.fileno());result=ctypes.string_at(ptr).decode();lib.GCCFree(ptr)

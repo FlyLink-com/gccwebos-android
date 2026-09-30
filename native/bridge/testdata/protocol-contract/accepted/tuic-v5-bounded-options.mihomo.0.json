@@ -1,0 +1,1 @@
+{"schemaVersion":1,"proxies":[{"server":"192.0.2.10","password":"synthetic-only","skip-cert-verify":false,"congestion-controller":"bbr","alpn":["h3"],"port":443,"udp-relay-mode":"quic","name":"GCC_SELECTED_PROXY","type":"tuic","uuid":"22222222-2222-4222-8222-222222222222","sni":"fixture.example.invalid"}],"rules":["MATCH,GCC_SELECTED_PROXY"]}

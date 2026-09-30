@@ -1,0 +1,45 @@
+mixed-port: 7897
+allow-lan: false
+mode: global
+proxies:
+  - name: "Synthetic TUIC options"
+    type: tuic
+    server: "192.0.2.10"
+    port: 443
+    uuid: "22222222-2222-4222-8222-222222222222"
+    password: "synthetic-only"
+    udp-relay-mode: "native"
+    congestion-controller: "bbr"
+    bbr-profile: "standard"
+    sni: "fixture.example.invalid"
+    alpn:
+      - "h3"
+    disable-sni: false
+    reduce-rtt: false
+    request-timeout: 8000
+    heartbeat-interval: 10000
+    max-udp-relay-packet-size: 1252
+    fast-open: false
+    skip-cert-verify: false
+    max-open-streams: 100
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic TUIC options"
+  - name: FALLBACK
+    type: fallback
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic TUIC options"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - AUTO
+      - FALLBACK
+      - "Synthetic TUIC options"
+rules:
+  - MATCH,GLOBAL

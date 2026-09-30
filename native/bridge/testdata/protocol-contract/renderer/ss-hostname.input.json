@@ -1,0 +1,12 @@
+{
+  "servers": [
+    {
+      "host": "node.example.invalid",
+      "port": 443,
+      "name": "Synthetic hostname",
+      "protocol": "ss",
+      "method": "aes-128-gcm",
+      "password": "synthetic-only"
+    }
+  ]
+}

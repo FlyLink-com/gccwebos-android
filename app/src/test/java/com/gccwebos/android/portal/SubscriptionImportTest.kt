@@ -92,7 +92,7 @@ class SubscriptionImportTest {
             val bytes = profile.copyMaterial()
             try {
                 val value = JSONObject(String(bytes))
-                assertEquals(setOf("proxies", "rules"), value.keys().asSequence().toSet())
+                assertEquals(setOf("schemaVersion", "proxies", "rules"), value.keys().asSequence().toSet())
                 assertEquals("MATCH,GCC_SELECTED_PROXY", value.getJSONArray("rules").getString(0))
                 assertFalse(String(bytes).contains("ignored.invalid"))
                 assertFalse(profile.toString().contains("not-a-real-password"))

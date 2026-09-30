@@ -44,7 +44,15 @@ jobs:
         run: |
           set -euo pipefail
           bash native/scripts/prepare.sh 2>&1 | tee .build-output/native/prepare.log
+      - name: Export exact-head Kotlin protocol contract goldens
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest --tests "*ProtocolContractTest" \
+            2>&1 | tee .build-output/native/kotlin-contract.log
       - name: Real packet-path tests with loopback-only fixtures
+        env:
+          GCC_PROTOCOL_GOLDENS: ${{ github.workspace }}/.build-output/protocol-contract
         run: |
           set -euo pipefail
           python3 -m venv .native-venv
@@ -104,6 +112,7 @@ jobs:
           name: gccwebos-native-vpn-lab-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             .build-output/native/
+            .build-output/protocol-contract/
             .build-output/device/
             .build-output/runtime-api33/
             app/build/outputs/apk/debug/*.apk

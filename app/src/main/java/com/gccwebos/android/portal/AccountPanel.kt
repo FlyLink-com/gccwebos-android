@@ -53,6 +53,8 @@ internal class AccountController(private val repository: PortalRepository, priva
     var busy by mutableStateOf(false)
     var clearing by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
+    var purchaseReturnRef by mutableStateOf<String?>(null)
+    var security by mutableStateOf<AccountSecurity?>(null)
     var resource by mutableStateOf<Resource?>(null)
     var deliveryReceived by mutableStateOf(false)
     var importStatus by mutableStateOf<ImportStatus?>(null)
@@ -61,6 +63,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     var restorationPending by mutableStateOf(false)
     var foregroundCheckPending by mutableStateOf(false)
     var localSubscription by mutableStateOf(LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING))
+    private var acceptedAccountId: String? = null
     private var task: Job? = null
     private var expiryTask: Job? = null
     private var operation = 0L
@@ -73,7 +76,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun restore() {
         if (busy) return
         expiryTask?.cancel()
-        authenticated = false; resource = null; nodes = emptyList(); importStatus = null
+        authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null
         restoring = true; restorationPending = true
         run {
             try {
@@ -93,7 +96,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     private fun revalidateAccount() = checkAccount(force = true)
     private fun checkAccount(force: Boolean) {
         if (busy || (authenticated && !force)) return
-        expiryTask?.cancel(); authenticated = false
+        expiryTask?.cancel(); authenticated = false; security = null
         restoring = true; restorationPending = true
         run {
             try {
@@ -103,6 +106,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             } finally { restoring = false; foregroundCheckPending = false }
         }
     }
+    fun readSecurity() = run { security = null; security = repository.security() }
     fun refreshSubscription() = run {
         localSubscription = repository.localSubscriptions.refresh(); nodes = localSubscription.nodes
     }
@@ -132,14 +136,16 @@ internal class AccountController(private val repository: PortalRepository, priva
     private suspend fun acceptAuthenticated(value: Session) {
         val remaining = repository.remainingSessionMillis()
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
-        account = value.accountId; authenticated = true; authSessionGeneration++
+        if (acceptedAccountId != value.accountId) purchaseReturnRef = null
+        acceptedAccountId = value.accountId
+        security = null; account = value.accountId; authenticated = true; authSessionGeneration++
         localSubscription = repository.localSubscriptions.snapshot(); nodes = localSubscription.nodes
         expiryTask?.cancel()
         val authEpoch = authSessionGeneration
         expiryTask = scope.launch {
             kotlinx.coroutines.delay(remaining)
             if (authSessionGeneration == authEpoch && authenticated) {
-                authenticated = false; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
+                authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
                 restoring = false; restorationPending = false; foregroundCheckPending = false
                 error = "登录已到期，请重新登录"
                 repository.cancelAuthentication()
@@ -156,7 +162,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerce(path: String, body: String? = null, key: String? = null, expectedSession: String? = null) = repository.commerce(path, body, key, expectedSession)
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
-    fun commerceSessionExpired() { expiryTask?.cancel(); authenticated = false; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { expiryTask?.cancel(); authenticated = false; security = null; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource() {
         importStatus = null; deliveryReceived = false; resource = null
@@ -183,8 +189,9 @@ internal class AccountController(private val repository: PortalRepository, priva
         task?.cancel(); expiryTask?.cancel()
         restoring = false; restorationPending = false; foregroundCheckPending = false
         if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
+        purchaseReturnRef = null; acceptedAccountId = null
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
-        authenticated = false; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
+        authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -207,7 +214,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             catch (failure: PortalFailure) {
                 if (current != operation) return@launch
                 error = when(failure.reason) {
-                    PortalFailure.Reason.SESSION_EXPIRED -> { restorationPending = false; authenticated = false; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
+                    PortalFailure.Reason.SESSION_EXPIRED -> { restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请重新获取验证题并登录" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
                     PortalFailure.Reason.RECOVERY_REQUIRED -> "上次交付需要恢复，请稍后重试或联系支持；不会重复领取"
@@ -309,4 +316,24 @@ internal fun subscriptionImportMessage(status: ImportStatus): String = when (sta
     ImportStatus.WAITING_DELIVERY -> "等待服务器交付；若曾清除本地订阅，请联系支持恢复"
     ImportStatus.UNSUPPORTED_CONFIGURATION -> "订阅已安全保存，但配置暂不兼容当前内核；不会尝试连接"
     ImportStatus.IMPORTED -> "订阅已通过离线兼容性校验，首条线路已导入预览；生产 VPN 尚未开放，暂不能连接"
+}
+
+@Composable
+internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean) {
+    androidx.compose.runtime.LaunchedEffect(state.authSessionGeneration, state.authenticated) {
+        if (autoLoad && state.authenticated) state.readSecurity()
+    }
+    if (!state.authenticated || state.restoring || state.foregroundCheckPending) return
+    BrandCard(Modifier.testTag("account-security-state")) {
+        Text("安全状态", style = MaterialTheme.typography.titleMedium)
+        val status = state.security
+        if (status == null) SupportingText(if (state.busy) "正在读取安全状态…" else "安全状态尚未确认，请重试读取。")
+        else {
+            SupportingText("身份验证器：${if (status.authenticatorBound) "已绑定" else "未绑定"}")
+            SupportingText("通行密钥：${if (status.passkeyEnabled) "已启用" else "未启用"}")
+            SupportingText("安全设置：${if (status.setupRequired) "待完成" else "无需补充"}")
+        }
+        BrandButton("重新读取安全状态", state::readSecurity, enabled = !state.busy)
+        SupportingText("这里只展示服务器确认的状态，不修改安全凭据。")
+    }
 }

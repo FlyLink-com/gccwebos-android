@@ -34,6 +34,13 @@ class CommerceRepository(private val request: suspend (String, String?, String?)
     suspend fun offers(): List<Offer> = CommerceJson.offers(call(requireNotNull(model).offersPath))
     suspend fun wallet(): Wallet = CommerceJson.wallet(call("/api/portal/coins/wallet"))
     suspend fun rechargeOffers(): List<RechargeOffer> = CommerceJson.rechargeOffers(call("/api/portal/coins/recharge/offers"))
+    suspend fun purchaseHistory(selected: CommerceModel): Pair<OrderPage?, List<PurchaseResult.Deferred>?> {
+        require(model == selected)
+        return when(selected) {
+            CommerceModel.LEGACY -> orderHistory() to null
+            CommerceModel.WALLET_FIRST -> null to transitionHistory()
+        }
+    }
     suspend fun orderHistory(cursor: OrderCursor? = null): OrderPage {
         val query = buildString {
             append("/api/portal/commerce/orders?limit=20")

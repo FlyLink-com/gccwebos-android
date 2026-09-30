@@ -36,6 +36,27 @@ class PortalRepositoryTest {
         wire.replies += loginResponse()
         repository.login("fixture@example.invalid","synthetic",HumanChallenge("challenge","1 + 2"),"3")
     }
+    @Test fun securityReadUsesNativeSessionAndRejectsRevocationWithoutFallback() = runTest {
+        val wire = Wire(); val repo = PortalRepository(wire, Store(), policy, {0}, {now}); login(repo, wire)
+        wire.replies += WireResponse(200, securityBody)
+        val status = repo.security(); assertFalse(status.authenticatorBound); assertTrue(status.setupRequired)
+        assertEquals("/api/portal/security/current", wire.calls.last().first)
+        assertNull(wire.calls.last().second); assertEquals("native_fixture", wire.calls.last().third!!.value)
+        wire.replies += WireResponse(401, "{\"error\":\"invalid_session\"}")
+        try { repo.security(); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED, failure.reason) }
+        try { repo.security(); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED, failure.reason) }
+        assertEquals(3, wire.calls.size)
+    }
+    private val securityBody = """{"security":{"authenticatorBound":false,"initialAccount":true,"passkeyEnabled":false,"passkeyExported":false,"setupRequired":true,"safety":{"noAdminApi":true,"noPublicAdmin":true,"noRawSecretReturned":true}}}"""
+    @Test fun securityProjectionRejectsCoercedBooleansMissingSafetyAndSecretExtensions() {
+        assertFalse(PortalJson.security(securityBody).passkeyEnabled)
+        for (body in listOf(securityBody.replace("\"authenticatorBound\":false", "\"authenticatorBound\":\"false\""),
+            securityBody.replace("\"noRawSecretReturned\":true", "\"noRawSecretReturned\":false"),
+            securityBody.replace("\"setupRequired\":true", "\"setupRequired\":true,\"otpSecret\":\"synthetic\""),
+            "{\"security\":{}}")) {
+            assertThrows(Exception::class.java) { PortalJson.security(body) }
+        }
+    }
     @Test fun persistsBeforeAckAndDoesNotRepeatSetup() = runTest {
         val wire = Wire(); val store = Store(); val repo = PortalRepository(wire,store,policy,{0},{now})
         login(repo,wire); wire.replies += delivery(); wire.replies += WireResponse(204,"")

@@ -17,6 +17,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -321,10 +324,37 @@ class MobileParityUiTest {
         compose.onNodeWithTag("commerce-signed-out").assertExists()
         compose.runOnIdle { assertFalse(state.authenticated) }
     }
-    @Test fun syntheticWalletAlipayCatalogAndOrderLayoutsRemainServerShaped() {
+    @Test fun cancelledForegroundPollCannotPublishLateRechargeResponse() {
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        lateinit var state: CommerceController; lateinit var poll: kotlinx.coroutines.Job
+        val record = PendingCommerce("recharge", null, "offer_fixture", "key_fixture", "recharge_fixture")
+        val recovery = object : CommerceRecovery {
+            override fun read(binding: String, kind: String) = if (kind == "recharge") record else null
+            override fun save(binding: String, value: PendingCommerce) = error("Polling must not create")
+            override fun clear(binding: String, kind: String) = error("Polling must not clear")
+        }
+        val wire = CommerceRepository({ path, body, key ->
+            assertEquals("/api/portal/coins/recharge/orders/recharge_fixture", path); assertNull(body); assertNull(key)
+            started.complete(Unit); withContext(NonCancellable) { release.await() }
+            WireResponse(500, "{}")
+        }, recovery, "fixture")
         compose.setContent {
             val scope = rememberCoroutineScope()
             val account = remember { offlineUiAccount(scope) }
+            state = remember { CommerceController(account, scope, recovery, initialRepository = wire).apply {
+                recharge = RechargeOrder("recharge_fixture", "offer_fixture", 1, 100, 10000, "CNY", 2, "xsd_v1", "alipay", "pending", null, null, null, null, at.plusSeconds(3600), at, at)
+            } }
+            androidx.compose.runtime.LaunchedEffect(Unit) { poll = launch { state.pollRecharge() } }
+        }
+        compose.waitUntil(10_000) { started.isCompleted }
+        compose.runOnIdle { poll.cancel(); release.complete(Unit) }
+        compose.waitUntil(10_000) { poll.isCompleted }
+        compose.runOnIdle { assertEquals("pending", state.recharge!!.status); assertNull(state.error); assertFalse(state.busy) }
+    }
+    @Test fun syntheticWalletAlipayCatalogAndOrderLayoutsRemainServerShaped() {
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val account = remember { offlineUiAccount(scope).apply { purchaseReturnRef = "offer_synthetic" } }
             val commerce = remember {
                 val recovery = object : CommerceRecovery {
                     override fun read(binding: String, kind: String): PendingCommerce? = null
@@ -356,6 +386,9 @@ class MobileParityUiTest {
         capture("server-empty-order-history")
         compose.onNodeWithTag("nav-Profile").performClick()
         capture("synthetic-my-wallet-summary")
+        compose.onNodeWithTag("mine-return-purchase").performScrollTo().performClick()
+        compose.onNodeWithTag("purchase-return-requote").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-recharge").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-select-recharge_synthetic").performScrollTo().assertIsDisplayed()
         capture("synthetic-alipay-recharge")

@@ -2,6 +2,7 @@ package com.gccwebos.android.commerce
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.LocalActivity
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
@@ -14,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.PortalFailure
@@ -21,17 +23,19 @@ import com.gccwebos.android.design.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 internal enum class CommerceMode { Overview, Mine, Plans, Orders, Wallet, Ledger }
 internal class CommerceController(private val account: AccountController, private val scope: CoroutineScope,
-    private val storage: CommerceRecovery, private val includeHistory: Boolean = false) {
+    private val storage: CommerceRecovery, private val includeHistory: Boolean = false, initialRepository: CommerceRepository? = null) {
     var busy by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var wallet by mutableStateOf<Wallet?>(null)
     var offers by mutableStateOf<List<Offer>>(emptyList())
+    var commerceModel by mutableStateOf<CommerceModel?>(null)
     var catalogLoaded by mutableStateOf(false)
     var ledgerPage by mutableStateOf<WalletLedgerPage?>(null)
     var rechargeOffers by mutableStateOf<List<RechargeOffer>>(emptyList())
@@ -43,10 +47,10 @@ internal class CommerceController(private val account: AccountController, privat
     var orderPage by mutableStateOf<OrderPage?>(null)
     var rechargeHistory by mutableStateOf<List<RechargeOrder>?>(null)
     var transitions by mutableStateOf<List<PurchaseResult.Deferred>?>(null)
-    private var repo: CommerceRepository? = null
+    private var repo: CommerceRepository? = initialRepository
     private val epoch = account.authSessionGeneration
     fun load() = run {
-        orderPage = null; rechargeHistory = null; transitions = null; catalogLoaded = false
+        orderPage = null; rechargeHistory = null; transitions = null; catalogLoaded = false; commerceModel = null
         quote = null; wallet = null; offers = emptyList(); rechargeOffers = emptyList(); purchase = null; recharge = null
         if (repo == null) {
             val session = account.commerceSessionBinding()
@@ -65,11 +69,13 @@ internal class CommerceController(private val account: AccountController, privat
         readPart { recharge = r.currentRecharge() }
         readPart { wallet = r.wallet() }
         readPart { rechargeOffers = r.rechargeOffers() }
-        readPart { r.loadModel(); offers = r.offers(); catalogLoaded = true }
+        readPart { commerceModel = r.loadModel() }
+        if (commerceModel != null) readPart { offers = r.offers(); catalogLoaded = true }
         if (includeHistory) {
-            readPart { orderPage = r.orderHistory() }
+            commerceModel?.let { selected -> readPart {
+                val history = r.purchaseHistory(selected); orderPage = history.first; transitions = history.second
+            } }
             readPart { rechargeHistory = r.rechargeHistory() }
-            readPart { transitions = if (r.loadModel() == CommerceModel.WALLET_FIRST) r.transitionHistory() else emptyList() }
         }
     }
     fun loadLedger(more: Boolean = false) = run {
@@ -95,7 +101,7 @@ internal class CommerceController(private val account: AccountController, privat
         }
         catch (_: Exception) { error = "部分信息尚未读取，请重试查询；不要重复下单。" }
     }
-    fun preview(offer: Offer) = run { quote = null; quote = requireNotNull(repo).preview(offer) }
+    fun preview(offer: Offer) = run { account.purchaseReturnRef = offer.offerRef; quote = null; quote = requireNotNull(repo).preview(offer) }
     fun confirmPurchase() = run {
         val value = requireNotNull(quote); quote = null
         try { purchase = requireNotNull(repo).purchase(value) }
@@ -110,8 +116,34 @@ internal class CommerceController(private val account: AccountController, privat
         finally { pendingPurchase = requireNotNull(repo).pending("purchase") != null }
     }
     fun queryRecharge() = run { recharge = null; wallet = null; recharge = requireNotNull(repo).retryRecharge(); wallet = requireNotNull(repo).wallet() }
+    suspend fun pollRecharge() {
+        if (busy || !currentSession() || recharge?.awaitingUpdate != true) return
+        busy = true
+        try { // Awaited by the RESUMED lifecycle job, never an independent mutation/retry job.
+            val next = requireNotNull(repo).currentRecharge()
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (!currentSession()) return
+            recharge = next
+            if (next?.status == "credited") {
+                val latest = requireNotNull(repo).wallet()
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (currentSession()) wallet = latest
+            }
+        } catch (failure: CancellationException) { throw failure }
+        catch (failure: PortalFailure) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (currentSession()) {
+                if (failure.reason == PortalFailure.Reason.SESSION_EXPIRED) account.commerceSessionExpired()
+                error = "充值状态尚未确认，请稍后查询原订单。"
+            }
+        } catch (_: Exception) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (currentSession()) error = "充值状态尚未确认，请稍后查询原订单。"
+        }
+        finally { busy = false }
+    }
     fun cancelPurchase() = run { purchase = requireNotNull(repo).cancelPurchase(); wallet = null }
-    fun finishPurchase() = run { requireNotNull(repo).finishPurchase(); pendingPurchase = false; purchase = null; wallet = null; account.refresh() }
+    fun finishPurchase() = run { requireNotNull(repo).finishPurchase(); pendingPurchase = false; purchase = null; wallet = null; account.purchaseReturnRef = null; account.refresh() }
     fun finishRecharge() = run { requireNotNull(repo).finishRecharge(); pendingRecharge = false; recharge = null; wallet = null; quote = null }
     fun currentSession() = account.authenticated && account.authSessionGeneration == epoch
     fun canOpenPayment(order: RechargeOrder, now: Instant) = currentSession() && recharge == order && order.paymentMethod == "alipay" && order.adapterKey == "xsd_v1" && order.payableAt(now)
@@ -153,7 +185,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext), includeHistory = mode == CommerceMode.Orders) }
-    var orderCategory by remember(account.authSessionGeneration) { mutableStateOf("orders") }
+    var orderCategory by remember(account.authSessionGeneration, state.commerceModel) { mutableStateOf(if (state.commerceModel == CommerceModel.WALLET_FIRST) "plans" else "orders") }
     var catalogCategory by remember(account.authSessionGeneration) { mutableStateOf("plan") }
     var selectedRecharge by remember(account.authSessionGeneration) { mutableStateOf<RechargeOffer?>(null) }
     var cancelConfirmation by remember { mutableStateOf(false) }
@@ -162,13 +194,21 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     LaunchedEffect(account.authSessionGeneration, account.authenticated) { if(autoLoad && account.authenticated) state.load() }
     LaunchedEffect(Unit) { while(true) { now = Instant.now(); kotlinx.coroutines.delay(1000) } }
     // A browser return is merely a reason to reread. It never confirms, creates or pays an order.
-    DisposableEffect(context, state) {
-        val lifecycle = (context as? ComponentActivity)?.lifecycle
+    val lifecycle = (LocalActivity.current as? ComponentActivity)?.lifecycle
+    DisposableEffect(lifecycle, state) {
         val observer = LifecycleEventObserver { _, event -> if(autoLoad && event == Lifecycle.Event.ON_RESUME && account.authenticated) {
             selectedRecharge = null; paymentReview = null; cancelConfirmation = false; state.load()
         } }
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
+    }
+    LaunchedEffect(state, lifecycle, autoLoad) {
+        if (autoLoad) lifecycle?.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                kotlinx.coroutines.delay(10_000)
+                if (account.authenticated && !account.restoring && !account.foregroundCheckPending) state.pollRecharge()
+            }
+        }
     }
     if (!account.authenticated || account.restoring || account.foregroundCheckPending) {
         BrandCard(Modifier.testTag("commerce-signed-out")) { Text(if(mode == CommerceMode.Wallet) "登录后查看钱包" else "登录后查看套餐"); SupportingText("价格、余额与可购买商品由服务器确认。") }
@@ -265,9 +305,22 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             if(done) BrandButton("完成并同步资源", state::finishPurchase, enabled = !state.busy)
         }
     }
+    if (mode == CommerceMode.Plans && account.purchaseReturnRef != null) BrandCard(Modifier.testTag("purchase-return")) {
+        val retained = state.offers.firstOrNull { it.offerRef == account.purchaseReturnRef }
+        Text("继续所选商品", style = MaterialTheme.typography.titleMedium)
+        SupportingText("充值不会自动购买。返回后读取当前商品并重新报价，仍需你确认。")
+        if (retained != null) BrandButton("重新获取所选商品报价", { state.preview(retained) }, enabled = !state.busy && !state.pendingPurchase, modifier = Modifier.testTag("purchase-return-requote"))
+        else SupportingText(if (state.catalogLoaded) "所选商品当前不可用，请重新选择。" else "商品尚未读取，请刷新后重试。")
+        onRecharge?.let { BrandButton("去充值，保留所选商品", it, enabled = !state.busy, modifier = Modifier.testTag("purchase-return-recharge")) }
+        TextButton(onClick = { account.purchaseReturnRef = null }) { Text("取消保留商品") }
+    }
     if (mode == CommerceMode.Orders) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("orders" to "商城", "recharge" to "充值", "plans" to "套餐计划").forEach { (key, label) ->
+            (when(state.commerceModel) {
+                CommerceModel.LEGACY -> listOf("orders" to "商城", "recharge" to "充值")
+                CommerceModel.WALLET_FIRST -> listOf("plans" to "套餐计划", "recharge" to "充值")
+                null -> listOf("recharge" to "充值")
+            }).forEach { (key, label) ->
                 FilterChip(selected = orderCategory == key, onClick = { orderCategory = key }, label = { Text(label) }, modifier = Modifier.testTag("orders-$key"))
             }
         }
@@ -436,7 +489,7 @@ private fun ledgerLabel(value: String) = when(value) {
 
 /** Native functional counterpart of mobile src/mine.jsx; account data is never hard-coded. */
 @Composable
-internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, stateOverride: CommerceController? = null) {
+internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, stateOverride: CommerceController? = null, onReturnToPlans: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext)) }
@@ -458,12 +511,17 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     }
     if (view == "security") {
         com.gccwebos.android.portal.AccountPanel(account)
+        com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad)
     } else {
         val mode = when(view) { "ledger" -> CommerceMode.Ledger; "wallet", "recharge" -> CommerceMode.Wallet; else -> CommerceMode.Mine }
         CommercePanel(account, mode, state, autoLoad,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
             onLedger = { if (account.authenticated) { view = "ledger"; if (autoLoad) state.loadLedger() } else view = "security" })
         if (!account.authenticated) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
+    }
+    if (account.authenticated && account.purchaseReturnRef != null && onReturnToPlans != null) BrandCard {
+        SupportingText("已保留所选商品；充值到账后请返回重新报价。")
+        BrandButton("返回所选商品", onReturnToPlans, modifier = Modifier.testTag("mine-return-purchase"))
     }
     if (view == "mine") BrandCard(Modifier.testTag("mine-menu")) {
         TextButton(onClick = { view = if (account.authenticated) "wallet" else "security" }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("mine-wallet")) {

@@ -87,6 +87,7 @@ data class RechargeOrder(
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
+    val awaitingUpdate: Boolean get() = status !in setOf("credited", "failed_no_charge", "expired", "reconciliation_required")
     val terminal: Boolean get() = status in setOf("credited", "failed_no_charge", "expired")
     fun payableAt(now: Instant): Boolean = status in setOf("entry_ready", "pending") &&
         nextAction != null && now < expiresAt && now < nextAction.expiresAt

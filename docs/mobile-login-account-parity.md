@@ -46,3 +46,14 @@ Backend PR753/mobile PR13 independent data-pack retrieval/rotation remain unpubl
 Offline tests cover bounded persistence, revocation, transient failure, cancellation, unlink/restore races, local capability/account separation, repeated fresh preparation, terminal-state restart, strict catalog/orders/ledger and display-only nodes. Android tests cover login/local-shell gates, account switching, foreground return, TOTP, delayed/failed restoration, expiry, encrypted storage/tamper/clear, synthetic business screens and icon masks.
 
 Full exact-head Gradle/JUnit/lint, API36 instrumentation, freshly rebuilt JNI/API33 regression, independent review and actual screenshot inspection are required. Test sources or this document are not execution evidence; completed results belong in the PR receipt.
+
+## Integrated mobile flow corrections
+
+The follow-up integrates accepted main `cded4a5` without altering its debug-only native acceptance fixtures or provenance checks. Original head `5942a71d` failed Android Lint (`ContextCastToActivity`); lifecycle access now uses `LocalActivity`. That failure remains historical evidence, not a claimed pass.
+
+- F1: load one authoritative commerce model; wallet-first history requests only deferred transitions, legacy only legacy orders. An unavailable model never falls back. The visible default/category follows that model
+- F2: every ten seconds while the screen is RESUMED, an awaited, cancellable job rereads only an already-known recharge order. It stops polling credited/failed/expired/reconciliation states; cancellation and session fences discard late success/error. It never calls the submission retry method or creates an order automatically
+- F3: native authenticated GET `/api/portal/security/current` shows strict server-returned authenticator/passkey/setup booleans with unknown/error/retry states. A 401 invalidates account state. No security mutation, secret or browser transport is introduced
+- F4: the current app session retains only the selected offer reference across navigation and payment browser return. My provides a return action; Plans resolves the current server catalog and explicitly fetches a fresh quote before a separately confirmed purchase. Signout/account change clears the selection. Process death does not restore this convenience selection; durable pending purchase/recharge recovery remains unchanged. No price, balance, quote or purchase instruction is retained by this shortcut
+
+These changes resolve the actionable native flow gaps within the stated scope. They do not claim pixel-identical frontend parity, process-persistent convenience selection, production payment completion, or passed Android instrumentation before its exact-head receipt.

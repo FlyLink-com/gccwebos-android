@@ -59,6 +59,9 @@ if lab_path.exists():
     assert permission.get(android + 'protectionLevel') == 'signature'
     lab_source = (ROOT / 'app/src/debug/java/com/gccwebos/android/vpn/LabVpnService.kt').read_text()
     assert '.addAllowedApplication(packageName)' in lab_source
+    assert '.addRoute("0.0.0.0", 0)' not in lab_source and '.addRoute("::", 0)' not in lab_source
+    assert '.addRoute("198.18.0.10", 32)' in lab_source and '.addRoute("172.19.0.2", 32)' in lab_source
+    assert 'BuildConfig.NATIVE_TUN_ACCEPTANCE' in lab_source
     assert '.allowBypass(' not in lab_source and '.allowFamily(' not in lab_source
     assert 'START_NOT_STICKY' in lab_source and 'stopSession()' in lab_source
     assert not (ROOT / 'app/src/main/jniLibs').exists(), 'Native lab binaries must not enter release source set'

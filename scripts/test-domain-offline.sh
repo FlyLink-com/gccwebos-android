@@ -6,7 +6,7 @@ cd -- "$(dirname -- "$0")/.."
 CP=$(printf '%s:' "$KOTLIN_TOOLS_DIR"/*.jar)
 mkdir -p .local-tests
 mapfile -t SRC < <(find app/src/main/java -name '*.kt' | grep -vE 'CommercePanel|SessionStore|LocalProfileStore|FileCommerceRecovery|MainActivity|AccountPanel|BrandTheme|DeliveryStore|UpdatePanel')
-mapfile -t TEST < <(find app/src/test -name '*.kt')
+mapfile -t TEST < <(find app/src/test app/src/acceptanceFixtures -name '*.kt')
 java -cp "$CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -jvm-target 17 \
   -classpath "$CP" -d .local-tests/all-tests.jar "${SRC[@]}" "${TEST[@]}"
 CLASSES=$(python3 - <<'PY'

@@ -37,6 +37,30 @@ class CommerceRepositoryTest {
     }
     private val quote get() = CommerceJson.quote(CommerceFixtures.quote, CommerceModel.LEGACY)
     private val topup get() = CommerceJson.rechargeOffers(CommerceFixtures.rechargeOffers).single()
+    @Test fun automaticRechargeReadNeverReplaysUnknownSubmissionAndStopsTerminalPolling() = runTest {
+        val wire = Wire(); val store = Store(); val repo = repository(wire, store)
+        store.save("account_a", PendingCommerce("recharge", null, "offer_fixture", "key_fixture"))
+        assertNull(repo.currentRecharge()); assertTrue(wire.calls.isEmpty())
+        val order = CommerceJson.rechargeOrder(CommerceFixtures.rechargeOrder)
+        for (status in listOf("credited", "failed_no_charge", "expired", "reconciliation_required")) assertFalse(order.copy(status = status).awaitingUpdate)
+        for (status in listOf("entry_ready", "pending", "payment_verified")) assertTrue(order.copy(status = status).awaitingUpdate)
+    }
+    @Test fun historyUsesOnlyTheLoadedModelRouteAndNeverFallsBack() = runTest {
+        for (deferred in listOf(false, true)) {
+            val wire = Wire(); val repo = repository(wire, Store()); load(repo, wire, deferred)
+            wire.replies += WireResponse(200, if (deferred) "{\"transitions\":[]}" else "{\"orders\":[],\"nextCursor\":null}")
+            val selected = if (deferred) CommerceModel.WALLET_FIRST else CommerceModel.LEGACY
+            val result = repo.purchaseHistory(selected)
+            assertEquals(listOf("/api/portal/commerce/model", if (deferred) "/api/portal/commerce/deferred/transitions" else "/api/portal/commerce/orders?limit=20"), wire.calls.map { it.path })
+            assertEquals(deferred, result.first == null); assertEquals(!deferred, result.second == null)
+            val wrong = if (deferred) CommerceModel.LEGACY else CommerceModel.WALLET_FIRST
+            try { repo.purchaseHistory(wrong); fail() } catch (_: IllegalArgumentException) { }
+            assertEquals(2, wire.calls.size)
+        }
+        val wire = Wire(); val repo = repository(wire, Store())
+        try { repo.purchaseHistory(CommerceModel.LEGACY); fail() } catch (_: IllegalArgumentException) { }
+        assertTrue(wire.calls.isEmpty())
+    }
     @Test fun purchaseKeyIsDurableBeforeMutationAndInHeaderOnly() = runTest {
         val wire=Wire(); val store=Store(); val repo=repository(wire,store); load(repo,wire)
         wire.replies += WireResponse(201,CommerceFixtures.order)

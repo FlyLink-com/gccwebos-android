@@ -136,6 +136,12 @@ class PortalRepository(private val transport: PortalTransport, private val store
         } }
     }
 
+    suspend fun security(): AccountSecurity = mutex.withLock { guarded {
+        val epoch = generation.get(); val active = activeSession()
+        val response = transport.request("/api/portal/security/current", session = active.token)
+        expectCurrent(response, setOf(200), epoch); checkGeneration(epoch); activeSession()
+        PortalJson.security(response.body)
+    } }
     suspend fun refresh(): Resource = mutex.withLock { guarded { refreshLocked() } }
     private suspend fun refreshLocked(epoch: Long = generation.get()): Resource {
         // Failed or superseded refreshes must not leave an old profile eligible for use.

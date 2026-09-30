@@ -5,6 +5,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.activity.compose.LocalActivity
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -67,7 +68,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     val scope = rememberCoroutineScope()
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = remember(accountOverride) { accountOverride ?: AccountController(productionRepository(context), scope) }
-    val lifecycle = (LocalContext.current as? ComponentActivity)?.lifecycle
+    val lifecycle = (LocalActivity.current as? ComponentActivity)?.lifecycle
     LaunchedEffect(account) { if (accountOverride == null) account.restore() }
     DisposableEffect(account, lifecycle) {
         var leftForeground = false
@@ -230,7 +231,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 }
                 Destination.Plans -> {
                     PageTitle("选择套餐", "套餐与报价以服务器返回为准。")
-                    CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce)
+                    CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce, onRecharge = openAccount)
                     if (!account.authenticated) BrandButton("登录查看套餐", openAccount)
                     ResourceCard(account)
                 }
@@ -240,7 +241,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 }
                 Destination.Profile -> {
                     LaunchedEffect(Unit) { if (!account.authenticated && account.localSubscription.hasProfile) account.restoreAccount() }
-                    com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride)
+                    com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans)
                     TelegramPanel()
                     BrandCard(Modifier.testTag("permissions-status")) {
                         Text("连接权限与后台运行", style = MaterialTheme.typography.titleMedium)

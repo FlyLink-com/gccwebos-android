@@ -88,3 +88,5 @@ class OriginPolicy(apiOrigin: String, subscriptionOrigins: Set<String>) {
 
 internal fun sessionBinding(token: Secret): String = java.security.MessageDigest.getInstance("SHA-256")
     .digest(token.value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+data class AccountSecurity(val authenticatorBound: Boolean, val initialAccount: Boolean, val passkeyEnabled: Boolean, val passkeyExported: Boolean, val setupRequired: Boolean)

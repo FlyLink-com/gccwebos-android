@@ -1,6 +1,10 @@
 package com.gccwebos.android.portal
 
 import java.time.Instant
+import com.gccwebos.android.core.*
+import java.io.File
+import java.nio.file.Files
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -37,8 +41,10 @@ class SubscriptionImportTest {
     private class Wire : PortalTransport {
         val replies = ArrayDeque<WireResponse>()
         val calls = mutableListOf<Pair<String, String?>>()
+        var requestHook: suspend (String) -> Unit = {}
         override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
             calls += path to body
+            requestHook(path)
             return replies.removeFirst()
         }
     }
@@ -46,13 +52,14 @@ class SubscriptionImportTest {
         val wire = Wire()
         var now = start
         var elapsed = 0L
+        var expectDurableAck = true
         var downloads = 0
         var raw = yaml.toByteArray()
         var downloadFailure: PortalFailure.Reason? = null
         var downloadHook: suspend () -> Unit = {}
         val repo = PortalRepository(wire, store, policy, { elapsed }, { now }, SubscriptionSource { url ->
             assertEquals("https://sub.invalid/sub/a/fixture", url.value)
-            assertFalse(store.value!!.pendingAck)
+            if (expectDurableAck) assertFalse(store.value!!.pendingAck)
             downloads++
             downloadHook()
             downloadFailure?.let { throw PortalFailure(it) }
@@ -285,4 +292,340 @@ class SubscriptionImportTest {
         assertEquals(2, h.downloads)
         assertEquals(1, h.wire.calls.count { it.first.endsWith("/setup") })
     }
+    private inner class PreparedHarness(val h: Harness, scope: CoroutineScope,
+        resolver: ConnectionLineResolver = ConnectionLineResolver { _, requested ->
+            ResolvedConnectionLine(requested ?: "synthetic-line-a", 0)
+        }) : AutoCloseable {
+        val directory = Files.createTempDirectory("fresh-config-test").toFile()
+        val file = File(directory, "prepared-connection.json")
+        val events = mutableListOf<String>()
+        var permission: suspend () -> Boolean = { true }
+        var starts = 0
+        val gateway = FreshConnectionConfigGateway(h.repo, resolver, AtomicPreparedConfigStore(directory))
+        val coordinator = ConnectionCoordinator(
+            object : AccountGateway { override suspend fun isAuthenticated() = true },
+            object : EntitlementGateway { override suspend fun current() = AccessDecision() },
+            gateway,
+            object : PermissionGateway { override suspend fun hasVpnPermission() = permission() },
+            object : AtomicActivationTunnel {
+                override suspend fun start(config: AuthorizedConfig): Boolean = error("Unfenced start")
+                override fun startAtomically(config: AuthorizedConfig): Boolean {
+                    assertTrue(file.isFile)
+                    val bytes = config.copyMaterial()
+                    try { assertArrayEquals(bytes, file.readBytes()) } finally { bytes.fill(0) }
+                    events += "start"; starts++; return true
+                }
+                override suspend fun stop() { events += "stop" }
+            },
+            object : TrafficProbe { override suspend fun isUsable() = true }, scope)
+        override fun close() { directory.deleteRecursively() }
+        fun next(model: String = "wallet_first_unique_v1") {
+            h.raw = yaml.toByteArray(); h.overview(available = model == "legacy")
+            h.wire.replies += WireResponse(200, """{"commerceModel":"$model"}""")
+        }
+    }
+
+    @Test fun everyAdmittedConnectReconnectAndSwitchRefreshesDownloadsAndWritesBeforeStart() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next(); assertEquals(ConnectionState.Connected("synthetic-line-a"), p.coordinator.connect())
+            // An identical active connect remains the documented coalesced command, not a restart.
+            assertEquals(ConnectionState.Connected("synthetic-line-a"), p.coordinator.connect())
+            assertEquals(1, h.downloads)
+            p.next(); p.coordinator.reconnect()
+            p.next(); h.raw = yaml.replace("not-a-real-password", "new-synthetic-password").toByteArray()
+            assertEquals(ConnectionState.Connected("synthetic-line-b"), p.coordinator.switchLine("synthetic-line-b"))
+            assertTrue(p.file.readText().contains("new-synthetic-password"))
+            p.coordinator.disconnect(); p.next(); p.coordinator.connect()
+            assertEquals(4, h.downloads); assertEquals(4, p.starts)
+            assertEquals(4, h.wire.calls.count { it.first.endsWith("/overview") })
+            assertNull(h.repo.copyImportedConfig())
+            p.coordinator.close()
+        }
+    }
+    @Test fun failedFreshDownloadNeverReusesOldFileOrCachedPreview() = runTest {
+        val h = Harness(); h.successfulImport()
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next(); p.coordinator.connect(); val old = p.file.readBytes()
+            p.next(); h.downloadFailure = PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE
+            assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), p.coordinator.reconnect())
+            assertEquals(1, p.starts); assertArrayEquals(old, p.file.readBytes())
+            assertNull(h.repo.copyImportedConfig()); p.coordinator.close()
+        }
+    }
+    @Test fun stalePermissionAttemptCannotApplyAfterNewerSwitch() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+            p.permission = { waiting.complete(Unit); release.await(); true }
+            p.next(); val old = async { p.coordinator.connect() }; waiting.await()
+            p.permission = { true }; p.next()
+            assertEquals(ConnectionState.Connected("synthetic-line-b"), p.coordinator.switchLine("synthetic-line-b"))
+            release.complete(Unit); assertEquals(ConnectionState.Disconnected, old.await())
+            assertEquals(1, p.starts); assertEquals(2, h.downloads); p.coordinator.close()
+        }
+    }
+    @Test fun logoutAfterPreparationBeforePermissionNeverWritesOrStarts() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.permission = { h.repo.logout(); true }; p.next()
+            assertEquals(ConnectionState.Disconnected, p.coordinator.connect())
+            assertEquals(0, p.starts); assertFalse(p.file.exists()); p.coordinator.close()
+        }
+    }
+    @Test fun newLoginOrResourceRefreshInvalidatesPreparedMaterialBeforeActivation() = runTest {
+        for (relogin in listOf(false, true)) {
+            val h = Harness(); h.saved(); h.login()
+            PreparedHarness(h, backgroundScope).use { p ->
+                p.permission = {
+                    if (relogin) h.login("new-session")
+                    else { h.overview(case = "none"); h.repo.refresh() }
+                    true
+                }
+                p.next(); val result = p.coordinator.connect()
+                assertTrue(result !is ConnectionState.Connected)
+                assertEquals(0, p.starts); assertFalse(p.file.exists()); p.coordinator.close()
+            }
+        }
+    }
+    @Test fun invalidOrUnresolvedLineNeverWritesOrStarts() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope, ConnectionLineResolver { _, _ -> null }).use { p ->
+            p.next(); assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), p.coordinator.connect())
+            assertEquals(0, h.downloads); assertEquals(0, p.starts); assertFalse(p.file.exists())
+            p.coordinator.close()
+        }
+    }
+    @Test fun restartedPreparationFetchesNewBytesRatherThanReadingPriorConfigFile() = runTest {
+        val first = Harness(); first.successfulImport()
+        val restarted = Harness(first.store); restarted.login("new-session")
+        PreparedHarness(restarted, backgroundScope).use { p ->
+            p.file.writeText("stale configuration must never be consumed")
+            p.next(); assertTrue(p.coordinator.connect() is ConnectionState.Connected)
+            assertEquals(1, restarted.downloads); assertFalse(p.file.readText().contains("stale"))
+            p.coordinator.close()
+        }
+    }
+    @Test fun atomicWriteFailureDoesNotStartEngineOrReplaceOldConfiguration() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            // A directory at the destination cannot be atomically replaced by the config file.
+            assertTrue(p.file.mkdir()); File(p.file, "old").writeText("preserve")
+            p.next(); assertEquals(ConnectionState.Failed(Failure.TUNNEL_FAILED), p.coordinator.connect())
+            assertEquals(0, p.starts); assertEquals("preserve", File(p.file, "old").readText())
+            assertFalse(p.directory.list()!!.any { it.endsWith(".tmp") }); p.coordinator.close()
+        }
+    }
+
+    @Test fun legacyRereadsSetupAfterAckAndAcrossRestartWithoutAdoptingOldPendingReceipt() = runTest {
+        val h = Harness(); h.saved(pending = true, token = "old-session")
+        val old = h.store.value; h.expectDurableAck = false; h.login("new-session")
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next("legacy"); h.delivery(); assertTrue(p.coordinator.connect() is ConnectionState.Connected)
+            p.next("legacy"); h.delivery(); assertTrue(p.coordinator.reconnect() is ConnectionState.Connected)
+            assertSame(old, h.store.value)
+            val setups = h.wire.calls.filter { it.first.endsWith("/setup") }
+            assertEquals(2, setups.size)
+            assertNotEquals(JSONObject(setups[0].second!!).getString("idempotencyKey"),
+                JSONObject(setups[1].second!!).getString("idempotencyKey"))
+            assertEquals(2, h.downloads); p.coordinator.close()
+        }
+        val restarted = Harness(); restarted.expectDurableAck = false; restarted.login("third-session")
+        PreparedHarness(restarted, backgroundScope).use { p ->
+            p.next("legacy"); restarted.delivery()
+            assertTrue(p.coordinator.connect() is ConnectionState.Connected)
+            assertNull(restarted.store.value); p.coordinator.close()
+        }
+    }
+    @Test fun freshWalletPendingNewSessionStillBlocksAndPreservesOriginalKey() = runTest {
+        val h = Harness(); h.saved(pending = true, token = "old-session"); val before = h.store.value
+        h.login("new-session")
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next(); assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), p.coordinator.connect())
+            assertSame(before, h.store.value); assertEquals(0, h.downloads); assertEquals(0, p.starts)
+            assertFalse(h.wire.calls.any { it.first.endsWith("/setup") }); p.coordinator.close()
+        }
+    }
+    @Test fun unknownCommerceModelFailsClosedWithoutClaimOrOldFileActivation() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next("future_unknown"); p.file.writeText("old")
+            assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), p.coordinator.connect())
+            assertEquals(0, h.downloads); assertEquals(0, p.starts); assertEquals("old", p.file.readText())
+            p.coordinator.close()
+        }
+    }
+
+    @Test fun freshWalletRetriesPersistedKeyAndPendingAckWithoutAnotherClaim() = runTest {
+        val h = Harness(); h.login()
+        h.store.value = DeliveryRecord("a@example.invalid", sessionBinding(Secret("session_fixture")), reference, "retained-key")
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next(); h.delivery(503)
+            assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), p.coordinator.connect())
+            assertEquals(0, h.downloads); assertEquals(0, p.starts)
+            p.next(); h.wire.replies += WireResponse(204, "")
+            assertTrue(p.coordinator.reconnect() is ConnectionState.Connected)
+            val setup = h.wire.calls.single { it.first.endsWith("/setup") }
+            assertEquals("retained-key", JSONObject(setup.second!!).getString("idempotencyKey"))
+            assertEquals(2, h.wire.calls.count { it.first.endsWith("/ack") }); p.coordinator.close()
+        }
+    }
+    @Test fun lateCancelledDownloadIsWipedAndCannotApplyAheadOfNewAttempt() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+            p.next(); val stale = h.raw
+            h.downloadHook = { waiting.complete(Unit); kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { release.await() } }
+            val first = async { p.coordinator.connect() }; waiting.await()
+            h.downloadHook = {}; h.overview(available = false)
+            h.wire.replies += WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+            val second = async { p.coordinator.switchLine("synthetic-line-b") }; runCurrent()
+            release.complete(Unit); assertEquals(ConnectionState.Disconnected, first.await())
+            // The source deliberately returned the old (now wiped) array again: fail closed,
+            // proving the late first result did not get applied or become a cache fallback.
+            assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), second.await())
+            assertTrue(stale.all { it == 0.toByte() }); assertEquals(0, p.starts); assertFalse(p.file.exists())
+            p.coordinator.close()
+        }
+    }
+    @Test fun observedProtected401BetweenPreparationAndStartInvalidatesAdmission() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next(); p.permission = {
+                h.wire.replies += WireResponse(401, "")
+                try { h.repo.commerce("/api/portal/coins/wallet"); fail() } catch (_: PortalFailure) { }
+                true
+            }
+            assertEquals(ConnectionState.Disconnected, p.coordinator.connect())
+            assertEquals(0, p.starts); assertFalse(p.file.exists()); p.coordinator.close()
+        }
+    }
+
+    @Test fun sessionOrResourceExpiryWhileWaitingPermissionBlocksActivation() = runTest {
+        for (sessionExpiry in listOf(true, false)) {
+            val h = Harness(); h.saved(); h.login()
+            PreparedHarness(h, backgroundScope).use { p ->
+                if (sessionExpiry) p.next()
+                else {
+                    h.overview(available = false, expiresAt = "2026-09-30T00:01:00.000Z")
+                    h.wire.replies += WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                }
+                p.permission = { if (sessionExpiry) h.elapsed = 1800000 else h.now = start.plusSeconds(61); true }
+                assertTrue(p.coordinator.connect() !is ConnectionState.Connected)
+                assertEquals(0, p.starts); assertFalse(p.file.exists()); p.coordinator.close()
+            }
+        }
+    }
+    @Test fun deniedPermissionNeverWritesOrActivatesPreparedMaterial() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope).use { p ->
+            p.next(); p.permission = { false }
+            assertEquals(ConnectionState.Failed(Failure.PERMISSION_DENIED), p.coordinator.connect())
+            assertEquals(1, h.downloads); assertEquals(0, p.starts); assertFalse(p.file.exists())
+            p.coordinator.close()
+        }
+    }
+    @Test fun resolverSelectsSecondExplicitlyMappedNodeWithoutInventingIndexIdentity() = runTest {
+        val h = Harness(); h.saved(); h.login()
+        PreparedHarness(h, backgroundScope, ConnectionLineResolver { _, requested ->
+            if (requested == "synthetic-authoritative-b") ResolvedConnectionLine(requested, 1) else null
+        }).use { p ->
+            p.next()
+            h.raw = """
+                proxies:
+                  - {name: one, type: ss, server: 192.0.2.1, port: 443, cipher: aes-128-gcm, password: synthetic-first}
+                  - {name: two, type: ss, server: 192.0.2.2, port: 443, cipher: aes-128-gcm, password: synthetic-second}
+            """.trimIndent().toByteArray()
+            assertEquals(ConnectionState.Connected("synthetic-authoritative-b"), p.coordinator.switchLine("synthetic-authoritative-b"))
+            assertTrue(p.file.readText().contains("synthetic-second")); assertFalse(p.file.readText().contains("synthetic-first"))
+            p.coordinator.close()
+        }
+    }
+
+    @Test fun queuedOlderLoginCannotAdoptNewerFailedLoginGeneration() = runTest {
+        val h = Harness(); h.saved(); h.login(); h.overview(available = false)
+        val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.downloadHook = { waiting.complete(Unit); release.await() }
+        val importing = async { runCatching { h.repo.refreshAndImport() } }; waiting.await()
+        val older = async { runCatching { h.repo.login("older@example.invalid", "synthetic", HumanChallenge("fixture", "1+2"), "3") } }
+        runCurrent()
+        val newer = async { runCatching { h.repo.login("newer@example.invalid", "synthetic", HumanChallenge("fixture", "1+2"), "3") } }
+        runCurrent(); h.wire.replies += WireResponse(401, ""); release.complete(Unit)
+        assertTrue(importing.await().exceptionOrNull() is CancellationException)
+        assertTrue(older.await().exceptionOrNull() is CancellationException)
+        assertEquals(PortalFailure.Reason.LOGIN_FAILED, (newer.await().exceptionOrNull() as PortalFailure).reason)
+        assertEquals(2, h.wire.calls.count { it.first.endsWith("/password/session") })
+        try { h.repo.copyImportedConfig(); fail() } catch (e: PortalFailure) {
+            assertEquals(PortalFailure.Reason.SESSION_EXPIRED, e.reason)
+        }
+    }
+    @Test fun queuedPreparationCannotAdoptLogoutGenerationWhileOldSessionStillExists() = runTest {
+        val h = Harness(); h.saved(); h.login(); h.overview(available = false)
+        val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.downloadHook = { waiting.complete(Unit); release.await() }
+        val importing = async { runCatching { h.repo.refreshAndImport() } }; waiting.await()
+        PreparedHarness(h, backgroundScope).use { p ->
+            val preparing = async { p.coordinator.connect() }; runCurrent()
+            val logout = launch { h.repo.logout() }; runCurrent(); release.complete(Unit)
+            assertTrue(importing.await().exceptionOrNull() is CancellationException)
+            assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), preparing.await())
+            logout.join(); assertEquals(0, p.starts); assertFalse(p.file.exists())
+            assertEquals(1, h.wire.calls.count { it.first.endsWith("/overview") }); p.coordinator.close()
+        }
+    }
+    @Test fun queuedTotpCannotAdoptANewerFailedLoginGeneration() = runTest {
+        val h = Harness(); val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.wire.requestHook = { path -> if (path.endsWith("/password/session")) { waiting.complete(Unit); release.await() } }
+        h.wire.replies += WireResponse(202, """{"challenge":{"status":"second_factor_required","availableFactors":["totp"],"challengeRef":"older-challenge","expiresAt":"2026-09-30T00:05:00Z"}}""")
+        val first = async { runCatching { h.repo.login("first@example.invalid", "synthetic", HumanChallenge("fixture", "1+2"), "3") } }
+        waiting.await()
+        val totp = async { runCatching { h.repo.totp("older-challenge", "123456") } }; runCurrent()
+        val newer = async { runCatching { h.repo.login("newer@example.invalid", "synthetic", HumanChallenge("fixture", "1+2"), "3") } }; runCurrent()
+        h.wire.replies += WireResponse(401, ""); h.wire.requestHook = {}; release.complete(Unit)
+        assertTrue(first.await().exceptionOrNull() is CancellationException)
+        assertTrue(totp.await().exceptionOrNull() is CancellationException)
+        assertEquals(PortalFailure.Reason.LOGIN_FAILED, (newer.await().exceptionOrNull() as PortalFailure).reason)
+        assertFalse(h.wire.calls.any { it.first.endsWith("/second-factor") })
+        try { h.repo.copyImportedConfig(); fail() } catch (e: PortalFailure) {
+            assertEquals(PortalFailure.Reason.SESSION_EXPIRED, e.reason)
+        }
+    }
+
+    @Test fun cancelledLoginIgnoresLateSuccessfulTransportResponse() = runTest {
+        val h = Harness(); val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.wire.requestHook = { waiting.complete(Unit); kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { release.await() } }
+        val login = launch { h.login() }; waiting.await(); login.cancel(); release.complete(Unit); login.join()
+        try { h.repo.copyImportedConfig(); fail() } catch (e: PortalFailure) {
+            assertEquals(PortalFailure.Reason.SESSION_EXPIRED, e.reason)
+        }
+        assertNull(h.store.value)
+    }
+
+    @Test fun oldProtected401CannotCancelTheNewerLoginAlreadyQueued() = runTest {
+        val h = Harness(); h.login()
+        val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.wire.requestHook = { path -> if (path.endsWith("/overview")) { waiting.complete(Unit); release.await() } }
+        h.wire.replies += WireResponse(401, "")
+        val old = async { runCatching { h.repo.refresh() } }; waiting.await()
+        val newer = async { h.login("new-session") }; runCurrent(); release.complete(Unit)
+        assertTrue(old.await().exceptionOrNull() is CancellationException)
+        newer.await(); assertNotNull(h.repo.commerceSessionBinding())
+        assertEquals(2, h.wire.calls.count { it.first.endsWith("/password/session") })
+    }
+
+    @Test fun queuedPreparationNullSessionCannotCancelNewerQueuedLogin() = runTest {
+        val h = Harness(); h.saved(); h.login(); h.overview(available = false)
+        val waiting = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.downloadHook = { waiting.complete(Unit); release.await() }
+        val old = async { runCatching { h.repo.refreshAndImport() } }; waiting.await()
+        PreparedHarness(h, backgroundScope).use { p ->
+            val preparation = async { p.coordinator.connect() }; runCurrent()
+            val login = async { h.login("new-session") }; runCurrent(); release.complete(Unit)
+            assertTrue(old.await().exceptionOrNull() is CancellationException)
+            assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), preparation.await())
+            login.await(); assertNotNull(h.repo.commerceSessionBinding())
+            assertEquals(0, p.starts); assertFalse(p.file.exists()); p.coordinator.close()
+        }
+    }
+
 }

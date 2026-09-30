@@ -1,0 +1,366 @@
+package com.gccwebos.android
+
+import android.graphics.Bitmap
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.test.platform.app.InstrumentationRegistry
+import com.gccwebos.android.commerce.*
+import com.gccwebos.android.portal.*
+import com.gccwebos.android.vpn.SafeProxyConfig
+import java.io.File
+import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+
+class MobileParityUiTest {
+    @get:Rule val compose = createComposeRule()
+    private val at = Instant.parse("2026-09-30T00:00:00Z")
+    private val policy = OriginPolicy("https://portal.invalid", setOf("https://sub.invalid"))
+    private val empty = object : DeliveryStore {
+        override fun read(): DeliveryRecord? = null
+        override fun save(record: DeliveryRecord) = Unit
+        override fun clear() = Unit
+    }
+    private fun sessions() = MemorySessionStore().apply { save(SavedSession(Secret("native_synthetic"), "fixture@example.invalid", at.plusSeconds(1800), 1800000, at, 0)) }
+    private fun capture(name: String) {
+        compose.waitForIdle()
+        val dir = File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null), "ui-evidence").apply { mkdirs() }
+        File(dir, "$name.png").outputStream().use { compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+    @Test fun savedSessionCannotExposeHomeUntilServerValidationCompletes() {
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>(); val saved = sessions()
+        lateinit var state: AccountController
+        var reads = 0
+        val wire = object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                assertEquals("/api/portal/resources/current/overview", path)
+                if (++reads == 1) { started.complete(Unit); release.await() }
+                return WireResponse(200, """{"resource":{"state":"none"}}""")
+            }
+        }
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}, sessions = saved), scope).apply { restore() } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.waitUntil(10_000) { started.isCompleted }
+        compose.onNodeWithTag("session-checking").assertExists()
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        capture("session-restore-gated")
+        compose.runOnIdle { release.complete(Unit) }
+        compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.runOnIdle { assertEquals("fixture@example.invalid", state.account); assertEquals(2, reads) }
+    }
+    @Test fun restoreNetworkFailureStaysGatedAndCanRetryWithoutPassword() {
+        val saved = sessions(); var fail = true; lateinit var state: AccountController
+        val wire = object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                if (fail) throw PortalFailure(PortalFailure.Reason.NETWORK)
+                return WireResponse(200, """{"resource":{"state":"none"}}""")
+            }
+        }
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}, sessions = saved), scope).apply { restore() } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.waitUntil(10_000) { !state.busy && state.restorationPending }
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("session-restore-retry").performScrollTo().assertIsDisplayed()
+        capture("session-restore-retry")
+        compose.runOnIdle { assertNotNull(saved.read()); fail = false }
+        compose.onNodeWithTag("session-restore-retry").performClick()
+        compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.onNodeWithTag("nav-Connect").assertExists()
+    }
+    @Test fun revokedSavedSessionReturnsToLoginAndClearsToken() {
+        val saved = sessions(); lateinit var state: AccountController
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(PortalRepository(object : PortalTransport {
+                override suspend fun request(path: String, body: String?, session: Secret?) = WireResponse(401, "")
+            }, empty, policy, {0}, {at}, sessions = saved), scope).apply { restore() } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.waitUntil(10_000) { !state.busy }
+        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.runOnIdle { assertNull(saved.read()); assertFalse(state.authenticated) }
+    }
+    @Test fun authenticatorRoundTripRetainsTicketAndCanCompleteLogin() {
+        lateinit var state: AccountController
+        val calls = mutableListOf<String>()
+        val wire = object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                calls += path
+                return when(path) {
+                    "/api/portal/password/session" -> WireResponse(202, """{"challenge":{"status":"second_factor_required","availableFactors":["totp"],"challengeRef":"synthetic-totp","expiresAt":"2026-09-30T00:05:00Z"}}""")
+                    "/api/portal/password/second-factor" -> WireResponse(200, """{"session":{"sessionRef":"native_synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:30:00Z"}}""")
+                    "/api/portal/resources/current/overview" -> WireResponse(200, """{"resource":{"state":"none"}}""")
+                    else -> error("Unexpected offline path")
+                }
+            }
+        }
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}), scope).apply {
+                account = "fixture@example.invalid"; password = "synthetic"; answer = "3"; challenge = HumanChallenge("synthetic", "1 + 2")
+            } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.runOnIdle { state.login() }
+        compose.waitUntil(10_000) { state.factorReference != null && !state.busy }
+        compose.runOnIdle { state.onForeground(); assertEquals("synthetic-totp", state.factorReference); assertEquals(1, calls.size) }
+        compose.onNodeWithTag("totp-code").performScrollTo().performTextInput("123456")
+        compose.runOnIdle { state.totp() }
+        compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.onNodeWithTag("nav-Connect").assertExists()
+    }
+    @Test fun foregroundWhileBusyClosesGateAndValidatesAfterReadCompletes() {
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        lateinit var state: AccountController; var reads = 0
+        val wire = object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                if (path.endsWith("/password/session")) return WireResponse(200, """{"session":{"sessionRef":"native_synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:30:00Z"}}""")
+                assertEquals("/api/portal/resources/current/overview", path)
+                if (++reads == 1) { started.complete(Unit); release.await() }
+                return WireResponse(200, """{"resource":{"state":"none"}}""")
+            }
+        }
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}), scope).apply {
+                account = "fixture@example.invalid"; password = "synthetic"; answer = "3"; challenge = HumanChallenge("synthetic", "1 + 2")
+            } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.runOnIdle { state.login() }; compose.waitUntil(10_000) { started.isCompleted }
+        compose.runOnIdle { state.onForeground(); assertTrue(state.foregroundCheckPending) }
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.runOnIdle { release.complete(Unit) }
+        compose.waitUntil(10_000) { state.authenticated && !state.busy && !state.foregroundCheckPending }
+        compose.runOnIdle { assertEquals(3, reads) }
+        compose.onNodeWithTag("nav-Connect").assertExists()
+    }
+    @Test fun foregroundIdleSessionExpiryClosesHomeWithoutAnotherRequest() {
+        lateinit var state: AccountController; val saved = MemorySessionStore()
+        val wire = object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse =
+                if (path.endsWith("/password/session")) WireResponse(200, """{"session":{"sessionRef":"native_synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:00:05Z"}}""")
+                else WireResponse(200, """{"resource":{"state":"none"}}""")
+        }
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}, sessions = saved), scope).apply {
+                account = "fixture@example.invalid"; password = "synthetic"; answer = "3"; challenge = HumanChallenge("synthetic", "1 + 2")
+            } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.runOnIdle { state.login() }
+        compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.waitUntil(15_000) { !state.authenticated }
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("login-screen").assertExists()
+        compose.runOnIdle { assertNull(saved.read()) }
+    }
+    @Test fun logoutAdmissionSurvivesImmediateControllerScopeCancellation() {
+        val saved = sessions()
+        compose.runOnIdle {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+            val repo = PortalRepository(object : PortalTransport { override suspend fun request(path: String, body: String?, session: Secret?) = error("No network") }, empty, policy, {0}, {at}, sessions = saved)
+            val state = AccountController(repo, scope)
+            state.logout(); scope.cancel()
+            assertNull(saved.read()); assertFalse(state.authenticated)
+        }
+    }
+    @Test fun localProfileSurvivesPortalLogoutAndKeepsCommerceGated() {
+        lateinit var state: AccountController
+        val delivery = object : DeliveryStore {
+            var record: DeliveryRecord? = DeliveryRecord("fixture", "binding", "resource", "key", Secret("https://sub.invalid/sub/a/synthetic"), Secret("handoff"), false)
+            override fun read() = record
+            override fun save(record: DeliveryRecord) { this.record = record }
+            override fun clear() { record = null }
+        }
+        val profiles = MemoryLocalProfileStore()
+        val repo = PortalRepository(object : PortalTransport { override suspend fun request(path: String, body: String?, session: Secret?) = error("No Portal access for local shell") },
+            delivery, policy, {0}, {at}, SubscriptionSource { error("Cached UI does not connect") }, profiles = profiles)
+        val raw = """proxies:
+  - name: Synthetic retained subscription
+    type: ss
+    server: 192.0.2.10
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+""".toByteArray()
+        repo.localSubscriptions.remember(raw, delivery.record!!.url!!, Instant.parse("2099-09-30T00:00:00Z"))
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(repo, scope).apply { restore() } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
+        compose.runOnIdle { assertFalse(state.authenticated); state.logout() }
+        compose.waitUntil(10_000) { !state.busy }
+        compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
+        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
+        compose.onNodeWithTag("reset-cancel").performClick()
+        compose.runOnIdle { assertTrue(state.localSubscription.hasProfile) }
+        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
+        compose.onNodeWithTag("reset-confirm").performClick()
+        compose.waitUntil(10_000) { !state.localSubscription.hasProfile && !state.busy }
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("login-screen").assertExists()
+    }
+    @Test fun localProfileWalletBrowserReturnRevalidatesAccountInsteadOfSigningOut() {
+        lateinit var state: AccountController; var reads = 0
+        val delivery = object : DeliveryStore {
+            val record = DeliveryRecord("fixture@example.invalid", "binding", "resource", "key", Secret("https://sub.invalid/sub/a/synthetic"), Secret("handoff"), false)
+            override fun read() = record
+            override fun save(record: DeliveryRecord) = Unit
+            override fun clear() = Unit
+        }
+        val repo = PortalRepository(object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                assertEquals("/api/portal/resources/current/overview", path); reads++
+                return WireResponse(200, """{"resource":{"state":"none"}}""")
+            }
+        }, delivery, policy, {0}, {at}, SubscriptionSource { error("No subscription fetch for wallet validation") }, sessions = sessions())
+        repo.localSubscriptions.remember("""proxies:
+  - name: Synthetic local node
+    type: ss
+    server: 192.0.2.10
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+""".toByteArray(), delivery.record.url!!, Instant.parse("2099-09-30T00:00:00Z"))
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(repo, scope).apply { restore() } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
+        compose.runOnIdle { assertEquals(0, reads); state.restoreAccount() }
+        compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.runOnIdle { assertEquals(2, reads); state.onForeground() }
+        compose.waitUntil(10_000) { state.authenticated && !state.busy && !state.foregroundCheckPending }
+        compose.runOnIdle { assertEquals(4, reads); assertTrue(state.localSubscription.hasProfile) }
+    }
+    @Test fun walletAccountSwitchFailurePreservesSeparateLocalSubscription() {
+        lateinit var state: AccountController
+        val delivery = object : DeliveryStore {
+            var value: DeliveryRecord? = DeliveryRecord("account-a@example.invalid", "old-binding", "resource", "key", Secret("https://sub.invalid/sub/a/synthetic"), Secret("handoff"), false)
+            override fun read() = value
+            override fun save(record: DeliveryRecord) { value = record }
+            override fun clear() { value = null }
+        }
+        val profiles = MemoryLocalProfileStore()
+        val repo = PortalRepository(object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                if (path.endsWith("/password/session")) return WireResponse(200, """{"session":{"sessionRef":"native_account_b","accountId":"account-b@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:30:00Z"}}""")
+                assertEquals("/api/portal/resources/current/overview", path)
+                throw PortalFailure(PortalFailure.Reason.NETWORK)
+            }
+        }, delivery, policy, {0}, {at}, SubscriptionSource { error("Wallet login must not replace local subscription") }, profiles = profiles)
+        repo.localSubscriptions.remember("""proxies:
+  - name: Synthetic account A local node
+    type: ss
+    server: 192.0.2.10
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+""".toByteArray(), delivery.value!!.url!!, Instant.parse("2099-09-30T00:00:00Z"))
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { AccountController(repo, scope).apply { restore() } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
+        compose.runOnIdle {
+            state.account = "account-b@example.invalid"; state.password = "synthetic"; state.answer = "3"
+            state.challenge = HumanChallenge("synthetic", "1 + 2"); state.login()
+        }
+        compose.waitUntil(10_000) { state.authenticated && !state.busy && state.error != null }
+        compose.runOnIdle {
+            assertEquals("account-b@example.invalid", state.account)
+            assertEquals("Synthetic account A local node", state.localSubscription.nodes.single().name)
+            assertNull(delivery.value); state.logout()
+        }
+        compose.waitUntil(10_000) { !state.authenticated && !state.busy }
+        compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.runOnIdle { assertTrue(state.localSubscription.hasProfile); assertNotNull(profiles.read()?.also { it.close() }) }
+    }
+    @Test fun expiredLocalSubscriptionGuidesPurchaseWithoutInventingWalletAuthentication() {
+        lateinit var state: AccountController
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            state = remember { offlineUiAccount(scope).apply {
+                authenticated = false
+                localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.EXPIRED, hasProfile = true, hasCapability = true,
+                    validUntil = Instant.parse("2020-09-30T00:00:00Z"))
+            } }
+            AppShell(state, autoLoadCommerce = false)
+        }
+        compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertIsDisplayed()
+        capture("local-subscription-expired-renewal")
+        compose.onNodeWithTag("expired-subscription-renew").performClick()
+        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.runOnIdle { assertFalse(state.authenticated) }
+    }
+    @Test fun syntheticWalletAlipayCatalogAndOrderLayoutsRemainServerShaped() {
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val account = remember { offlineUiAccount(scope) }
+            val commerce = remember {
+                val recovery = object : CommerceRecovery {
+                    override fun read(binding: String, kind: String): PendingCommerce? = null
+                    override fun save(binding: String, value: PendingCommerce) = Unit
+                    override fun clear(binding: String, kind: String) = Unit
+                }
+                CommerceController(account, scope, recovery).apply {
+                    wallet = Wallet("active", 1, 1000, 150, 50, 1200, 0, 0)
+                    catalogLoaded = true
+                    offers = listOf(Offer("offer_synthetic", "version_synthetic", LocalizedText("合成验收年卡", "Synthetic plan"), LocalizedText("仅离线界面验收", "Offline only"), LocalizedNotices(emptyList(), emptyList()), 100, 10000, listOf("paid_coins"), 365, 100, 0))
+                    rechargeOffers = listOf(RechargeOffer("recharge_synthetic", 1, 100, 10000, "CNY", 2, listOf("alipay")))
+                    orderPage = OrderPage(emptyList()); rechargeHistory = emptyList(); transitions = emptyList()
+                }
+            }
+            AppShell(account, autoLoadCommerce = false, commerceOverride = commerce)
+        }
+        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextContains("1200 Coins")
+        capture("synthetic-home-balance-validity")
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("subscription-node-0").assertExists()
+        capture("synthetic-parsed-nodes")
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("catalog-data-packs").performScrollTo().performClick()
+        compose.onNodeWithText("当前暂无可购买流量包").assertExists()
+        capture("server-empty-data-packs")
+        compose.onNodeWithTag("nav-Orders").performClick()
+        compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
+        compose.onNodeWithText("暂无这类订单").assertExists()
+        capture("server-empty-order-history")
+        compose.onNodeWithTag("nav-Profile").performClick()
+        capture("synthetic-my-wallet-summary")
+        compose.onNodeWithTag("mine-recharge").performScrollTo().performClick()
+        compose.onNodeWithTag("recharge-select-recharge_synthetic").performScrollTo().assertIsDisplayed()
+        capture("synthetic-alipay-recharge")
+        compose.onNodeWithTag("recharge-select-recharge_synthetic").performClick()
+        compose.onNodeWithTag("recharge-cancel").performClick()
+        compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
+    }
+}

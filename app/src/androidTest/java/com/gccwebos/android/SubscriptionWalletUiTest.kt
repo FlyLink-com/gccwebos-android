@@ -134,10 +134,10 @@ class SubscriptionWalletUiTest {
 
     @Test fun launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage() {
         launchShell { authenticated = false }
-        compose.onNodeWithTag("brand-name").assertTextEquals("clash飞连vpn")
+        compose.onNodeWithTag("brand-name").assertTextEquals("clash|飞连")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.gccwebos.android.debug", context.packageName)
-        assertEquals("clash飞连vpn", context.packageManager.getApplicationLabel(context.applicationInfo).toString())
+        assertEquals("飞连vpn", context.packageManager.getApplicationLabel(context.applicationInfo).toString())
         val icon = context.packageManager.getApplicationIcon(context.packageName)
         assertTrue(icon is AdaptiveIconDrawable)
         icon.setBounds(0, 0, 192, 192)
@@ -245,7 +245,7 @@ class SubscriptionWalletUiTest {
         capture("none-font-200")
         compose.onNodeWithTag("guidance-dismiss").performClick()
         compose.runOnIdle { account.resource = available(days = 365) }
-        compose.onNodeWithTag("brand-name").performScrollTo().assertTextEquals("clash飞连vpn")
+        compose.onNodeWithTag("brand-name").performScrollTo().assertTextEquals("clash|飞连")
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertIsDisplayed()
         capture("countdown-font-200")
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()

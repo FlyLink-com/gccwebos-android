@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Layout-only reuse of the authorized avatar; the source PNG pixels are unchanged. -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:width="72dp" android:height="72dp" android:gravity="center">
-        <bitmap android:src="@drawable/brand_robot_avatar" android:gravity="fill" />
-    </item>
-</layer-list>
+<!-- Approved robot and clash|飞连 wordmark, uniformly scaled inside the adaptive safe zone. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="17%" android:insetTop="17%" android:insetRight="17%" android:insetBottom="17%">
+    <bitmap android:src="@drawable/launcher_user_robot" android:gravity="fill" />
+</inset>

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -24,22 +25,28 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-internal enum class CommerceMode { Plans, Wallet }
+internal enum class CommerceMode { Overview, Mine, Plans, Orders, Wallet, Ledger }
 internal class CommerceController(private val account: AccountController, private val scope: CoroutineScope,
-    private val storage: CommerceRecovery) {
+    private val storage: CommerceRecovery, private val includeHistory: Boolean = false) {
     var busy by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var wallet by mutableStateOf<Wallet?>(null)
     var offers by mutableStateOf<List<Offer>>(emptyList())
+    var catalogLoaded by mutableStateOf(false)
+    var ledgerPage by mutableStateOf<WalletLedgerPage?>(null)
     var rechargeOffers by mutableStateOf<List<RechargeOffer>>(emptyList())
     var quote by mutableStateOf<Quote?>(null)
     var purchase by mutableStateOf<PurchaseResult?>(null)
     var recharge by mutableStateOf<RechargeOrder?>(null)
     var pendingPurchase by mutableStateOf(false)
     var pendingRecharge by mutableStateOf(false)
+    var orderPage by mutableStateOf<OrderPage?>(null)
+    var rechargeHistory by mutableStateOf<List<RechargeOrder>?>(null)
+    var transitions by mutableStateOf<List<PurchaseResult.Deferred>?>(null)
     private var repo: CommerceRepository? = null
     private val epoch = account.authSessionGeneration
     fun load() = run {
+        orderPage = null; rechargeHistory = null; transitions = null; catalogLoaded = false
         quote = null; wallet = null; offers = emptyList(); rechargeOffers = emptyList(); purchase = null; recharge = null
         if (repo == null) {
             val session = account.commerceSessionBinding()
@@ -58,7 +65,26 @@ internal class CommerceController(private val account: AccountController, privat
         readPart { recharge = r.currentRecharge() }
         readPart { wallet = r.wallet() }
         readPart { rechargeOffers = r.rechargeOffers() }
-        readPart { r.loadModel(); offers = r.offers() }
+        readPart { r.loadModel(); offers = r.offers(); catalogLoaded = true }
+        if (includeHistory) {
+            readPart { orderPage = r.orderHistory() }
+            readPart { rechargeHistory = r.rechargeHistory() }
+            readPart { transitions = if (r.loadModel() == CommerceModel.WALLET_FIRST) r.transitionHistory() else emptyList() }
+        }
+    }
+    fun loadLedger(more: Boolean = false) = run {
+        val old = if (more) ledgerPage else null
+        if (!more) ledgerPage = null
+        val next = requireNotNull(repo).ledger(old?.nextCursor)
+        require(old == null || old.entries.none { entry -> next.entries.any { it.entryRef == entry.entryRef } })
+        ledgerPage = if (old == null) next else WalletLedgerPage(old.entries + next.entries, next.nextCursor)
+    }
+    fun moreOrders() = run {
+        val current = orderPage ?: return@run
+        val cursor = current.nextCursor ?: return@run
+        val next = requireNotNull(repo).orderHistory(cursor)
+        require(current.orders.none { old -> next.orders.any { it.ref == old.ref } })
+        orderPage = OrderPage(current.orders + next.orders, next.nextCursor)
     }
     private suspend fun readPart(action: suspend () -> Unit) {
         try { action() }
@@ -122,10 +148,13 @@ internal class CommerceController(private val account: AccountController, privat
 }
 
 @Composable
-internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true) {
+internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true,
+    onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext)) }
+    val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext), includeHistory = mode == CommerceMode.Orders) }
+    var orderCategory by remember(account.authSessionGeneration) { mutableStateOf("orders") }
+    var catalogCategory by remember(account.authSessionGeneration) { mutableStateOf("plan") }
     var selectedRecharge by remember(account.authSessionGeneration) { mutableStateOf<RechargeOffer?>(null) }
     var cancelConfirmation by remember { mutableStateOf(false) }
     var paymentReview by remember(account.authSessionGeneration) { mutableStateOf<RechargeOrder?>(null) }
@@ -141,36 +170,48 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
     }
-    if (!account.authenticated) {
+    if (!account.authenticated || account.restoring || account.foregroundCheckPending) {
         BrandCard(Modifier.testTag("commerce-signed-out")) { Text(if(mode == CommerceMode.Wallet) "登录后查看钱包" else "登录后查看套餐"); SupportingText("价格、余额与可购买商品由服务器确认。") }
         return
     }
-    BrandCard(Modifier.testTag("commerce-status")) {
+    if (mode != CommerceMode.Mine || state.error != null || state.busy) BrandCard(Modifier.testTag("commerce-status")) {
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
         BrandButton("刷新钱包与套餐", state::load, enabled = !state.busy, modifier = Modifier.testTag("commerce-refresh"))
     }
-    if (mode == CommerceMode.Wallet) {
+    if (mode == CommerceMode.Wallet || mode == CommerceMode.Overview || mode == CommerceMode.Mine) {
         BrandCard(Modifier.testTag("wallet-card")) {
-            Eyebrow("钱包余额")
-            Text(state.wallet?.let { formatCoins(it.spendableUnits) } ?: "尚未读取", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.testTag("wallet-balance"))
-            state.wallet?.let { w ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Eyebrow("可用余额")
+                    Text(state.wallet?.let { formatCoins(it.spendableUnits) } ?: "尚未读取", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.testTag("wallet-balance"))
+                }
+                if (androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.3f)
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_wallet_coin), null, modifier = Modifier.size(92.dp))
+            }
+            if (mode == CommerceMode.Mine) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                BrandButton("充值", { onRecharge?.invoke() }, enabled = !state.busy, modifier = Modifier.weight(1f).testTag("mine-recharge"))
+                OutlinedButton(onClick = { onLedger?.invoke() }, enabled = !state.busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp).testTag("mine-ledger")) { Text("账单明细  ›") }
+            }
+            if (mode != CommerceMode.Mine) state.wallet?.let { w ->
                 SupportingText("已充值 ${formatCoins(w.paidCoins)} · 赠送 ${formatCoins(w.bonusCoins)} · 奖励 ${formatCoins(w.rewardCoins)}")
                 SupportingText("冻结中 ${formatCoins(w.heldUnits)} · 待到账 ${formatCoins(w.pendingUnits)}")
                 SupportingText(when(w.status) { "active" -> "钱包可用"; "not_created" -> "钱包尚未创建"; "frozen" -> "钱包已冻结"; else -> "钱包已关闭" })
             }
             SupportingText("余额以本次成功查询为准；充值到账不等于套餐已购买。")
         }
-        if (!state.pendingRecharge) state.rechargeOffers.forEach { offer ->
+        if (mode == CommerceMode.Wallet) AlipayBadge()
+        if (mode == CommerceMode.Wallet && !state.pendingRecharge) state.rechargeOffers.forEach { offer ->
             BrandCard(Modifier.testTag("recharge-offer-${offer.offerRef}")) {
                 Text("充值 ${formatCoins(offer.paidCoinUnits)}", style = MaterialTheme.typography.titleLarge)
                 SupportingText(formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent))
-                SupportingText("支付方式：" + offer.paymentMethods.joinToString(" / "))
+                SupportingText(if ("alipay" in offer.paymentMethods) "支付宝 · 安全支付" else "当前原生版本暂不支持此支付方式")
+                SupportingText("支付方式以服务器返回为准：" + offer.paymentMethods.joinToString(" / "))
                 if ("alipay" !in offer.paymentMethods) SupportingText("当前原生版本暂不支持此支付方式")
-                BrandButton("选择充值", { selectedRecharge = offer }, enabled = !state.busy && "alipay" in offer.paymentMethods, modifier = Modifier.testTag("recharge-select-${offer.offerRef}"))
+                AlipayButton("选择支付宝充值", { selectedRecharge = offer }, enabled = !state.busy && "alipay" in offer.paymentMethods, modifier = Modifier.testTag("recharge-select-${offer.offerRef}"))
             }
         }
-        if (state.pendingRecharge) BrandCard(Modifier.testTag("recharge-order")) {
+        if (mode == CommerceMode.Wallet && state.pendingRecharge) BrandCard(Modifier.testTag("recharge-order")) {
             Text("当前充值", style = MaterialTheme.typography.titleLarge)
             val order = state.recharge
             SupportingText(order?.let { rechargeStatus(it.status) } ?: "上次提交结果待核对，请沿用原记录查询。")
@@ -179,17 +220,26 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             if (order != null && order.paymentMethod == "alipay" && order.adapterKey == "xsd_v1" && order.status in setOf("entry_ready", "pending") && order.nextAction != null &&
                 order.expiresAt > now && order.nextAction.expiresAt > now) {
                 SupportingText("付款方式：${order.paymentMethod} · 通道：${order.adapterKey}")
-                BrandButton("查看付款信息", { paymentReview = order }, enabled = !state.busy, modifier = Modifier.testTag("recharge-pay"))
+                AlipayButton("查看支付宝付款信息", { paymentReview = order }, enabled = !state.busy, modifier = Modifier.testTag("recharge-pay"))
             }
             if(order?.status in setOf("credited", "failed_no_charge", "expired")) BrandButton("核对完成，返回充值", state::finishRecharge, enabled = !state.busy)
             SupportingText("返回应用后请查询状态；不要因为页面关闭或等待到账重新付款。")
         }
-    } else {
-        if (!state.pendingPurchase) state.offers.forEach { offer ->
+    } else if (mode == CommerceMode.Plans) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilterChip(selected = catalogCategory == "plan", onClick = { catalogCategory = "plan" }, label = { Text("套餐") }, modifier = Modifier.testTag("catalog-plans"))
+            FilterChip(selected = catalogCategory == "data_pack", onClick = { catalogCategory = "data_pack" }, label = { Text("流量包") }, modifier = Modifier.testTag("catalog-data-packs"))
+        }
+        val shownOffers = state.offers.filter { it.category == catalogCategory }
+        if (shownOffers.isEmpty() && !state.busy) BrandCard {
+            Text(if (!state.catalogLoaded) "商品尚未读取" else if (catalogCategory == "data_pack") "当前暂无可购买流量包" else "当前暂无可购买套餐", style = MaterialTheme.typography.titleMedium)
+            SupportingText("只展示本次服务器返回的商品。未发布的商品、档位与价格不会出现在这里。")
+        }
+        if (!state.pendingPurchase) shownOffers.forEach { offer ->
             BrandCard(Modifier.testTag("plan-offer-${offer.offerRef}")) {
-                Text(if(offer.durationDays == 365L) "年卡365天" else "${offer.durationDays}天", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("plan-title-${offer.offerRef}"))
+                Text(if (offer.category == "data_pack") offer.title.zh else if(offer.durationDays == 365L) "年卡365天" else "${offer.durationDays}天", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("plan-title-${offer.offerRef}"))
                 Text(formatCoins(offer.baseCoinUnits), style = MaterialTheme.typography.headlineSmall)
-                SupportingText("每月流量 ${offer.monthlyTrafficGb} GB")
+                SupportingText(if (offer.category == "data_pack") "${offer.trafficGb} GB · 永久有效，用完为止" else "每月流量 ${offer.monthlyTrafficGb} GB")
                 SupportingText(offer.summary.zh)
                 offer.importantNotices.zh.forEach { SupportingText(it) }
                 BrandButton("查看实时报价", { state.preview(offer) }, enabled = !state.busy, modifier = Modifier.testTag("plan-quote-${offer.offerRef}"))
@@ -215,24 +265,66 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             if(done) BrandButton("完成并同步资源", state::finishPurchase, enabled = !state.busy)
         }
     }
+    if (mode == CommerceMode.Orders) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("orders" to "商城", "recharge" to "充值", "plans" to "套餐计划").forEach { (key, label) ->
+                FilterChip(selected = orderCategory == key, onClick = { orderCategory = key }, label = { Text(label) }, modifier = Modifier.testTag("orders-$key"))
+            }
+        }
+        when (orderCategory) {
+            "orders" -> {
+                val page = state.orderPage
+                HistoryState(page?.orders?.size, state.busy)
+                page?.orders?.forEach { order -> PurchaseHistoryCard(order) }
+                if (page?.nextCursor != null) BrandButton("加载更早订单", state::moreOrders, enabled = !state.busy)
+            }
+            "recharge" -> {
+                HistoryState(state.rechargeHistory?.size, state.busy)
+                state.rechargeHistory?.forEach { order -> BrandCard(Modifier.testTag("history-recharge-${order.orderRef}")) {
+                    if (order.paymentMethod == "alipay") AlipayBadge() else SupportingText("支付方式：${order.paymentMethod}")
+                    Text(formatMoney(order.amountMinor, order.currency, order.currencyExponent), style = MaterialTheme.typography.titleLarge)
+                    SupportingText("${formatCoins(order.expectedPaidCoinUnits)} · ${rechargeStatus(order.status)}")
+                    SupportingText("订单 ${order.orderRef}")
+                    SupportingText(localTime(order.createdAt))
+                } }
+            }
+            else -> {
+                HistoryState(state.transitions?.size, state.busy)
+                state.transitions?.forEach { order -> PurchaseHistoryCard(order) }
+            }
+        }
+        SupportingText("订单、支付与发放状态分别以服务器查询为准。关闭支付页面不代表到账；待核对订单请在钱包或套餐中恢复原记录。")
+    }
+    if (mode == CommerceMode.Ledger) {
+        BrandButton("刷新账单", { state.loadLedger() }, enabled = !state.busy)
+        HistoryState(state.ledgerPage?.entries?.size, state.busy, "账单")
+        state.ledgerPage?.entries?.forEach { entry -> BrandCard {
+            Text(ledgerLabel(entry.category), style = MaterialTheme.typography.titleMedium)
+            Text("${if (entry.totalDeltaUnits > 0) "+" else ""}${entry.totalDeltaUnits} Coins", style = MaterialTheme.typography.headlineSmall)
+            SupportingText(localTime(entry.occurredAt))
+            SupportingText("可用变动：${entry.availableDeltaUnits ?: "未单独提供"} · 预留变动：${entry.heldDeltaUnits ?: "未单独提供"}")
+            SupportingText("记录 ${entry.entryRef}")
+        } }
+        if (state.ledgerPage?.nextCursor != null) BrandButton("加载更早账单", { state.loadLedger(true) }, enabled = !state.busy)
+    }
     state.quote?.let { quote ->
         val valid = quote.expiresAt > now && quote.purchaseAvailability == "available"
-        AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, title = { Text("确认购买${quote.offer.durationDays}天套餐") },
+        AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, title = { Text(if (quote.offer.category == "data_pack") "确认购买${quote.offer.trafficGb} GB流量包" else "确认购买${quote.offer.durationDays}天套餐") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("服务平台：clash飞连vpn · portal.gccwebos.com")
+                Text("服务平台：clash|飞连 · portal.gccwebos.com")
                 Text("本次扣除：${formatCoins(quote.amountUnits)}")
-                Text("每月流量：${quote.offer.monthlyTrafficGb} GB")
+                Text(if (quote.offer.category == "data_pack") "流量：${quote.offer.trafficGb} GB；永久有效，用完为止" else "每月流量：${quote.offer.monthlyTrafficGb} GB")
                 Text("报价有效至：${localTime(quote.expiresAt)}")
                 quote.transition?.let { Text("服务器安排生效时间：${localTime(it.scheduledFor)}") }
                 quote.offer.importantNotices.zh.forEach { Text(it) }
                 if(!valid) Text(if(quote.expiresAt <= now) "报价已过期，请关闭后重新获取" else "余额不足，尚缺 ${formatCoins(quote.shortfallUnits)}。请前往我的充值，再重新获取报价。")
-                Text("确认后提交一次套餐订单；资源到账状态另行核对。")
+                Text("确认后提交一次商品订单；资源到账状态另行核对。")
             } }, confirmButton = { TextButton(onClick = state::confirmPurchase, enabled = valid && !state.busy, modifier = Modifier.testTag("purchase-confirm")) { Text("确认购买") } },
             dismissButton = { TextButton(onClick = { state.quote = null }, enabled = !state.busy, modifier = Modifier.testTag("purchase-cancel")) { Text("取消") } })
     }
     selectedRecharge?.let { offer ->
         AlertDialog(onDismissRequest = { selectedRecharge = null }, title = { Text("确认创建充值订单") },
-            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState())) { Text("向 clash飞连vpn（portal.gccwebos.com）充值 ${formatCoins(offer.paidCoinUnits)}，应付 ${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)}。创建后还需主动打开支付页面，是否到账以服务器查询为准。") } },
+            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState())) { Text("向 clash|飞连（portal.gccwebos.com）充值 ${formatCoins(offer.paidCoinUnits)}，应付 ${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)}。创建后还需主动打开支付页面，是否到账以服务器查询为准。") } },
             confirmButton = { TextButton(onClick = { selectedRecharge = null; state.confirmRecharge(offer) }, enabled = !state.busy, modifier = Modifier.testTag("recharge-confirm")) { Text("创建充值订单") } },
             dismissButton = { TextButton(onClick = { selectedRecharge = null }, modifier = Modifier.testTag("recharge-cancel")) { Text("取消") } })
     }
@@ -241,7 +333,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         val current = state.canOpenPayment(order, now)
         AlertDialog(onDismissRequest = { paymentReview = null }, title = { Text("核对付款信息") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("服务平台：clash飞连vpn · portal.gccwebos.com")
+                Text("服务平台：clash|飞连 · portal.gccwebos.com")
                 Text("本次一次性充值：${formatCoins(order.expectedPaidCoinUnits)}")
                 Text("服务器确认应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
                 Text("支付方式：${order.paymentMethod}；通道：${order.adapterKey}")
@@ -291,3 +383,101 @@ internal fun purchaseStatus(value: PurchaseResult): String = when(value) {
     }
 }
 private fun localTime(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z").withZone(ZoneId.systemDefault()).format(value)
+
+/** Original mobile Alipay vector, placed on the same light plate and brand gradient. */
+@Composable
+private fun AlipayBadge() {
+    Surface(color = Brand.SurfaceRaised, shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            AlipayMark(48.dp)
+            Column { Text("支付宝支付", style = MaterialTheme.typography.titleMedium); SupportingText("安全便捷的在线支付方式") }
+        }
+    }
+}
+@Composable
+private fun AlipayMark(size: androidx.compose.ui.unit.Dp) {
+    Surface(color = androidx.compose.ui.graphics.Color(0xFFF0F9FF), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp), modifier = Modifier.size(size)) {
+        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_alipay), null, modifier = Modifier.padding(5.dp))
+    }
+}
+@Composable
+private fun AlipayButton(text: String, onClick: () -> Unit, enabled: Boolean = true, modifier: Modifier = Modifier) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)
+    Button(onClick, enabled = enabled, modifier = modifier.fillMaxWidth().heightIn(min = 52.dp)
+        .then(Modifier.background(if (enabled) androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd))
+            else androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Brand.SurfaceRaised, Brand.SurfaceRaised)), shape)),
+        shape = shape, colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent, contentColor = androidx.compose.ui.graphics.Color.White)) {
+        AlipayMark(28.dp); Spacer(Modifier.width(10.dp)); Text(text)
+    }
+}
+@Composable
+private fun HistoryState(size: Int?, busy: Boolean, label: String = "订单") {
+    if (size == null || size == 0) BrandCard {
+        Text(if (busy) "正在查询$label" else if (size == null) "${label}尚未读取" else if (label == "订单") "暂无这类订单" else "暂无${label}记录", style = MaterialTheme.typography.titleMedium)
+        SupportingText(if (size == null) "查询失败或尚未完成不代表没有订单，请重试。" else "这里只展示服务器返回的记录。")
+    }
+}
+@Composable
+private fun PurchaseHistoryCard(order: PurchaseResult) {
+    BrandCard(Modifier.testTag("history-order-${order.ref}")) {
+        Text(order.offer.title.zh, style = MaterialTheme.typography.titleLarge)
+        Text(formatCoins(order.amountUnits), style = MaterialTheme.typography.titleMedium)
+        SupportingText(purchaseStatus(order))
+        if (order.offer.category == "data_pack") SupportingText("独立流量包 · ${order.offer.trafficGb} GB，永久有效，用完为止。交付与重置入口需服务器另行开放。")
+        SupportingText("订单 ${order.ref}")
+    }
+}
+
+private fun ledgerLabel(value: String) = when(value) {
+    "credit" -> "入账"; "pending_to_available" -> "待确认转可用"; "pending_to_reversed" -> "待确认撤回"
+    "available_to_held" -> "订单预留"; "held_to_available" -> "预留释放"; "held_to_consumed" -> "订单扣款"
+    "held_to_expired", "available_to_expired" -> "余额到期"; "available_to_reversed" -> "可用余额撤回"; else -> "账单记录"
+}
+
+/** Native functional counterpart of mobile src/mine.jsx; account data is never hard-coded. */
+@Composable
+internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, stateOverride: CommerceController? = null) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext)) }
+    var view by remember { mutableStateOf("mine") }
+    androidx.activity.compose.BackHandler(enabled = view != "mine") {
+        if (account.factorReference != null || account.busy) account.cancelAuthentication() else view = "mine"
+    }
+    if (view != "mine") TextButton(onClick = { view = "mine" }, modifier = Modifier.testTag("mine-back")) { Text("‹ 返回我的") }
+    if (view == "mine") BrandCard(Modifier.testTag("mine-welcome")) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                SupportingText(if (account.authenticated) "欢迎回来" else "本地订阅与账户分开管理")
+                Text(if (account.authenticated) account.account else "账户未登录", style = MaterialTheme.typography.headlineSmall)
+            }
+            if (androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.3f)
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_robot_welcome), null,
+                    modifier = Modifier.width(110.dp).height(146.dp), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+        }
+    }
+    if (view == "security") {
+        com.gccwebos.android.portal.AccountPanel(account)
+    } else {
+        val mode = when(view) { "ledger" -> CommerceMode.Ledger; "wallet", "recharge" -> CommerceMode.Wallet; else -> CommerceMode.Mine }
+        CommercePanel(account, mode, state, autoLoad,
+            onRecharge = { view = if (account.authenticated) "recharge" else "security" },
+            onLedger = { if (account.authenticated) { view = "ledger"; if (autoLoad) state.loadLedger() } else view = "security" })
+        if (!account.authenticated) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
+    }
+    if (view == "mine") BrandCard(Modifier.testTag("mine-menu")) {
+        TextButton(onClick = { view = if (account.authenticated) "wallet" else "security" }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("mine-wallet")) {
+            Icon(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_receipt), null, tint = Brand.Amber)
+            Spacer(Modifier.width(12.dp)); Text("钱包", modifier = Modifier.weight(1f)); Text("›")
+        }
+        HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+        TextButton(onClick = { view = "security" }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("mine-security")) {
+            Icon(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_lock), null, tint = Brand.Cyan)
+            Spacer(Modifier.width(12.dp)); Text("账户与安全", modifier = Modifier.weight(1f)); Text("›")
+        }
+        if (account.authenticated) {
+            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+            TextButton(onClick = account::logout, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("mine-signout")) { Text("退出登录（保留本地订阅）") }
+        }
+    }
+}

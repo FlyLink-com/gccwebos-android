@@ -235,7 +235,7 @@ class SubscriptionImportTest {
         val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
         h.downloadHook = { started.complete(Unit); release.await() }
         val importing = async { h.repo.refreshAndImport() }; started.await()
-        val logout = launch { h.repo.logout() }; runCurrent(); release.complete(Unit)
+        val logout = launch { h.repo.clearLocalData() }; runCurrent(); release.complete(Unit)
         try { importing.await(); fail() } catch (_: CancellationException) { }
         logout.join(); assertNull(h.store.value); assertTrue(h.raw.all { it == 0.toByte() })
     }
@@ -261,7 +261,7 @@ class SubscriptionImportTest {
         var logout: kotlinx.coroutines.Job? = null
         try {
             h.repo.refreshAndImport(onResource = {
-                logout = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { h.repo.logout() }
+                logout = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { h.repo.clearLocalData() }
             })
             fail()
         } catch (_: CancellationException) { }
@@ -368,7 +368,7 @@ class SubscriptionImportTest {
     @Test fun logoutAfterPreparationBeforePermissionNeverWritesOrStarts() = runTest {
         val h = Harness(); h.saved(); h.login()
         PreparedHarness(h, backgroundScope).use { p ->
-            p.permission = { h.repo.logout(); true }; p.next()
+            p.permission = { h.repo.clearLocalData(); true }; p.next()
             assertEquals(ConnectionState.Disconnected, p.coordinator.connect())
             assertEquals(0, p.starts); assertFalse(p.file.exists()); p.coordinator.close()
         }
@@ -566,7 +566,7 @@ class SubscriptionImportTest {
         val importing = async { runCatching { h.repo.refreshAndImport() } }; waiting.await()
         PreparedHarness(h, backgroundScope).use { p ->
             val preparing = async { p.coordinator.connect() }; runCurrent()
-            val logout = launch { h.repo.logout() }; runCurrent(); release.complete(Unit)
+            val logout = launch { h.repo.clearLocalData() }; runCurrent(); release.complete(Unit)
             assertTrue(importing.await().exceptionOrNull() is CancellationException)
             assertEquals(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE), preparing.await())
             logout.join(); assertEquals(0, p.starts); assertFalse(p.file.exists())

@@ -38,19 +38,45 @@ class HttpsPortalTransport(private val policy: OriginPolicy) : PortalTransport {
 /** Separate client never accepts Portal session headers or a shared CookieJar. */
 class SubscriptionTransport(private val policy: OriginPolicy) : SubscriptionSource {
     private val client = isolatedClient()
-    override suspend fun download(url: Secret): ByteArray = receiveSubscriptionBytes {
+    override suspend fun download(url: Secret): ByteArray = read(url).bytes
+    override suspend fun read(url: Secret): SubscriptionRead = receiveSubscriptionRead {
         val response = executeBytes(client, Request.Builder().url(policy.subscription(url.value))
             .header("Accept", "application/x-yaml").header("Cache-Control", "no-store").build(), 2 * 1024 * 1024)
-        if (response.status == 200) response.bytes // Preserve exact UTF-8 bytes for strict importer validation.
-        else {
-            response.bytes.fill(0)
-            throw PortalFailure(when(response.status) {
-                403 -> PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE
-                404, 410 -> PortalFailure.Reason.SUBSCRIPTION_REVOKED
-                else -> PortalFailure.Reason.UNAVAILABLE
-            })
-        }
+        decodeSubscriptionResponse(response.status, response.bytes, response.validUntil)
     }
+}
+/** Takes ownership of bytes on failure; successful caller owns the returned buffer. */
+internal fun decodeSubscriptionResponse(status: Int, bytes: ByteArray, validUntil: String?): SubscriptionRead {
+    var transferred = false
+    try {
+        if (status != 200) {
+            val error = bytes.toString(Charsets.UTF_8).trim()
+            val reason = when {
+                status == 403 && Regex("\\{\\s*\"error\"\\s*:\\s*\"Subscription expired\"\\s*}").matches(error) -> PortalFailure.Reason.SUBSCRIPTION_EXPIRED
+                status in setOf(401, 404, 410) || (status == 403 && Regex("\\{\\s*\"error\"\\s*:\\s*\"Subscription link expired\"\\s*}").matches(error)) -> PortalFailure.Reason.SUBSCRIPTION_REVOKED
+                status == 403 -> PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE
+                else -> PortalFailure.Reason.UNAVAILABLE
+            }
+            throw PortalFailure(reason)
+        }
+        val until = validUntil?.let {
+            require(it.length <= 64)
+            java.time.Instant.parse(it)
+        }
+        transferred = true
+        return SubscriptionRead(bytes, until)
+    } catch (failure: PortalFailure) { throw failure }
+    catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.PROTOCOL) }
+    finally { if (!transferred) bytes.fill(0) }
+}
+
+private suspend fun receiveSubscriptionRead(read: () -> SubscriptionRead): SubscriptionRead {
+    var owned: SubscriptionRead? = null
+    try {
+        val result = withContext(Dispatchers.IO) { read().also { owned = it } }
+        owned = null
+        return result
+    } finally { owned?.bytes?.fill(0) }
 }
 /** Owns IO results even when withContext discards them after caller cancellation. */
 internal suspend fun receiveSubscriptionBytes(read: () -> ByteArray): ByteArray {
@@ -68,7 +94,7 @@ private fun isolatedClient() = OkHttpClient.Builder().cookieJar(CookieJar.NO_COO
     .followRedirects(false).followSslRedirects(false).cache(null)
     .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS)
     .callTimeout(30, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
-private class BinaryResponse(val status: Int, val bytes: ByteArray) {
+private class BinaryResponse(val status: Int, val bytes: ByteArray, val validUntil: String? = null) {
     override fun toString() = "BinaryResponse(status=$status)"
 }
 private fun executeBounded(client: OkHttpClient, request: Request, limit: Int): WireResponse {
@@ -95,7 +121,7 @@ private fun executeBytes(client: OkHttpClient, request: Request, limit: Int): Bi
                 } finally { buffer.fill(0); output.wipe() }
             }
             if (bytes.size > limit) { bytes.fill(0); throw PortalFailure(PortalFailure.Reason.PROTOCOL) }
-            return BinaryResponse(response.code, bytes)
+            return BinaryResponse(response.code, bytes, response.header("X-Subscription-Valid-Until"))
         }
     } catch (_: IOException) { throw PortalFailure(PortalFailure.Reason.NETWORK) }
 }

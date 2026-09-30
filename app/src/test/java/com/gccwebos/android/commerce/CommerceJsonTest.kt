@@ -39,11 +39,15 @@ class CommerceJsonTest {
         assertEquals("BHD 0.001", formatMoney(1, "BHD", 3))
     }
 
-    @Test fun validDataPacksAreExcludedButMalformedDataPacksAreNotSilentlySkipped() {
+    @Test fun serverDataPacksAreTypedWithoutInventingDurationAndMalformedPacksFail() {
         val pack = JSONObject(fixture.planOffer).put("category", "data_pack")
         pack.put("delivery", JSONObject("""{"kind":"data_pack","durationDays":null,"monthlyTrafficGb":null,"trafficGb":5,"neverExpires":true,"discountBasisPoints":null}"""))
         val catalog = JSONObject().put("offers", JSONArray().put(JSONObject(fixture.planOffer)).put(pack))
-        assertEquals(1, CommerceJson.offers(catalog.toString()).size)
+        val offers = CommerceJson.offers(catalog.toString())
+        assertEquals(2, offers.size)
+        assertEquals("data_pack", offers[1].category)
+        assertEquals(5L, offers[1].trafficGb)
+        assertNull(offers[1].durationDays); assertNull(offers[1].monthlyTrafficGb)
         pack.getJSONObject("delivery").put("durationDays", 30)
         rejects { CommerceJson.offers(catalog.toString()) }
         rejects { CommerceJson.offers(fixture.offerBody.replace("\"plan\"", "\"unknown_plan\"")) }

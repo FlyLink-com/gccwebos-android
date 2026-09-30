@@ -49,7 +49,7 @@ internal fun GccTheme(content: @Composable () -> Unit) {
 
 @Composable
 internal fun BrandCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = Brand.Shape, color = Brand.Surface,
+    Surface(modifier.fillMaxWidth(), shape = Brand.Shape, color = Brand.Surface.copy(alpha = .82f),
         border = BorderStroke(1.dp, Brand.Border)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }

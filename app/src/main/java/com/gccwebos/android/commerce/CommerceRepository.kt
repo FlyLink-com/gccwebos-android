@@ -34,6 +34,30 @@ class CommerceRepository(private val request: suspend (String, String?, String?)
     suspend fun offers(): List<Offer> = CommerceJson.offers(call(requireNotNull(model).offersPath))
     suspend fun wallet(): Wallet = CommerceJson.wallet(call("/api/portal/coins/wallet"))
     suspend fun rechargeOffers(): List<RechargeOffer> = CommerceJson.rechargeOffers(call("/api/portal/coins/recharge/offers"))
+    suspend fun orderHistory(cursor: OrderCursor? = null): OrderPage {
+        val query = buildString {
+            append("/api/portal/commerce/orders?limit=20")
+            if (cursor != null) {
+                val stamp = java.time.format.DateTimeFormatterBuilder().appendInstant(3).toFormatter().format(cursor.afterCreatedAt)
+                append("&afterCreatedAt=").append(java.net.URLEncoder.encode(stamp, "UTF-8"))
+                append("&afterOrderRef=").append(java.net.URLEncoder.encode(cursor.afterOrderRef, "UTF-8"))
+            }
+        }
+        return CommerceJson.orders(call(query), cursor)
+    }
+    suspend fun transitionHistory(): List<PurchaseResult.Deferred> = CommerceJson.transitions(call("/api/portal/commerce/deferred/transitions"))
+    suspend fun rechargeHistory(): List<RechargeOrder> = CommerceJson.rechargeOrders(call("/api/portal/coins/recharge/orders"))
+    suspend fun ledger(cursor: WalletLedgerCursor? = null): WalletLedgerPage {
+        val query = buildString {
+            append("/api/portal/coins/wallet/ledger?limit=20")
+            if (cursor != null) {
+                val stamp = java.time.format.DateTimeFormatterBuilder().appendInstant(3).toFormatter().format(cursor.afterOccurredAt)
+                append("&afterOccurredAt=").append(java.net.URLEncoder.encode(stamp, "UTF-8"))
+                append("&afterEntryRef=").append(java.net.URLEncoder.encode(cursor.afterEntryRef, "UTF-8"))
+            }
+        }
+        return CommerceJson.ledger(call(query), cursor)
+    }
     fun pending(kind: String) = recovery.read(binding, kind)
     suspend fun preview(offer: Offer): Quote = mutex.withLock {
         require(pending("purchase") == null)

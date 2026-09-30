@@ -91,7 +91,7 @@ class PortalRepositoryTest {
     }
     @Test fun logoutClearsLocalDeliveryAndSession() = runTest {
         val wire = Wire(); val store = Store(); val repo = PortalRepository(wire,store,policy,{0},{now})
-        login(repo,wire); repo.logout(); assertNull(store.value)
+        login(repo,wire); repo.clearLocalData(); assertNull(store.value)
         try { repo.refresh(); fail() } catch(f: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED,f.reason) }
         assertEquals(1,wire.calls.size)
     }
@@ -190,7 +190,7 @@ class PortalRepositoryTest {
         val wire = Wire(); val repo = PortalRepository(wire,Store(),policy,{0},{now})
         login(repo,wire)
         val oldBinding = repo.commerceSessionBinding()
-        repo.logout()
+        repo.clearLocalData()
         wire.replies += loginResponse("replacement_fixture")
         repo.login("fixture@example.invalid","synthetic",HumanChallenge("challenge","1+2"),"3")
         val count = wire.calls.size

@@ -1,0 +1,23 @@
+[
+  {
+    "asset": "launcher_user_robot.webp",
+    "sourceFile": "exec-b1b8a58d-e78e-416b-b7d3-1d6e707d3baa.png",
+    "sourceSha256": "1048c5308e8f370b0281d307f63591d701ccb2cfc7e1680ea5c792444293ec26",
+    "bundledSha256": "565812e436074991c2f81aa76874a21e54ea2d4c608029206046c5b9968cd7b0",
+    "mechanicalConversion": "512x512, lossless WebP"
+  },
+  {
+    "asset": "brand_robot_welcome.webp",
+    "sourceFile": "exec-bdeb9eae-fc0b-4a97-a1eb-35bf8f13ff15.png",
+    "sourceSha256": "9cee50154688cdd01643484a97095ed38adec1b0cc2371465939538639f5d44a",
+    "bundledSha256": "e21322987b03fdf76ba2efd19cebeaa9886888d3606b25c55b7ed2e96f0247a0",
+    "mechanicalConversion": "512x512 within aspect, alpha preserved, lossless WebP"
+  },
+  {
+    "asset": "brand_lounge.webp",
+    "sourceFile": "exec-a09637f5-e2f3-429c-a814-95902e53a1ce.png",
+    "sourceSha256": "990e5584038d6cb9a0b35a65b9d6ecde4bef0260c9de7261c2eff0c6da0fcf43",
+    "bundledSha256": "b19cdcd7f6505fbaecefd33851dd07846d58cf73d5c0f12f9455f059ce9891c2",
+    "mechanicalConversion": "1080x1920 within aspect, WebP quality88"
+  }
+]

@@ -10,14 +10,18 @@ import org.junit.Test
 class AppShellTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    @Test fun realVpnIsExplicitlyUnavailable() {
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+    @Test fun signedOutLaunchCannotExposeMainOrVpn() {
+        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("vpn-connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("page-Profile").assertDoesNotExist()
     }
-
-    @Test fun allFourDestinationsRemainAccessible() {
-        listOf("Lines", "Plans", "Profile", "Connect").forEach { name ->
-            compose.onNodeWithTag("nav-$name").performClick()
-            compose.onNodeWithTag("page-$name").assertExists()
+    @Test fun signedOutActivityRecreationStaysBehindLoginGate() {
+        compose.activityRule.scenario.recreate()
+        compose.waitForIdle()
+        compose.onNodeWithTag("login-screen").assertExists()
+        listOf("Connect", "Lines", "Plans", "Orders", "Profile").forEach { name ->
+            compose.onNodeWithTag("nav-$name").assertDoesNotExist()
         }
     }
 }

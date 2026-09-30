@@ -1,3 +1,5 @@
+> 0.4.0 mobile parity: encrypted local-subscription shell with account-only login gates, server-validated native-session restore, actual subscription-node metadata, server-driven wallet/catalog/orders and approved robot/clash|飞连 launcher artwork. [Scope and limits](docs/mobile-login-account-parity.md). Production VPN remains disabled.
+
 > Offline protocol contract v1: bounded SS AEAD, VLESS TCP TLS/Reality, Hysteria2 and TUIC v5 projection; production VPN remains disabled. See [support limits and evidence](docs/offline-protocol-contract.md).
 
 # clash飞连vpn · 0.3.0-commerce-draft

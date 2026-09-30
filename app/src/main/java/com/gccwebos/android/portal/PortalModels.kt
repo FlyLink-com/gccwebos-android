@@ -44,7 +44,7 @@ class DeliveryRecord(val accountId: String, val sessionBinding: String, val reso
 }
 class PortalFailure(val reason: Reason) : Exception(reason.name) {
     enum class Reason { NETWORK, PROTOCOL, LOGIN_FAILED, SESSION_EXPIRED, RECONCILIATION,
-        UNAVAILABLE, RATE_LIMITED, STORAGE, RECOVERY_REQUIRED, SUBSCRIPTION_UNAVAILABLE, SUBSCRIPTION_REVOKED }
+        UNAVAILABLE, RATE_LIMITED, STORAGE, RECOVERY_REQUIRED, SUBSCRIPTION_UNAVAILABLE, SUBSCRIPTION_REVOKED, SUBSCRIPTION_EXPIRED }
 }
 
 /** Independent API/subscription boundaries; rejects query strings and redirects. */
@@ -52,7 +52,21 @@ class OriginPolicy(apiOrigin: String, subscriptionOrigins: Set<String>) {
     val api: URI = origin(apiOrigin)
     private val subscriptions = subscriptionOrigins.map(::origin).toSet()
     fun apiUrl(path: String): String {
-        require(path.startsWith("/api/portal/") && !path.contains('?') && !path.contains('#'))
+        require(path.startsWith("/api/portal/") && !path.contains('#'))
+        if ('?' in path) {
+            // Only audited order-history and wallet-ledger cursor contracts may add query parameters.
+            val ledger = path.substringBefore('?') == "/api/portal/coins/wallet/ledger"
+            require(ledger || path.substringBefore('?') == "/api/portal/commerce/orders")
+            val timeKey = if (ledger) "afterOccurredAt" else "afterCreatedAt"
+            val refKey = if (ledger) "afterEntryRef" else "afterOrderRef"
+            val parts = path.substringAfter('?').split('&').map { it.split('=', limit = 2) }
+            require(parts.all { it.size == 2 } && parts.map { it[0] }.toSet().size == parts.size)
+            val query = parts.associate { it[0] to java.net.URLDecoder.decode(it[1], "UTF-8") }
+            require(query.keys == setOf("limit") || query.keys == setOf("limit", timeKey, refKey))
+            require(query["limit"] == "20")
+            query[timeKey]?.let { require(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z").matches(it)); Instant.parse(it) }
+            query[refKey]?.let { require(Regex(if (ledger) "[A-Za-z0-9][A-Za-z0-9._:-]{0,127}" else "[a-z][a-z0-9_]{2,95}").matches(it)) }
+        }
         return api.resolve(path).toString()
     }
     fun subscription(url: String): String {

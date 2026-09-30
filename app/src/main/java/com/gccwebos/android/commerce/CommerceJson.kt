@@ -39,8 +39,8 @@ object CommerceJson {
         return CommerceModel.entries.singleOrNull { it.wireValue == value } ?: invalid()
     }
 
-    /** Validate the entire catalog before omitting supported-but-out-of-scope data packs. */
-    fun offers(body: String): List<Offer> = array(root(body, "offers")["offers"]).mapNotNull(::offerProjection)
+    /** Only server-returned enabled offers; no local catalog or inferred package availability. */
+    fun offers(body: String): List<Offer> = array(root(body, "offers")["offers"]).map(::offerProjection)
 
     fun offer(body: String, expectedRef: String? = null): Offer =
         plan(root(body, "offer")["offer"]).also { matchReference(it.offerRef, expectedRef) }
@@ -123,7 +123,67 @@ object CommerceJson {
         return result
     }
 
-    private fun offerProjection(raw: Any?): Offer? {
+    fun orders(body: String, requestCursor: OrderCursor? = null): OrderPage {
+        val root = root(body, "orders", "nextCursor")
+        val orders = array(root["orders"]).map(::order)
+        require(orders.size <= 20 && orders.map { it.ref }.toSet().size == orders.size)
+        fun older(order: PurchaseResult.Order, cursor: OrderCursor) = order.createdAt < cursor.afterCreatedAt ||
+            (order.createdAt == cursor.afterCreatedAt && order.ref < cursor.afterOrderRef)
+        orders.forEachIndexed { index, value ->
+            if (requestCursor != null) require(older(value, requestCursor))
+            if (index > 0) require(older(value, OrderCursor(orders[index - 1].createdAt, orders[index - 1].ref)))
+        }
+        val cursor = root["nextCursor"]?.let { raw ->
+            val value = obj(raw, "afterCreatedAt", "afterOrderRef")
+            OrderCursor(time(value["afterCreatedAt"]), value.reference("afterOrderRef", commerceRef)).also {
+                require(orders.isNotEmpty() && it.afterCreatedAt == orders.last().createdAt && it.afterOrderRef == orders.last().ref)
+            }
+        }
+        return OrderPage(orders, cursor)
+    }
+    fun transitions(body: String): List<PurchaseResult.Deferred> =
+        array(root(body, "transitions")["transitions"]).map(::deferred).also { rows ->
+            require(rows.map { it.ref }.toSet().size == rows.size)
+        }
+
+    fun ledger(body: String, requestCursor: WalletLedgerCursor? = null): WalletLedgerPage {
+        val root = root(body, "entries", "nextCursor")
+        val rows = array(root["entries"]).map { raw ->
+            val v = obj(raw, "entryRef", "category", "coinType", "amountUnits", "availableDeltaUnits", "pendingDeltaUnits", "heldDeltaUnits", "totalDeltaUnits", "relatedOrderRef", "occurredAt")
+            val amount = v.units("amountUnits", true)
+            val kind = v.choice("category", setOf("credit", "pending_to_reversed", "pending_to_available", "available_to_held", "held_to_available", "held_to_consumed", "held_to_expired", "available_to_expired", "available_to_reversed"))
+            val deltas = listOf("availableDeltaUnits", "pendingDeltaUnits", "heldDeltaUnits").map { key -> v[key]?.let { integer(it, -MAX_SAFE_COIN_UNITS) } }
+            val total = integer(v["totalDeltaUnits"], -MAX_SAFE_COIN_UNITS)
+            val expected: List<Long?> = when(kind) {
+                "credit" -> listOf(null, null, null, amount)
+                "pending_to_reversed" -> listOf(0, -amount, 0, -amount)
+                "pending_to_available" -> listOf(amount, -amount, 0, 0)
+                "available_to_held" -> listOf(-amount, 0, amount, 0)
+                "held_to_available" -> listOf(amount, 0, -amount, 0)
+                "held_to_consumed", "held_to_expired" -> listOf(0, 0, -amount, -amount)
+                else -> listOf(-amount, 0, 0, -amount)
+            }
+            require(deltas + total == expected)
+            WalletLedgerEntry(v.reference("entryRef", rechargeRef), kind, v.choice("coinType", coinPriority.toSet()), amount,
+                deltas[0], deltas[1], deltas[2], total, v.nullableReference("relatedOrderRef", rechargeRef), time(v["occurredAt"]))
+        }
+        require(rows.size <= 20 && rows.map { it.entryRef }.toSet().size == rows.size)
+        fun older(row: WalletLedgerEntry, cursor: WalletLedgerCursor) = row.occurredAt < cursor.afterOccurredAt ||
+            (row.occurredAt == cursor.afterOccurredAt && row.entryRef < cursor.afterEntryRef)
+        rows.forEachIndexed { index, row ->
+            if (requestCursor != null) require(older(row, requestCursor))
+            if (index > 0) require(older(row, WalletLedgerCursor(rows[index - 1].occurredAt, rows[index - 1].entryRef)))
+        }
+        val next = root["nextCursor"]?.let { raw ->
+            val v = obj(raw, "afterOccurredAt", "afterEntryRef")
+            WalletLedgerCursor(time(v["afterOccurredAt"]), v.reference("afterEntryRef", rechargeRef)).also {
+                require(rows.isNotEmpty() && it.afterOccurredAt == rows.last().occurredAt && it.afterEntryRef == rows.last().entryRef)
+            }
+        }
+        return WalletLedgerPage(rows, next)
+    }
+
+    private fun offerProjection(raw: Any?): Offer {
         val value = obj(raw, "offerRef", "offerVersionRef", "category", "title", "summary", "importantNotices", "baseCoinUnits", "referencePrice", "acceptedCoinTypes", "delivery")
         val ref = value.reference("offerRef", commerceRef)
         val versionRef = value.reference("offerVersionRef", commerceRef)
@@ -147,14 +207,14 @@ object CommerceJson {
             "data_pack" -> {
                 require(delivery["kind"] == "data_pack" && delivery["durationDays"] == null && delivery["monthlyTrafficGb"] == null &&
                     delivery["neverExpires"] == true && delivery["discountBasisPoints"] == null) { "Invalid data pack delivery" }
-                delivery.units("trafficGb", positive = true)
-                return null
+                return Offer(ref, versionRef, title, summary, importantNotices, units, amountMinor, accepted,
+                    null, null, null, "data_pack", delivery.units("trafficGb", positive = true))
             }
             else -> invalid()
         }
     }
 
-    private fun plan(raw: Any?): Offer = offerProjection(raw) ?: invalid()
+    private fun plan(raw: Any?): Offer = offerProjection(raw)
 
     private fun order(raw: Any?): PurchaseResult.Order {
         val value = obj(raw, "orderRef", "offer", "amountUnits", "allocation", "paymentStatus", "cancelUntil", "fulfillment", "createdAt", "updatedAt")

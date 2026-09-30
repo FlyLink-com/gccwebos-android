@@ -78,12 +78,21 @@ jobs:
           cp .build-output/build-manifest.json .build-output/native/build-manifest.json
           sha256sum app/build/outputs/apk/debug/*.apk | tee .build-output/native/apks.sha256
       - name: Load actual JNI library and check guarded app on emulator
-        run: bash scripts/m0-emulator-smoke.sh
+        env:
+          REQUIRE_NATIVE_JNI: 'true'
+        run: |
+          set -euo pipefail
+          # Only disposable compiler/module caches. Keep artifacts and all verification receipts.
+          if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then
+            du -sh native/build/gocache native/build/gopath | tee .build-output/native/cache-disk.log
+            rm -rf -- native/build/gocache native/build/gopath
+          fi
+          bash scripts/m0-emulator-smoke.sh
       - name: Retain source, native and Android evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: gccwebos-native-vpn-lab-${{ github.sha }}
+          name: gccwebos-native-vpn-lab-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             .build-output/native/
             .build-output/device/

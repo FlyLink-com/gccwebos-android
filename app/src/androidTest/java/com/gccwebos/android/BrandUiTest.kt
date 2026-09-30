@@ -2,6 +2,16 @@ package com.gccwebos.android
 
 import android.graphics.Bitmap
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
+import com.gccwebos.android.design.GccTheme
+import com.gccwebos.android.portal.*
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -73,4 +83,40 @@ class BrandUiTest {
             compose.onNodeWithTag("nav-$page").assertIsDisplayed()
         }
     }
+    @Test fun totpCancelKeepsSubscriptionAndResetStillRequiresConfirmation() {
+        class MemoryStore : DeliveryStore {
+            var value: DeliveryRecord? = DeliveryRecord("fixture", "binding", "resource", "operation")
+            override fun read() = value
+            override fun save(record: DeliveryRecord) { value = record }
+            override fun clear() { value = null }
+        }
+        val store = MemoryStore()
+        lateinit var state: AccountController
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val controller = remember {
+                val wire = object : PortalTransport {
+                    override suspend fun request(path: String, body: String?, session: Secret?): WireResponse =
+                        throw AssertionError("Offline UI test must not send a request")
+                }
+                AccountController(PortalRepository(wire, store,
+                    OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L }), scope).apply {
+                    factorReference = "fixture-totp"
+                }
+            }
+            state = controller
+            GccTheme { Column(Modifier.verticalScroll(rememberScrollState())) { AccountPanel(controller) } }
+        }
+        compose.onNodeWithTag("totp-cancel").performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertNull(state.factorReference); assertNotNull(store.value) }
+        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
+        compose.onNodeWithTag("reset-cancel").performClick()
+        compose.runOnIdle { assertNotNull(store.value) }
+        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
+        compose.onNodeWithTag("reset-confirm").performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertNull(store.value) }
+    }
+
 }

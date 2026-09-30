@@ -33,7 +33,7 @@
 
 ## 状态与安全
 
-- 原有 AccountController、API、认证、加密存储、领取、ack、取消和清除逻辑保持不变
+- 原有 AccountController、API端点、认证、加密存储、领取、ack、取消和清除逻辑保持不变。DTO额外保留既有严格校验的 durationDays / monthlyTrafficGb，展示真实套餐规格，不新增接口或重新计算商品参数
 - 输入与账号控制器位于导航之外，切换入口不丢失在途登录状态；页面滚动位置随入口重置
 - 本地清除仍需确认；取消 TOTP 保留既有本地订阅；退出不宣称服务器撤销
 - 用量按服务器真实状态显示。pending 绝不显示成0；stale 的已用和剩余都明确标为过期；未设置额度不推断成无限
@@ -43,8 +43,8 @@
 ## 验证方式
 
 - `scripts/verify_source.py`：源码、XML、Wrapper校验及debug/release边界
-- `ResourcePresentationTest`：8项真实/未知/过期/退出显示映射用例
-- `BrandUiTest`：真实Compose渲染四入口截图、重复导航与账号保留、清除取消、85%/200%字体及动作可达性
+- `ResourcePresentationTest`：11项真实/未知/过期/退出/服务端套餐参数显示映射用例
+- `BrandUiTest`：真实Compose渲染四入口截图、重复导航与账号保留、清除取消、TOTP取消保留订阅与确认清除、85%/200%字体及动作可达性
 - 模拟器脚本额外捕获320dp窄屏与约1067dp平板。核验顶层窗口、应用UI包与错误弹窗，不以进程存在或测试绿灯代替前景截图
 - 所有UI用例使用离线状态或明确测试输入，不登录真实账户，不连接生产 VPN
 

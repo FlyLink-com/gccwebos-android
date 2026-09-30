@@ -28,7 +28,8 @@ internal object PortalJson {
                 resource.keysExactly("state", "plan", "validUntil", "setupAvailable", "resourceRef", "usage")
                 val plan = resource.getJSONObject("plan")
                 plan.keysExactly("id", "durationDays", "monthlyTrafficGb")
-                require(plan.number("durationDays") > 0)
+                val durationDays = plan.number("durationDays")
+                require(durationDays > 0)
                 val traffic = plan.get("monthlyTrafficGb")
                 require(traffic is Number && traffic.toDouble().isFinite() && traffic.toDouble() >= 0)
                 val reference = resource.text("resourceRef")
@@ -39,7 +40,8 @@ internal object PortalJson {
                 Resource.Available(reference, plan.text("id"), time(resource.text("validUntil")),
                     resource.get("setupAvailable") as Boolean,
                     Usage(usage.number("totalBytes"), usage.nullableNumber("usedBytes"), usage.nullableNumber("remainingBytes"),
-                        usage.text("collectionStatus"), if (usage.isNull("updatedAt")) null else time(usage.text("updatedAt"))))
+                        usage.text("collectionStatus"), if (usage.isNull("updatedAt")) null else time(usage.text("updatedAt"))),
+                    durationDays = durationDays, monthlyTrafficGb = traffic.toDouble())
             }
             else -> error("Invalid resource schema")
         }

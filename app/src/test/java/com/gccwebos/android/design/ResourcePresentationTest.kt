@@ -42,6 +42,28 @@ class ResourcePresentationTest {
     @Test fun availableDoesNotClaimSubscriptionSaved() {
         assertFalse(resourcePresentation(true, available(Usage(1, null, null, "pending", null))).detail.contains("保存"))
     }
+    @Test fun serverPlanParametersAppearWithoutLocalPrices() {
+        val resource = available(Usage(100, null, null, "pending", null)).copy(durationDays = 30, monthlyTrafficGb = 12.5)
+        val display = resourcePresentation(true, resource)
+        assertEquals("12.5 GB · 30 天", display.title)
+        assertEquals("12.5 GB", display.facts.toMap()["每月套餐流量"])
+        assertEquals("30 天", display.facts.toMap()["套餐时长"])
+        assertEquals("尚未采集", display.facts.toMap()["已用流量"])
+    }
+    @Test fun unknownQuotaNeverClaimsZeroOrUnlimitedPlanTraffic() {
+        val resource = available(Usage(0, 20, null, "measured", date)).copy(durationDays = 365, monthlyTrafficGb = 0.0)
+        val display = resourcePresentation(true, resource)
+        assertEquals("Server plan", display.title)
+        assertEquals("365 天", display.facts.toMap()["套餐时长"])
+        assertFalse(display.facts.toMap().containsKey("每月套餐流量"))
+    }
+    @Test fun parserRetainsValidatedSourcePlanFields() {
+        val body = """{"resource":{"state":"available","plan":{"id":"source-plan","durationDays":90,"monthlyTrafficGb":25.5},"validUntil":"2026-12-30T00:00:00.000Z","setupAvailable":true,"resourceRef":"resource_${"a".repeat(64)}","usage":{"totalBytes":100,"usedBytes":null,"remainingBytes":null,"collectionStatus":"pending","updatedAt":null,"cycleStartedAt":"2026-09-30T00:00:00.000Z","cycleEndsAt":"2026-10-30T00:00:00.000Z"}}}"""
+        val resource = com.gccwebos.android.portal.PortalJson.resource(body) as Resource.Available
+        assertEquals(90L, resource.durationDays)
+        assertEquals(25.5, resource.monthlyTrafficGb)
+        assertEquals("25.5 GB · 90 天", resourcePresentation(true, resource).title)
+    }
     @Test fun binaryUnitsAreExplicitAndNullIsNotZero() {
         assertEquals("1.0 GiB", formatBytes(1024L * 1024 * 1024))
         assertEquals("尚未采集", formatBytes(null))

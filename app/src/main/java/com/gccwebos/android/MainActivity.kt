@@ -166,7 +166,7 @@ private fun WelcomeCard(authenticated: Boolean) {
         Box(Modifier.heightIn(min = if (largeText) 136.dp else 156.dp)) {
             // Preserve Library pixels. Omit decorative art at large font sizes to protect text space.
             if (!largeText) Image(painterResource(R.drawable.brand_robot_welcome), contentDescription = null,
-                contentScale = ContentScale.Fit, alignment = Alignment.CenterRight,
+                contentScale = ContentScale.Fit, alignment = Alignment.CenterEnd,
                 modifier = Modifier.align(Alignment.CenterEnd).width(140.dp).height(170.dp))
             Box(Modifier.matchParentSize().background(Brush.horizontalGradient(
                 listOf(Brand.Background.copy(alpha = .94f), Brand.Background.copy(alpha = .62f),

@@ -41,7 +41,9 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
       - name: Verify pinned upstream and Go dependency graph
-        run: bash native/scripts/prepare.sh 2>&1 | tee .build-output/native/prepare.log
+        run: |
+          set -euo pipefail
+          bash native/scripts/prepare.sh 2>&1 | tee .build-output/native/prepare.log
       - name: Real packet-path tests with loopback-only fixtures
         run: |
           set -euo pipefail

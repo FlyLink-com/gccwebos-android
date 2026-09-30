@@ -84,7 +84,8 @@ object CommerceJson {
         val amount = value.units("amountUnits", positive = true)
         val discount = value.units("appliedDiscountBasisPoints").also { require(it <= 10_000) }
         val numerator = BigInteger.valueOf(offer.baseCoinUnits) * BigInteger.valueOf(10_000 - discount)
-        require(amount == ((numerator + BigInteger.valueOf(9_999)) / BigInteger.valueOf(10_000)).longValueExact()) { "Invalid quote amount" }
+        // Compare exact integers directly: BigInteger.longValueExact requires Android API 31.
+        require(BigInteger.valueOf(amount) == (numerator + BigInteger.valueOf(9_999)) / BigInteger.valueOf(10_000)) { "Invalid quote amount" }
         val availability = value.choice("purchaseAvailability", setOf("available", "insufficient_balance"))
         val shortfall = value.units("shortfallUnits")
         val balances = obj(value["balances"], "before", "after")

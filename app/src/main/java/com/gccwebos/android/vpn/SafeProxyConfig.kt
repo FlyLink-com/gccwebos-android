@@ -33,7 +33,27 @@ object SafeProxyConfig {
     private val fingerprints = setOf("chrome", "firefox", "safari", "ios", "edge")
     private val uuidPattern = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
+    /** Display-only metadata; names/indexes are never stable authorization or connection IDs. */
+    data class NodeSummary(val index: Int, val name: String, val protocol: String, val supported: Boolean)
+    fun inspect(yaml: ByteArray): List<NodeSummary> = try {
+        input(yaml).mapIndexed { index, p ->
+            val name = string(p, "name")
+            require(name.isNotBlank() && name.toByteArray().size <= 128 && name.none { it.isISOControl() })
+            val protocol = string(p, "type")
+            require(protocol.matches(Regex("[a-z0-9-]{1,24}")))
+            NodeSummary(index, name, protocol, try { node(p); true } catch (_: Exception) { false })
+        }
+    } catch (_: Exception) { throw UnsafeProxyConfiguration() }
     fun project(yaml: ByteArray, selectedIndex: Int): ByteArray = try {
+        val proxies = input(yaml)
+        require(selectedIndex in proxies.indices)
+        // Validate ALL nodes. An unsupported mixed node must never disappear silently.
+        val safe = proxies.map(::node)
+        JSONObject().put("schemaVersion", SCHEMA_VERSION).put("proxies", JSONArray().put(safe[selectedIndex]))
+            .put("rules", JSONArray().put("MATCH,GCC_SELECTED_PROXY"))
+            .toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
+    } catch (_: Exception) { throw UnsafeProxyConfiguration() }
+    private fun input(yaml: ByteArray): List<Map<*, *>> {
         require(yaml.size in 1..MAX_BYTES)
         val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(yaml)).toString()
@@ -66,15 +86,10 @@ object SafeProxyConfig {
             require(profile.values.all { it is Boolean })
         }
         val proxies = root["proxies"] as? List<*> ?: throw UnsafeProxyConfiguration()
-        require(proxies.size in 1..128 && selectedIndex in proxies.indices)
-        // Validate ALL nodes. Unknown nodes in a mixed subscription must never disappear silently.
-        val safe = proxies.map { node(it as? Map<*, *> ?: throw UnsafeProxyConfiguration()) }
-        // Incoming DNS/rules/groups/listeners/profile/global fingerprint are discarded, never merged.
-        // No provider, URL, path, script, plugin, controller, external UI or geodata downloads.
-        JSONObject().put("schemaVersion", SCHEMA_VERSION).put("proxies", JSONArray().put(safe[selectedIndex]))
-            .put("rules", JSONArray().put("MATCH,GCC_SELECTED_PROXY"))
-            .toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
-    } catch (_: Exception) { throw UnsafeProxyConfiguration() }
+        require(proxies.size in 1..128)
+        // Metadata inspection uses the same bounded parser, but cannot authorize a node.
+        return proxies.map { it as? Map<*, *> ?: throw UnsafeProxyConfiguration() }
+    }
 
     private fun node(p: Map<*, *>): JSONObject {
         val type = string(p, "type")

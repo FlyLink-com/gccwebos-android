@@ -5,7 +5,7 @@ cd -- "$(dirname -- "$0")/.."
 : "${KOTLIN_TOOLS_DIR:?Set KOTLIN_TOOLS_DIR to verified Kotlin 2.3.10/JUnit/coroutines/JSON/OkHttp/SnakeYAML jars}"
 CP=$(printf '%s:' "$KOTLIN_TOOLS_DIR"/*.jar)
 mkdir -p .local-tests
-mapfile -t SRC < <(find app/src/main/java -name '*.kt' | grep -vE 'CommercePanel|FileCommerceRecovery|MainActivity|AccountPanel|BrandTheme|DeliveryStore|UpdatePanel')
+mapfile -t SRC < <(find app/src/main/java -name '*.kt' | grep -vE 'CommercePanel|SessionStore|LocalProfileStore|FileCommerceRecovery|MainActivity|AccountPanel|BrandTheme|DeliveryStore|UpdatePanel')
 mapfile -t TEST < <(find app/src/test app/src/acceptanceFixtures -name '*.kt')
 java -cp "$CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -jvm-target 17 \
   -classpath "$CP" -d .local-tests/all-tests.jar "${SRC[@]}" "${TEST[@]}"

@@ -27,10 +27,12 @@ import org.junit.Test
 /** Offline native UI smoke tests. No login, production requests or VPN permissions. */
 class BrandUiTest {
     @get:Rule val compose = createComposeRule()
-    private fun launch(fontScale: Float = 1f) {
+    private fun launch(fontScale: Float = 1f, signedIn: Boolean = true) {
         compose.setContent {
             val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) { AppShell() }
+            val scope = rememberCoroutineScope()
+            val account = remember { offlineUiAccount(scope).apply { authenticated = signedIn } }
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) { AppShell(account, autoLoadCommerce = false) }
         }
     }
     private fun capture(name: String) {
@@ -45,20 +47,21 @@ class BrandUiTest {
         launch()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         capture("connect")
-        listOf("Lines", "Plans", "Profile").forEach { page ->
+        listOf("Lines", "Plans", "Orders", "Profile").forEach { page ->
             compose.onNodeWithTag("nav-$page").performClick()
             compose.onNodeWithTag("page-$page").assertIsDisplayed()
             capture(page.lowercase())
         }
-        compose.onNodeWithTag("login-submit").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
+        compose.onNodeWithTag("account-reset").performScrollTo().assertIsDisplayed()
     }
-    @Test fun typedAccountSurvivesTabSwitchAndResetCancellation() {
-        launch()
-        compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("login-account").performScrollTo().performTextInput("ui-fixture@example.invalid")
-        compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("login-account").assertTextContains("ui-fixture@example.invalid")
+    @Test fun signedOutGateRetainsTypedAccountAfterResetCancellation() {
+        launch(signedIn = false)
+        compose.onNodeWithTag("login-screen").assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("login-account").performScrollTo().performTextClearance()
+        compose.onNodeWithTag("login-account").performTextInput("ui-fixture@example.invalid")
+        capture("login")
         compose.onNodeWithTag("account-reset").performScrollTo().performClick()
         compose.onNodeWithTag("reset-cancel").performClick()
         compose.onNodeWithTag("reset-confirm").assertDoesNotExist()
@@ -69,9 +72,9 @@ class BrandUiTest {
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()
         capture("connect-font-200")
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("login-account").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
+        compose.onNodeWithTag("account-panel").performScrollTo().assertIsDisplayed()
         capture("profile-font-200")
-        compose.onNodeWithTag("login-submit").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("account-reset").performScrollTo().performClick()
         compose.onNodeWithTag("reset-cancel").assertIsDisplayed().performClick()
         compose.onNodeWithTag("nav-Connect").performClick()
@@ -81,7 +84,7 @@ class BrandUiTest {
         launch(.85f)
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         capture("connect-font-85")
-        listOf("Connect", "Lines", "Plans", "Profile").forEach { page ->
+        listOf("Connect", "Lines", "Plans", "Orders", "Profile").forEach { page ->
             compose.onNodeWithTag("nav-$page").assertIsDisplayed()
         }
     }

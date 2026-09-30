@@ -1,6 +1,9 @@
 package com.gccwebos.android.portal
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.*
 import org.junit.Test
 import org.json.JSONObject
@@ -35,6 +38,27 @@ class PortalRepositoryTest {
     private suspend fun login(repository: PortalRepository, wire: Wire) {
         wire.replies += loginResponse()
         repository.login("fixture@example.invalid","synthetic",HumanChallenge("challenge","1 + 2"),"3")
+    }
+    @Test fun securityReadUsesNativeSessionAndRejectsRevocationWithoutFallback() = runTest {
+        val wire = Wire(); val repo = PortalRepository(wire, Store(), policy, {0}, {now}); login(repo, wire)
+        wire.replies += WireResponse(200, securityBody)
+        val status = repo.security(); assertFalse(status.authenticatorBound); assertTrue(status.setupRequired)
+        assertEquals("/api/portal/security/current", wire.calls.last().first)
+        assertNull(wire.calls.last().second); assertEquals("native_fixture", wire.calls.last().third!!.value)
+        wire.replies += WireResponse(401, "{\"error\":\"invalid_session\"}")
+        try { repo.security(); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED, failure.reason) }
+        try { repo.security(); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED, failure.reason) }
+        assertEquals(3, wire.calls.size)
+    }
+    private val securityBody = """{"security":{"authenticatorBound":false,"initialAccount":true,"passkeyEnabled":false,"passkeyExported":false,"setupRequired":true,"safety":{"noAdminApi":true,"noPublicAdmin":true,"noRawSecretReturned":true}}}"""
+    @Test fun securityProjectionRejectsCoercedBooleansMissingSafetyAndSecretExtensions() {
+        assertFalse(PortalJson.security(securityBody).passkeyEnabled)
+        for (body in listOf(securityBody.replace("\"authenticatorBound\":false", "\"authenticatorBound\":\"false\""),
+            securityBody.replace("\"noRawSecretReturned\":true", "\"noRawSecretReturned\":false"),
+            securityBody.replace("\"setupRequired\":true", "\"setupRequired\":true,\"otpSecret\":\"synthetic\""),
+            "{\"security\":{}}")) {
+            assertThrows(Exception::class.java) { PortalJson.security(body) }
+        }
     }
     @Test fun persistsBeforeAckAndDoesNotRepeatSetup() = runTest {
         val wire = Wire(); val store = Store(); val repo = PortalRepository(wire,store,policy,{0},{now})
@@ -91,7 +115,7 @@ class PortalRepositoryTest {
     }
     @Test fun logoutClearsLocalDeliveryAndSession() = runTest {
         val wire = Wire(); val store = Store(); val repo = PortalRepository(wire,store,policy,{0},{now})
-        login(repo,wire); repo.logout(); assertNull(store.value)
+        login(repo,wire); repo.clearLocalData(); assertNull(store.value)
         try { repo.refresh(); fail() } catch(f: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED,f.reason) }
         assertEquals(1,wire.calls.size)
     }
@@ -100,6 +124,37 @@ class PortalRepositoryTest {
         val body = JSONObject(wire.calls.single().second!!)
         assertFalse(body.getBoolean("rememberMe")); assertNull(wire.calls.single().third)
         assertEquals(setOf("accountId","password","rememberMe","humanVerification"),body.keys().asSequence().toSet())
+    }
+    @Test fun cancelledAccountLoginCannotPublishLateTotpTicketIntoNewAccount() = runTest {
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>(); val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var count = 0
+        val wire = object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                require(path == "/api/portal/password/session")
+                if (++count == 1) {
+                    started.complete(Unit); kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { release.await() }
+                    return WireResponse(202,"""{"challenge":{"status":"second_factor_required","challengeRef":"old-mfa","availableFactors":["totp"],"expiresAt":"2026-09-30T00:05:00.000Z"}}""")
+                }
+                return loginResponse("native_new_account")
+            }
+        }
+        val saved = MemorySessionStore(); val repo = PortalRepository(wire, Store(), policy, {0}, {now}, sessions = saved)
+        val old = async { runCatching { repo.login("old", "synthetic", HumanChallenge("c", "prompt"), "3") } }
+        started.await(); val reset = launch { repo.cancelAuthentication() }; runCurrent(); release.complete(Unit)
+        assertTrue(old.await().exceptionOrNull() is kotlinx.coroutines.CancellationException); reset.join()
+        assertNull(saved.read())
+        repo.login("new", "synthetic", HumanChallenge("d", "prompt"), "3")
+        try { repo.totp("old-mfa", "123456"); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.LOGIN_FAILED, failure.reason) }
+        assertEquals(2, count); assertNotNull(repo.commerceSessionBinding())
+    }
+    @Test fun explicitAuthenticationCancelRemovesTotpTicketAndNeverPersistsIt() = runTest {
+        val wire = Wire(); val saved = MemorySessionStore()
+        val repo = PortalRepository(wire, Store(), policy, {0}, {now}, sessions = saved)
+        wire.replies += WireResponse(202,"""{"challenge":{"status":"second_factor_required","challengeRef":"mfa","availableFactors":["totp"],"expiresAt":"2026-09-30T00:05:00.000Z"}}""")
+        repo.login("a", "synthetic", HumanChallenge("c", "prompt"), "3")
+        assertNull(saved.read()); repo.cancelAuthentication()
+        try { repo.totp("mfa", "123456"); fail() } catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.LOGIN_FAILED, failure.reason) }
+        assertEquals(1, wire.calls.size); assertNull(saved.read())
     }
     @Test fun totpChallengeDoesNotCreateSession() = runTest {
         val wire = Wire(); val repo = PortalRepository(wire,Store(),policy,{0},{now})
@@ -190,7 +245,7 @@ class PortalRepositoryTest {
         val wire = Wire(); val repo = PortalRepository(wire,Store(),policy,{0},{now})
         login(repo,wire)
         val oldBinding = repo.commerceSessionBinding()
-        repo.logout()
+        repo.clearLocalData()
         wire.replies += loginResponse("replacement_fixture")
         repo.login("fixture@example.invalid","synthetic",HumanChallenge("challenge","1+2"),"3")
         val count = wire.calls.size

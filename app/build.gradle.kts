@@ -13,8 +13,8 @@ android {
         applicationId = "com.gccwebos.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.3.0-commerce-draft"
+        versionCode = 6
+        versionName = "0.4.0-mobile-parity"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

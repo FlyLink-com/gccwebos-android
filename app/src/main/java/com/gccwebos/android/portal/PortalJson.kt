@@ -18,6 +18,16 @@ internal object PortalJson {
         require(Regex("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z").matches(value))
         return Instant.parse(value)
     }
+    fun security(body: String): AccountSecurity {
+        val root = JSONObject(body); root.keysExactly("security")
+        val value = root.getJSONObject("security")
+        value.keysExactly("authenticatorBound", "initialAccount", "passkeyEnabled", "passkeyExported", "setupRequired", "safety")
+        val safety = value.getJSONObject("safety")
+        safety.keysExactly("noAdminApi", "noPublicAdmin", "noRawSecretReturned")
+        listOf("noAdminApi", "noPublicAdmin", "noRawSecretReturned").forEach { require(safety.get(it) == true) }
+        return AccountSecurity(value.get("authenticatorBound") as Boolean, value.get("initialAccount") as Boolean,
+            value.get("passkeyEnabled") as Boolean, value.get("passkeyExported") as Boolean, value.get("setupRequired") as Boolean)
+    }
     fun resource(body: String): Resource {
         val root = JSONObject(body); root.keysExactly("resource")
         val resource = root.getJSONObject("resource")

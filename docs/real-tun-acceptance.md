@@ -80,8 +80,8 @@ No client/device limit or automatic backend reset is introduced.
 
 ## Cost-bounded source-identical JNI reuse
 
-Harness-only iterations may reuse the two native libraries from immutable artifact11105785156,
-source b56b185461e8aa0f1cdbee4fa5ac290520fe13a8. The archive digest, repository/run identity,
+Harness-only iterations may reuse the two native libraries from immutable artifact11114730030,
+source b3bb94fe73aa39e03fd25e4b7fc7ef4ba5ab7987. The archive digest, repository/run identity,
 entire native Git tree, Kotlin projector/JNI contract sources, and both raw library hashes must
 match before extraction. Only explicit library/header/notice entries are copied; no old APK is
 used. Every current app/test APK is rebuilt and its packaging, signatures, release exclusion,

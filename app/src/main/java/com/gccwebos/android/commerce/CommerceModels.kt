@@ -13,6 +13,14 @@ enum class CommerceModel(
     WALLET_FIRST("wallet_first_unique_v1", "/api/portal/commerce/deferred/offers", "/api/portal/commerce/deferred/checkout-preview", "/api/portal/commerce/deferred/transitions"),
 }
 
+data class WalletLedgerCursor(val afterOccurredAt: Instant, val afterEntryRef: String)
+data class WalletLedgerEntry(val entryRef: String, val category: String, val coinType: String, val amountUnits: Long,
+    val availableDeltaUnits: Long?, val pendingDeltaUnits: Long?, val heldDeltaUnits: Long?, val totalDeltaUnits: Long,
+    val relatedOrderRef: String?, val occurredAt: Instant)
+data class WalletLedgerPage(val entries: List<WalletLedgerEntry>, val nextCursor: WalletLedgerCursor?)
+data class OrderCursor(val afterCreatedAt: Instant, val afterOrderRef: String)
+data class OrderPage(val orders: List<PurchaseResult.Order>, val nextCursor: OrderCursor? = null)
+
 data class LocalizedText(val zh: String, val en: String)
 data class LocalizedNotices(val zh: List<String>, val en: List<String>)
 
@@ -26,9 +34,11 @@ data class Offer(
     val baseCoinUnits: Long,
     val referenceAmountMinor: Long,
     val acceptedCoinTypes: List<String>,
-    val durationDays: Long,
-    val monthlyTrafficGb: Long,
-    val discountBasisPoints: Long,
+    val durationDays: Long?,
+    val monthlyTrafficGb: Long?,
+    val discountBasisPoints: Long?,
+    val category: String = "plan",
+    val trafficGb: Long? = null,
 )
 
 data class Wallet(
@@ -77,6 +87,7 @@ data class RechargeOrder(
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
+    val awaitingUpdate: Boolean get() = status !in setOf("credited", "failed_no_charge", "expired", "reconciliation_required")
     val terminal: Boolean get() = status in setOf("credited", "failed_no_charge", "expired")
     fun payableAt(now: Instant): Boolean = status in setOf("entry_ready", "pending") &&
         nextAction != null && now < expiresAt && now < nextAction.expiresAt

@@ -2,6 +2,23 @@
 
 > 后续离线协议合同 v1 扩展了受限支持形态；当前准确边界见 [离线协议合同](offline-protocol-contract.md)。下文“仅 SS”是 PR #8 历史基线，不代表后续全协议互通或生产 VPN 已开放。
 
+## 后续连接准备纠正
+
+PR #8 的「新 session + pendingAck 一律需要恢复」只描述当时统一的保守导入路径，
+不是 legacy 后端能力限制。新的[每次连接准备边界](fresh-connection-preparation.md)在
+同一认证事务内读取现有 `/api/portal/commerce/model`，严格区分：
+
+- `legacy`：每次重新调用 current/setup，取得当前权威地址与当前 session 的 handoff，
+  ACK 后下载最新 YAML；不依赖历史 receipt、历史 request 列表或旧配置。Legacy ACK
+  不消费材料，故本轮 receipt 可只存于尝试内存；不覆盖可能尚待恢复的 wallet receipt
+- `wallet_first_unique_v1`：保留加密持久 URL，每次重新下载最新 YAML；同 session 的 lease/key/ACK
+  重试合同保持不变。新 session 的 pending ACK、地址彻底丢失仍不能伪装成恢复成功
+- 模型未知、查询失败或会话失效：停止准备，不猜测模型，不调用重新签发/轮换接口
+
+查询模型复用已存在的认证接口，不新增后端字段或 endpoint。现有登录后的预览导入仍是
+保守兼容性预览，不是生产连接路径。后端恢复 API 提案暂停；不作为普通 fresh download
+的前置条件，也未获得实现/部署授权。生产 VPN、稳定线路身份和真实 TUN 验收仍未开放。
+
 ## 本次范围
 
 客户端自动完成「登录 → 当前资源 → 持久交付 receipt → ACK → 下载 → 受限配置投影」。没有手填 URL、生产请求测试、购买、充值、签发、轮换、后台部署或 VPN 启动。

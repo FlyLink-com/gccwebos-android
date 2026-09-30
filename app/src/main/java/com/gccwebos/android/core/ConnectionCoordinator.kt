@@ -45,7 +45,8 @@ data class AccessDecision(val block: BusinessBlock? = null)
  * analytics or navigation arguments. Consumers own (and must wipe) copies they request.
  * close() wipes the coordinator's copy, not the caller's constructor argument.
  */
-class AuthorizedConfig(val lineId: String, material: ByteArray) : Closeable {
+class AuthorizedConfig(val lineId: String, material: ByteArray,
+    private val activationGuard: (((() -> Boolean)) -> Boolean)? = null) : Closeable {
     private val bytes = material.copyOf()
     private var closed = false
 
@@ -55,6 +56,14 @@ class AuthorizedConfig(val lineId: String, material: ByteArray) : Closeable {
     fun copyMaterial(): ByteArray {
         check(!closed) { "Configuration is closed" }
         return bytes.copyOf()
+    }
+
+    val requiresAtomicActivation: Boolean get() = activationGuard != null
+
+    /** Fresh production-shaped material can only cross a synchronous, fenced handoff. */
+    fun activate(action: () -> Boolean): Boolean {
+        synchronized(this) { check(!closed) { "Configuration is closed" } }
+        return activationGuard?.invoke(action) ?: action()
     }
 
     @Synchronized
@@ -82,6 +91,14 @@ interface PermissionGateway { suspend fun hasVpnPermission(): Boolean }
 interface TunnelGateway {
     suspend fun start(config: AuthorizedConfig): Boolean
     suspend fun stop()
+}
+
+/** Bounded synchronous acceptance boundary for fresh preparation. It must accept/copy bytes
+ * before returning, with no deferred start or suspension. Real native activation needs its own
+ * cancellation/watchdog contract; no production implementation exists in this slice.
+ */
+interface AtomicActivationTunnel : TunnelGateway {
+    fun startAtomically(config: AuthorizedConfig): Boolean
 }
 
 /** Must probe the intended tunnel path in M1, never ordinary direct Internet connectivity. */
@@ -274,7 +291,16 @@ class ConnectionCoordinator(
                 val started = step(Step.TUNNEL) {
                     ownsNewTunnel = true
                     tunnelMayBeRunning = true // start may partially allocate, even when it fails.
-                    tunnel.start(authorized)
+                    if (authorized.requiresAtomicActivation) {
+                        val atomic = tunnel as? AtomicActivationTunnel
+                            ?: throw IllegalStateException("Atomic activation adapter required")
+                        val context = currentCoroutineContext()
+                        synchronized(commandLock) {
+                            context.ensureActive()
+                            if (current?.id != ticket.id) throw CancellationException("Superseded connection command")
+                            authorized.activate { context.ensureActive(); atomic.startAtomically(authorized) }
+                        }
+                    } else tunnel.start(authorized)
                 }
                 if (!started) throw Abort(ConnectionState.Failed(Failure.TUNNEL_FAILED))
                 // The adapter has copied/consumed what it needs. Avoid keeping source bytes alive.

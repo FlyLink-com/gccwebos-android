@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import androidx.core.content.ContextCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -66,8 +67,8 @@ class NativeVpnLabActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (!BuildConfig.DEBUG || !BuildConfig.NATIVE_VPN_LAB) { finish(); return }
         val filter = IntentFilter(LabVpnService.ACTION_STATE)
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, "$packageName.permission.VPN_LAB_STATE", null, Context.RECEIVER_NOT_EXPORTED)
-        else @Suppress("DEPRECATION") registerReceiver(receiver, filter, "$packageName.permission.VPN_LAB_STATE", null)
+        ContextCompat.registerReceiver(this, receiver, filter, "$packageName.permission.VPN_LAB_STATE",
+            null, ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent { MaterialTheme { Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("原生 VPN 隔离实验", style = MaterialTheme.typography.headlineSmall)
             Text("仅 Debug 显式启用。只接管本应用流量；可能暂时中断本应用联网。使用本机回环假数据，不连接生产节点、读取订阅或保证实际可用。离开此页面会停止。")

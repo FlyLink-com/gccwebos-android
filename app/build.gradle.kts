@@ -44,9 +44,9 @@ android {
     buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = true }
     sourceSets.getByName("test").resources.srcDir("../native/bridge/testdata")
-    sourceSets.getByName("test").java.srcDir("src/acceptanceFixtures/java")
+    sourceSets.getByName("test").kotlin.srcDir("src/acceptanceFixtures/java")
     if (providers.gradleProperty("nativeTunAcceptance").orNull == "true") {
-        sourceSets.getByName("androidTest").java.srcDirs("src/acceptanceTest/java", "src/acceptanceFixtures/java")
+        sourceSets.getByName("androidTest").kotlin.srcDirs("src/acceptanceTest/java", "src/acceptanceFixtures/java")
         sourceSets.getByName("androidTest").manifest.srcFile("src/acceptanceTest/AndroidManifest.xml")
     }
 }

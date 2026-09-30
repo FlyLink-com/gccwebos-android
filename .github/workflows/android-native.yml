@@ -6,6 +6,8 @@ on:
       - 'native/**'
       - 'app/**'
       - 'scripts/verify_source.py'
+      - 'scripts/real-tun-runtime-api33.sh'
+      - 'scripts/verify_real_tun_acceptance.py'
       - '.github/workflows/android-native.yml'
 permissions:
   contents: read
@@ -105,7 +107,7 @@ jobs:
           # must not be mislabeled as an app/JNI failure or silently ignored.
           sha256sum app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
             | tee .build-output/native/fresh-runtime-apks-before.sha256
-          bash scripts/native-runtime-api33.sh
+          bash scripts/real-tun-runtime-api33.sh
           sha256sum -c .build-output/native/fresh-runtime-apks-before.sha256
       - name: Retain source, native and Android evidence
         if: always()

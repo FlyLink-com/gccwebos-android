@@ -61,11 +61,12 @@ be distributed as a consumer feature. Platform references: [VpnService](https://
 
 ## Evidence and remaining gates
 
-`native-runtime-api33.sh` runs the ordinary 40-case JNI/UI suite separately, then explicitly
+`real-tun-runtime-api33.sh` runs the ordinary 40-case JNI/UI suite separately, then explicitly
 selects the real-TUN test with its opt-in argument. A missing, skipped or failed test is a hard
 failure. `verify_real_tun_acceptance.py` also requires the matching packet/lifecycle JSON proof.
 Screenshots, instrumentation output, source/APK hashes, routes and sanitized counters are
 retained in the exact-head native CI artifact. Cleanup always destroys the disposable emulator.
+The separate historical immutable-APK replay script is unchanged; its provenance gate is not relaxed.
 
 Results must be read from the exact published commit's CI, not inferred from host/JVM tests.
 Production stable-line authorization, prepared-config/native integration, bounded handoff,

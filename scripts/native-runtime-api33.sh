@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Disposable Android emulator only. Optional explicitly authorized synthetic app-only real TUN; no backend/signing credentials.
+# Disposable Android emulator only. No real VPN, backend or signing credentials.
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 OUT="$PWD/.build-output/runtime-api33/device"
@@ -15,10 +15,6 @@ SYSTEM_IMAGE='system-images;android-33;default;x86_64'
 APP_ID='com.gccwebos.android.debug'
 ACTIVITY="$APP_ID/com.gccwebos.android.MainActivity"
 TEST_RUNNER="$APP_ID.test/androidx.test.runner.AndroidJUnitRunner"
-REAL_TUN_CLASS="com.gccwebos.android.vpn.RealTunAcceptanceTest"
-if [ "${REQUIRE_REAL_TUN:-false}" = true ]; then
-  test "${GITHUB_ACTIONS:-}" = true && test "${RUNNER_ENVIRONMENT:-}" = github-hosted
-fi
 APK='app/build/outputs/apk/debug/app-debug.apk'
 TEST_APK='app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'
 test -s "$APK" && test -s "$TEST_APK"
@@ -89,8 +85,6 @@ cleanup() {
   timeout 5 "$ADB" -s emulator-5554 logcat -b crash -d > "$OUT/crash.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 shell dumpsys activity lastanr > "$OUT/last-anr.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 shell dumpsys window > "$OUT/window-state.log" 2>&1
-  timeout 10 "$ADB" -s emulator-5554 pull "/sdcard/Android/data/$APP_ID/files/real-tun-evidence" "$OUT/" > "$OUT/real-tun-pull.log" 2>&1
-  timeout 5 "$ADB" -s emulator-5554 shell dumpsys connectivity > "$OUT/connectivity-final.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 shell df -h /data > "$OUT/device-disk.log" 2>&1
   df -h "$SDK_ROOT" > "$OUT/host-disk-final.log" 2>&1
   timeout 5 "$ADB" -s emulator-5554 emu kill >/dev/null 2>&1
@@ -168,19 +162,11 @@ adb shell uiautomator dump /sdcard/m0-window.xml > "$OUT/ui-dump.log"
 adb pull /sdcard/m0-window.xml "$OUT/window.xml"
 verify_ui_xml "$OUT/window.xml"
 log 'Running instrumented tests'
-timeout 240 "$ADB" -s emulator-5554 shell am instrument -w -r -e notClass "$REAL_TUN_CLASS" "$TEST_RUNNER" \
+timeout 240 "$ADB" -s emulator-5554 shell am instrument -w -r "$TEST_RUNNER" \
   | tee "$OUT/instrumentation.log"
 grep -Eq 'OK \([1-9][0-9]* tests?\)' "$OUT/instrumentation.log"
 if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' "$OUT/instrumentation.log"; then exit 1; fi
 if [ "${REQUIRE_NATIVE_JNI:-false}" = true ]; then python3 scripts/verify_native_instrumentation.py "$OUT/instrumentation.log"; fi
-if [ "${REQUIRE_REAL_TUN:-false}" = true ]; then
-  log 'Authorized real-TUN acceptance: app-only synthetic /32 routes and ephemeral loopback fixture'
-  timeout 360 "$ADB" -s emulator-5554 shell am instrument -w -r \
-    -e class "$REAL_TUN_CLASS" -e gccRealTunAcceptance true "$TEST_RUNNER" \
-    | tee "$OUT/real-tun-instrumentation.log"
-  adb pull "/sdcard/Android/data/$APP_ID/files/real-tun-evidence" "$OUT/" > "$OUT/real-tun-pull.log"
-  python3 scripts/verify_real_tun_acceptance.py "$OUT/real-tun-instrumentation.log" "$OUT/real-tun-evidence/result.json"
-fi
 log 'Relaunching after tests'
 adb shell am start -W -n "$ACTIVITY" > "$OUT/relaunch.log"
 sleep 2
@@ -210,9 +196,4 @@ adb shell wm size reset
 adb shell wm density reset
 sha256sum "$APK" "$TEST_APK" | tee "$OUT/installed-apks.sha256"
 printf '%s\n' 'PASS: same Debug APK installed and launched on API 33 emulator (same prebuilt source-pinned APK); instrumentation passed.' \
-  'NOT TESTED: physical devices, production nodes/accounts, other-protocol interoperability or global leak prevention.' | tee "$OUT/result.log"
-if [ "${REQUIRE_REAL_TUN:-false}" = true ]; then
-  echo 'PASS: authorized emulator-only SS AEAD real TUN TCP/UDP/DNS and lifecycle acceptance; see real-tun evidence.' | tee -a "$OUT/result.log"
-else
-  echo 'NOT TESTED: real TUN packet path (acceptance flag is off).' | tee -a "$OUT/result.log"
-fi
+  'NOT TESTED: physical devices, real TUN traffic, backend, payments. API36 remains environment-blocked.' | tee "$OUT/result.log"

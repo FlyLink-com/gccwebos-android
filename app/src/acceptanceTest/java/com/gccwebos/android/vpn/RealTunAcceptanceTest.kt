@@ -40,6 +40,7 @@ import org.junit.Test
  * Sockets use Android's actual per-app TUN routes. The SS server only answers locally; it cannot
  * forward traffic. No credentials, fixture input, or subscription bytes enter evidence/logs.
  */
+@android.annotation.TargetApi(33)
 class RealTunAcceptanceTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext

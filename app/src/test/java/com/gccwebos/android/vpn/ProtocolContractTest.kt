@@ -1,6 +1,7 @@
 package com.gccwebos.android.vpn
 
 import java.io.File
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -16,6 +17,14 @@ class ProtocolContractTest {
         assertEquals("Unsupported or unsafe proxy configuration", error.message)
         assertNull(error.cause)
     }
+    // Android's compile-time JSONObject API lacks desktop org.json's similar().
+    // Compare structure explicitly, ignoring object key order but preserving array order/types.
+    private fun structure(value: Any?): Any? = when (value) {
+        is JSONObject -> value.keys().asSequence().toList().associateWith { structure(value.get(it)) }
+        is JSONArray -> (0 until value.length()).map { structure(value.get(it)) }
+        JSONObject.NULL -> null
+        else -> value
+    }
     @Test fun backendRendererGoldensProduceExactVersionedContract() {
         val output = System.getProperty("protocolContractOutput")?.let(::File)?.also { it.mkdirs() }
         for (name in positive) for (format in listOf("clash", "mihomo")) for (index in 0 until if (name == "mixed") 4 else 1) {
@@ -23,7 +32,7 @@ class ProtocolContractTest {
             val actual = SafeProxyConfig.project(input, index)
             val filename = "$name.$format.$index.json"
             val expected = JSONObject(String(resource("accepted/$filename")))
-            assertTrue("Golden contract mismatch: $filename", expected.similar(JSONObject(String(actual))))
+            assertEquals("Golden contract mismatch: $filename", structure(expected), structure(JSONObject(String(actual))))
             // Native CI reads THESE actual bytes, not an older compiled bridge/APK or hand-written DTO.
             output?.let { File(it, filename).writeBytes(actual) }
             actual.fill(0); input.fill(0)

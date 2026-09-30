@@ -52,7 +52,9 @@ The same case then verifies:
 3. Killing only the verified same-app `:vpn` PID removes the TUN; a 10-second quiet observation
    and filtered Android service dump verify no automatic or pending restart in that window
 4. A separate test-APK activity uses Android's actual VPN consent transfer to trigger the
-   original service's real `onRevoke` callback. That activity never establishes its own TUN
+   original service's real `onRevoke` callback. That activity never establishes its own TUN.
+   The standalone test-APK helper uses only platform Java, without depending on the target
+   app's Kotlin runtime/classloader
 5. A VPN permission result delivered after the explicit Stop handler does not start a service
    or create a TUN. To guarantee a fresh system dialog, only the disposable target app's
    previous VPN app-op is set to `ignore`; authorization is never granted through appops

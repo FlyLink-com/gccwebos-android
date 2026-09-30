@@ -47,6 +47,7 @@ android {
     sourceSets.getByName("test").kotlin.srcDir("src/acceptanceFixtures/java")
     if (providers.gradleProperty("nativeTunAcceptance").orNull == "true") {
         sourceSets.getByName("androidTest").kotlin.srcDirs("src/acceptanceTest/java", "src/acceptanceFixtures/java")
+        sourceSets.getByName("androidTest").java.srcDir("src/acceptanceTest/java")
         sourceSets.getByName("androidTest").manifest.srcFile("src/acceptanceTest/AndroidManifest.xml")
     }
 }

@@ -30,10 +30,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.*
+import com.gccwebos.android.commerce.CommerceMode
+import com.gccwebos.android.commerce.CommercePanel
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.AccountPanel
+import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.productionRepository
 import com.gccwebos.android.update.UpdatePanel
+import java.time.Instant
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,13 +57,25 @@ private enum class Destination(@StringRes val title: Int, @DrawableRes val icon:
 }
 
 @Composable
-internal fun AppShell() {
+internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommerce: Boolean = true) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
-    val account = remember { AccountController(productionRepository(context), scope) }
+    val account = remember(accountOverride) { accountOverride ?: AccountController(productionRepository(context), scope) }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
+    // Guidance belongs to the authenticated lifecycle, outside the keyed destination composition.
+    var guidance by remember { mutableStateOf(ResourceGuidanceState()) }
+    val currentGuidance = guidance.reconcile(
+        authenticated = account.authenticated,
+        accountKey = account.account.trim(),
+        sessionGeneration = account.authSessionGeneration,
+        resource = account.resource,
+        busy = account.busy,
+        error = account.error,
+        onConnectionPage = selected == Destination.Connect,
+    )
+    SideEffect { if (guidance != currentGuidance) guidance = currentGuidance }
     GccTheme {
         Surface(Modifier.fillMaxSize(), color = Brand.Background) {
             Scaffold(containerColor = Brand.Background, bottomBar = {
@@ -82,14 +99,19 @@ internal fun AppShell() {
                         }
                     }
                 }
-            }) { padding -> key(selected) { Page(selected, padding, account) { selectedName = Destination.Profile.name } } }
+            }) { padding -> key(selected) { Page(selected, padding, account, autoLoadCommerce) { selectedName = Destination.Profile.name } } }
+            if (currentGuidance.visible) NoResourceGuidance(
+                onDismiss = { guidance = currentGuidance.dismiss() },
+                openPlans = { guidance = currentGuidance.dismiss(); selectedName = Destination.Plans.name },
+                openWallet = { guidance = currentGuidance.dismiss(); selectedName = Destination.Profile.name },
+            )
         }
     }
 }
 
 @Composable
 private fun Page(destination: Destination, padding: PaddingValues, account: AccountController,
-                 openAccount: () -> Unit) {
+                 autoLoadCommerce: Boolean, openAccount: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
         Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
             modifier = Modifier.widthIn(max = 680.dp).fillMaxSize())
@@ -133,13 +155,14 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     InfoCard("安全交付", "配置由服务器按当前账号授权返回；订阅地址不会显示在页面中。")
                 }
                 Destination.Plans -> {
-                    PageTitle("套餐与用量", "这里仅显示服务器确认的当前资源。")
-                    ResourceCard(account)
+                    PageTitle("选择套餐", "套餐与报价以服务器返回为准。")
+                    CommercePanel(account, CommerceMode.Plans, autoLoad = autoLoadCommerce)
                     if (!account.authenticated) BrandButton("登录查看套餐", openAccount)
-                    InfoCard("购买入口尚未开放", "原生报价、付款和订单流程接入后开放购买。当前没有本地示例价格，也不会扣款。")
+                    ResourceCard(account)
                 }
                 Destination.Profile -> {
-                    PageTitle("我的账号", "账号、订阅与版本信息，一处管理。")
+                    PageTitle("我的账号", "账号、订阅、钱包与版本信息，一处管理。")
+                    CommercePanel(account, CommerceMode.Wallet, autoLoad = autoLoadCommerce)
                     AccountPanel(account)
                     BrandCard { UpdatePanel() }
                     if (BuildConfig.DEBUG) BrandCard { DebugBuildPanel() }
@@ -157,8 +180,8 @@ private fun BrandHeader() {
         verticalAlignment = Alignment.CenterVertically) {
         Image(painterResource(R.drawable.brand_robot_avatar), contentDescription = null,
             modifier = Modifier.size(42.dp), contentScale = ContentScale.Fit)
-        Image(painterResource(R.drawable.brand_wordmark), contentDescription = "gccwebos",
-            modifier = Modifier.width(148.dp).height(42.dp), contentScale = ContentScale.Fit)
+        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).testTag("brand-name"))
     }
 }
 
@@ -176,10 +199,10 @@ private fun WelcomeCard(authenticated: Boolean) {
                     Brand.Background.copy(alpha = .12f)))))
             Column(Modifier.fillMaxWidth(if (largeText) 1f else .64f).padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Eyebrow("GCCWEBOS / CONNECT")
+                Eyebrow("连接")
                 Text(if (authenticated) "欢迎回来" else "欢迎使用", style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold)
-                SupportingText("gccwebos · 与你同行")
+                SupportingText("${stringResource(R.string.app_name)} · 与你同行")
             }
         }
     }
@@ -195,12 +218,26 @@ private fun PageTitle(title: String, detail: String) {
 
 @Composable
 internal fun ResourceCard(state: AccountController, showOperationState: Boolean = true) {
-    val display = resourcePresentation(state.authenticated, state.resource)
+    val countdownEnabled = state.authenticated && !state.busy && state.error == null && state.resource is Resource.Available
+    val now by produceState(initialValue = Instant.now(), countdownEnabled, state.resource) {
+        value = Instant.now()
+        while (countdownEnabled) {
+            delay(1_000)
+            value = Instant.now()
+        }
+    }
+    val display = resourcePresentation(state.authenticated, state.resource, state.busy, state.error, now)
     BrandCard(Modifier.testTag("resource-card")) {
         Eyebrow("当前资源")
         Text(display.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
             modifier = if (showOperationState) Modifier.semantics { liveRegion = LiveRegionMode.Polite } else Modifier)
         SupportingText(display.detail)
+        display.countdown?.let { remaining ->
+            SupportingText("剩余有效时间")
+            // Readable when focused, without announcing a ticking live region every second.
+            Text(remaining, style = MaterialTheme.typography.titleMedium, color = Brand.Cyan,
+                modifier = Modifier.testTag("resource-countdown"))
+        }
         display.facts.forEach { (label, value) ->
             HorizontalDivider(color = Brand.Border)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -220,4 +257,25 @@ private fun InfoCard(title: String, detail: String) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         SupportingText(detail)
     }
+}
+
+
+@Composable
+private fun NoResourceGuidance(onDismiss: () -> Unit, openPlans: () -> Unit, openWallet: () -> Unit) {
+    AlertDialog(
+        modifier = Modifier.testTag("no-resource-guidance"),
+        onDismissRequest = onDismiss,
+        title = { Text("还没有订阅资源") },
+        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+            Text("服务器已确认当前账号暂无资源。可以查看套餐购买，或先到钱包充值；到账与资源发放以服务器确认为准。")
+        } },
+        confirmButton = { Column {
+            TextButton(onClick = openPlans, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .testTag("guidance-plans")) { Text("查看套餐") }
+            TextButton(onClick = openWallet, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .testTag("guidance-wallet")) { Text("前往钱包充值") }
+        } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)
+            .testTag("guidance-dismiss")) { Text("稍后再说") } },
+    )
 }

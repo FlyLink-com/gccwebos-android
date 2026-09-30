@@ -85,7 +85,10 @@ jobs:
           # Only disposable compiler/module caches. Keep artifacts and all verification receipts.
           if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ]; then
             du -sh native/build/gocache native/build/gopath | tee .build-output/native/cache-disk.log
-            rm -rf -- native/build/gocache native/build/gopath
+            # Go owns the read-only module-cache permissions; use its official cleaner.
+            env GOTOOLCHAIN=local GOPATH="$PWD/native/build/gopath" GOCACHE="$PWD/native/build/gocache" \
+              "$PWD/native/toolchain/go/bin/go" clean -cache -modcache \
+              2>&1 | tee .build-output/native/cache-clean.log
           fi
           bash scripts/m0-emulator-smoke.sh
       - name: Retain source, native and Android evidence

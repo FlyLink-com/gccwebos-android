@@ -69,10 +69,10 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
             } catch (failure: Exception) { file.failWrite(output); throw failure }
             syncDirectory()
             val received = read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
-                require(received.accountId == record.accountId && received.sessionBinding == record.sessionBinding &&
-                    received.resource == record.resource && received.operationKey == record.operationKey &&
-                    received.url?.value == record.url?.value && received.handoff?.value == record.handoff?.value &&
-                    received.pendingAck == record.pendingAck)
+            require(received.accountId == record.accountId && received.sessionBinding == record.sessionBinding &&
+                received.resource == record.resource && received.operationKey == record.operationKey &&
+                received.url?.value == record.url?.value && received.handoff?.value == record.handoff?.value &&
+                received.pendingAck == record.pendingAck)
         } finally { plain.fill(0) }
     }
     override fun clear() = storage {

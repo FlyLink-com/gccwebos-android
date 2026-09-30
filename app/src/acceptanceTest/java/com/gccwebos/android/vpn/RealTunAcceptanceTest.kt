@@ -161,11 +161,12 @@ class RealTunAcceptanceTest {
         assertArrayEquals(byteArrayOf(0x12, 0x34), dns.copyOfRange(0, 2))
         assertArrayEquals(byteArrayOf(198.toByte(), 18, 0, 10), dns.takeLast(4).toByteArray())
         assertTrue(fixture.tcpRequests.get() > 0 && fixture.udpRequests.get() > 0 && fixture.dnsRequests.get() > 0)
-        assertTrue("Fixture rejected unexpected traffic: ${fixture.errors}", fixture.errors.isEmpty())
         screenshot(label)
         record(label, JSONObject().put("pid", pid).put("tcpProof", true).put("udpProof", true).put("dnsThroughProxy", true)
             .put("tcpRequests", fixture.tcpRequests.get()).put("udpRequests", fixture.udpRequests.get())
-            .put("dnsRequests", fixture.dnsRequests.get()).put("routes", JSONArray(link.routes.map { it.toString() })))
+            .put("dnsRequests", fixture.dnsRequests.get()).put("privateDnsProbesRejected", fixture.privateDnsProbesRejected.get())
+            .put("unexpectedErrors", JSONArray(fixture.errors.toList())).put("routes", JSONArray(link.routes.map { it.toString() })))
+        assertTrue("Fixture rejected unexpected traffic: ${fixture.errors}", fixture.errors.isEmpty())
         return pid
     }
 
@@ -228,7 +229,10 @@ class RealTunAcceptanceTest {
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
             if (depth > 20 || result.size >= 500) return
             result += node
-            for (index in 0 until node.childCount) node.getChild(index)?.let { visit(it, depth + 1) }
+            for (index in 0 until node.childCount) {
+                if (result.size >= 500) break
+                node.getChild(index)?.let { visit(it, depth + 1) }
+            }
         }
         visit(root, 0); return result
     }

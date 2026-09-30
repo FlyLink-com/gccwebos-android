@@ -16,6 +16,8 @@ for name in ('first-start', 'fresh-process-restart', 'before-platform-revocation
     case = cases[name]
     assert all(case[k] is True for k in ('tcpProof', 'udpProof', 'dnsThroughProxy'))
     assert all(case[k] > 0 for k in ('tcpRequests', 'udpRequests', 'dnsRequests'))
+    assert case['unexpectedErrors'] == []
+    assert case['privateDnsProbesRejected'] >= 0
 assert cases['first-start']['pid'] != cases['fresh-process-restart']['pid']
 assert cases['explicit-stop']['tunGone'] and cases['explicit-stop']['processGone']
 assert cases['process-death']['tunGone'] and cases['process-death']['noAutomaticRestart']

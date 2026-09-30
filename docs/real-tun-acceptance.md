@@ -25,7 +25,10 @@ Internet access, or interoperability for VLESS/Reality/Hysteria2/TUIC.
   proof nonce. It implements bounded SS AES-128-GCM framing, decodes only explicit test
   destinations, and synthesizes responses locally. It has **no forwarding or resolver path**
 - DNS's `1.1.1.1:53` is only an encrypted inner destination, recognized and answered by that
-  loopback fixture; the fixture never dials it. The actual test app query goes to TUN DNS
+  loopback fixture; the fixture never dials it. Android may also probe its configured TUN DNS
+  address `172.19.0.2:853` for opportunistic private DNS. Exactly that destination is classified
+  and rejected locally without a response or forwarding; it is never counted as a successful
+  DNS proof. All other unexpected destinations/errors still fail the test. The actual test app query goes to TUN DNS
   `172.19.0.2`, exercising in-process hijack and DNS-over-proxy
 - The service consumes one bounded, deadline-limited, permission-0600 fixture input from the
   app-private no-backup directory. Only loopback SS with an ephemeral-format password is
@@ -72,3 +75,25 @@ Results must be read from the exact published commit's CI, not inferred from hos
 Production stable-line authorization, prepared-config/native integration, bounded handoff,
 real-device behavior, other protocols and broader routing/DNS acceptance remain separate gates.
 No client/device limit or automatic backend reset is introduced.
+
+## Cost-bounded source-identical JNI reuse
+
+Harness-only iterations may reuse the two native libraries from immutable artifact11105785156,
+source b56b185461e8aa0f1cdbee4fa5ac290520fe13a8. The archive digest, repository/run identity,
+entire native Git tree, Kotlin projector/JNI contract sources, and both raw library hashes must
+match before extraction. Only explicit library/header/notice entries are copied; no old APK is
+used. Every current app/test APK is rebuilt and its packaging, signatures, release exclusion,
+JNI execution and actual TUN tests still run. The receipt separately names native source and
+application source. Prior runtime failure is retained and never relabeled successful.
+
+Changed native/projector inputs or an expired/missing artifact trigger the full original native
+build/test path; corrupt or contradictory provenance fails closed. Prior host packet-path proof
+is retained under reused-source-evidence, rather than presented as a new-head host execution.
+
+## API36 startup stabilization
+
+The separate API36 UI lane preserves first-boot logs, ANR/window state, screenshot and boot ID,
+then reboots its owned disposable AVD exactly once before APK installation. It verifies the boot
+ID changed, applies bounded startup deadlines, and rejects any post-warm-boot ANR/error window.
+Existing APK identity, foreground, crash and instrumentation gates remain required. No dialog
+is dismissed and first-boot SystemUI failures are retained rather than rewritten as app passes.

@@ -115,6 +115,51 @@ while (( SECONDS < deadline )); do
   sleep 2
 done
 [ "$booted" = true ] || { log 'FAIL: emulator boot timed out'; exit 1; }
+# API36 first boot repeatedly stalls SystemUIService on this disposable two-core host.
+# Retain the first-boot failure evidence, then warm-boot ONCE before any APK installation.
+# No ANR dialog is dismissed and no app/foreground/instrumentation gate is bypassed.
+log 'Preserving initial API36 boot diagnostics before one bounded warm boot'
+sleep 60
+adb shell cat /proc/sys/kernel/random/boot_id > "$OUT/first-boot-id.log"
+FIRST_BOOT_ID=$(tr -d '\r\n' < "$OUT/first-boot-id.log")
+test -n "$FIRST_BOOT_ID"
+adb logcat -b main -b system -b events -b crash -d > "$OUT/first-boot-logcat.log"
+adb shell dumpsys activity lastanr > "$OUT/first-boot-last-anr.log"
+adb shell dumpsys window > "$OUT/first-boot-window.log"
+adb exec-out screencap -p > "$OUT/first-boot.png"
+log 'Rebooting only the owned disposable AVD once; application is not installed yet'
+adb reboot
+timeout 180 "$ADB" -s emulator-5554 wait-for-device
+warm_booted=false
+deadline=$((SECONDS + 240))
+while (( SECONDS < deadline )); do
+  current_boot_id=$(timeout 5 "$ADB" -s emulator-5554 shell cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n' || true)
+  completed=$(timeout 5 "$ADB" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r\n' || true)
+  if [ -n "$current_boot_id" ] && [ "$current_boot_id" != "$FIRST_BOOT_ID" ] && [ "$completed" = 1 ]; then
+    warm_booted=true
+    printf '%s\n' "$current_boot_id" > "$OUT/post-warmboot-id.log"
+    break
+  fi
+  kill -0 "$EMU_PID"
+  sleep 2
+done
+[ "$warm_booted" = true ] || { log 'FAIL: single warm boot did not complete'; exit 1; }
+sleep 30
+adb logcat -b main -b system -b events -b crash -d > "$OUT/post-warmboot-logcat.log"
+adb shell dumpsys activity lastanr > "$OUT/post-warmboot-last-anr.log"
+adb shell dumpsys window > "$OUT/post-warmboot-window.log"
+adb exec-out screencap -p > "$OUT/post-warmboot.png"
+if grep -Eq 'am_anr[[:space:]]*:|ANR in ' "$OUT/post-warmboot-logcat.log"; then
+  log 'FAIL: ANR after the single warm boot; no further retry'
+  exit 1
+fi
+grep -E 'mCurrentFocus|mFocusedApp' "$OUT/post-warmboot-window.log" > "$OUT/post-warmboot-focus.log"
+if grep -Eiq 'Application Not Responding|Application Error|isn.t responding' "$OUT/post-warmboot-focus.log"; then
+  log 'FAIL: system error window after warm boot'
+  exit 1
+fi
+printf '%s\n' 'One pre-install disposable-AVD warm boot completed; first-boot evidence retained; normal gates still required.' \
+  > "$OUT/warmboot-result.log"
 log 'Android boot complete; allowing package manager and SystemUI to settle'
 sleep 10
 adb shell service check package | tee "$OUT/package-service.log"

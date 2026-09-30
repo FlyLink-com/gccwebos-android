@@ -36,6 +36,7 @@ class SyntheticSsFixture : AutoCloseable {
     val tcpRequests = AtomicInteger()
     val udpRequests = AtomicInteger()
     val dnsRequests = AtomicInteger()
+    val privateDnsProbesRejected = AtomicInteger()
     val errors = CopyOnWriteArrayList<String>()
     val tcpProof get() = "GCC_TUN_TCP_$token"
     val udpRequest get() = "GCC_TUN_UDP_REQUEST_$token".toByteArray()
@@ -71,15 +72,20 @@ class SyntheticSsFixture : AutoCloseable {
     }
 
     private fun handle(socket: Socket) {
+        var stage = "FRAME"
+        var addressLabel = "unparsed"
         try {
             val stream = AeadStream(socket, key)
             var first = stream.read()
             while (first.size < 7) first += stream.read()
             require(first[0] == 1.toByte()) // Literal IPv4 only; never invoke DNS/network forwarding.
             val destination = first.copyOfRange(0, 7)
+            addressLabel = destination.drop(1).take(4).joinToString(".") { (it.toInt() and 255).toString() } + ":" + ushort(destination, 5)
+            stage = "DESTINATION"
             var body = first.copyOfRange(7, first.size)
             when {
                 destination.contentEquals(address(TCP_PORT)) -> {
+                    stage = "HTTP"
                     while (!String(body, Charsets.US_ASCII).contains("\r\n\r\n")) {
                         require(body.size < 4096); body += stream.read()
                     }
@@ -88,6 +94,7 @@ class SyntheticSsFixture : AutoCloseable {
                     stream.write("HTTP/1.1 200 OK\r\nContent-Length: ${tcpProof.length}\r\nConnection: close\r\n\r\n$tcpProof".toByteArray())
                 }
                 destination.contentEquals(byteArrayOf(1, 1, 1, 1, 1, 0, 53)) -> {
+                    stage = "DNS"
                     while (body.size < 2) body += stream.read()
                     val length = ushort(body, 0); require(length in 17..512)
                     while (body.size < length + 2) body += stream.read()
@@ -99,11 +106,16 @@ class SyntheticSsFixture : AutoCloseable {
                         questionTail() + byteArrayOf(0xc0.toByte(), 12, 0, 1, 0, 1, 0, 0, 0, 1, 0, 4, 198.toByte(), 18, 0, 10)
                     stream.write(byteArrayOf((response.size shr 8).toByte(), response.size.toByte()) + response)
                 }
+                destination.contentEquals(byteArrayOf(1, 172.toByte(), 19, 0, 2, 3, 85)) -> {
+                    // Android may validate the configured TUN DNS server with a DoT probe.
+                    // This fixture does not offer TLS DNS: close locally, NEVER forward it.
+                    privateDnsProbesRejected.incrementAndGet()
+                }
                 else -> error("Fixture destination rejected")
             }
             first.fill(0); body.fill(0)
         } catch (_: EOFException) { /* Core shutdown may close an idle stream. */ }
-        catch (_: Exception) { if (running.get()) errors += "TCP_REJECTED" }
+        catch (failure: Exception) { if (running.get()) errors += "TCP_${stage}_${failure.javaClass.simpleName}_$addressLabel" }
         finally { clients -= socket; runCatching { socket.close() } }
     }
 

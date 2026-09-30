@@ -56,8 +56,27 @@ class SyntheticSsFixtureTest {
                 stream.write(byteArrayOf(1, 203.toByte(), 0, 113, 10, 1, 187.toByte()) + "not-forwarded".toByteArray())
                 assertEquals(-1, socket.getInputStream().read())
             }
-            assertEquals(listOf("TCP_REJECTED"), fixture.errors.toList())
+            assertEquals(listOf("TCP_DESTINATION_IllegalStateException_203.0.113.10:443"), fixture.errors.toList())
             assertEquals(0, fixture.tcpRequests.get())
         }
     }
+    @Test fun androidPrivateDnsProbeIsRejectedLocallyWithoutForwardingOrGeneralAllowance() {
+        SyntheticSsFixture().use { fixture ->
+            Socket("127.0.0.1", fixture.port).use { socket ->
+                socket.soTimeout = 3000
+                val stream = SyntheticSsFixture.AeadStream(socket, fixture.key)
+                stream.write(byteArrayOf(1, 172.toByte(), 19, 0, 2, 3, 85) + byteArrayOf(22, 3, 1))
+                assertEquals(-1, socket.getInputStream().read())
+            }
+            assertEquals(1, fixture.privateDnsProbesRejected.get()); assertTrue(fixture.errors.isEmpty())
+            assertEquals(0, fixture.tcpRequests.get()); assertEquals(0, fixture.dnsRequests.get())
+            Socket("127.0.0.1", fixture.port).use { socket ->
+                socket.soTimeout = 3000
+                SyntheticSsFixture.AeadStream(socket, fixture.key).write(byteArrayOf(1, 172.toByte(), 19, 0, 3, 3, 85))
+                assertEquals(-1, socket.getInputStream().read())
+            }
+            assertEquals(1, fixture.errors.size) // Adjacent addresses are not silently allowed.
+        }
+    }
+
 }

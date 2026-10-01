@@ -292,6 +292,8 @@ public final class CopyBoundaryIpcTest {
             catch (TimeoutException expected) { waitTimedOut = true; }
             check(waitTimedOut && !oldCall.isDone() && !oldCall.isCancelled(),
                 "P6 timeout must leave the real synchronous Binder call in stack");
+            check(!oldCall.cancel(true) && !oldCall.isCancelled(),
+                "P6 cancelling an await handle must not cancel the actual RPC claim");
             oldGuard.abandonAwait(a);
             CopySessionGuard.State abandoned = oldGuard.state();
             check(abandoned.phase == CopySessionGuard.Phase.UNKNOWN && abandoned.claims == 1
@@ -342,6 +344,8 @@ public final class CopyBoundaryIpcTest {
             check(replacement.reconcile(a)
                     && replacement.state().phase == CopySessionGuard.Phase.CLEANUP_CONFIRMED,
                 "P6 explicit reconciliation requires every matching debt and actual claim exit");
+            check(replacement.clearAndWipe(a) == null && replacement.state().claims == 0,
+                "P6 terminal A cannot reopen an old clear claim before B grant");
             check(Arrays.equals(fixture, fixtureAfterCallerEdit),
                 "P6 guard may erase only its private sender copy, never the caller fixture");
             Wire.Frame b = replacement.grant(nextRequest());

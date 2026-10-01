@@ -7,6 +7,9 @@ import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Surviving in-memory metadata guard. Adapter reconstruction must reuse Recovery. */
 public final class CopySessionGuard {
@@ -49,7 +52,9 @@ public final class CopySessionGuard {
     /** Returns null while any prior debt/claim remains; never performs a retry. */
     public Wire.Frame grant(long request) throws RemoteException {
         synchronized (recovery.lock) {
-            if (recovery.reserving || (recovery.entry != null && !recovery.entry.reconciled)) return null;
+            Entry prior = recovery.entry;
+            if (recovery.reserving || (prior != null && (!prior.reconciled || prior.claims != 0 ||
+                    !prior.senderWiped || !prior.receiverWiped || !prior.leases.isEmpty()))) return null;
             recovery.reserving = true;
         }
         Wire.Frame scope;
@@ -89,7 +94,7 @@ public final class CopySessionGuard {
             recovery.entry = entry;
         }
         try {
-            return calls.submit(() -> {
+            Future<Wire.Frame> actualCall = calls.submit(() -> {
                 try {
                     Wire.Frame receipt = client.call(Wire.COPY, entry.scope,
                         dropReply ? Wire.ARG_DROP_REPLY : 0, entry.sender);
@@ -110,6 +115,7 @@ public final class CopySessionGuard {
                     }
                 }
             });
+            return new NonCancellingCall(actualCall);
         } catch (RuntimeException notScheduled) {
             synchronized (recovery.lock) {
                 Arrays.fill(entry.sender, (byte) 0); entry.senderWiped = true;
@@ -121,7 +127,7 @@ public final class CopySessionGuard {
 
     public void abandonAwait(Wire.Frame scope) {
         synchronized (recovery.lock) {
-            Entry e = addressed(scope); if (e != null) e.unknown = true;
+            Entry e = addressed(scope); if (e != null && !e.reconciled) e.unknown = true;
         }
     }
     public Lease addLease(Wire.Frame scope) {
@@ -140,7 +146,9 @@ public final class CopySessionGuard {
     public Wire.Frame clearAndWipe(Wire.Frame scope) throws RemoteException {
         final Entry e;
         synchronized (recovery.lock) {
-            e = addressed(scope); if (e == null) return null; ++e.claims;
+            e = addressed(scope);
+            if (e == null || e.reconciled || e.claims >= 4) return null;
+            ++e.claims;
         }
         try {
             Wire.Frame fence = client.clear(e.scope);
@@ -183,5 +191,20 @@ public final class CopySessionGuard {
         return e != null && scope != null && e.scope.incarnation == scope.incarnation &&
             e.scope.revision == scope.revision && e.scope.request == scope.request &&
             e.scope.capHi == scope.capHi && e.scope.capLo == scope.capLo ? e : null;
+    }
+    /** Awaiters may detach; cancellation never removes a queued or in-stack RPC. */
+    private static final class NonCancellingCall implements Future<Wire.Frame> {
+        private final Future<Wire.Frame> actual;
+        NonCancellingCall(Future<Wire.Frame> actual) { this.actual = actual; }
+        @Override public boolean cancel(boolean interrupt) { return false; }
+        @Override public boolean isCancelled() { return false; }
+        @Override public boolean isDone() { return actual.isDone(); }
+        @Override public Wire.Frame get() throws InterruptedException, ExecutionException {
+            return actual.get();
+        }
+        @Override public Wire.Frame get(long timeout, TimeUnit unit)
+                throws InterruptedException, ExecutionException, TimeoutException {
+            return actual.get(timeout, unit);
+        }
     }
 }

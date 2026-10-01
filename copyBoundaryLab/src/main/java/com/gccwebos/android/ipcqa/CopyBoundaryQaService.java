@@ -43,7 +43,10 @@ public final class CopyBoundaryQaService extends Service {
             // decoding, wait or clearCallingIdentity. PID is diagnostic only.
             final int callerUid = Binder.getCallingUid();
             if (callerUid != Process.myUid()) throw new SecurityException("CALLER_UID");
-            if (code != Wire.TRANSACTION || reply == null || flags != 0) return false;
+            // Native Binder may append transport flags to a synchronous call.
+            // Only one-way requests lack the reply contract used by this codec.
+            if (code != Wire.TRANSACTION || reply == null || (flags & IBinder.FLAG_ONEWAY) != 0)
+                return false;
             Wire.Frame request = null;
             if (calls.incrementAndGet() > 8) {
                 calls.decrementAndGet();

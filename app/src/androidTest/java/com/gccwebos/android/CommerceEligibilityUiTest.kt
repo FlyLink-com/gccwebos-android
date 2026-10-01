@@ -133,7 +133,7 @@ class CommerceEligibilityUiTest {
             assertFalse(commerce.busy); assertTrue(commerceReads.isEmpty())
         }
         if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-status").assertTextEquals("商品尚未读取")
-        else compose.onNodeWithTag("wallet-balance").assertTextEquals("尚未读取")
+        else compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
     }
 
     private fun expectedReads(mode: CommerceMode) = when (mode) {

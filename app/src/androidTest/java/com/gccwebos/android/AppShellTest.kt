@@ -2,6 +2,7 @@ package com.gccwebos.android
 
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -32,13 +33,15 @@ class AppShellTest {
         }, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
         subscription = SubscriptionSource { error("Navigation fixture cannot download configuration") }), scope)
 
-    private fun launch(): AccountController {
+    private fun launch(control: () -> ConnectionControlState = { ConnectionControlState() },
+        onPowerAction: ((ConnectionPowerAction) -> Unit)? = null): AccountController {
         lateinit var controller: AccountController
         compose.setContent {
             val scope = rememberCoroutineScope()
             val state = remember { account(scope) }
             controller = state
-            AppShell(state, autoLoadCommerce = false)
+            AppShell(state, autoLoadCommerce = false, connectionControlState = control(),
+                onConnectionPowerAction = onPowerAction)
         }
         return controller
     }
@@ -49,9 +52,65 @@ class AppShellTest {
         listOf("Connect", "Plans", "Profile").forEach { compose.onNodeWithTag("nav-$it").assertExists() }
         listOf("Lines", "Orders").forEach { compose.onNodeWithTag("nav-$it").assertDoesNotExist() }
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
+        compose.onNodeWithTag("connection-power").assertExists()
+        compose.onNodeWithTag("subscription-waterdrop").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接暂不可用")
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("未配置")
         compose.onNodeWithTag("subscription-usage-unavailable").assertTextEquals("暂不可用")
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
+    }
+
+    @Test fun readyConfigurationNeverShowsConnectedOrEnablesUnwiredProductionPower() {
+        val state = launch()
+        compose.runOnIdle {
+            state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
+                hasCapability = true, validUntil = Instant.now().plusSeconds(600))
+        }
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接暂不可用").assertIsNotEnabled()
+        compose.onNodeWithText("已连接").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-usage-unavailable").assertTextEquals("暂不可用")
+        compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
+    }
+
+    @Test fun controllerPowerCannotReplayOnNavigationAndAccountWorkDoesNotBlockCancelOrDisconnect() {
+        val control = mutableStateOf(ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true))
+        val actions = CopyOnWriteArrayList<ConnectionPowerAction>()
+        val state = launch({ control.value }, { actions += it })
+        compose.runOnIdle {
+            state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
+                hasCapability = true, validUntil = Instant.now().plusSeconds(600))
+        }
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.runOnIdle {
+            assertEquals(listOf(ConnectionPowerAction.Connect), actions.toList())
+            control.value = ConnectionControlState(ConnectionPhase.Connecting, revision = 1)
+        }
+        compose.onNodeWithTag("connection-status").assertTextEquals("连接中")
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接中").assertIsNotEnabled()
+        compose.runOnIdle {
+            state.busy = true // Account work cannot remove a real controller's cancellation capability.
+            control.value = control.value.copy(canCancel = true, revision = 2)
+        }
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("取消连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.runOnIdle {
+            assertEquals(listOf(ConnectionPowerAction.Connect, ConnectionPowerAction.Cancel), actions.toList())
+            control.value = ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true, revision = 3)
+        }
+        compose.onNodeWithTag("connection-status").assertTextEquals("已连接")
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("断开连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.runOnIdle {
+            assertEquals(listOf(ConnectionPowerAction.Connect, ConnectionPowerAction.Cancel, ConnectionPowerAction.Disconnect), actions.toList())
+            assertEquals(emptyList<String>(), requests.toList())
+        }
     }
 
     @Test fun signedOutRecreationRetainsConnectionWithoutAuthenticationRequests() {

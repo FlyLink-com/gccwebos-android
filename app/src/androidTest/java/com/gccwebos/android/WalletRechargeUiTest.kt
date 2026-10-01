@@ -59,7 +59,7 @@ class WalletRechargeUiTest {
     }
     @Test fun unknownErrorAndConfirmedZeroKeepDirectoryStatesSeparate() {
         launch()
-        compose.onNodeWithTag("wallet-balance").assertTextEquals("尚未读取")
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
         compose.onNodeWithTag("recharge-offers-unread").assertExists()
         compose.runOnIdle { state.walletError = "合成余额读取失败"; state.rechargeOffersError = "合成档位读取失败" }
         compose.onNodeWithTag("wallet-error").assertTextEquals("合成余额读取失败")
@@ -77,11 +77,13 @@ class WalletRechargeUiTest {
         compose.onNodeWithText("73 Coins").performScrollTo().assertIsDisplayed()
         repeat(2) {
             compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
+            compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
             compose.onNodeWithTag("recharge-confirm").assertIsDisplayed()
             compose.onNodeWithTag("recharge-cancel").performClick()
             compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
         }
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
         compose.runOnIdle { state.rechargeOffers = listOf(offer.copy(quoteVersion = 10, amountMinor = 2567)) }
         compose.onNodeWithTag("recharge-confirm").performClick()
         compose.onNodeWithTag("recharge-flow-error").performScrollTo().assertExists()

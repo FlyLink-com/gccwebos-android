@@ -96,6 +96,7 @@ class WalletResumeUiTest {
     }
     private fun createPending() {
         compose.onNodeWithTag("recharge-select-resume_ui_offer").performScrollTo().performClick()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-confirm").performClick()
         compose.waitUntil(5000) { posts == 1 }
         compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("等待付款或支付确认")

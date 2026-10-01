@@ -324,18 +324,21 @@ class SubscriptionWalletUiTest {
 
     @Test fun walletUnknownAndErrorNeverBecomeZeroAndConfirmedBalanceIsExact() {
         launchCommerce(CommerceMode.Wallet)
-        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("尚未读取")
+        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("— Coins")
         compose.runOnIdle { commerce.error = "离线余额读取失败" }
         compose.onNodeWithTag("wallet-error").performScrollTo().assertTextEquals("离线余额读取失败")
-        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("尚未读取")
+        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("— Coins")
         capture("wallet-error")
         compose.runOnIdle {
             commerce.error = null
             commerce.wallet = Wallet("active", 1, 12, 5, 3, 20, 3, 4)
         }
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("20 Coins")
-        compose.onNodeWithText("充值 Coins 余额 12 Coins · 赠送 5 Coins · 奖励 3 Coins").assertExists()
-        compose.onNodeWithText("冻结中 3 Coins · 待到账 4 Coins").assertExists()
+        compose.onNodeWithTag("wallet-paid").assertTextEquals("12 Coins")
+        compose.onNodeWithTag("wallet-bonus").assertTextEquals("5 Coins")
+        compose.onNodeWithTag("wallet-reward").assertTextEquals("3 Coins")
+        compose.onNodeWithTag("wallet-held").assertTextEquals("3 Coins")
+        compose.onNodeWithTag("wallet-pending").assertTextEquals("4 Coins")
         capture("wallet-confirmed-fixture")
         compose.runOnIdle { account.authenticated = false }
         compose.onNodeWithTag("commerce-signed-out").performScrollTo().assertIsDisplayed()
@@ -513,6 +516,7 @@ class SubscriptionWalletUiTest {
         val fixture = rechargeOffer()
         launchCommerce(CommerceMode.Wallet, fontScale = 2f) { rechargeOffers = listOf(fixture) }
         compose.onNodeWithTag("recharge-select-${fixture.offerRef}").performScrollTo().performClick()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-confirm").assertIsDisplayed().assertIsEnabled()
         compose.onNodeWithTag("recharge-cancel").assertIsDisplayed()
         capture("recharge-confirm-font-200")

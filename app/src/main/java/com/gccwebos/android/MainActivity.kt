@@ -87,11 +87,25 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     registrationOpener: ((String) -> Unit)? = null,
     registrationOverride: RegistrationController? = null,
     commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery? = null,
-    paymentOpenerOverride: ((String) -> Unit)? = null) {
+    paymentOpenerOverride: ((String) -> Unit)? = null,
+    connectionControlState: ConnectionControlState = ConnectionControlState(),
+    onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = remember(accountOverride) { accountOverride ?: AccountController(productionRepository(context), scope) }
+    // Keep an accepted power command outside keyed destinations. Navigation cannot replay it
+    // while the controller is still publishing acceptance/rejection. A new snapshot/revision is the ack.
+    var acceptedConnectionCommand by remember(connectionControlState, account) { mutableStateOf(false) }
+    val powerControl = connectionControlState.copy(commandPending = connectionControlState.commandPending || acceptedConnectionCommand)
+    val powerAction: ((ConnectionPowerAction) -> Unit)? = onConnectionPowerAction?.let { handler ->
+        { action ->
+            if (!acceptedConnectionCommand && !connectionControlState.commandPending && action != ConnectionPowerAction.None) {
+                acceptedConnectionCommand = true
+                handler(action)
+            }
+        }
+    }
     val lifecycle = (LocalActivity.current as? ComponentActivity)?.lifecycle
     // Restore starts before the login form may fetch its first question. A child
     // composition must not take the authentication busy slot ahead of restore.
@@ -149,7 +163,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                     }
                 }
              }) { padding -> key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
-                 commerceRecoveryOverride, paymentOpenerOverride,
+                 commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
                  openAccount = { selectedName = Destination.Profile.name }, openPlans = { selectedName = Destination.Plans.name },
                  openNodes = { selectedName = Destination.Lines.name }, registrationOpener = registrationOpener,
                  loginStartupReady = loginStartupReady, registrationOverride = registrationOverride) } }
@@ -198,6 +212,7 @@ private fun LoginScreen(account: AccountController, registrationOpener: ((String
 private fun Page(destination: Destination, padding: PaddingValues, account: AccountController,
                   autoLoadCommerce: Boolean, commerceOverride: com.gccwebos.android.commerce.CommerceController?,
                   commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery?, paymentOpenerOverride: ((String) -> Unit)?,
+                  connectionControlState: ConnectionControlState, onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)?,
                   openAccount: () -> Unit, openPlans: () -> Unit, openNodes: () -> Unit,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
                   registrationOverride: RegistrationController?) {
@@ -221,11 +236,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
             BrandHeader()
             when (destination) {
                 Destination.Connect -> {
-                    ConnectionOverview(account, openAccount, openPlans, openNodes)
-                    if (account.authenticated && account.localSubscription.status == com.gccwebos.android.portal.LocalSubscriptionStatus.MISSING &&
-                        !account.localSubscription.hasCapability && !account.localSubscription.hasProfile &&
-                        (account.resource as? Resource.Available)?.validUntil?.let { it <= Instant.now() } == true)
-                        BrandButton("购买／续订订阅", openPlans, modifier = Modifier.testTag("portal-expired-renew"))
+                    ConnectionOverview(account, openAccount, openPlans, openNodes, connectionControlState,
+                        onConnectionPowerAction)
                 }
                 Destination.Lines -> {
                     Text("订阅节点", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)

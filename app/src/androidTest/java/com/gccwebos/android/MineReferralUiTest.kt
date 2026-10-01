@@ -77,10 +77,10 @@ class MineReferralUiTest {
     @Test fun oldSessionIsNeutralAndUnknownBalanceCannotBecomeResourceDerivedZero() {
         launchMine()
         compose.onNodeWithTag("mine-account-identity").assertTextEquals("账户")
-        compose.onNodeWithTag("wallet-balance").assertTextEquals("尚未读取")
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
         compose.runOnIdle { commerce.walletError = "合成余额读取失败" }
         compose.onNodeWithTag("wallet-error").assertTextEquals("合成余额读取失败")
-        compose.onNodeWithTag("wallet-balance").assertTextEquals("尚未读取")
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
         compose.runOnIdle { commerce.wallet = Wallet("active", 1, 43, 0, 0, 43, 7, 9); commerce.walletLoaded = true; commerce.walletError = null }
         compose.onNodeWithTag("wallet-balance").assertTextEquals("43 Coins")
         compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(copied.isEmpty()); assertTrue(requests.isEmpty()) }

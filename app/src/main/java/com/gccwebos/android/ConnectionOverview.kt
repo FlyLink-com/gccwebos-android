@@ -1,18 +1,10 @@
 package com.gccwebos.android
 
-import android.database.ContentObserver
-import android.os.Handler
-import android.os.Looper
-import android.provider.Settings
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -22,132 +14,205 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.SupportingText
 import com.gccwebos.android.design.remainingValidity
 import com.gccwebos.android.portal.AccountController
-import com.gccwebos.android.portal.LocalSubscriptionStatus
 import com.gccwebos.android.portal.LocalSubscriptionSnapshot
+import com.gccwebos.android.portal.LocalSubscriptionStatus
 import java.time.Instant
 import kotlinx.coroutines.delay
-import kotlin.math.PI
-import kotlin.math.sin
 
-internal enum class ConnectionVisualTone { Neutral, Available, Expired }
-internal data class ConnectionOverviewPresentation(val status: LocalSubscriptionStatus, val title: String,
-    val tone: ConnectionVisualTone, val countdown: String?, val usageText: String = "暂不可用")
+internal enum class ConnectionVisualTone { Neutral, Connecting, Connected, Error }
+internal enum class ConnectionPhase { Unavailable, Disconnected, Connecting, Connected, Disconnecting, Failed }
+internal enum class ConnectionFailure { NetworkUnavailable, ResourceUnavailable, ReadFailed, Other }
+internal enum class ConnectionPowerAction { None, Connect, Cancel, Disconnect }
 
-/** An account overview is deliberately absent: it cannot prove usage belongs to this local capability. */
-internal fun connectionOverviewPresentation(snapshot: LocalSubscriptionSnapshot, now: Instant): ConnectionOverviewPresentation {
+/** Read-only UI input from a future controller, never inferred from saved configuration.
+ * The controller must publish a new snapshot/revision when it accepts or rejects a command.
+ * Defaults deliberately expose no working engine, cancellation or disconnect action.
+ */
+internal data class ConnectionControlState(
+    val phase: ConnectionPhase = ConnectionPhase.Unavailable,
+    val failure: ConnectionFailure? = null,
+    val canConnect: Boolean = false,
+    val canCancel: Boolean = false,
+    val canDisconnect: Boolean = false,
+    val commandPending: Boolean = false,
+    val revision: Long = 0,
+)
+
+internal data class ConnectionOverviewPresentation(
+    val status: LocalSubscriptionStatus,
+    val title: String,
+    val connectionText: String,
+    val tone: ConnectionVisualTone,
+    val countdown: String?,
+    val usageText: String = "暂不可用",
+    val action: ConnectionPowerAction = ConnectionPowerAction.None,
+    val powerLabel: String = "连接暂不可用",
+)
+
+/** Account usage is absent: it cannot prove usage belongs to this local capability.
+ * READY is configuration evidence only; it can never produce Connecting or Connected.
+ */
+internal fun connectionOverviewPresentation(
+    snapshot: LocalSubscriptionSnapshot,
+    now: Instant,
+    control: ConnectionControlState = ConnectionControlState(),
+): ConnectionOverviewPresentation {
     val status = if (snapshot.status == LocalSubscriptionStatus.READY && snapshot.hasProfile && snapshot.hasCapability &&
-        snapshot.validUntil?.let { it <= now } == true)
-        LocalSubscriptionStatus.EXPIRED else snapshot.status
+        snapshot.validUntil?.let { it <= now } == true) LocalSubscriptionStatus.EXPIRED else snapshot.status
     val confirmedReady = status == LocalSubscriptionStatus.READY && snapshot.hasProfile && snapshot.hasCapability &&
         snapshot.validUntil?.let { it > now } == true
-    val tone = when {
-        status == LocalSubscriptionStatus.EXPIRED -> ConnectionVisualTone.Expired
-        confirmedReady -> ConnectionVisualTone.Available
-        else -> ConnectionVisualTone.Neutral
+    val localError = status in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.RETRY_REQUIRED,
+        LocalSubscriptionStatus.INVALID_LINK, LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)
+    val connectionText = when (control.phase) {
+        ConnectionPhase.Unavailable, ConnectionPhase.Disconnected, ConnectionPhase.Failed -> "未连接"
+        ConnectionPhase.Connecting -> "连接中"
+        ConnectionPhase.Connected -> "已连接"
+        ConnectionPhase.Disconnecting -> "断开中"
     }
-    val title = when (status) {
-        LocalSubscriptionStatus.MISSING -> "暂无订阅"
-        LocalSubscriptionStatus.READY -> if (confirmedReady) "订阅可用" else "订阅待确认"
-        LocalSubscriptionStatus.EXPIRED -> "订阅已过期"
-        LocalSubscriptionStatus.RETRY_REQUIRED -> "读取失败"
-        LocalSubscriptionStatus.INVALID_LINK -> "订阅资源不可用"
-        LocalSubscriptionStatus.UNSUPPORTED -> "配置暂不支持"
-        LocalSubscriptionStatus.STORAGE_ERROR -> "本地存储异常"
+    val title = when {
+        localError -> when (status) {
+            LocalSubscriptionStatus.EXPIRED -> "订阅已过期"
+            LocalSubscriptionStatus.RETRY_REQUIRED -> "读取失败"
+            LocalSubscriptionStatus.INVALID_LINK -> "订阅资源不可用"
+            LocalSubscriptionStatus.UNSUPPORTED -> "配置暂不支持"
+            LocalSubscriptionStatus.STORAGE_ERROR -> "本地存储异常"
+            else -> error("Local error requires an explicit local status")
+        }
+        control.phase == ConnectionPhase.Failed -> when (control.failure) {
+            ConnectionFailure.NetworkUnavailable -> "无网络"
+            ConnectionFailure.ResourceUnavailable -> "订阅资源不可用"
+            ConnectionFailure.ReadFailed -> "读取失败"
+            ConnectionFailure.Other, null -> "连接异常"
+        }
+        status == LocalSubscriptionStatus.MISSING -> "未配置"
+        !confirmedReady -> "订阅待确认"
+        control.phase == ConnectionPhase.Unavailable -> "连接暂不可用"
+        else -> ""
+    }
+    val tone = when {
+        localError || control.phase == ConnectionPhase.Failed -> ConnectionVisualTone.Error
+        control.phase == ConnectionPhase.Connecting || control.phase == ConnectionPhase.Disconnecting -> ConnectionVisualTone.Connecting
+        control.phase == ConnectionPhase.Connected -> ConnectionVisualTone.Connected
+        else -> ConnectionVisualTone.Neutral
     }
     val countdown = when {
         status == LocalSubscriptionStatus.EXPIRED -> "已到期"
         confirmedReady -> snapshot.validUntil?.let { remainingValidity(it, now) }
         else -> null
     }
-    return ConnectionOverviewPresentation(status, title, tone, countdown)
+    val action = if (control.commandPending) ConnectionPowerAction.None else when (control.phase) {
+        ConnectionPhase.Disconnected, ConnectionPhase.Failed ->
+            if (control.canConnect && confirmedReady) ConnectionPowerAction.Connect else ConnectionPowerAction.None
+        ConnectionPhase.Connecting -> if (control.canCancel) ConnectionPowerAction.Cancel else ConnectionPowerAction.None
+        ConnectionPhase.Connected -> if (control.canDisconnect) ConnectionPowerAction.Disconnect else ConnectionPowerAction.None
+        ConnectionPhase.Unavailable, ConnectionPhase.Disconnecting -> ConnectionPowerAction.None
+    }
+    val powerLabel = when (action) {
+        ConnectionPowerAction.Connect -> if (control.phase == ConnectionPhase.Failed) "重试连接" else "连接"
+        ConnectionPowerAction.Cancel -> "取消连接"
+        ConnectionPowerAction.Disconnect -> "断开连接"
+        ConnectionPowerAction.None -> when (control.phase) {
+            ConnectionPhase.Connecting -> "连接中"
+            ConnectionPhase.Connected -> "已连接"
+            ConnectionPhase.Disconnecting -> "断开中"
+            else -> "连接暂不可用"
+        }
+    }
+    return ConnectionOverviewPresentation(status, title, connectionText, tone, countdown,
+        action = action, powerLabel = powerLabel)
 }
 
-/** Presentation of the saved capability only. This component never starts a VPN or reads usage. */
+/** A single power component. Production supplies no engine state or command handler yet. */
 @Composable
-internal fun ConnectionOverview(account: AccountController, openAccount: () -> Unit,
-    openPlans: () -> Unit, openNodes: () -> Unit) {
+internal fun ConnectionOverview(
+    account: AccountController,
+    openAccount: () -> Unit,
+    openPlans: () -> Unit,
+    openNodes: () -> Unit,
+    control: ConnectionControlState = ConnectionControlState(),
+    onPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
+) {
     val snapshot = account.localSubscription
     val now by produceState(Instant.now(), snapshot.validUntil) {
         while (true) { value = Instant.now(); delay(1_000) }
     }
-    val presentation = connectionOverviewPresentation(snapshot, now)
+    val presentation = connectionOverviewPresentation(snapshot, now, control)
     val accent = when (presentation.tone) {
-        ConnectionVisualTone.Expired -> Color(0xFFFF658E)
-        ConnectionVisualTone.Available -> Brand.Cyan
         ConnectionVisualTone.Neutral -> Brand.Muted
+        ConnectionVisualTone.Connecting -> Brand.Blue
+        ConnectionVisualTone.Connected -> Brand.Green
+        ConnectionVisualTone.Error -> Color(0xFFFF658E)
     }
-    val motionAllowed = rememberSystemMotionAllowed()
-    val phase = if (motionAllowed && presentation.tone == ConnectionVisualTone.Available) {
-        val transition = rememberInfiniteTransition(label = "subscription-water")
-        val progress by transition.animateFloat(0f, 1f,
-            animationSpec = infiniteRepeatable(tween(4_000, easing = LinearEasing)), label = "water-phase")
-        progress
-    } else 0f
     val operable = !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing
+    var acceptedCommand by remember(control, account) { mutableStateOf(false) }
+    // Session refresh/login must not prevent a controller-authorized cancel or disconnect.
+    val powerEnabled = onPowerAction != null && !acceptedCommand && presentation.action != ConnectionPowerAction.None &&
+        (presentation.action != ConnectionPowerAction.Connect || !account.clearing)
     Column(Modifier.fillMaxWidth().testTag("connection-overview"), horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.fillMaxWidth().heightIn(min = 350.dp).testTag("subscription-waterdrop"),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Box(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp).testTag("connection-power"),
             contentAlignment = Alignment.Center) {
-            Canvas(Modifier.matchParentSize()) {
-                val bounds = Rect(size.width * .035f, 8.dp.toPx(), size.width * .965f, size.height - 8.dp.toPx())
-                val drop = Path().apply { addOval(bounds) }
-                clipPath(drop) {
-                    drawRect(Brush.verticalGradient(listOf(accent.copy(alpha = .04f), accent.copy(alpha = .22f))))
-                    for (layer in 0..2) {
-                        val water = Path()
-                        val level = size.height * (.48f + layer * .07f)
-                        water.moveTo(0f, level)
-                        for (step in 0..60) {
-                            val x = size.width * step / 60f
-                            val y = level + sin((step / 60f * 2f + phase + layer * .2f) * PI * 2).toFloat() * size.height * .016f
-                            water.lineTo(x, y)
-                        }
-                        water.lineTo(size.width, size.height); water.lineTo(0f, size.height); water.close()
-                        drawPath(water, accent.copy(alpha = .07f + layer * .035f))
-                    }
+            Button(onClick = {
+                if (powerEnabled && !acceptedCommand) {
+                    acceptedCommand = true
+                    onPowerAction?.invoke(presentation.action)
                 }
-                drawOval(accent.copy(alpha = .45f), Offset(bounds.left, bounds.top), Size(bounds.width, bounds.height),
-                    style = Stroke(1.dp.toPx()))
+            }, enabled = powerEnabled, shape = CircleShape, contentPadding = PaddingValues(0.dp),
+                modifier = Modifier.size(184.dp)
+                    .background(Brush.radialGradient(listOf(accent.copy(alpha = .20f), accent.copy(alpha = .04f))), CircleShape)
+                    .border(1.5.dp, accent.copy(alpha = .65f), CircleShape)
+                    .semantics {
+                        contentDescription = presentation.powerLabel
+                        stateDescription = listOf(presentation.connectionText, presentation.title).filter { it.isNotEmpty() }.joinToString(" · ")
+                    }.testTag("vpn-connect"),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = accent,
+                    disabledContainerColor = Color.Transparent, disabledContentColor = accent)) {
+                Canvas(Modifier.size(72.dp)) {
+                    drawArc(accent, startAngle = -45f, sweepAngle = 270f, useCenter = false,
+                        topLeft = Offset(size.width * .16f, size.height * .22f),
+                        size = Size(size.width * .68f, size.height * .68f),
+                        style = Stroke(5.dp.toPx(), cap = StrokeCap.Round))
+                    drawLine(accent, Offset(size.width * .5f, size.height * .09f),
+                        Offset(size.width * .5f, size.height * .5f), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+                }
             }
-            Column(Modifier.padding(horizontal = 42.dp, vertical = 55.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(presentation.title, color = accent, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            Text(presentation.connectionText, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag("connection-status"))
+            if (presentation.title.isNotEmpty()) {
+                SupportingText(" · ")
+                Text(presentation.title, color = accent, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("local-subscription-title"))
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SupportingText("剩余时间")
                 Text(presentation.countdown?.removePrefix("剩余 ") ?: "暂不可用", style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.testTag("subscription-validity-countdown"))
+                    textAlign = TextAlign.Center, modifier = Modifier.testTag("subscription-validity-countdown"))
+            }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SupportingText("剩余流量")
                 Text(presentation.usageText, style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.testTag("subscription-usage-unavailable"))
+                    textAlign = TextAlign.Center, modifier = Modifier.testTag("subscription-usage-unavailable"))
             }
-        }
-        Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            Text("未连接", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("connection-status"))
-            SupportingText(" · ")
-            SupportingText("连接暂不可用", Modifier.testTag("connection-unavailable"))
-        }
-        Button(onClick = {}, enabled = false, shape = RoundedCornerShape(50),
-            modifier = Modifier.heightIn(min = 56.dp).fillMaxWidth().background(
-                Brush.horizontalGradient(listOf(Brand.ActionStart.copy(alpha = .4f), Brand.ActionEnd.copy(alpha = .45f))),
-                RoundedCornerShape(50)).testTag("vpn-connect"),
-            colors = ButtonDefaults.buttonColors(disabledContainerColor = Color.Transparent, disabledContentColor = Brand.Text)) {
-            Text("连接", style = MaterialTheme.typography.titleLarge)
         }
         val nodes: @Composable (Modifier) -> Unit = { modifier ->
             TextButton(onClick = openNodes, modifier = modifier.heightIn(min = 48.dp).testTag("connection-nodes")) { Text("节点 ›") }
@@ -173,27 +238,4 @@ internal fun ConnectionOverview(account: AccountController, openAccount: () -> U
             }
         }
     }
-}
-
-/** Read-only system preference. A zero or unreadable animation scale removes the repeating animation. */
-@Composable
-private fun rememberSystemMotionAllowed(): Boolean {
-    val resolver = LocalContext.current.contentResolver
-    fun readAllowed(): Boolean = try {
-        Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0f) > 0f
-    } catch (_: SecurityException) { false }
-    var allowed by remember(resolver) { mutableStateOf(readAllowed()) }
-    DisposableEffect(resolver) {
-        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) { allowed = readAllowed() }
-        }
-        var registered = false
-        try {
-            resolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
-            registered = true
-        }
-        catch (_: SecurityException) { allowed = false }
-        onDispose { if (registered) resolver.unregisterContentObserver(observer) }
-    }
-    return allowed
 }

@@ -527,6 +527,7 @@ class MobileParityUiTest {
         compose.onNodeWithTag("recharge-select-recharge_synthetic").performScrollTo().assertIsDisplayed()
         capture("synthetic-alipay-recharge")
         compose.onNodeWithTag("recharge-select-recharge_synthetic").performClick()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-cancel").performClick()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
     }

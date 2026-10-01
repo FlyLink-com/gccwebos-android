@@ -34,6 +34,8 @@ class MobileParityUiTest {
         override fun clear() = Unit
     }
     private fun sessions() = MemorySessionStore().apply { save(SavedSession(Secret("native_synthetic"), "fixture@example.invalid", at.plusSeconds(1800), 1800000, at, 0)) }
+    private fun loginChallenge() = WireResponse(201,
+        """{"challenge":{"challengeRef":"synthetic","type":"math","prompt":"1 + 2","expiresInSeconds":3600}}""")
     private fun capture(name: String) {
         compose.waitForIdle()
         val dir = File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null), "ui-evidence").apply { mkdirs() }
@@ -149,11 +151,12 @@ class MobileParityUiTest {
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
     }
-    @Test fun foregroundWhileBusyClosesGateAndValidatesAfterReadCompletes() {
+    @Test fun foregroundWhileBusyGatesCommerceAndValidatesAfterReadCompletes() {
         val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
         lateinit var state: AccountController; var reads = 0
         val wire = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                if (path == "/api/portal/human-challenges") return loginChallenge()
                 if (path.endsWith("/password/session")) return WireResponse(200, """{"session":{"sessionRef":"native_synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:30:00Z"}}""")
                 assertEquals("/api/portal/resources/current/overview", path)
                 if (++reads == 1) { started.complete(Unit); release.await() }
@@ -163,39 +166,64 @@ class MobileParityUiTest {
         compose.setContent {
             val scope = rememberCoroutineScope()
             state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}), scope).apply {
-                account = "fixture@example.invalid"; password = "synthetic"; answer = "3"; challenge = HumanChallenge("synthetic", "1 + 2")
+                account = "fixture@example.invalid"; password = "synthetic"
             } }
             AppShell(state, autoLoadCommerce = false)
         }
-        compose.runOnIdle { state.login() }; compose.waitUntil(10_000) { started.isCompleted }
+        // Compact form admission owns the challenge; a preseeded question is intentionally invalidated.
+        compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
+        compose.runOnIdle { state.answer = "3"; state.login() }; compose.waitUntil(10_000) { started.isCompleted }
         compose.runOnIdle { state.onForeground(); assertTrue(state.foregroundCheckPending) }
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
-        compose.runOnIdle { release.complete(Unit) }
+        // Same-session validation retains navigation, but cannot expose commerce actions.
+        compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, reads); release.complete(Unit) }
         compose.waitUntil(10_000) { state.authenticated && !state.busy && !state.foregroundCheckPending }
         compose.runOnIdle { assertEquals(3, reads) }
+        compose.onNodeWithTag("commerce-signed-out").assertDoesNotExist()
         compose.onNodeWithTag("nav-Connect").assertExists()
     }
     @Test fun foregroundIdleSessionExpiryClosesHomeWithoutAnotherRequest() {
         lateinit var state: AccountController; val saved = MemorySessionStore()
+        val authenticatedRequests = mutableListOf<String>()
         val wire = object : PortalTransport {
-            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse =
-                if (path.endsWith("/password/session")) WireResponse(200, """{"session":{"sessionRef":"native_synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:00:05Z"}}""")
-                else WireResponse(200, """{"resource":{"state":"none"}}""")
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                if (session != null) authenticatedRequests += path
+                return when (path) {
+                    "/api/portal/human-challenges" -> loginChallenge()
+                    "/api/portal/password/session" -> WireResponse(200, """{"session":{"sessionRef":"native_synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:00:05Z"}}""")
+                    "/api/portal/resources/current/overview" -> WireResponse(200, """{"resource":{"state":"none"}}""")
+                    else -> throw AssertionError("Unexpected offline path: $path")
+                }
+            }
         }
         compose.setContent {
             val scope = rememberCoroutineScope()
             state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}, sessions = saved), scope).apply {
-                account = "fixture@example.invalid"; password = "synthetic"; answer = "3"; challenge = HumanChallenge("synthetic", "1 + 2")
+                account = "fixture@example.invalid"; password = "synthetic"
             } }
             AppShell(state, autoLoadCommerce = false)
         }
-        compose.runOnIdle { state.login() }
+        compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
+        compose.runOnIdle { state.answer = "3"; state.login() }
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.runOnIdle {
+            assertNotNull(saved.read())
+            assertEquals(listOf("/api/portal/resources/current/overview"), authenticatedRequests)
+        }
+        // Drive the controller's Compose coroutine delay, without a request or foreground callback.
+        compose.mainClock.advanceTimeBy(5_001)
         compose.waitUntil(15_000) { !state.authenticated }
         compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
         compose.onNodeWithTag("login-screen").assertExists()
-        compose.runOnIdle { assertNull(saved.read()) }
+        compose.runOnIdle {
+            assertNull(saved.read())
+            assertEquals(listOf("/api/portal/resources/current/overview"), authenticatedRequests)
+        }
     }
     @Test fun logoutAdmissionSurvivesImmediateControllerScopeCancellation() {
         val saved = sessions()
@@ -345,10 +373,20 @@ class MobileParityUiTest {
         compose.onNodeWithTag("commerce-signed-out").assertExists()
         compose.runOnIdle { assertFalse(state.authenticated) }
     }
-    @Test fun cancelledForegroundPollCannotPublishLateRechargeResponse() {
+    @Test fun cancelledForegroundPollCannotPublishLateRechargeResponse() = cancelledForegroundPoll(success = false)
+    @Test fun cancelledForegroundPollCannotRestoreALatePaymentAction() = cancelledForegroundPoll(success = true)
+    private fun cancelledForegroundPoll(success: Boolean) {
         val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
         lateinit var state: CommerceController; lateinit var poll: kotlinx.coroutines.Job
+        var responses = 0
         val record = PendingCommerce("recharge", null, "offer_fixture", "key_fixture", "recharge_fixture")
+        val payableBody = """{"recharge":{"order":{"orderRef":"recharge_fixture","offerRef":"offer_fixture",
+            "quoteVersion":1,"expectedPaidCoinUnits":100,"amountMinor":10000,"currency":"CNY","currencyExponent":2,
+            "adapterKey":"xsd_v1","paymentMethod":"alipay","status":"entry_ready","providerOrderRef":null,
+            "nextAction":{"type":"redirect","url":"https://www.xsd8866.com/pay?fixture=synthetic","expiresAt":"2026-09-30T01:00:00.000Z"},
+            "walletOperationRef":null,"walletLotRef":null,"expiresAt":"2026-09-30T01:00:00.000Z",
+            "createdAt":"2026-09-30T00:00:00.000Z","updatedAt":"2026-09-30T00:00:00.000Z"}}}"""
+        val payable = CommerceJson.rechargeOrder(payableBody)
         val recovery = object : CommerceRecovery {
             override fun read(binding: String, kind: String) = if (kind == "recharge") record else null
             override fun save(binding: String, value: PendingCommerce) = error("Polling must not create")
@@ -356,21 +394,35 @@ class MobileParityUiTest {
         }
         val wire = CommerceRepository({ path, body, key ->
             assertEquals("/api/portal/coins/recharge/orders/recharge_fixture", path); assertNull(body); assertNull(key)
-            started.complete(Unit); withContext(NonCancellable) { release.await() }
-            WireResponse(500, "{}")
+            started.complete(Unit)
+            withContext(NonCancellable) {
+                release.await(); responses++
+                if (success) WireResponse(200, payableBody) else WireResponse(500, "{}")
+            }
         }, recovery, "fixture")
         compose.setContent {
             val scope = rememberCoroutineScope()
             val account = remember { offlineUiAccount(scope) }
             state = remember { CommerceController(account, scope, recovery, initialRepository = wire).apply {
-                recharge = RechargeOrder("recharge_fixture", "offer_fixture", 1, 100, 10000, "CNY", 2, "xsd_v1", "alipay", "pending", null, null, null, null, at.plusSeconds(3600), at, at)
+                recharge = payable
+                assertTrue(canOpenPayment(payable, at))
             } }
             androidx.compose.runtime.LaunchedEffect(Unit) { poll = launch { state.pollRecharge() } }
         }
         compose.waitUntil(10_000) { started.isCompleted }
-        compose.runOnIdle { poll.cancel(); release.complete(Unit) }
+        compose.runOnIdle {
+            // Poll admission revokes the old payment action even before cancellation or response.
+            assertNull(state.recharge); assertTrue(state.pendingRecharge); assertTrue(state.busy)
+            assertFalse(state.canOpenPayment(payable, at))
+            poll.cancel(); release.complete(Unit)
+        }
         compose.waitUntil(10_000) { poll.isCompleted }
-        compose.runOnIdle { assertEquals("pending", state.recharge!!.status); assertNull(state.error); assertFalse(state.busy) }
+        compose.runOnIdle {
+            assertEquals(1, responses); assertTrue(poll.isCancelled)
+            assertNull(state.recharge); assertNull(state.error); assertFalse(state.busy)
+            assertFalse(state.canOpenPayment(payable, at)); assertTrue(state.pendingRecharge)
+            assertEquals(record, recovery.read("fixture", "recharge"))
+        }
     }
     @Test fun syntheticWalletAlipayCatalogAndOrderLayoutsRemainServerShaped() {
         compose.setContent {

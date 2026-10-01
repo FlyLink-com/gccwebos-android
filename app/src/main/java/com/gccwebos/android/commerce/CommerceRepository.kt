@@ -54,6 +54,16 @@ class CommerceRepository(private val request: suspend (String, String?, String?)
     }
     suspend fun transitionHistory(): List<PurchaseResult.Deferred> = CommerceJson.transitions(call("/api/portal/commerce/deferred/transitions"))
     suspend fun rechargeHistory(): List<RechargeOrder> = CommerceJson.rechargeOrders(call("/api/portal/coins/recharge/orders"))
+    /** Explicit history reads never inspect, replay, or clear a durable pending operation. */
+    suspend fun purchaseHistoryDetail(selected: CommerceModel, ref: String): PurchaseResult {
+        require(model == selected)
+        require(Regex("[a-z][a-z0-9_]{2,95}").matches(ref))
+        return CommerceJson.purchaseResult(call(selected.purchasePath + "/" + ref), selected, ref)
+    }
+    suspend fun rechargeHistoryDetail(ref: String): RechargeOrder {
+        require(Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}").matches(ref))
+        return CommerceJson.rechargeOrder(call("/api/portal/coins/recharge/orders/" + ref), ref)
+    }
     suspend fun ledger(cursor: WalletLedgerCursor? = null): WalletLedgerPage {
         val query = buildString {
             append("/api/portal/coins/wallet/ledger?limit=20")

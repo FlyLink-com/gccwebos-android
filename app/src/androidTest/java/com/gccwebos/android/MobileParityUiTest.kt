@@ -62,7 +62,7 @@ class MobileParityUiTest {
         compose.runOnIdle { release.complete(Unit) }
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
-        compose.runOnIdle { assertEquals("fixture@example.invalid", state.account); assertEquals(2, reads) }
+        compose.runOnIdle { assertEquals("", state.account); assertEquals("fixture@example.invalid", state.authenticatedAccountId); assertEquals(2, reads) }
     }
     @Test fun restoreNetworkFailureStaysGatedAndCanRetryWithoutPassword() {
         val saved = sessions(); var fail = true; lateinit var state: AccountController
@@ -319,7 +319,8 @@ class MobileParityUiTest {
         }
         compose.waitUntil(10_000) { state.authenticated && !state.busy && state.error != null }
         compose.runOnIdle {
-            assertEquals("account-b@example.invalid", state.account)
+            assertEquals("", state.account)
+            assertEquals("account-b@example.invalid", state.authenticatedAccountId)
             assertEquals("Synthetic account A local node", state.localSubscription.nodes.single().name)
             assertNull(delivery.value); state.logout()
         }
@@ -386,13 +387,15 @@ class MobileParityUiTest {
                     catalogLoaded = true
                     offers = listOf(Offer("offer_synthetic", "version_synthetic", LocalizedText("合成验收年卡", "Synthetic plan"), LocalizedText("仅离线界面验收", "Offline only"), LocalizedNotices(emptyList(), emptyList()), 100, 10000, listOf("paid_coins"), 365, 100, 0))
                     rechargeOffers = listOf(RechargeOffer("recharge_synthetic", 1, 100, 10000, "CNY", 2, listOf("alipay")))
+                    rechargeOffersLoaded = true; walletLoaded = true
                     orderPage = OrderPage(emptyList()); rechargeHistory = emptyList(); transitions = emptyList()
                 }
             }
             AppShell(account, autoLoadCommerce = false, commerceOverride = commerce)
         }
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextContains("1200 Coins")
-        capture("synthetic-home-balance-validity")
+        capture("synthetic-profile-balance-validity")
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("subscription-node-0").assertExists()
         capture("synthetic-parsed-nodes")
@@ -402,7 +405,7 @@ class MobileParityUiTest {
         capture("server-empty-data-packs")
         compose.onNodeWithTag("nav-Orders").performClick()
         compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
-        compose.onNodeWithText("暂无这类订单").assertExists()
+        compose.onNodeWithText("暂无充值记录").assertExists()
         capture("server-empty-order-history")
         compose.onNodeWithTag("nav-Profile").performClick()
         capture("synthetic-my-wallet-summary")

@@ -272,6 +272,12 @@ object CommerceJson {
         val value = obj(raw, "type", "url", "expiresAt")
         require(value["type"] == "redirect") { "Invalid payment action" }
         val url = value.text("url")
+        require(trustedPaymentRedirect(url, adapterKey)) { "Invalid or untrusted payment URL" }
+        return PaymentRedirect(url, time(value["expiresAt"]))
+    }
+
+    /** The UI opening seam reuses the same pinned-origin rules as API projection validation. */
+    internal fun trustedPaymentRedirect(url: String, adapterKey: String): Boolean = try {
         require(url.all { it.code in 0x21..0x7e }) { "Invalid payment URL" }
         val uri = try { URI(url) } catch (_: Exception) { invalid() }
         val host = uri.host?.lowercase() ?: invalid()
@@ -280,8 +286,8 @@ object CommerceJson {
             host != "localhost" && !host.endsWith(".localhost") && !host.startsWith('[') &&
             !Regex("[0-9]{1,3}(\\.[0-9]{1,3}){3}").matches(host)) { "Unsafe payment URL" }
         require("https://$host" in (trustedActionOrigins[adapterKey] ?: emptySet())) { "Untrusted payment origin" }
-        return PaymentRedirect(url, time(value["expiresAt"]))
-    }
+        true
+    } catch (_: Exception) { false }
 
     private fun balance(raw: Any?): CoinBalance {
         val value = obj(raw, "bonusCoins", "paidCoins", "rewardCoins", "heldCoins")

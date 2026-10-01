@@ -1,0 +1,112 @@
+package com.gccwebos.android
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import com.gccwebos.android.commerce.*
+import com.gccwebos.android.design.GccTheme
+import com.gccwebos.android.portal.*
+import kotlinx.coroutines.CoroutineScope
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import java.time.Instant
+
+/** Synthetic fixture only: local font scale and memory opener, no account/payment requests. */
+class WalletRechargeUiTest {
+    @get:Rule val compose = createComposeRule()
+    private lateinit var state: CommerceController
+    private val opened = mutableListOf<String>()
+    private val calls = mutableListOf<String>()
+    private val future = Instant.parse("2099-10-01T00:00:00Z")
+    private val offer = RechargeOffer("recharge_ui_fixture", 9, 73, 2345, "CNY", 2, listOf("alipay"))
+    private val order = RechargeOrder("recharge_ui_order", offer.offerRef, 10, 79, 2567, "CNY", 2,
+        "xsd_v1", "alipay", "entry_ready", null, PaymentRedirect("https://www.xsd8866.com/offline-fixture", future),
+        null, null, future, Instant.EPOCH, Instant.EPOCH)
+    private fun account(scope: CoroutineScope) = AccountController(PortalRepository(
+        object : PortalTransport { override suspend fun request(path: String, body: String?, session: Secret?): WireResponse = throw AssertionError("No Portal requests") },
+        object : DeliveryStore { override fun read(): DeliveryRecord? = null; override fun save(record: DeliveryRecord) = throw AssertionError("No delivery writes"); override fun clear() = Unit },
+        OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
+        subscription = SubscriptionSource { throw AssertionError("No subscription requests") },
+        sessions = MemorySessionStore(), profiles = MemoryLocalProfileStore()), scope).apply { authenticated = true }
+    private fun launch(fontScale: Float = 1f, setup: CommerceController.() -> Unit = {}) {
+        compose.setContent {
+            val scope = rememberCoroutineScope(); val owner = remember { account(scope) }
+            val controller = remember {
+                val recovery = object : CommerceRecovery {
+                    override fun read(binding: String, kind: String): PendingCommerce? = null
+                    override fun save(binding: String, value: PendingCommerce) = throw AssertionError("No order creation in these fixtures")
+                    override fun clear(binding: String, kind: String) = throw AssertionError("No recovery clears")
+                }
+                val repository = CommerceRepository({ path, _, _ -> calls += path; throw AssertionError("No transport expected") }, recovery, "ui_fixture_account")
+                CommerceController(owner, scope, recovery, initialRepository = repository).apply(setup)
+            }
+            state = controller
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                GccTheme { Column(Modifier.width(320.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                    CommercePanel(owner, CommerceMode.Wallet, controller, autoLoad = false, paymentOpener = { opened += it })
+                } }
+            }
+        }
+    }
+    @Test fun unknownErrorAndConfirmedZeroKeepDirectoryStatesSeparate() {
+        launch()
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("尚未读取")
+        compose.onNodeWithTag("recharge-offers-unread").assertExists()
+        compose.runOnIdle { state.walletError = "合成余额读取失败"; state.rechargeOffersError = "合成档位读取失败" }
+        compose.onNodeWithTag("wallet-error").assertTextEquals("合成余额读取失败")
+        compose.onNodeWithTag("recharge-offers-error").assertExists()
+        compose.runOnIdle {
+            state.wallet = Wallet("not_created", 0, 0, 0, 0, 0, 0, 0); state.walletLoaded = true; state.walletError = null
+            state.rechargeOffers = emptyList(); state.rechargeOffersLoaded = true; state.rechargeOffersError = null
+        }
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("0 Coins")
+        compose.onNodeWithTag("recharge-offers-empty").assertExists()
+        compose.runOnIdle { assertTrue(calls.isEmpty()); assertTrue(opened.isEmpty()) }
+    }
+    @Test fun realOfferAmountAndLargeFontCancelStayLocalThenChangedSnapshotRejectsCreate() {
+        launch(fontScale = 2f) { rechargeOffers = listOf(offer); rechargeOffersLoaded = true }
+        compose.onNodeWithText("73 Coins").performScrollTo().assertIsDisplayed()
+        repeat(2) {
+            compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
+            compose.onNodeWithTag("recharge-confirm").assertIsDisplayed()
+            compose.onNodeWithTag("recharge-cancel").performClick()
+            compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
+        }
+        compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
+        compose.runOnIdle { state.rechargeOffers = listOf(offer.copy(quoteVersion = 10, amountMinor = 2567)) }
+        compose.onNodeWithTag("recharge-confirm").performClick()
+        compose.onNodeWithTag("recharge-flow-error").performScrollTo().assertExists()
+        compose.runOnIdle { assertTrue(calls.isEmpty()); assertNull(state.recharge); assertTrue(opened.isEmpty()) }
+    }
+    @Test fun actualCreatedAmountNeedsSecondReviewAndFakeOpenDoesNotCreditOrClearPending() {
+        launch { pendingRecharge = true; recharge = order }
+        compose.onNodeWithTag("recharge-pay").performScrollTo().performClick()
+        compose.onNodeWithText("实际应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("到账目标：79 Coins").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("payment-open-cancel").performClick()
+        compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(state.pendingRecharge) }
+        compose.onNodeWithTag("recharge-pay").performScrollTo().performClick()
+        compose.onNodeWithTag("payment-open-confirm").performClick()
+        compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, opened.size); assertEquals("entry_ready", state.recharge!!.status); assertTrue(state.pendingRecharge); assertNull(state.wallet); assertTrue(calls.isEmpty()) }
+    }
+    @Test fun verifiedIsNotCreditedAndExpiredActionNeverExposesPayment() {
+        launch { pendingRecharge = true; recharge = order.copy(status = "payment_verified", nextAction = null) }
+        compose.onNodeWithTag("recharge-status").assertTextEquals("支付已核验，Coins 尚待到账")
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-finish").assertDoesNotExist()
+        compose.runOnIdle { state.recharge = order.copy(nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH)) }
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-status-query").performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { assertTrue(calls.isEmpty()); assertTrue(opened.isEmpty()) }
+    }
+}

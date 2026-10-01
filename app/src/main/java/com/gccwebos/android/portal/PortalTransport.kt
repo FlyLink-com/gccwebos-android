@@ -15,9 +15,27 @@ interface PortalTransport {
     suspend fun request(path: String, body: String? = null, session: Secret? = null): WireResponse
     suspend fun commerce(path: String, body: String?, session: Secret, key: String?): WireResponse =
         if (key == null) request(path, body, session) else throw PortalFailure(PortalFailure.Reason.PROTOCOL)
+    suspend fun referral(path: String, body: String?, session: Secret): WireResponse {
+        require(ReferralJson.validRequest(path, body))
+        require(Regex("[a-z][a-z0-9_]{2,95}").matches(session.value))
+        return request(path, body, session)
+    }
+}
+/** Audited referral requests only, with matching Portal Origin/Host and native session header. */
+internal fun portalReferralRequest(policy: OriginPolicy, path: String, body: String?, session: Secret): Request {
+    require(ReferralJson.validRequest(path, body))
+    require(Regex("[a-z][a-z0-9_]{2,95}").matches(session.value))
+    val builder = Request.Builder().url(policy.apiUrl(path)).header("Accept", "application/json")
+        .header("Cache-Control", "no-store").header("Origin", policy.api.toString())
+        .header("Host", policy.api.host).header("X-Portal-Session", session.value)
+    if (body != null) builder.post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+    return builder.build()
 }
 class HttpsPortalTransport(private val policy: OriginPolicy) : PortalTransport {
     private val client = isolatedClient()
+    override suspend fun referral(path: String, body: String?, session: Secret): WireResponse = withContext(Dispatchers.IO) {
+        executeBounded(client, portalReferralRequest(policy, path, body, session), 65536)
+    }
     override suspend fun commerce(path: String, body: String?, session: Secret, key: String?): WireResponse = withContext(Dispatchers.IO) {
         val builder = Request.Builder().url(policy.apiUrl(path)).header("Accept", "application/json")
             .header("Cache-Control", "no-store").header("X-Portal-Session", session.value)

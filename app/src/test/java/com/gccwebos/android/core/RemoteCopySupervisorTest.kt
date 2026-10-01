@@ -465,4 +465,31 @@ class RemoteCopySupervisorTest {
         assertEquals(0, f.port.forces)
         assertEquals(1, f.port.copies)
     }
+
+    @Test fun stopReturnsItsOwnTicketWhenObserverStopsANewerRequest() {
+        val f = Fixture()
+        f.copy()
+        var entered = false
+        var firstTicket: StopTicket? = null
+        var secondTicket: StopTicket? = null
+        f.host.observe { snapshot ->
+            if (snapshot.phase == Phase.CLEANUP_CONFIRMED && !entered) {
+                entered = true
+                firstTicket = requireNotNull(f.port.stop)
+                f.port.onStop = { _, _, _, _ -> } // Keep the newer request occupied.
+                f.copy()
+                secondTicket = f.host.stop()
+            }
+        }
+        val returned = requireNotNull(f.host.stop())
+        assertTrue(entered)
+        assertSame(firstTicket, returned)
+        assertNotSame(secondTicket, returned)
+        assertFalse(f.host.timeout(returned))
+        assertEquals(0, f.port.forces)
+        assertEquals(Phase.STOPPING, f.host.snapshot().phase)
+        assertTrue(f.host.timeout(requireNotNull(secondTicket)))
+        assertEquals(1, f.port.forces)
+    }
+
 }

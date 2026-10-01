@@ -238,10 +238,12 @@ class RemoteCopySupervisor(private val limits: Limits, private val endpoint: Bou
         if (e.stopping || e.leases.size >= limits.maxLeases) null else Lease(key, false).also { e.leases[it] = false }
     }
     fun stop(): StopTicket? {
+        val addressedTicket: StopTicket
         val dispatch = synchronized(recovery.lock) {
             if (recovery.owner !== owner) return null
             val e = recovery.entry ?: return null
             beginStopLocked(e, Reason.STOP_REQUESTED); eraseFrame(e.key)
+            addressedTicket = requireNotNull(e.stop)
             if (e.stopSent || !claimLocked(e)) null else { e.stopSent = true; e }
         }
         if (dispatch != null) {
@@ -250,7 +252,8 @@ class RemoteCopySupervisor(private val limits: Limits, private val endpoint: Bou
             finally { finishClaim(dispatch.key) }
         }
         dispatchObservers()
-        return synchronized(recovery.lock) { recovery.entry?.stop ?: dispatch?.stop }
+        // A callback or another thread may have already opened a newer request.
+        return addressedTicket
     }
     fun timeout(ticket: StopTicket): Boolean {
         val e = synchronized(recovery.lock) {

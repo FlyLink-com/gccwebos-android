@@ -54,7 +54,9 @@ current copy; stopped, conflicting, duplicate and stale receipts cannot revive i
 Transaction-too-large/reply-loss tests simulate an already copied receiver and
 an unavailable reply; they are not Android IPC tests.
 
-Stop closes registration and creates an exact request-bound ticket. The ledger
+Stop closes registration and creates an exact request-bound ticket. The returned
+ticket is captured for the addressed request before external dispatch; reentrant
+observers or concurrent callers cannot substitute a newer request’s ticket. The ledger
 includes the sender buffer, possible receiver copy and each additional synthetic
 resource. Receiver discard actually wipes its own arrays before minting a copy
 release proof. Generic fake resource release cannot release sender or receiver
@@ -98,10 +100,11 @@ thread executor, native interruption or actual timer is claimed.
 
 ## Validation boundary
 
-`RemoteCopySupervisorTest` contains 14 methods mapped directly to G1–G14 in
+`RemoteCopySupervisorTest` contains 15 methods mapped directly to G1–G14 in
 `output/engine-e2-preparation/E2-REVIEW-GATES.md`: actual frame bounds, private
 copies, bound provenance, duplicates/conflict, no activation/sequence exhaustion,
-unknown replies, stop ordering, claim drain, full ledger, endpoint death, owner
+unknown replies, stop ordering and cross-generation return tickets, claim drain,
+full ledger, endpoint death, owner
 recovery, force once, UI/exceptions/bounded pump, and safe output. They use only
 synthetic bytes, memory fake ports and fake evidence. Until the owner records the
 actual run, these are source fixtures, not passed tests. No build, test, Git,

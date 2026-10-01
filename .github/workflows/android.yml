@@ -10,7 +10,49 @@ concurrency:
   group: android-m0-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  # This dedicated candidate branch builds QA APKs only. Installing or executing
+  # either new package is a separate approval gate, including on hosted runners.
+  copy-boundary-compile:
+    if: startsWith(github.head_ref || github.ref_name, 'codex/lucky-e2b-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compile bounded QA component and both APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/copy-boundary/ledger
+          git rev-parse HEAD | tee .build-output/copy-boundary/source-commit.log
+          chmod +x gradlew
+          javac -d .build-output/copy-boundary/ledger copyBoundaryLab/src/main/java/com/gccwebos/android/ipcqa/CopyLedger.java copyBoundaryLab/src/test/java/com/gccwebos/android/ipcqa/CopyLedgerSmoke.java
+          java -cp .build-output/copy-boundary/ledger com.gccwebos.android.ipcqa.CopyLedgerSmoke | tee .build-output/copy-boundary/ledger-smoke.log
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" "platforms;android-36" "build-tools;36.0.0"
+          ./gradlew --no-daemon --console=plain -PcopyBoundaryLab=true :copyBoundaryLab:assembleDebug :copyBoundaryLab:assembleDebugAndroidTest :copyBoundaryLab:lintDebug 2>&1 | tee .build-output/copy-boundary/build.log
+          python3 scripts/collect_copy_boundary_evidence.py "$SDK_ROOT" .build-output/copy-boundary
+      - name: Retain QA candidate, manifests and compile evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: copy-boundary-b1-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            copyBoundaryLab/build/outputs/apk/
+            copyBoundaryLab/build/reports/
+            .build-output/copy-boundary/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
   validate:
+    if: "!startsWith(github.head_ref || github.ref_name, 'codex/lucky-e2b-')"
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

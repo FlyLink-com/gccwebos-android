@@ -16,3 +16,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "gccwebos-android"
 include(":app")
+
+// Explicit, permission-free copy-only QA candidate; never part of ordinary builds.
+if (providers.gradleProperty("copyBoundaryLab").orNull == "true") {
+    include(":copyBoundaryLab")
+}

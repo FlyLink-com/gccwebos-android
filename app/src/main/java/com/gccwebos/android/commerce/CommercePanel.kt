@@ -100,15 +100,13 @@ internal class CommerceController(private val account: AccountController, privat
             readPart({ r.rechargeHistory() }, onFailure = { rechargeHistoryError = "充值记录查询失败，请重试；这不代表未付款。" }) { rechargeHistory = it }
         }
     }
-    /** Wallet and recharge reads do not depend on a purchase model or silently replay an unknown create. */
+    /** Mine balance reads only the wallet; recharge recovery belongs to Wallet and polling. */
     fun loadBalance() = run {
         wallet = null; walletLoaded = false; walletError = null
-        recharge = null
         val r = repository()
-        pendingRecharge = r.pending("recharge") != null
-        readPart({ r.currentRecharge() }) { recharge = it }
         readPart({ r.wallet() }, onFailure = { walletError = "余额查询失败，请重试。" }) { wallet = it; walletLoaded = true }
     }
+    /** Wallet and recharge reads do not depend on a purchase model or silently replay an unknown create. */
     fun loadWallet() = run {
         wallet = null; walletLoaded = false; walletError = null
         rechargeOffers = emptyList(); rechargeOffersLoaded = false; rechargeOffersError = null; recharge = null

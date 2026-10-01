@@ -51,4 +51,19 @@ class MineBalanceTest {
             job.cancel()
         }
     }
+    @Test fun balanceRefreshDoesNotReadOrEraseExistingRechargeRecoveryState() = runTest {
+        val paths = mutableListOf<String>()
+        val repo = CommerceRepository({ path, body, key ->
+            paths += path; assertNull(body); assertNull(key); assertEquals("/api/portal/coins/wallet", path)
+            WireResponse(200, CommerceFixtures.wallet)
+        }, recovery, "mine_fixture_account")
+        val state = CommerceController(owner(this), this, recovery, initialRepository = repo)
+        val recharge = CommerceJson.rechargeOrder(CommerceFixtures.rechargeOrder)
+        state.recharge = recharge; state.pendingRecharge = true
+        state.loadBalance(); runCurrent()
+        assertEquals(listOf("/api/portal/coins/wallet"), paths)
+        assertTrue(state.walletLoaded); assertEquals(20L, state.wallet!!.spendableUnits)
+        assertTrue(state.pendingRecharge); assertSame(recharge, state.recharge)
+        assertFalse(state.rechargeOffersLoaded); assertNull(state.error)
+    }
 }

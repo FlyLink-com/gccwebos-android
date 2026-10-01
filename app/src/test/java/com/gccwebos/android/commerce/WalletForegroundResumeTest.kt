@@ -116,7 +116,7 @@ class WalletForegroundResumeTest {
         assertTrue(f.requests.any { it.first.endsWith("/" + original.orderRef) && it.second == null })
     }
 
-    @Test fun aRecreatedMineBalanceRestoresKnownPendingWithoutReplayingCreateOrPayment() = runTest {
+    @Test fun aRecreatedWalletRestoresKnownPendingWithoutReplayingCreateOrPayment() = runTest {
         val f = Fixture(backgroundScope)
         f.account.restoreAccount(); runCurrent()
         val first = CommerceController(f.account, backgroundScope, f.recovery)
@@ -124,8 +124,8 @@ class WalletForegroundResumeTest {
         first.confirmRecharge(CommerceJson.rechargeOffers(CommerceFixtures.rechargeOffers).single()); runCurrent()
         val original = first.recharge!!
         val next = CommerceController(f.account, backgroundScope, f.recovery)
-        next.loadBalance(); runCurrent()
-        assertTrue("Mine balance must restore the durable pending flag", next.pendingRecharge)
+        next.loadWallet(); runCurrent()
+        assertTrue("Wallet must restore the durable pending flag", next.pendingRecharge)
         assertEquals(original.orderRef, next.recharge?.orderRef)
         assertEquals(1, f.posts); assertTrue(f.opened.isEmpty())
         assertTrue(next.walletLoaded)
@@ -167,7 +167,7 @@ class WalletForegroundResumeTest {
         controller.loadWallet(); runCurrent()
         val owner = Owner().apply { start(AccountForegroundObserver(f.account)) }
         owner.browserReturn(); runCurrent()
-        controller.loadBalance(); runCurrent(); controller.pollRecharge()
+        controller.loadWallet(); runCurrent(); controller.pollRecharge()
         assertTrue(controller.pendingRecharge); assertNull(controller.recharge)
         assertEquals(pending, f.recovery.read(binding, "recharge"))
         assertEquals(0, f.posts); assertTrue(f.opened.isEmpty())
@@ -222,15 +222,16 @@ class WalletForegroundResumeTest {
                         WireResponse(200, CommerceFixtures.rechargeOrder)
                     }
                     "/api/portal/coins/wallet" -> WireResponse(200, CommerceFixtures.wallet)
+                    "/api/portal/coins/recharge/offers" -> WireResponse(200, CommerceFixtures.rechargeOffers)
                     else -> throw AssertionError("Unexpected read")
                 }
             }, f.recovery, binding, { now })
             val controller = CommerceController(f.account, backgroundScope, f.recovery, initialRepository = repository)
             val sibling = backgroundScope.launch { awaitCancellation() }
-            controller.loadBalance(); runCurrent(); assertTrue(controller.busy)
+            controller.loadWallet(); runCurrent(); assertTrue(controller.busy)
             controller.pauseForAuthentication()
             f.account.onForeground(); runCurrent()
-            controller.loadBalance(); runCurrent()
+            controller.loadWallet(); runCurrent()
             // The repository mutex keeps the new read queued until the old callback releases.
             old.complete(Unit); runCurrent()
             assertEquals(2, reads); assertTrue(controller.busy); assertTrue(sibling.isActive)

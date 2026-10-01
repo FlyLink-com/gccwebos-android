@@ -12,12 +12,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -26,16 +24,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
@@ -71,6 +66,9 @@ private enum class Destination(@StringRes val title: Int, @DrawableRes val icon:
     Orders(R.string.tab_orders, R.drawable.brand_receipt),
     Profile(R.string.tab_profile, R.drawable.brand_user),
 }
+
+// Nodes and history remain destinations, reached from the component that owns them.
+private val primaryDestinations = listOf(Destination.Connect, Destination.Plans, Destination.Profile)
 
 /** The same lifecycle handler is used by production and memory-backed UI fixtures. */
 internal class AccountForegroundObserver(private val account: AccountController) : LifecycleEventObserver {
@@ -109,9 +107,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
-    val hasLocal = account.localSubscription.hasProfile
-    BackHandler(enabled = !account.authenticated && (account.factorReference != null || account.busy || (hasLocal && selected != Destination.Connect))) {
-        if (account.factorReference != null || account.busy) account.cancelAuthentication()
+    BackHandler(enabled = selected != Destination.Connect) {
+        if (selected == Destination.Profile && !account.authenticated &&
+            (account.factorReference != null || account.busy)) account.cancelAuthentication()
         else selectedName = Destination.Connect.name
     }
     // Guidance belongs to the authenticated lifecycle, outside the keyed destination composition.
@@ -128,18 +126,13 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     SideEffect { if (guidance != currentGuidance) guidance = currentGuidance }
     GccTheme {
         Surface(Modifier.fillMaxSize(), color = Brand.Background) {
-            if (!account.retainingCommerceSession && ((!account.authenticated && !hasLocal) ||
-                ((account.restoring || account.foregroundCheckPending) && !hasLocal))) {
-                LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride)
-                return@Surface
-            }
             Scaffold(containerColor = Brand.Background, bottomBar = {
                 Surface(color = Brand.Background) {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                         NavigationBar(Modifier.widthIn(max = 760.dp).fillMaxWidth()
                             .heightIn(min = if (LocalDensity.current.fontScale > 1.3f) 112.dp else 80.dp),
                             containerColor = Brand.Surface, tonalElevation = 0.dp) {
-                            Destination.entries.forEach { destination ->
+                            primaryDestinations.forEach { destination ->
                                 val title = stringResource(destination.title)
                                 NavigationBarItem(
                                     modifier = Modifier.testTag("nav-${destination.name}"),
@@ -155,9 +148,11 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         }
                     }
                 }
-            }) { padding -> key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
-                commerceRecoveryOverride, paymentOpenerOverride,
-                openAccount = { selectedName = Destination.Profile.name }, openPlans = { selectedName = Destination.Plans.name }) } }
+             }) { padding -> key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
+                 commerceRecoveryOverride, paymentOpenerOverride,
+                 openAccount = { selectedName = Destination.Profile.name }, openPlans = { selectedName = Destination.Plans.name },
+                 openNodes = { selectedName = Destination.Lines.name }, registrationOpener = registrationOpener,
+                 loginStartupReady = loginStartupReady, registrationOverride = registrationOverride) } }
             if (currentGuidance.visible) NoResourceGuidance(
                 onDismiss = { guidance = currentGuidance.dismiss() },
                 openPlans = { guidance = currentGuidance.dismiss(); selectedName = Destination.Plans.name },
@@ -169,8 +164,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
 
 @Composable
 private fun LoginScreen(account: AccountController, registrationOpener: ((String) -> Unit)?,
-                        loginStartupReady: Boolean, registrationOverride: RegistrationController?) {
-    Box(Modifier.fillMaxSize().imePadding(), contentAlignment = Alignment.TopCenter) {
+                         loginStartupReady: Boolean, registrationOverride: RegistrationController?,
+                         padding: PaddingValues) {
+    Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
         Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Brand.Background.copy(alpha = .86f)))
@@ -182,7 +178,7 @@ private fun LoginScreen(account: AccountController, registrationOpener: ((String
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 CircularProgressIndicator(color = Brand.Cyan)
                 Text("正在验证已保存登录", style = MaterialTheme.typography.titleLarge)
-                SupportingText("服务器确认之前不会进入主页。")
+                SupportingText("验证后显示账户资源。")
                 TextButton(onClick = account::cancelAuthentication) { Text("取消并返回登录") }
             } else {
                 if (account.localSubscription.hasCapability) Column(Modifier.testTag("local-subscription-notice"),
@@ -200,11 +196,20 @@ private fun LoginScreen(account: AccountController, registrationOpener: ((String
 
 @Composable
 private fun Page(destination: Destination, padding: PaddingValues, account: AccountController,
-                 autoLoadCommerce: Boolean, commerceOverride: com.gccwebos.android.commerce.CommerceController?,
-                 commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery?, paymentOpenerOverride: ((String) -> Unit)?,
-                 openAccount: () -> Unit, openPlans: () -> Unit) {
+                  autoLoadCommerce: Boolean, commerceOverride: com.gccwebos.android.commerce.CommerceController?,
+                  commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery?, paymentOpenerOverride: ((String) -> Unit)?,
+                  openAccount: () -> Unit, openPlans: () -> Unit, openNodes: () -> Unit,
+                  registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
+                  registrationOverride: RegistrationController?) {
+    if (destination == Destination.Profile) {
+        LaunchedEffect(account) { if (!account.authenticated && account.localSubscription.hasProfile) account.restoreAccount() }
+        if (!account.authenticated && !account.retainingCommerceSession) {
+            LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride, padding)
+            return
+        }
+    }
     val compact = destination == Destination.Connect || destination == Destination.Lines || destination == Destination.Plans || destination == Destination.Orders || destination == Destination.Profile
-    Box(Modifier.fillMaxSize().padding(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
         Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
             modifier = Modifier.widthIn(max = 680.dp).fillMaxSize())
         Box(Modifier.widthIn(max = 680.dp).fillMaxSize().background(Brand.Background.copy(alpha = .30f)))
@@ -216,8 +221,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
             BrandHeader()
             when (destination) {
                 Destination.Connect -> {
-                    ConnectionControl()
-                    LocalSubscriptionCard(account, openAccount, openPlans)
+                    ConnectionOverview(account, openAccount, openPlans, openNodes)
                     if (account.authenticated && account.localSubscription.status == com.gccwebos.android.portal.LocalSubscriptionStatus.MISSING &&
                         !account.localSubscription.hasCapability && !account.localSubscription.hasProfile &&
                         (account.resource as? Resource.Available)?.validUntil?.let { it <= Instant.now() } == true)
@@ -231,17 +235,30 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         openAccount)
                 }
                 Destination.Plans -> {
-                    Text("商城", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce, onRecharge = openAccount)
-                    if (!account.authenticated) BrandButton("登录查看套餐", openAccount)
-                    ResourceCard(account)
+                    Text("套餐", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    if (!account.authenticated && !account.retainingCommerceSession) {
+                        BrandCard(Modifier.testTag("commerce-signed-out")) {
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("∞", color = Brand.Cyan, style = MaterialTheme.typography.displayLarge,
+                                    modifier = Modifier.clearAndSetSemantics {})
+                                Text("选择适合你的套餐", style = MaterialTheme.typography.titleLarge)
+                                SupportingText(if (account.restoring || account.foregroundCheckPending) "正在确认账户" else "当前套餐尚未加载")
+                                BrandButton("登录查看当前套餐", openAccount,
+                                    enabled = !account.busy && !account.restoring && !account.foregroundCheckPending,
+                                    modifier = Modifier.testTag("anonymous-plans-login"))
+                            }
+                        }
+                    } else {
+                        CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce, onRecharge = openAccount)
+                        if (account.authenticated) ResourceCard(account)
+                    }
                 }
                 Destination.Orders -> {
                     Text("我的订单", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     CommercePanel(account, CommerceMode.Orders, stateOverride = commerceOverride, autoLoad = autoLoadCommerce)
                 }
                 Destination.Profile -> {
-                    LaunchedEffect(Unit) { if (!account.authenticated && account.localSubscription.hasProfile) account.restoreAccount() }
                     com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans,
                         recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride)
                     var details by remember(account.authSessionGeneration) { mutableStateOf(false) }
@@ -275,40 +292,6 @@ private fun BrandHeader() {
                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag("brand-name"))
             Box(Modifier.width(112.dp).height(3.dp).background(Brush.horizontalGradient(
                 listOf(androidx.compose.ui.graphics.Color(0xFFFF27DF), Brand.Blue, Brand.Cyan))))
-        }
-    }
-}
-
-@Composable
-private fun ConnectionControl() {
-    Surface(Modifier.fillMaxWidth(), shape = Brand.Shape, color = Brand.Surface.copy(alpha = .72f),
-        border = BorderStroke(1.dp, Brand.Border)) {
-        Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("未连接", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
-                modifier = Modifier.testTag("connection-status"))
-            Box(Modifier.size(200.dp).background(Brush.radialGradient(
-                listOf(Brand.Blue.copy(alpha = .35f), Color.Transparent)), CircleShape), contentAlignment = Alignment.Center) {
-                Button(onClick = {}, enabled = false, shape = CircleShape,
-                    modifier = Modifier.size(168.dp).background(Brush.linearGradient(listOf(
-                        Brand.ActionStart.copy(alpha = .55f), Brand.ActionMiddle.copy(alpha = .55f), Brand.ActionEnd.copy(alpha = .65f))), CircleShape)
-                        .border(1.dp, Brand.Cyan.copy(alpha = .45f), CircleShape).testTag("vpn-connect"),
-                    colors = ButtonDefaults.buttonColors(disabledContainerColor = Color.Transparent, disabledContentColor = Brand.Text),
-                    contentPadding = PaddingValues(16.dp)) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Canvas(Modifier.size(32.dp)) {
-                            val inset = 4.dp.toPx()
-                            drawArc(Brand.Cyan, -50f, 280f, false, topLeft = Offset(inset, inset),
-                                size = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2),
-                                style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
-                            drawLine(Brand.Cyan, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height / 2),
-                                strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-                        }
-                        Text("连接", style = MaterialTheme.typography.titleLarge)
-                    }
-                }
-            }
-            SupportingText("连接暂未开放", Modifier.testTag("connection-unavailable"))
         }
     }
 }
@@ -401,54 +384,6 @@ private fun TelegramPanel() {
             copied = true
         }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (copied) "频道链接已复制" else "复制频道链接") }
         if (unavailable) SupportingText("无法打开时，可复制链接后在 Telegram 或支持访问的浏览器中打开。")
-    }
-}
-
-@Composable
-private fun LocalSubscriptionCard(account: AccountController, openAccount: () -> Unit, openPlans: () -> Unit) {
-    val original = account.localSubscription
-    val now by produceState(Instant.now(), original.validUntil) {
-        while (true) { value = Instant.now(); delay(1_000) }
-    }
-    val value = if (original.status == com.gccwebos.android.portal.LocalSubscriptionStatus.READY && original.validUntil?.let { it <= now } == true)
-        original.copy(status = com.gccwebos.android.portal.LocalSubscriptionStatus.EXPIRED) else original
-    Surface(Modifier.fillMaxWidth().testTag("local-subscription-card"), shape = Brand.Shape,
-        color = Brand.Surface.copy(alpha = .72f), border = BorderStroke(1.dp, Brand.Border)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val title = when (value.status) {
-                com.gccwebos.android.portal.LocalSubscriptionStatus.MISSING -> "尚未保存本地订阅"
-                com.gccwebos.android.portal.LocalSubscriptionStatus.READY -> "本地订阅已保存"
-                com.gccwebos.android.portal.LocalSubscriptionStatus.EXPIRED -> "订阅已到期"
-                com.gccwebos.android.portal.LocalSubscriptionStatus.INVALID_LINK -> "订阅链接需要恢复"
-                com.gccwebos.android.portal.LocalSubscriptionStatus.UNSUPPORTED -> "配置暂不受支持"
-                com.gccwebos.android.portal.LocalSubscriptionStatus.STORAGE_ERROR -> "本地安全存储需要处理"
-                else -> "订阅更新尚未完成"
-            }
-            Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("local-subscription-title"))
-            value.validUntil?.let { SupportingText("上次确认至 ${it.atZone(ZoneId.systemDefault()).toLocalDate()}") }
-            if (account.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("local-subscription-loading"), color = Brand.Cyan)
-            account.error?.let { Text(it, color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.testTag("local-subscription-error").semantics { liveRegion = LiveRegionMode.Polite }) }
-            when (value.status) {
-                com.gccwebos.android.portal.LocalSubscriptionStatus.RETRY_REQUIRED -> SupportingText("暂未确认，请重试。")
-                com.gccwebos.android.portal.LocalSubscriptionStatus.STORAGE_ERROR -> SupportingText("本地存储异常，请重试。")
-                com.gccwebos.android.portal.LocalSubscriptionStatus.UNSUPPORTED -> SupportingText("当前配置暂不兼容。")
-                com.gccwebos.android.portal.LocalSubscriptionStatus.MISSING -> SupportingText("同步后显示实际订阅节点。")
-                else -> Unit
-            }
-            if (value.hasCapability) TextButton(onClick = account::refreshSubscription, enabled = !account.busy,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("local-subscription-refresh")) { Text("刷新订阅配置") }
-            else if (account.authenticated) TextButton(onClick = account::refresh, enabled = !account.busy,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("local-subscription-sync")) { Text("同步账户订阅") }
-            else if (value.status != com.gccwebos.android.portal.LocalSubscriptionStatus.INVALID_LINK)
-                TextButton(onClick = openAccount, enabled = !account.busy,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("open-account")) { Text("登录同步订阅") }
-            if (value.status == com.gccwebos.android.portal.LocalSubscriptionStatus.EXPIRED) {
-                BrandButton("购买／续订订阅", openPlans, modifier = Modifier.testTag("expired-subscription-renew"))
-            } else if (value.status == com.gccwebos.android.portal.LocalSubscriptionStatus.INVALID_LINK) {
-                BrandButton("登录恢复订阅", openAccount)
-            }
-        }
     }
 }
 

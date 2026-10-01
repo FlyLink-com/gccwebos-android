@@ -22,6 +22,15 @@ internal fun ReferralPanel(account: AccountController, autoLoad: Boolean = true,
     LaunchedEffect(state, autoLoad, account.authenticated, account.restoring, account.foregroundCheckPending) {
         if (autoLoad && account.authenticated && !account.restoring && !account.foregroundCheckPending) state.load()
     }
+    // Keep the controller and its session-owned unknown-generation latch composed while
+    // account validation is pending. Only the private presentation is withheld.
+    if (!account.authenticated || account.restoring || account.foregroundCheckPending) {
+        BrandCard(Modifier.testTag("referral-account-confirmation")) {
+            Text(if (account.restoring || account.foregroundCheckPending) "正在确认账户" else "登录后查看推荐",
+                modifier = Modifier.testTag("referral-account-confirmation-status"))
+        }
+        return
+    }
     BrandCard(Modifier.testTag("referral-profile")) {
         Row(Modifier.fillMaxWidth()) {
             Text("推荐奖励", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))

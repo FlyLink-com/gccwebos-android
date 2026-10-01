@@ -115,6 +115,7 @@ class RegistrationUiTest {
                 }
             }
         }
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.waitUntil(5_000) { accountFixture.questionCalls.get() == 1 && !screen.account.challengeLoading }
         compose.onNodeWithTag("login-register").performScrollTo().performClick()
         compose.onNodeWithTag("registration-form").assertIsDisplayed()
@@ -135,7 +136,7 @@ class RegistrationUiTest {
             assertTrue(screen.accountFixture.unexpectedRequests.isEmpty())
             assertEquals(1, screen.accountFixture.questionCalls.get())
         }
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertExists()
     }
     private fun capture(name: String) {
         compose.waitForIdle()

@@ -135,7 +135,7 @@ internal class CommerceController(private val account: AccountController, privat
     fun loadLedger(more: Boolean = false) = run {
         val old = if (more) ledgerPage else null
         if (!more) ledgerPage = null
-        val next = requireNotNull(repo).ledger(old?.nextCursor)
+        val next = repository().ledger(old?.nextCursor)
         ensureCurrentSession()
         require(old == null || old.entries.none { entry -> next.entries.any { it.entryRef == entry.entryRef } })
         ledgerPage = if (old == null) next else WalletLedgerPage(old.entries + next.entries, next.nextCursor)
@@ -392,6 +392,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             if (state.canOperate()) {
                 if (mode == CommerceMode.Mine) state.loadBalance()
                 else if (walletMode) state.loadWallet()
+                else if (mode == CommerceMode.Ledger) state.loadLedger()
                 else if (!state.catalogLoaded) state.load()
             }
         }
@@ -403,7 +404,8 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         val observer = LifecycleEventObserver { _, event -> if(autoLoad && event == Lifecycle.Event.ON_RESUME &&
             state.currentSession() && !account.restoring && !account.foregroundCheckPending) {
             cancelConfirmation = false
-            if (mode == CommerceMode.Mine) state.loadBalance() else if (walletMode) state.loadWallet() else state.load()
+            if (mode == CommerceMode.Mine) state.loadBalance() else if (walletMode) state.loadWallet()
+            else if (mode == CommerceMode.Ledger) state.loadLedger() else state.load()
         } }
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
@@ -436,7 +438,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"), color = Brand.Cyan)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
-    } else if (mode != CommerceMode.Orders && !walletMode) BrandCard(Modifier.testTag("commerce-status")) {
+    } else if (mode != CommerceMode.Orders && mode != CommerceMode.Ledger && !walletMode) BrandCard(Modifier.testTag("commerce-status")) {
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
         BrandButton("刷新钱包与套餐", state::load, enabled = !state.busy, modifier = Modifier.testTag("commerce-refresh"))
@@ -495,6 +497,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     }
     if (mode == CommerceMode.Ledger) {
         BrandButton("刷新账单", { state.loadLedger() }, enabled = !state.busy)
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("ledger-error")) }
         HistoryState(state.ledgerPage?.entries?.size, state.busy, "账单")
         state.ledgerPage?.entries?.forEach { entry -> BrandCard {
             Text(ledgerLabel(entry.category), style = MaterialTheme.typography.titleMedium)
@@ -504,6 +507,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             SupportingText("记录 ${entry.entryRef}")
         } }
         if (state.ledgerPage?.nextCursor != null) BrandButton("加载更早账单", { state.loadLedger(true) }, enabled = !state.busy)
+        return // Read-only history must not inherit a retained purchase confirmation.
     }
     state.quote?.let { quote ->
         val valid = quote.expiresAt > now && quote.purchaseAvailability == "available"
@@ -605,8 +609,9 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     val scope = rememberCoroutineScope()
     val sessionOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
     val state = stateOverride ?: remember(sessionOwner, recoveryOverride) { CommerceController(account, scope,
-        recoveryOverride ?: FileCommerceRecovery(context.applicationContext)) }
+        recoveryOverride ?: FileCommerceRecovery(context.applicationContext), includeHistory = true) }
     var view by remember(sessionOwner) { mutableStateOf("mine") }
+    var historyTab by remember(sessionOwner) { mutableStateOf("orders") }
     var telegramUnavailable by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (account.factorReference != null || account.busy) account.cancelAuthentication() else view = "mine"
@@ -630,10 +635,28 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     } else if (view == "referral") {
         ReferralPanel(account, autoLoad, referralOverride, copyOverride)
     } else {
-        val mode = when(view) { "ledger" -> CommerceMode.Ledger; "wallet", "recharge" -> CommerceMode.Wallet; else -> CommerceMode.Mine }
+        if (view == "history") {
+            Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = historyTab == "orders", onClick = { historyTab = "orders" },
+                    enabled = !state.busy && state.canOperate(), label = { Text("订单") },
+                    modifier = Modifier.testTag("mine-history-orders"))
+                FilterChip(selected = historyTab == "ledger", onClick = {
+                    historyTab = "ledger"
+                }, enabled = !state.busy && state.canOperate(), label = { Text("账单明细") },
+                    modifier = Modifier.testTag("mine-history-ledger"))
+            }
+        }
+        val mode = when(view) {
+            "history" -> if (historyTab == "ledger") CommerceMode.Ledger else CommerceMode.Orders
+            "ledger" -> CommerceMode.Ledger
+            "wallet", "recharge" -> CommerceMode.Wallet
+            else -> CommerceMode.Mine
+        }
         CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
-            onLedger = { if (account.authenticated) { view = "ledger"; if (autoLoad) state.loadLedger() } else view = "security" })
+            onLedger = { if (account.authenticated) {
+                view = "history"; historyTab = "ledger"
+            } else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
     if (account.authenticated && account.purchaseReturnRef != null && onReturnToPlans != null) BrandCard {
@@ -644,6 +667,11 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         color = Brand.Surface.copy(alpha = .82f), border = BorderStroke(1.dp, Brand.Border)) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
         MineMenuRow("钱包", "mine-wallet", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending) { view = if (account.authenticated) "wallet" else "security" }
+        HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+        MineMenuRow("订单与账单", "mine-history", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending) {
+            view = if (account.authenticated) "history" else "security"
+            historyTab = "orders"
+        }
         HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
         MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
         HorizontalDivider(color = Brand.Border.copy(alpha = .55f))

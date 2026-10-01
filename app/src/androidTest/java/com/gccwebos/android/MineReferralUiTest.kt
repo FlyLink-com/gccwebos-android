@@ -52,11 +52,17 @@ class MineReferralUiTest {
             }
         }
     }
-    private fun launchReferral(profile: () -> String, font: Float = 1f) {
+    private fun launchReferral(profile: () -> String, font: Float = 1f, unknownGeneration: Boolean = false) {
         compose.setContent {
             val scope = rememberCoroutineScope(); val owner = remember { owner(scope) }; account = owner
             val state = remember { ReferralController(owner, scope, { copied += it }, ReferralRepository { route, body ->
-                requests += route to body; assertNull(body)
+                requests += route to body
+                if (route == ReferralJson.LINK) {
+                    check(unknownGeneration) { "This fixture does not allow link generation" }
+                    assertEquals("{}", body)
+                    throw PortalFailure(PortalFailure.Reason.NETWORK)
+                }
+                assertNull(body)
                 WireResponse(200, if (route == ReferralJson.PROFILE) profile() else """{"performance":{"registrations":4,"firstRechargeConversions":1,"creditedFirstRechargeCoins":17,"pendingRewardCoins":3,"availableRewardCoins":5,"reversedRewardCoins":2,"conversionRate":0.25,"reconciliationRequired":false}}""")
             }) }; referral = state
             val actual = LocalDensity.current
@@ -103,5 +109,64 @@ class MineReferralUiTest {
         compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("推荐归因期尚未确认，暂不能生成或复制链接。").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { assertTrue(copied.isEmpty()); assertEquals(2, requests.size); assertTrue(requests.all { it.second == null }) }
+    }
+
+    @Test fun pendingRestoringAndSignedOutWithholdPreviouslyReadReferralDataAndActions() {
+        launchReferral({ """{"profile":{"eligible":true,"linkPath":"$path","policy":{"policyRef":"referral_ui_policy","version":3,"effectiveAt":"2026-09-30T00:00:00.000Z","rateBps":735,"rounding":"floor","attributionDays":47,"confirmationDays":9},"attributionDays":47}}""" })
+        val original = referral
+        compose.onNodeWithTag("referral-policy-rate").assertExists()
+        compose.onNodeWithTag("referral-available-reward").performScrollTo().assertExists()
+        for (gate in listOf("foreground", "restoring", "signed-out")) {
+            compose.runOnIdle {
+                account.foregroundCheckPending = gate == "foreground"
+                account.restoring = gate == "restoring"
+                account.authenticated = gate != "signed-out"
+            }
+            compose.onNodeWithTag("referral-account-confirmation").assertExists()
+            listOf("referral-profile", "referral-performance", "referral-policy-rate", "referral-available-reward",
+                "referral-copy", "referral-generate").forEach { compose.onNodeWithTag(it).assertDoesNotExist() }
+            compose.runOnIdle {
+                assertSame(original, referral)
+                assertNotNull(referral.profile); assertNotNull(referral.performance)
+                assertFalse(referral.canCopy); assertFalse(referral.canGenerate)
+                referral.copyLink(); referral.generateLink()
+                assertTrue(copied.isEmpty())
+                assertTrue(requests.none { it.first == ReferralJson.LINK })
+            }
+        }
+    }
+
+    @Test fun sameSessionForegroundConfirmationKeepsUnknownGenerationAndNeverReplaysPost() {
+        launchReferral({ """{"profile":{"eligible":true,"linkPath":null,"policy":{"policyRef":"referral_ui_policy","version":3,"effectiveAt":"2026-09-30T00:00:00.000Z","rateBps":735,"rounding":"floor","attributionDays":47,"confirmationDays":9},"attributionDays":47}}""" }, unknownGeneration = true)
+        val original = referral
+        val originalGuard = account.referralGenerationGuard
+        val originalEpoch = account.authSessionGeneration
+        compose.onNodeWithTag("referral-generate").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { !referral.busy && account.referralGenerationGuard.unknown }
+        compose.runOnIdle {
+            assertEquals(1, requests.count { it.first == ReferralJson.LINK })
+            account.foregroundCheckPending = true; account.restoring = true; account.authenticated = false
+        }
+        compose.onNodeWithTag("referral-account-confirmation").assertExists()
+        compose.onNodeWithTag("referral-performance").assertDoesNotExist()
+        compose.onNodeWithTag("referral-copy").assertDoesNotExist()
+        compose.onNodeWithTag("referral-generate").assertDoesNotExist()
+        val readsBeforeResume = requests.count { it.first != ReferralJson.LINK }
+        compose.runOnIdle {
+            assertSame(original, referral); assertSame(originalGuard, account.referralGenerationGuard)
+            assertTrue(originalGuard.unknown)
+            account.authenticated = true; account.restoring = false; account.foregroundCheckPending = false
+        }
+        compose.waitUntil(5_000) { !referral.busy && requests.count { it.first != ReferralJson.LINK } > readsBeforeResume }
+        compose.onNodeWithTag("referral-available-reward").performScrollTo().assertExists()
+        compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle {
+            assertSame(original, referral); assertSame(originalGuard, account.referralGenerationGuard)
+            assertEquals(originalEpoch, account.authSessionGeneration)
+            referral.generateLink(); referral.copyLink()
+            assertTrue(originalGuard.unknown)
+            assertEquals(1, requests.count { it.first == ReferralJson.LINK })
+            assertTrue(copied.isEmpty())
+        }
     }
 }

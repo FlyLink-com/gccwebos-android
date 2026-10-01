@@ -41,7 +41,7 @@ class MobileParityUiTest {
         val dir = File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null), "ui-evidence").apply { mkdirs() }
         File(dir, "$name.png").outputStream().use { compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
-    @Test fun savedSessionCannotExposeHomeUntilServerValidationCompletes() {
+    @Test fun savedSessionKeepsConnectionVisibleButPrivateAccountWaitsForValidation() {
         val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>(); val saved = sessions()
         lateinit var state: AccountController
         var reads = 0
@@ -58,15 +58,17 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.waitUntil(10_000) { started.isCompleted }
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("session-checking").assertExists()
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertExists()
         capture("session-restore-gated")
         compose.runOnIdle { release.complete(Unit) }
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.runOnIdle { assertEquals("", state.account); assertEquals("fixture@example.invalid", state.authenticatedAccountId); assertEquals(2, reads) }
     }
-    @Test fun restoreNetworkFailureStaysGatedAndCanRetryWithoutPassword() {
+    @Test fun restoreNetworkFailureKeepsConnectionAndCanRetryAccountWithoutPassword() {
         val saved = sessions(); var fail = true; lateinit var state: AccountController
         val wire = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
@@ -80,7 +82,8 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.waitUntil(10_000) { !state.busy && state.restorationPending }
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("session-restore-retry").performScrollTo().assertIsDisplayed()
         capture("session-restore-retry")
         compose.runOnIdle { assertNotNull(saved.read()); fail = false }
@@ -98,8 +101,10 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.waitUntil(10_000) { !state.busy }
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("login-screen").assertExists()
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertExists()
         compose.runOnIdle { assertNull(saved.read()); assertFalse(state.authenticated) }
     }
     @Test fun authenticatorRoundTripRetainsTicketAndCanCompleteLogin() {
@@ -139,12 +144,10 @@ class MobileParityUiTest {
         compose.runOnIdle { state.login() }
         compose.waitUntil(10_000) { state.factorReference != null && !state.busy }
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
         compose.onNodeWithTag("totp-code").performScrollTo().assertIsDisplayed()
         capture("local-subscription-totp-pending")
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
         compose.runOnIdle { state.restoreAccount(); state.onForeground(); assertEquals("synthetic-totp", state.factorReference); assertEquals(1, calls.size) }
         compose.onNodeWithTag("totp-code").performScrollTo().performTextInput("123456")
         compose.runOnIdle { state.totp() }
@@ -171,6 +174,7 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         // Compact form admission owns the challenge; a preseeded question is intentionally invalidated.
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
         compose.runOnIdle { state.answer = "3"; state.login() }; compose.waitUntil(10_000) { started.isCompleted }
         compose.runOnIdle { state.onForeground(); assertTrue(state.foregroundCheckPending) }
@@ -186,7 +190,7 @@ class MobileParityUiTest {
         compose.onNodeWithTag("commerce-signed-out").assertDoesNotExist()
         compose.onNodeWithTag("nav-Connect").assertExists()
     }
-    @Test fun foregroundIdleSessionExpiryClosesHomeWithoutAnotherRequest() {
+    @Test fun foregroundIdleSessionExpiryClosesPrivateAccountButKeepsConnection() {
         lateinit var state: AccountController; val saved = MemorySessionStore()
         val authenticatedRequests = mutableListOf<String>()
         val wire = object : PortalTransport {
@@ -207,9 +211,11 @@ class MobileParityUiTest {
             } }
             AppShell(state, autoLoadCommerce = false)
         }
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
         compose.runOnIdle { state.answer = "3"; state.login() }
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.runOnIdle {
             assertNotNull(saved.read())
@@ -218,7 +224,9 @@ class MobileParityUiTest {
         // Drive the controller's Compose coroutine delay, without a request or foreground callback.
         compose.mainClock.advanceTimeBy(5_001)
         compose.waitUntil(15_000) { !state.authenticated }
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("login-screen").assertExists()
         compose.runOnIdle {
             assertNull(saved.read())
@@ -285,7 +293,6 @@ class MobileParityUiTest {
             assertNull(saved.read()); assertTrue(calls.isEmpty())
         }
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
         // The signed-out compact form intentionally omits reset. Reset belongs to the
         // authenticated account panel, so reach it through a fresh offline login.
         compose.onNodeWithTag("account-reset").assertDoesNotExist()
@@ -306,7 +313,7 @@ class MobileParityUiTest {
         compose.onNodeWithTag("account-reset").performScrollTo().performClick()
         compose.onNodeWithTag("reset-confirm").performClick()
         compose.waitUntil(10_000) { !state.localSubscription.hasProfile && !state.busy }
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("login-screen").assertExists()
         compose.runOnIdle {
             assertFalse(state.authenticated); assertNull(state.authenticatedAccountId); assertNull(state.displayEmail)

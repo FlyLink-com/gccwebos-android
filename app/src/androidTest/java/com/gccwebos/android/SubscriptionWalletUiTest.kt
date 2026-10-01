@@ -28,6 +28,8 @@ import java.io.File
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
@@ -37,14 +39,28 @@ import org.junit.Test
 class SubscriptionWalletUiTest {
     @get:Rule val compose = createComposeRule()
     private val requests = AtomicInteger()
+    private val loginChallengeRequests = AtomicInteger()
+    private var expectedLoginChallengeRequests = 0
     private lateinit var account: AccountController
     private lateinit var commerce: CommerceController
     private val future = Instant.parse("2099-09-30T00:00:00Z")
     private val collected = Instant.parse("2026-09-30T00:00:00Z")
 
-    private fun accountFixture(scope: CoroutineScope): AccountController {
+    private fun accountFixture(scope: CoroutineScope, allowLoginChallenge: Boolean = false): AccountController {
         val wire = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                // The mounted login form may fetch exactly one in-memory question. This
+                // grants no authentication, commerce, subscription or actual network access.
+                if (allowLoginChallenge && path == "/api/portal/human-challenges") {
+                    assertNull(session)
+                    val submitted = JSONObject(requireNotNull(body))
+                    assertEquals(setOf("scope"), submitted.keys().asSequence().toSet())
+                    assertEquals("portal_login", submitted.getString("scope"))
+                    assertEquals("The login form must not loop its question request", 1,
+                        loginChallengeRequests.incrementAndGet())
+                    return WireResponse(201, """{"challenge":{"challengeRef":"offline_subscription_question",
+                        "type":"math","prompt":"离线题目：2 + 3 = ?","expiresInSeconds":180}}""")
+                }
                 requests.incrementAndGet()
                 throw AssertionError("Offline UI fixture attempted a request: $path")
             }
@@ -59,17 +75,21 @@ class SubscriptionWalletUiTest {
             override fun clear() = Unit
         }
         return AccountController(PortalRepository(wire, store,
-            OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L }), scope).apply {
+            OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
+            subscription = SubscriptionSource { throw AssertionError("No UI subscription request") },
+            sessions = MemorySessionStore(), profiles = MemoryLocalProfileStore()), scope).apply {
             account = "offline-ui@example.invalid"
             authenticated = true
             authSessionGeneration = 1
         }
     }
 
-    private fun launchShell(fontScale: Float = 1f, setup: AccountController.() -> Unit = {}) {
+    private fun launchShell(fontScale: Float = 1f, allowLoginChallenge: Boolean = false,
+        setup: AccountController.() -> Unit = {}) {
+        expectedLoginChallengeRequests = if (allowLoginChallenge) 1 else 0
         compose.setContent {
             val scope = rememberCoroutineScope()
-            val controller = remember { accountFixture(scope).apply(setup) }
+            val controller = remember { accountFixture(scope, allowLoginChallenge).apply(setup) }
             account = controller
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
@@ -83,7 +103,8 @@ class SubscriptionWalletUiTest {
         compose.setContent {
             val scope = rememberCoroutineScope()
             val owner = remember { accountFixture(scope) }
-            val state = remember {
+            account = owner
+            val state = remember(owner.authSessionGeneration) {
                 val recovery = object : CommerceRecovery {
                     override fun read(binding: String, kind: String): PendingCommerce? =
                         throw AssertionError("Offline UI fixture must not access recovery storage")
@@ -94,9 +115,11 @@ class SubscriptionWalletUiTest {
                         throw AssertionError("Offline UI fixture must not clear recovery storage")
                     }
                 }
-                CommerceController(owner, scope, recovery).apply(setup)
+                CommerceController(owner, scope, recovery).apply(setup).apply {
+                    if (wallet != null) walletLoaded = true
+                    if (rechargeOffers.isNotEmpty()) rechargeOffersLoaded = true
+                }
             }
-            account = owner
             commerce = state
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
@@ -111,7 +134,10 @@ class SubscriptionWalletUiTest {
         }
     }
 
-    @After fun noFixtureEverContactsNetwork() { assertEquals(0, requests.get()) }
+    @After fun noFixtureEverContactsNetwork() {
+        assertEquals(0, requests.get())
+        assertEquals(expectedLoginChallengeRequests, loginChallengeRequests.get())
+    }
 
     private fun capture(name: String) {
         compose.waitForIdle()
@@ -133,7 +159,7 @@ class SubscriptionWalletUiTest {
     )
 
     @Test fun launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage() {
-        launchShell { authenticated = false }
+        launchShell(allowLoginChallenge = true) { authenticated = false }
         compose.onNodeWithTag("brand-name").assertTextEquals("飞连vpn")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.gccwebos.android.debug", context.packageName)
@@ -158,23 +184,37 @@ class SubscriptionWalletUiTest {
     }
 
     @Test fun signedOutLoadingErrorAndUnknownNeverShowNoSubscriptionModal() {
-        launchShell { authenticated = false; resource = Resource.None }
+        launchShell(allowLoginChallenge = true) { authenticated = false; resource = Resource.None }
         compose.onNodeWithTag("login-screen").assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
         compose.onNodeWithTag("login-account").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.runOnIdle { account.authenticated = true; account.busy = true }
+        compose.onNodeWithTag("local-subscription-loading").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithText("正在读取资源").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.runOnIdle { account.busy = false; account.error = "离线同步失败" }
+        compose.onNodeWithTag("local-subscription-error").performScrollTo().assertTextEquals("离线同步失败")
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithText("资源暂时无法确认").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         capture("resource-error")
         compose.runOnIdle { account.error = null; account.resource = null }
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithText("等待读取资源").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.runOnIdle { account.resource = Resource.Reconciliation }
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithText("资源正在对账").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
     }
 
@@ -216,6 +256,8 @@ class SubscriptionWalletUiTest {
 
     @Test fun activeResourceHasDurationCountdownAndTruthfulTrafficStates() {
         launchShell { resource = available() }
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithText("30天").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextContains("剩余", substring = true)
         compose.onNodeWithText("1.0 KiB").performScrollTo().assertIsDisplayed()
@@ -232,6 +274,8 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithText("768 B · 数据已过期").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { account.resource = available().copy(validUntil = Instant.EPOCH) }
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextEquals("已到期")
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("portal-expired-renew").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
     }
 
@@ -247,9 +291,11 @@ class SubscriptionWalletUiTest {
         capture("none-font-200")
         compose.onNodeWithTag("guidance-dismiss").performClick()
         compose.runOnIdle { account.resource = available(days = 365) }
+        compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithTag("brand-name").performScrollTo().assertTextEquals("飞连vpn")
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertIsDisplayed()
         capture("countdown-font-200")
+        compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()
     }
 
@@ -280,7 +326,7 @@ class SubscriptionWalletUiTest {
         launchCommerce(CommerceMode.Wallet)
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("尚未读取")
         compose.runOnIdle { commerce.error = "离线余额读取失败" }
-        compose.onNodeWithTag("commerce-error").performScrollTo().assertTextEquals("离线余额读取失败")
+        compose.onNodeWithTag("wallet-error").performScrollTo().assertTextEquals("离线余额读取失败")
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("尚未读取")
         capture("wallet-error")
         compose.runOnIdle {
@@ -288,7 +334,7 @@ class SubscriptionWalletUiTest {
             commerce.wallet = Wallet("active", 1, 12, 5, 3, 20, 3, 4)
         }
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("20 Coins")
-        compose.onNodeWithText("已充值 12 Coins · 赠送 5 Coins · 奖励 3 Coins").assertExists()
+        compose.onNodeWithText("充值 Coins 余额 12 Coins · 赠送 5 Coins · 奖励 3 Coins").assertExists()
         compose.onNodeWithText("冻结中 3 Coins · 待到账 4 Coins").assertExists()
         capture("wallet-confirmed-fixture")
         compose.runOnIdle { account.authenticated = false }
@@ -298,10 +344,11 @@ class SubscriptionWalletUiTest {
 
     @Test fun threeServerShapedOffersHaveDurationOnlyHeadingsAtLargeFont() {
         val fixtures = offers()
-        launchCommerce(CommerceMode.Plans, fontScale = 2f) { offers = fixtures }
+        launchCommerce(CommerceMode.Plans, fontScale = 2f) { offers = fixtures; catalogLoaded = true; commerceModel = CommerceModel.LEGACY }
         fixtures.forEach { offer ->
             compose.onNodeWithTag("plan-title-${offer.offerRef}").performScrollTo()
-                .assertTextEquals(if (offer.durationDays == 365L) "年卡365天" else "30天")
+                .assertTextEquals("${offer.durationDays}天")
+            compose.onNodeWithTag("plan-price-${offer.offerRef}").performScrollTo().assertTextEquals(formatCoins(offer.baseCoinUnits))
             compose.onNodeWithTag("plan-quote-${offer.offerRef}").performScrollTo().assertIsDisplayed()
         }
         capture("offers-font-200")
@@ -327,6 +374,139 @@ class SubscriptionWalletUiTest {
         capture("quote-expired-font-200")
         compose.onNodeWithTag("purchase-cancel").assertIsDisplayed().performClick()
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+    }
+
+    @Test fun catalogAutoLoadWaitsOnceForRestorationAndBusyWithoutLoop() {
+        val paths = mutableListOf<String>()
+        val walletPath = "/api/portal/coins/wallet"
+        val walletReads = AtomicInteger()
+        val initialBalance = CompletableDeferred<Unit>()
+        val catalogBalance = CompletableDeferred<Unit>()
+        val laterBalance = CompletableDeferred<Unit>()
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val owner = remember { accountFixture(scope).apply { restoring = true } }
+            val state = remember {
+                val recovery = object : CommerceRecovery {
+                    override fun read(binding: String, kind: String): PendingCommerce? = null
+                    override fun save(binding: String, value: PendingCommerce) = throw AssertionError("No order writes")
+                    override fun clear(binding: String, kind: String) = throw AssertionError("No recovery clear")
+                }
+                val repository = CommerceRepository({ path, body, key ->
+                    assertNull(body); assertNull(key); paths += path
+                    if (path == walletPath) when (walletReads.incrementAndGet()) {
+                        1 -> initialBalance.await()
+                        2 -> catalogBalance.await()
+                        3 -> laterBalance.await()
+                        else -> throw AssertionError("Catalog reads must not loop")
+                    }
+                    WireResponse(200, when (path) {
+                        walletPath -> """{"wallet":{"status":"active","version":1,"balances":{"paidCoins":21,"bonusCoins":0,"rewardCoins":0},"spendableUnits":21,"heldUnits":0,"pendingUnits":0}}"""
+                        "/api/portal/coins/recharge/offers", "/api/portal/commerce/deferred/offers" -> """{"offers":[]}"""
+                        "/api/portal/commerce/model" -> """{"commerceModel":"wallet_first_unique_v1"}"""
+                        else -> throw AssertionError("Unexpected read: $path")
+                    })
+                }, recovery, "synthetic_catalog_account")
+                CommerceController(owner, scope, recovery, initialRepository = repository)
+            }
+            account = owner; commerce = state
+            GccTheme { Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                CommercePanel(owner, CommerceMode.Plans, stateOverride = state, autoLoad = true)
+            } }
+        }
+        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.runOnIdle {
+            assertTrue(paths.isEmpty())
+            assertFalse(commerce.busy)
+            // Admit a real, deferred read before the eligible catalog effect recomposes.
+            // Its busy slot belongs to current-session work, not revoked restoration work.
+            account.restoring = false
+            commerce.loadBalance()
+        }
+        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.onNodeWithTag("commerce-refresh").assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(listOf(walletPath), paths)
+            assertFalse(commerce.catalogLoaded)
+            initialBalance.complete(Unit)
+        }
+        compose.waitUntil(5_000) { walletReads.get() == 2 }
+        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.runOnIdle {
+            assertEquals(listOf(walletPath, walletPath), paths)
+            assertFalse(commerce.catalogLoaded)
+            catalogBalance.complete(Unit)
+        }
+        compose.waitUntil(5_000) { commerce.catalogLoaded && !commerce.busy }
+        compose.waitForIdle()
+        compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        // Completing another explicit balance read must not restart the loaded catalog.
+        compose.runOnIdle { commerce.loadBalance() }
+        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.runOnIdle {
+            assertTrue(commerce.catalogLoaded)
+            assertEquals(3, walletReads.get())
+            laterBalance.complete(Unit)
+        }
+        compose.waitUntil(5_000) { !commerce.busy }
+        compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        compose.runOnIdle {
+            assertEquals(listOf(walletPath, walletPath, "/api/portal/coins/recharge/offers",
+                "/api/portal/commerce/model", "/api/portal/commerce/deferred/offers", walletPath), paths)
+        }
+    }
+
+    @Test fun catalogStatesKeepServerDurationCoinsAndTrafficInDetails() {
+        val fixture = offers().first().copy(durationDays = 47, baseCoinUnits = 73, monthlyTrafficGb = 17)
+        launchCommerce(CommerceMode.Plans) { error = "合成目录读取失败" }
+        compose.onNodeWithTag("catalog-status").assertTextEquals("商品尚未读取")
+        compose.onNodeWithTag("commerce-error").assertTextEquals("合成目录读取失败")
+        compose.onNodeWithTag("plan-offer-${fixture.offerRef}").assertDoesNotExist()
+        compose.runOnIdle {
+            commerce.error = null; commerce.catalogLoaded = true; commerce.commerceModel = CommerceModel.LEGACY
+            commerce.offers = listOf(fixture)
+        }
+        compose.onNodeWithTag("plan-title-${fixture.offerRef}").performScrollTo().assertTextEquals("47天")
+        compose.onNodeWithTag("plan-price-${fixture.offerRef}").assertTextEquals("73 Coins")
+        compose.onNodeWithText("每月流量 17 GB").assertDoesNotExist()
+        compose.onNodeWithTag("plan-details-${fixture.offerRef}").performScrollTo().performClick()
+        compose.onNodeWithText("每月流量 17 GB").performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { commerce.busy = true }
+        compose.onNodeWithTag("plan-quote-${fixture.offerRef}").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-plans").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-data-packs").assertIsNotEnabled()
+    }
+
+    @Test fun insufficientDeferredQuoteKeepsConfirmationDisabledAndCancelsLocally() {
+        val balance = CoinBalance(0, 5, 0, 0)
+        val fixture = quote().copy(purchaseAvailability = "insufficient_balance", shortfallUnits = 15,
+            allocation = emptyList(), balances = QuoteBalances(balance, balance),
+            transition = QuoteTransition("initial_activation", future))
+        launchCommerce(CommerceMode.Plans) { quote = fixture; commerceModel = CommerceModel.WALLET_FIRST }
+        repeat(2) {
+            compose.onNodeWithTag("purchase-confirm").assertIsNotEnabled()
+            compose.onNodeWithText("余额不足，尚缺 15 Coins。请前往我的充值，再重新获取报价。")
+                .performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("purchase-cancel").performClick()
+            compose.runOnIdle { assertNull(commerce.quote); assertNull(commerce.purchase) }
+            if (it == 0) compose.runOnIdle { commerce.quote = fixture }
+        }
+    }
+
+    @Test fun accountGenerationSwitchClosesOldOrderCancellationDialog() {
+        val fixture = offers().first()
+        launchCommerce(CommerceMode.Plans) {
+            pendingPurchase = true
+            purchase = PurchaseResult.Order("offline_order_${account.authSessionGeneration}", fixture,
+                fixture.baseCoinUnits, listOf(CoinAllocation("paid_coins", fixture.baseCoinUnits)),
+                "held", "not_requested", null, future, collected, collected)
+        }
+        compose.onNodeWithText("取消此套餐订单").performScrollTo().performClick()
+        compose.onNodeWithTag("purchase-order-cancel-dialog").assertExists()
+        compose.runOnIdle { account.authSessionGeneration++ }
+        compose.onNodeWithTag("purchase-order-cancel-dialog").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2L, account.authSessionGeneration); assertTrue(commerce.currentSession()) }
+        compose.onNodeWithText("取消此套餐订单").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun rechargeDialogCancelsWithoutCreatingAnOrderAtLargeFont() {
@@ -401,7 +581,7 @@ class SubscriptionWalletUiTest {
         launchCommerce(CommerceMode.Wallet, fontScale = 2f) { pendingRecharge = true; recharge = fixture }
         repeat(2) {
             compose.onNodeWithTag("recharge-pay").performScrollTo().performClick()
-            compose.onNodeWithText("核对付款信息").assertIsDisplayed()
+            compose.onNodeWithText("核对服务器付款信息").assertIsDisplayed()
             // This only asserts the action; the test deliberately never invokes the external Intent.
             compose.onNodeWithTag("payment-open-confirm").assertIsDisplayed().assertIsEnabled()
             compose.onNodeWithText("将打开：www.xsd8866.com").performScrollTo().assertIsDisplayed()

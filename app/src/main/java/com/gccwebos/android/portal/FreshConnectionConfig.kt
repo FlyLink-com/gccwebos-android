@@ -22,8 +22,10 @@ fun interface ConnectionLineResolver {
  * The caller supplies an app-private no-backup directory. No production instance is wired.
  * Replacement must be atomic; unsupported filesystems fail closed without a fallback copy.
  */
-class AtomicPreparedConfigStore(private val directory: File) {
-    internal fun replace(bytes: ByteArray) {
+/** Borrowed bytes; production uses AtomicPreparedConfigStore, offline contracts inject a fake writer. */
+fun interface PreparedConfigStore { fun replace(bytes: ByteArray) }
+class AtomicPreparedConfigStore(private val directory: File) : PreparedConfigStore {
+    override fun replace(bytes: ByteArray) {
         require(bytes.size in 1..com.gccwebos.android.vpn.SafeProxyConfig.MAX_BYTES)
         require(directory.isDirectory && !Files.isSymbolicLink(directory.toPath()))
         val target = File(directory, "prepared-connection.json").toPath()

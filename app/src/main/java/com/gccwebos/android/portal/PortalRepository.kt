@@ -16,6 +16,12 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 
+/** The login contract uses ECMAScript String.trim, which differs from Kotlin's whitespace set. */
+internal fun normalizedLoginPassword(password: String): String = password.trim { character ->
+    character in '\u0009'..'\u000D' || character in '\u2000'..'\u200A' ||
+        character in " \u00A0\u1680\u2028\u2029\u202F\u205F\u3000\uFEFF"
+}
+
 /** One delivery at a time, scoped to the exact account, session and resource. */
 class PortalRepository(private val transport: PortalTransport, private val store: DeliveryStore,
     private val policy: OriginPolicy, private val elapsed: () -> Long,
@@ -35,6 +41,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private fun invalidateImport() { imported?.close(); imported = null; importedUntil = null; importedGeneration = null }
     @Volatile private var totpExpiry: Pair<String, Long>? = null
 
+    /** The form and final submission share the repository's monotonic clock. */
+    internal fun remainingHumanChallengeMillis(challenge: HumanChallenge): Long =
+        (challenge.expiresElapsed - elapsed()).coerceAtLeast(0L)
+
     suspend fun humanChallenge(): HumanChallenge = guarded {
         val response = transport.request("/api/portal/human-challenges", JSONObject().put("scope", "portal_login").toString())
         expect(response, setOf(201), false)
@@ -44,6 +54,8 @@ class PortalRepository(private val transport: PortalTransport, private val store
         HumanChallenge(value.optString("challengeRef").ifBlank { value.getString("id") }, value.getString("prompt"), elapsed() + lifetime * 1000)
     }
     suspend fun login(account: String, password: String, challenge: HumanChallenge, answer: String): LoginResult {
+        val submittedPassword = normalizedLoginPassword(password)
+        if (submittedPassword.isEmpty()) throw PortalFailure(PortalFailure.Reason.LOGIN_FAILED)
         val epoch = synchronized(activationLock) { generation.incrementAndGet().also { session = null; totpExpiry = null } }
         return mutex.withLock {
             guarded {
@@ -52,7 +64,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 sessions.clear()
                 if (elapsed() >= challenge.expiresElapsed) throw PortalFailure(PortalFailure.Reason.LOGIN_FAILED)
                 totpExpiry = null
-                val body = JSONObject().put("accountId", account).put("password", password).put("rememberMe", false)
+                val body = JSONObject().put("accountId", account).put("password", submittedPassword).put("rememberMe", false)
                     .put("humanVerification", JSONObject().put("challengeRef", challenge.reference).put("answer", answer))
                 val response = transport.request("/api/portal/password/session", body.toString())
                 expect(response, setOf(200, 202), false)
@@ -273,6 +285,19 @@ class PortalRepository(private val transport: PortalTransport, private val store
         val value = activeSession()
         minOf(value.lifetimeMillis - (elapsed() - value.receivedElapsed),
             java.time.Duration.between(now(), value.expiresAt).toMillis(), SavedSession.MAX_NATIVE_SESSION_MILLIS).also { require(it > 0) }
+    }
+    /** Referral cannot broaden the commerce paths or operate on a replaced native session. */
+    internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null): WireResponse = mutex.withLock {
+        guarded {
+            require(ReferralJson.validRequest(path, body))
+            val epoch = generation.get(); val active = activeSession()
+            require(Regex("[a-z][a-z0-9_]{2,95}").matches(active.token.value))
+            if (expectedSession != null && expectedSession != sessionBinding(active.token)) throw CancellationException("Referral session changed")
+            val response = transport.referral(path, body, active.token)
+            currentCoroutineContext().ensureActive(); checkGeneration(epoch); activeSession()
+            if (response.status == 401) expectCurrent(response, emptySet(), epoch)
+            response
+        }
     }
     suspend fun commerceSessionBinding(): String = mutex.withLock { sessionBinding(activeSession().token) }
     suspend fun commerceAccountBinding(): String = mutex.withLock {

@@ -27,7 +27,8 @@ sealed interface ConnectionState {
     data class Working(val step: Step, val operation: Operation = Operation.CONNECT) : ConnectionState
     data class Connected(val lineId: String) : ConnectionState
     data class Blocked(val reason: BusinessBlock) : ConnectionState
-    data class Failed(val reason: Failure) : ConnectionState
+    data class Failed(val reason: Failure, val preparation: PreparationFailure? = null,
+        val choices: List<ConnectionChoice> = emptyList()) : ConnectionState
 }
 
 enum class Operation { CONNECT, SWITCH, RECONNECT }
@@ -36,6 +37,7 @@ enum class BusinessBlock { UNAUTHENTICATED, NO_PLAN, PROVISIONING, EXPIRED, QUOT
 enum class Failure {
     NO_LINE, ACCOUNT_FAILED, ENTITLEMENT_FAILED, CONFIG_UNAVAILABLE,
     PERMISSION_DENIED, TUNNEL_FAILED, TRAFFIC_FAILED, TIMEOUT, CLEANUP_FAILED,
+    PREPARATION_FAILED, SELECTION_REQUIRED, ENGINE_DIED, PERMISSION_REVOKED,
 }
 
 data class AccessDecision(val block: BusinessBlock? = null)
@@ -124,15 +126,20 @@ data class ConnectionTimeouts(
  * request; cancellation is never reclassified as an ordinary network failure.
  */
 class ConnectionCoordinator(
-    private val account: AccountGateway,
-    private val entitlement: EntitlementGateway,
-    private val config: ConfigGateway,
+    private val account: AccountGateway?,
+    private val entitlement: EntitlementGateway?,
+    private val config: ConfigGateway?,
     private val permission: PermissionGateway,
     private val tunnel: TunnelGateway,
     private val probe: TrafficProbe,
     parentScope: CoroutineScope,
     private val timeouts: ConnectionTimeouts = ConnectionTimeouts(),
+    private val local: LocalConfigGateway? = null,
 ) {
+    /** Account-independent local capability path; production adapters are not installed. */
+    constructor(config: LocalConfigGateway, permission: PermissionGateway, tunnel: LifecycleTunnel,
+        probe: TrafficProbe, parentScope: CoroutineScope, timeouts: ConnectionTimeouts = ConnectionTimeouts()) :
+        this(null, null, null, permission, tunnel, probe, parentScope, timeouts, config)
     private val owner = SupervisorJob(requireNotNull(parentScope.coroutineContext[Job]) {
         "The coordinator requires a lifecycle-owned CoroutineScope"
     })
@@ -145,8 +152,23 @@ class ConnectionCoordinator(
     private var current: Ticket? = null
     private var closed = false
     private var lastRequestedLine: String? = null
+    private var lastSelection: SelectionIntent = SelectionIntent.Choose
     // Only accessed while holding lifecycle. True is deliberately retained on cleanup failure.
-    private var tunnelMayBeRunning = false
+    @Volatile private var tunnelMayBeRunning = false
+    private val clearObservation = try { local?.observeClear {
+        synchronized(commandLock) {
+            if (!closed && owner.isActive) submit(null, Operation.CONNECT, disconnect = true)
+        }
+    } } catch (failure: Throwable) { owner.cancel(); throw failure }
+
+    init {
+        require(local != null || (account != null && entitlement != null && config != null))
+        require(local == null || tunnel is LifecycleTunnel)
+        owner.invokeOnCompletion {
+            local?.invalidatePending()
+            if (!tunnelMayBeRunning) clearObservation?.close()
+        }
+    }
 
     private class Ticket(
         val id: Long,
@@ -154,13 +176,43 @@ class ConnectionCoordinator(
         val operation: Operation,
         val disconnect: Boolean,
         val predecessor: Job?,
+        val selection: SelectionIntent?,
     ) {
+        var terminal: TunnelTerminal? = null
         val begin = CompletableDeferred<Unit>()
         val result = CompletableDeferred<ConnectionState>()
         lateinit var job: Job
     }
 
     private class Abort(val outcome: ConnectionState) : Exception(null, null, false, false)
+
+    /** UI observers may detach/cancel await() without stopping service-owned work.
+     * Use stop(), cancel() or owner.close() explicitly. Commands are submitted synchronously.
+     */
+    class Command internal constructor(private val outcome: CompletableDeferred<ConnectionState>,
+        private val cancelAction: () -> Unit) {
+        suspend fun await(): ConnectionState = outcome.await()
+        fun cancel() = cancelAction()
+    }
+    private fun command(ticket: Ticket) = Command(ticket.result) {
+        synchronized(commandLock) {
+            if (current?.id == ticket.id && ticket.job.isActive) {
+                local?.invalidatePending()
+                mutableState.value = ConnectionState.Disconnecting
+                ticket.job.cancel(CancellationException("Connection command cancelled"))
+            }
+        }
+    }
+    fun start(intent: SelectionIntent = SelectionIntent.Choose): Command {
+        check(local != null) { "Typed selection requires local admission" }
+        return command(submit(null, Operation.CONNECT, selection = intent))
+    }
+    fun switchSelection(selection: ConnectionSelection): Command {
+        check(local != null) { "Typed selection requires local admission" }
+        return command(submit(null, Operation.SWITCH, selection = SelectionIntent.Selected(selection)))
+    }
+    fun restart(): Command = command(submit(null, Operation.RECONNECT))
+    fun stop(): Command = command(submit(null, Operation.CONNECT, disconnect = true))
 
     suspend fun connect(lineId: String? = null): ConnectionState = await(submit(lineId, Operation.CONNECT))
 
@@ -196,27 +248,34 @@ class ConnectionCoordinator(
                         else ConnectionState.Failed(Failure.CLEANUP_FAILED)
                 }
             }
+            if (!tunnelMayBeRunning) clearObservation?.close()
             state.value
         }
     }
 
-    private fun submit(lineId: String?, operation: Operation, disconnect: Boolean = false): Ticket {
+    private fun submit(lineId: String?, operation: Operation, disconnect: Boolean = false,
+        selection: SelectionIntent? = null): Ticket {
         val ticket = synchronized(commandLock) {
             check(!closed && owner.isActive) { "Connection coordinator is closed" }
             val previous = current
             val connected = mutableState.value as? ConnectionState.Connected
             // Only identical active ordinary connects are coalesced. Switch/reconnect are explicit.
-            if (!disconnect && operation == Operation.CONNECT && previous != null && previous.job.isActive &&
+            if (local == null && !disconnect && operation == Operation.CONNECT && previous != null && previous.job.isActive &&
                 !previous.disconnect && (previous.lineId == lineId || (connected != null && lineId == null))) {
                 return previous
             }
             val resolvedLine = if (operation == Operation.RECONNECT) lastRequestedLine else lineId
+            if (local != null) require(lineId == null) { "Local admission requires an opaque selection" }
+            val resolvedSelection = if (local == null) null else if (operation == Operation.RECONNECT) lastSelection
+                else selection ?: SelectionIntent.Choose
+            local?.invalidatePending()
             previous?.job?.cancel(CancellationException("Superseded connection command"))
-            val next = Ticket(++sequence, resolvedLine, operation, disconnect, previous?.job)
+            val next = Ticket(++sequence, resolvedLine, operation, disconnect, previous?.job, resolvedSelection)
+            if (!disconnect && resolvedSelection != null) lastSelection = resolvedSelection
             if (!disconnect) lastRequestedLine = resolvedLine
             current = next
             mutableState.value = if (disconnect) ConnectionState.Disconnecting
-                else ConnectionState.Working(Step.ACCOUNT, operation)
+                else ConnectionState.Working(if (local == null) Step.ACCOUNT else Step.CONFIG, operation)
             // UND starts inside execute's try/finally before awaiting begin. Even a command
             // cancelled before admission to lifecycle gets a cleanup-aware terminal outcome.
             next.job = scope.launch(start = CoroutineStart.UNDISPATCHED) { execute(next) }
@@ -235,6 +294,17 @@ class ConnectionCoordinator(
 
     private fun publish(ticket: Ticket, value: ConnectionState) = synchronized(commandLock) {
         if (current?.id == ticket.id) mutableState.value = value
+    }
+
+    private suspend fun publishActive(ticket: Ticket, value: ConnectionState, complete: Boolean = false) {
+        val context = currentCoroutineContext()
+        synchronized(commandLock) {
+            context.ensureActive()
+            if (current?.id != ticket.id || ticket.terminal != null)
+                throw CancellationException("Connection generation terminated")
+            mutableState.value = value
+            if (complete) ticket.result.complete(value)
+        }
     }
 
     private suspend fun checkpoint(ticket: Ticket) {
@@ -267,23 +337,35 @@ class ConnectionCoordinator(
                 suspend fun <T> step(value: Step, action: suspend () -> T): T {
                     stage = value
                     checkpoint(ticket)
-                    publish(ticket, ConnectionState.Working(value, ticket.operation))
+                    publishActive(ticket, ConnectionState.Working(value, ticket.operation))
                     val budget = if (value == Step.PERMISSION) timeouts.permissionMillis else timeouts.stepMillis
                     return withTimeout(budget) { action() }.also { checkpoint(ticket) }
                 }
 
-                if (!step(Step.ACCOUNT) { account.isAuthenticated() }) {
-                    throw Abort(ConnectionState.Blocked(BusinessBlock.UNAUTHENTICATED))
+                if (local == null) {
+                    if (!step(Step.ACCOUNT) { requireNotNull(account).isAuthenticated() }) {
+                        throw Abort(ConnectionState.Blocked(BusinessBlock.UNAUTHENTICATED))
+                    }
+                    step(Step.ENTITLEMENT) { requireNotNull(entitlement).current() }.block?.let {
+                        throw Abort(ConnectionState.Blocked(it))
+                    }
                 }
-                step(Step.ENTITLEMENT) { entitlement.current() }.block?.let {
-                    throw Abort(ConnectionState.Blocked(it))
-                }
-                // Capture ownership *inside* the timed block, before a timeout/checkpoint could
-                // discard the result. A late config is always wiped in finally.
-                val authorized = step(Step.CONFIG) { config.forLine(ticket.lineId).also { material = it } }
-                    ?: throw Abort(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE))
-                if (ticket.lineId != null && ticket.lineId != authorized.lineId) {
+                // Capture ownership inside the timed block; late material is always wiped.
+                val authorized = step(Step.CONFIG) {
+                    if (local == null) requireNotNull(config).forLine(ticket.lineId).also { material = it }
+                    else when (val result = local.prepare(requireNotNull(ticket.selection))) {
+                        is ConfigPreparation.Ready -> result.config.also { material = it }
+                        is ConfigPreparation.Unavailable -> throw Abort(ConnectionState.Failed(
+                            Failure.PREPARATION_FAILED, result.reason))
+                        is ConfigPreparation.SelectionRequired -> throw Abort(ConnectionState.Failed(
+                            Failure.SELECTION_REQUIRED, choices = result.choices))
+                    }
+                } ?: throw Abort(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE))
+                if (local == null && ticket.lineId != null && ticket.lineId != authorized.lineId) {
                     throw Abort(ConnectionState.Failed(Failure.NO_LINE))
+                }
+                if (local != null && !authorized.requiresAtomicActivation) {
+                    throw Abort(ConnectionState.Failed(Failure.CONFIG_UNAVAILABLE))
                 }
                 if (!step(Step.PERMISSION) { permission.hasVpnPermission() }) {
                     throw Abort(ConnectionState.Failed(Failure.PERMISSION_DENIED))
@@ -298,7 +380,12 @@ class ConnectionCoordinator(
                         synchronized(commandLock) {
                             context.ensureActive()
                             if (current?.id != ticket.id) throw CancellationException("Superseded connection command")
-                            authorized.activate { context.ensureActive(); atomic.startAtomically(authorized) }
+                            authorized.activate {
+                                context.ensureActive()
+                                if (local != null) (atomic as LifecycleTunnel).accept(authorized) { event ->
+                                    terminal(ticket, event)
+                                } else atomic.startAtomically(authorized)
+                            }
                         }
                     } else tunnel.start(authorized)
                 }
@@ -310,17 +397,23 @@ class ConnectionCoordinator(
                 }
                 checkpoint(ticket)
                 val connected = ConnectionState.Connected(authorized.lineId)
-                publish(ticket, connected)
-                ticket.result.complete(connected)
+                publishActive(ticket, connected, complete = true)
                 // Keep tunnel lifetime tied to owner cancellation, not to the UI awaiter.
                 awaitCancellation()
             } catch (abort: Abort) {
                 outcome = abort.outcome
             } catch (_: TimeoutCancellationException) {
-                outcome = ConnectionState.Failed(Failure.TIMEOUT)
+                outcome = if (local != null && stage == Step.CONFIG)
+                    ConnectionState.Failed(Failure.PREPARATION_FAILED, PreparationFailure.TIMEOUT)
+                    else ConnectionState.Failed(Failure.TIMEOUT)
             } catch (cancelled: CancellationException) {
-                outcome = ConnectionState.Disconnected
+                outcome = synchronized(commandLock) { ticket.terminal?.let { event ->
+                    ConnectionState.Failed(if (event == TunnelTerminal.ENGINE_DIED) Failure.ENGINE_DIED
+                        else Failure.PERMISSION_REVOKED)
+                } ?: ConnectionState.Disconnected }
                 throw cancelled
+            } catch (failure: PreparationRejected) {
+                outcome = ConnectionState.Failed(Failure.PREPARATION_FAILED, failure.reason)
             } catch (_: Exception) {
                 // Exception messages may contain URLs/credentials. Expose only our safe enum.
                 outcome = ConnectionState.Failed(when (stage) {
@@ -355,6 +448,15 @@ class ConnectionCoordinator(
                 // A newer worker can own lifecycle now. Do not wait for or stop that tunnel.
                 ticket.result.complete(outcome)
             }
+        }
+    }
+
+    private fun terminal(ticket: Ticket, event: TunnelTerminal) = synchronized(commandLock) {
+        if (current?.id == ticket.id && ticket.job.isActive && ticket.terminal == null) {
+            ticket.terminal = event
+            local?.invalidatePending()
+            mutableState.value = ConnectionState.Disconnecting
+            ticket.job.cancel(CancellationException("Tunnel terminated"))
         }
     }
 

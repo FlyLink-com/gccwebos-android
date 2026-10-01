@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.LocalActivity
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -11,19 +12,30 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.PortalFailure
+import com.gccwebos.android.portal.ReferralController
+import com.gccwebos.android.portal.ReferralPanel
 import com.gccwebos.android.design.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -34,11 +46,15 @@ internal class CommerceController(private val account: AccountController, privat
     var busy by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var wallet by mutableStateOf<Wallet?>(null)
+    var walletLoaded by mutableStateOf(false)
+    var walletError by mutableStateOf<String?>(null)
     var offers by mutableStateOf<List<Offer>>(emptyList())
     var commerceModel by mutableStateOf<CommerceModel?>(null)
     var catalogLoaded by mutableStateOf(false)
     var ledgerPage by mutableStateOf<WalletLedgerPage?>(null)
     var rechargeOffers by mutableStateOf<List<RechargeOffer>>(emptyList())
+    var rechargeOffersLoaded by mutableStateOf(false)
+    var rechargeOffersError by mutableStateOf<String?>(null)
     var quote by mutableStateOf<Quote?>(null)
     var purchase by mutableStateOf<PurchaseResult?>(null)
     var recharge by mutableStateOf<RechargeOrder?>(null)
@@ -47,115 +63,244 @@ internal class CommerceController(private val account: AccountController, privat
     var orderPage by mutableStateOf<OrderPage?>(null)
     var rechargeHistory by mutableStateOf<List<RechargeOrder>?>(null)
     var transitions by mutableStateOf<List<PurchaseResult.Deferred>?>(null)
+    var purchaseHistoryError by mutableStateOf<String?>(null)
+    var rechargeHistoryError by mutableStateOf<String?>(null)
     private var repo: CommerceRepository? = initialRepository
     private val epoch = account.authSessionGeneration
+    private val identity = account.commerceSessionIdentity
+    private var operation = 0L
+    private var requestJob: Job? = null
+    private class ReadEpoch(val generation: Long, val sequence: Long? = null) : AbstractCoroutineContextElement(Key) {
+        companion object Key : CoroutineContext.Key<ReadEpoch>
+    }
+    /** A validation pause revokes old confirmations without deleting account-scoped recovery. */
+    fun pauseForAuthentication() {
+        operation++; requestJob?.cancel(); requestJob = null; busy = false
+        quote = null; recharge = null
+    }
     fun load() = run {
         orderPage = null; rechargeHistory = null; transitions = null; catalogLoaded = false; commerceModel = null
+        purchaseHistoryError = null; rechargeHistoryError = null
         quote = null; wallet = null; offers = emptyList(); rechargeOffers = emptyList(); purchase = null; recharge = null
+        walletLoaded = false; rechargeOffersLoaded = false; walletError = null; rechargeOffersError = null
+        val r = repository()
+        pendingPurchase = r.pending("purchase") != null; pendingRecharge = r.pending("recharge") != null
+        // Reconcile money first; a broken catalog cannot preserve an old payment action.
+        readPart({ r.currentPurchase() }) { purchase = it }
+        readPart({ r.currentRecharge() }) { recharge = it }
+        readPart({ r.wallet() }, onFailure = { walletError = "余额查询失败，请重试。" }) { wallet = it; walletLoaded = true }
+        readPart({ r.rechargeOffers() }, onFailure = { rechargeOffersError = "充值报价尚未读取，请重试。" }) { rechargeOffers = it; rechargeOffersLoaded = true }
+        readPart({ r.loadModel() }, onFailure = { purchaseHistoryError = "订单类型未能读取，请重试查询。" }) { commerceModel = it }
+        if (commerceModel != null) readPart({ r.offers() }) { offers = it; catalogLoaded = true }
+        if (includeHistory) {
+            commerceModel?.let { selected -> readPart({ r.purchaseHistory(selected) },
+                onFailure = { purchaseHistoryError = "订单列表查询失败，请重试；这不代表没有订单。" }) {
+                orderPage = it.first; transitions = it.second
+            } }
+            readPart({ r.rechargeHistory() }, onFailure = { rechargeHistoryError = "充值记录查询失败，请重试；这不代表未付款。" }) { rechargeHistory = it }
+        }
+    }
+    /** Mine balance reads only the wallet; recharge recovery belongs to Wallet and polling. */
+    fun loadBalance() = run {
+        wallet = null; walletLoaded = false; walletError = null
+        val r = repository()
+        readPart({ r.wallet() }, onFailure = { walletError = "余额查询失败，请重试。" }) { wallet = it; walletLoaded = true }
+    }
+    /** Wallet and recharge reads do not depend on a purchase model or silently replay an unknown create. */
+    fun loadWallet() = run {
+        wallet = null; walletLoaded = false; walletError = null
+        rechargeOffers = emptyList(); rechargeOffersLoaded = false; rechargeOffersError = null; recharge = null
+        val r = repository()
+        pendingRecharge = r.pending("recharge") != null
+        readPart({ r.currentRecharge() }) { recharge = it }
+        readPart({ r.wallet() }, onFailure = { walletError = "余额查询失败，请重试。" }) { wallet = it; walletLoaded = true }
+        readPart({ r.rechargeOffers() }, onFailure = { rechargeOffersError = "充值报价查询失败，请重试。" }) { rechargeOffers = it; rechargeOffersLoaded = true }
+    }
+    private suspend fun repository(): CommerceRepository {
         if (repo == null) {
             val session = account.commerceSessionBinding()
             val binding = account.commerceAccountBinding()
+            ensureCurrentSession()
             repo = CommerceRepository({ path, body, key ->
-                if (!account.authenticated || account.authSessionGeneration != epoch) throw CancellationException("Account changed")
+                ensureCurrentSession()
+                val generation = account.authSessionGeneration
                 account.commerce(path, body, key, session).also {
-                    if (!currentSession()) throw CancellationException("Account changed")
+                    ensureCurrentSession()
+                    if (account.authSessionGeneration != generation) throw CancellationException("Account changed")
                 }
             }, storage, binding)
         }
-        val r = requireNotNull(repo)
-        pendingPurchase = r.pending("purchase") != null; pendingRecharge = r.pending("recharge") != null
-        // Reconcile money first; a broken catalog cannot preserve an old payment action.
-        readPart { purchase = r.currentPurchase() }
-        readPart { recharge = r.currentRecharge() }
-        readPart { wallet = r.wallet() }
-        readPart { rechargeOffers = r.rechargeOffers() }
-        readPart { commerceModel = r.loadModel() }
-        if (commerceModel != null) readPart { offers = r.offers(); catalogLoaded = true }
-        if (includeHistory) {
-            commerceModel?.let { selected -> readPart {
-                val history = r.purchaseHistory(selected); orderPage = history.first; transitions = history.second
-            } }
-            readPart { rechargeHistory = r.rechargeHistory() }
-        }
+        return requireNotNull(repo)
     }
     fun loadLedger(more: Boolean = false) = run {
         val old = if (more) ledgerPage else null
         if (!more) ledgerPage = null
         val next = requireNotNull(repo).ledger(old?.nextCursor)
+        ensureCurrentSession()
         require(old == null || old.entries.none { entry -> next.entries.any { it.entryRef == entry.entryRef } })
         ledgerPage = if (old == null) next else WalletLedgerPage(old.entries + next.entries, next.nextCursor)
     }
     fun moreOrders() = run {
         val current = orderPage ?: return@run
         val cursor = current.nextCursor ?: return@run
-        val next = requireNotNull(repo).orderHistory(cursor)
-        require(current.orders.none { old -> next.orders.any { it.ref == old.ref } })
-        orderPage = OrderPage(current.orders + next.orders, next.nextCursor)
+        purchaseHistoryError = null
+        readPart({
+            val next = requireNotNull(repo).orderHistory(cursor)
+            require(current.orders.none { old -> next.orders.any { it.ref == old.ref } })
+            OrderPage(current.orders + next.orders, next.nextCursor)
+        }, onFailure = { purchaseHistoryError = "更早订单查询失败，已保留当前列表。" }) { orderPage = it }
     }
-    private suspend fun readPart(action: suspend () -> Unit) {
-        try { action() }
+    suspend fun historyDetail(selection: HistorySelection): HistoryDetail = withContext(ReadEpoch(account.authSessionGeneration)) {
+        ensureCurrentSession()
+        val r = requireNotNull(repo)
+        val detail = when (selection.kind) {
+            HistoryKind.Legacy -> {
+                require(commerceModel == CommerceModel.LEGACY)
+                HistoryDetail.Purchase(r.purchaseHistoryDetail(CommerceModel.LEGACY, selection.ref))
+            }
+            HistoryKind.Deferred -> {
+                require(commerceModel == CommerceModel.WALLET_FIRST)
+                HistoryDetail.Purchase(r.purchaseHistoryDetail(CommerceModel.WALLET_FIRST, selection.ref))
+            }
+            HistoryKind.Recharge -> HistoryDetail.Recharge(r.rechargeHistoryDetail(selection.ref))
+        }
+        ensureCurrentSession()
+        detail
+    }
+    fun canOperate() = currentSession() && !account.busy && !account.restoring &&
+        !account.foregroundCheckPending && !account.clearing
+    private suspend fun currentOperation(): Boolean {
+        val context = currentCoroutineContext()
+        val read = context[ReadEpoch]
+        return context.isActive && canOperate() && (read == null ||
+            (read.generation == account.authSessionGeneration && (read.sequence == null || read.sequence == operation)))
+    }
+    private suspend fun ensureCurrentSession() {
+        currentCoroutineContext().ensureActive()
+        if (!currentOperation()) throw CancellationException("Account changed")
+    }
+    private suspend fun <T> readPart(read: suspend () -> T, onFailure: () -> Unit = {}, publish: (T) -> Unit) {
+        try {
+            val value = read()
+            ensureCurrentSession()
+            publish(value)
+        }
         catch (failure: CancellationException) { throw failure }
         catch (failure: PortalFailure) {
+            ensureCurrentSession()
             if (failure.reason == PortalFailure.Reason.SESSION_EXPIRED) throw failure
+            onFailure()
             error = "部分信息尚未读取，请重试查询；未读取的余额或订单不代表零余额或未付款。"
         }
-        catch (_: Exception) { error = "部分信息尚未读取，请重试查询；不要重复下单。" }
+        catch (_: Exception) { ensureCurrentSession(); onFailure(); error = "部分信息尚未读取，请重试查询；不要重复下单。" }
     }
-    fun preview(offer: Offer) = run { account.purchaseReturnRef = offer.offerRef; quote = null; quote = requireNotNull(repo).preview(offer) }
+    fun preview(offer: Offer) = run {
+        account.purchaseReturnRef = offer.offerRef; quote = null
+        val value = requireNotNull(repo).preview(offer)
+        ensureCurrentSession()
+        quote = value
+    }
     fun confirmPurchase() = run {
         val value = requireNotNull(quote); quote = null
-        try { purchase = requireNotNull(repo).purchase(value) }
-        finally { pendingPurchase = requireNotNull(repo).pending("purchase") != null; wallet = null }
+        try {
+            val next = requireNotNull(repo).purchase(value)
+            ensureCurrentSession(); purchase = next
+        } finally { if (currentOperation()) { pendingPurchase = requireNotNull(repo).pending("purchase") != null; wallet = null } }
     }
     fun confirmRecharge(offer: RechargeOffer) = run {
-        try { recharge = requireNotNull(repo).recharge(offer) }
-        finally { pendingRecharge = requireNotNull(repo).pending("recharge") != null }
+        try {
+            val next = requireNotNull(repo).recharge(offer)
+            ensureCurrentSession()
+            recharge = next
+        }
+        finally {
+            if (currentOperation())
+                pendingRecharge = requireNotNull(repo).pending("recharge") != null
+        }
     }
     fun queryPurchase() = run {
-        try { purchase = null; wallet = null; purchase = requireNotNull(repo).retryPurchase(); wallet = requireNotNull(repo).wallet() }
-        finally { pendingPurchase = requireNotNull(repo).pending("purchase") != null }
+        try {
+            purchase = null; wallet = null
+            val next = requireNotNull(repo).retryPurchase()
+            ensureCurrentSession(); purchase = next
+            val balance = requireNotNull(repo).wallet()
+            ensureCurrentSession(); wallet = balance
+        } finally { if (currentOperation()) pendingPurchase = requireNotNull(repo).pending("purchase") != null }
     }
-    fun queryRecharge() = run { recharge = null; wallet = null; recharge = requireNotNull(repo).retryRecharge(); wallet = requireNotNull(repo).wallet() }
+    /** Explicit recovery may replay the SAME durable create; it is never used for a browser return. */
+    fun queryRecharge() = run {
+        recharge = null; wallet = null; walletLoaded = false; walletError = null
+        val next = requireNotNull(repo).retryRecharge()
+        ensureCurrentSession(); recharge = next
+        val balance = requireNotNull(repo).wallet()
+        ensureCurrentSession(); wallet = balance; walletLoaded = true
+    }
+    fun readRechargeStatus() = run {
+        recharge = null
+        val next = requireNotNull(repo).currentRecharge()
+        ensureCurrentSession(); recharge = next
+        if (next?.status == "credited") {
+            wallet = null; walletLoaded = false; walletError = null
+            readPart({ requireNotNull(repo).wallet() }, onFailure = { walletError = "Coins 已到账，余额尚未读取，请重试查询。" }) {
+                wallet = it; walletLoaded = true
+            }
+        }
+    }
     suspend fun pollRecharge() {
-        if (busy || !currentSession() || recharge?.awaitingUpdate != true) return
+        if (busy || !canOperate()) return
+        val sequence = ++operation
+        withContext(ReadEpoch(account.authSessionGeneration, sequence)) {
         busy = true
         try { // Awaited by the RESUMED lifecycle job, never an independent mutation/retry job.
-            val next = requireNotNull(repo).currentRecharge()
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (!currentSession()) return
+            val r = repository()
+            pendingRecharge = r.pending("recharge") != null
+            if (!pendingRecharge || (recharge != null && recharge?.awaitingUpdate != true)) return@withContext
+            recharge = null // An unsuccessful read must not preserve an old payment action.
+            val next = r.currentRecharge()
+            ensureCurrentSession()
             recharge = next
             if (next?.status == "credited") {
+                wallet = null; walletLoaded = false
                 val latest = requireNotNull(repo).wallet()
-                kotlinx.coroutines.currentCoroutineContext().ensureActive()
-                if (currentSession()) wallet = latest
+                ensureCurrentSession(); wallet = latest; walletLoaded = true
             }
         } catch (failure: CancellationException) { throw failure }
         catch (failure: PortalFailure) {
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (currentSession()) {
+            ensureCurrentSession()
+            if (currentOperation()) {
                 if (failure.reason == PortalFailure.Reason.SESSION_EXPIRED) account.commerceSessionExpired()
                 error = "充值状态尚未确认，请稍后查询原订单。"
             }
         } catch (_: Exception) {
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            if (currentSession()) error = "充值状态尚未确认，请稍后查询原订单。"
+            ensureCurrentSession()
+            error = "充值状态尚未确认，请稍后查询原订单。"
         }
-        finally { busy = false }
+        finally { if (operation == sequence) busy = false }
+        }
     }
-    fun cancelPurchase() = run { purchase = requireNotNull(repo).cancelPurchase(); wallet = null }
-    fun finishPurchase() = run { requireNotNull(repo).finishPurchase(); pendingPurchase = false; purchase = null; wallet = null; account.purchaseReturnRef = null; account.refresh() }
-    fun finishRecharge() = run { requireNotNull(repo).finishRecharge(); pendingRecharge = false; recharge = null; wallet = null; quote = null }
-    fun currentSession() = account.authenticated && account.authSessionGeneration == epoch
-    fun canOpenPayment(order: RechargeOrder, now: Instant) = currentSession() && recharge == order && order.paymentMethod == "alipay" && order.adapterKey == "xsd_v1" && order.payableAt(now)
+    fun cancelPurchase() = run { val next = requireNotNull(repo).cancelPurchase(); ensureCurrentSession(); purchase = next; wallet = null }
+    fun finishPurchase() = run { requireNotNull(repo).finishPurchase(); ensureCurrentSession(); pendingPurchase = false; purchase = null; wallet = null; account.purchaseReturnRef = null; account.refresh() }
+    fun finishRecharge() = run { requireNotNull(repo).finishRecharge(); ensureCurrentSession(); pendingRecharge = false; recharge = null; wallet = null; walletLoaded = false; quote = null }
+    fun currentSession() = account.authenticated && if (identity == null) account.authSessionGeneration == epoch
+        else account.commerceSessionIdentity === identity
+    fun canOpenPayment(order: RechargeOrder, now: Instant) = canOperate() && recharge == order &&
+        order.paymentMethod == "alipay" && order.adapterKey == "xsd_v1" && order.payableAt(now) &&
+        order.nextAction?.let { CommerceJson.trustedPaymentRedirect(it.url, order.adapterKey) } == true
     fun cannotOpenPayment() { error = "无法打开付款页面，请保留当前订单并稍后查询，不要重复创建充值。" }
     private fun run(action: suspend () -> Unit) {
-        if (busy || !account.authenticated || account.authSessionGeneration != epoch) return
+        if (busy || !canOperate()) return
+        val sequence = ++operation
+        val generation = account.authSessionGeneration
         busy = true; error = null
-        scope.launch {
-            try { action() }
+        requestJob = scope.launch(ReadEpoch(generation, sequence)) {
+            try {
+                ensureCurrentSession()
+                if (account.restoring || account.foregroundCheckPending) return@launch
+                action()
+            }
             catch (error: CancellationException) { throw error }
             catch (error: PortalFailure) {
-                if (!currentSession()) return@launch
+                ensureCurrentSession()
                 if (error.reason == PortalFailure.Reason.SESSION_EXPIRED) {
                     wallet = null; offers = emptyList(); rechargeOffers = emptyList(); quote = null
                     purchase = null; recharge = null; account.commerceSessionExpired()
@@ -163,7 +308,7 @@ internal class CommerceController(private val account: AccountController, privat
                 this@CommerceController.error = "未能确认服务响应，请重试查询；不要重复下单。"
             }
             catch (failure: CommerceFailure) {
-                if (!currentSession()) return@launch
+                ensureCurrentSession()
                 error = when(failure.code) {
                     "quote_expired", "quote_stale" -> "报价已失效，请重新获取报价后再确认购买。"
                     "insufficient_coins" -> "钱包余额不足，请充值到账后重新获取报价。"
@@ -173,31 +318,92 @@ internal class CommerceController(private val account: AccountController, privat
                     else -> "订单尚未确认，请沿用原记录查询，不要重新付款。"
                 }
             }
-            catch (_: Exception) { if(currentSession()) error = "操作尚未确认，请重试查询；已有记录会沿用原订单，不会另建一笔。" }
-            finally { busy = false }
+            catch (_: Exception) { ensureCurrentSession(); error = "操作尚未确认，请重试查询；已有记录会沿用原订单，不会另建一笔。" }
+            finally { if (operation == sequence) { busy = false; requestJob = null } }
+        }
+    }
+}
+
+@Composable
+private fun CatalogOfferCard(offer: Offer, enabled: Boolean, onQuote: () -> Unit) {
+    var details by remember(offer.offerRef, offer.offerVersionRef) { mutableStateOf(false) }
+    val largeFont = androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f
+    Surface(Modifier.fillMaxWidth().testTag("plan-offer-${offer.offerRef}"), shape = Brand.Shape,
+        color = Brand.Surface.copy(alpha = .82f), border = BorderStroke(1.dp, Brand.Border)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val title = if (offer.category == "plan") offer.durationDays?.let { "${it}天" } ?: offer.title.zh else offer.title.zh
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val heading: @Composable (Modifier) -> Unit = { modifier ->
+                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                        modifier = modifier.testTag("plan-title-${offer.offerRef}"))
+                }
+                val price: @Composable () -> Unit = {
+                    Text(formatCoins(offer.baseCoinUnits), style = MaterialTheme.typography.headlineSmall,
+                        color = Brand.Cyan, modifier = Modifier.testTag("plan-price-${offer.offerRef}"))
+                }
+                if (largeFont || maxWidth < 300.dp) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    heading(Modifier); price()
+                } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    heading(Modifier.weight(1f)); price()
+                }
+            }
+            if (offer.category == "plan") SupportingText(offer.title.zh)
+            offer.importantNotices.zh.forEach { SupportingText(it) }
+            if (details) {
+                SupportingText(offer.summary.zh)
+                SupportingText(if (offer.category == "data_pack") "${offer.trafficGb} GB · 永久有效，用完为止"
+                    else "每月流量 ${offer.monthlyTrafficGb} GB")
+            }
+            val explanation: @Composable (Modifier) -> Unit = { modifier ->
+                TextButton(onClick = { details = !details }, modifier = modifier.heightIn(min = 48.dp)
+                    .testTag("plan-details-${offer.offerRef}")) { Text(if (details) "收起说明" else "商品说明") }
+            }
+            val quote: @Composable (Modifier) -> Unit = { modifier ->
+                BrandButton("查看报价", onQuote, enabled = enabled,
+                    modifier = modifier.testTag("plan-quote-${offer.offerRef}"))
+            }
+            if (largeFont) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                quote(Modifier.fillMaxWidth()); explanation(Modifier.fillMaxWidth())
+            } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                quote(Modifier.weight(1f)); explanation(Modifier)
+            }
         }
     }
 }
 
 @Composable
 internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true,
-    onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null) {
+    onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null, paymentOpener: ((String) -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext), includeHistory = mode == CommerceMode.Orders) }
-    var orderCategory by remember(account.authSessionGeneration, state.commerceModel) { mutableStateOf(if (state.commerceModel == CommerceModel.WALLET_FIRST) "plans" else "orders") }
     var catalogCategory by remember(account.authSessionGeneration) { mutableStateOf("plan") }
-    var selectedRecharge by remember(account.authSessionGeneration) { mutableStateOf<RechargeOffer?>(null) }
-    var cancelConfirmation by remember { mutableStateOf(false) }
-    var paymentReview by remember(account.authSessionGeneration) { mutableStateOf<RechargeOrder?>(null) }
+    var cancelConfirmation by remember(account.authSessionGeneration, state) { mutableStateOf(false) }
+    val walletMode = mode in setOf(CommerceMode.Wallet, CommerceMode.Mine, CommerceMode.Overview)
     var now by remember { mutableStateOf(Instant.now()) }
-    LaunchedEffect(account.authSessionGeneration, account.authenticated) { if(autoLoad && account.authenticated) state.load() }
+    val accountReady = state.canOperate()
+    LaunchedEffect(state, account.authSessionGeneration, accountReady, autoLoad, mode) {
+        // Login exposes the session before resource loading finishes. Account work can also
+        // interrupt an existing read: revoke it, then reload once the same session is eligible.
+        if (!accountReady) state.pauseForAuthentication()
+        if (autoLoad && accountReady) {
+            // Commerce busy is not an effect key: completing/failing a read must not retry it.
+            snapshotFlow { !state.busy && state.canOperate() }.first { it }
+            if (state.canOperate()) {
+                if (mode == CommerceMode.Mine) state.loadBalance()
+                else if (walletMode) state.loadWallet()
+                else if (!state.catalogLoaded) state.load()
+            }
+        }
+    }
     LaunchedEffect(Unit) { while(true) { now = Instant.now(); kotlinx.coroutines.delay(1000) } }
     // A browser return is merely a reason to reread. It never confirms, creates or pays an order.
     val lifecycle = (LocalActivity.current as? ComponentActivity)?.lifecycle
-    DisposableEffect(lifecycle, state) {
-        val observer = LifecycleEventObserver { _, event -> if(autoLoad && event == Lifecycle.Event.ON_RESUME && account.authenticated) {
-            selectedRecharge = null; paymentReview = null; cancelConfirmation = false; state.load()
+    DisposableEffect(lifecycle, state, autoLoad, mode) {
+        val observer = LifecycleEventObserver { _, event -> if(autoLoad && event == Lifecycle.Event.ON_RESUME &&
+            state.currentSession() && !account.restoring && !account.foregroundCheckPending) {
+            cancelConfirmation = false
+            if (mode == CommerceMode.Mine) state.loadBalance() else if (walletMode) state.loadWallet() else state.load()
         } }
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
@@ -211,64 +417,39 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     if (!account.authenticated || account.restoring || account.foregroundCheckPending) {
-        BrandCard(Modifier.testTag("commerce-signed-out")) { Text(if(mode == CommerceMode.Wallet) "登录后查看钱包" else "登录后查看套餐"); SupportingText("价格、余额与可购买商品由服务器确认。") }
+        BrandCard(Modifier.testTag("commerce-signed-out")) {
+            Text(if (account.restoring || account.foregroundCheckPending) "正在验证登录"
+                else if(mode == CommerceMode.Wallet) "登录后查看钱包" else if(mode == CommerceMode.Orders) "登录后查看订单" else "登录后查看套餐")
+            SupportingText("价格、余额与可购买商品由服务器确认。")
+        }
         return
     }
-    if (mode != CommerceMode.Mine || state.error != null || state.busy) BrandCard(Modifier.testTag("commerce-status")) {
+    if (mode == CommerceMode.Plans) BrandCard(Modifier.testTag("commerce-status")) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(when {
+                state.busy -> if (state.catalogLoaded) "正在处理，请稍候" else "正在读取商品"
+                state.catalogLoaded -> "已读取 ${state.offers.size} 款商品"
+                else -> "商品尚未读取"
+            }, modifier = Modifier.weight(1f).testTag("catalog-status"), style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = state::load, enabled = !state.busy,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("commerce-refresh")) { Text("刷新商品") }
+        }
+        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"), color = Brand.Cyan)
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
+    } else if (mode != CommerceMode.Orders && !walletMode) BrandCard(Modifier.testTag("commerce-status")) {
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
         BrandButton("刷新钱包与套餐", state::load, enabled = !state.busy, modifier = Modifier.testTag("commerce-refresh"))
     }
-    if (mode == CommerceMode.Wallet || mode == CommerceMode.Overview || mode == CommerceMode.Mine) {
-        BrandCard(Modifier.testTag("wallet-card")) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Eyebrow("可用余额")
-                    Text(state.wallet?.let { formatCoins(it.spendableUnits) } ?: "尚未读取", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.testTag("wallet-balance"))
-                }
-                if (androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.3f)
-                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_wallet_coin), null, modifier = Modifier.size(92.dp))
-            }
-            if (mode == CommerceMode.Mine) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BrandButton("充值", { onRecharge?.invoke() }, enabled = !state.busy, modifier = Modifier.weight(1f).testTag("mine-recharge"))
-                OutlinedButton(onClick = { onLedger?.invoke() }, enabled = !state.busy, modifier = Modifier.weight(1f).heightIn(min = 52.dp).testTag("mine-ledger")) { Text("账单明细  ›") }
-            }
-            if (mode != CommerceMode.Mine) state.wallet?.let { w ->
-                SupportingText("已充值 ${formatCoins(w.paidCoins)} · 赠送 ${formatCoins(w.bonusCoins)} · 奖励 ${formatCoins(w.rewardCoins)}")
-                SupportingText("冻结中 ${formatCoins(w.heldUnits)} · 待到账 ${formatCoins(w.pendingUnits)}")
-                SupportingText(when(w.status) { "active" -> "钱包可用"; "not_created" -> "钱包尚未创建"; "frozen" -> "钱包已冻结"; else -> "钱包已关闭" })
-            }
-            SupportingText("余额以本次成功查询为准；充值到账不等于套餐已购买。")
-        }
-        if (mode == CommerceMode.Wallet) AlipayBadge()
-        if (mode == CommerceMode.Wallet && !state.pendingRecharge) state.rechargeOffers.forEach { offer ->
-            BrandCard(Modifier.testTag("recharge-offer-${offer.offerRef}")) {
-                Text("充值 ${formatCoins(offer.paidCoinUnits)}", style = MaterialTheme.typography.titleLarge)
-                SupportingText(formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent))
-                SupportingText(if ("alipay" in offer.paymentMethods) "支付宝 · 安全支付" else "当前原生版本暂不支持此支付方式")
-                SupportingText("支付方式以服务器返回为准：" + offer.paymentMethods.joinToString(" / "))
-                if ("alipay" !in offer.paymentMethods) SupportingText("当前原生版本暂不支持此支付方式")
-                AlipayButton("选择支付宝充值", { selectedRecharge = offer }, enabled = !state.busy && "alipay" in offer.paymentMethods, modifier = Modifier.testTag("recharge-select-${offer.offerRef}"))
-            }
-        }
-        if (mode == CommerceMode.Wallet && state.pendingRecharge) BrandCard(Modifier.testTag("recharge-order")) {
-            Text("当前充值", style = MaterialTheme.typography.titleLarge)
-            val order = state.recharge
-            SupportingText(order?.let { rechargeStatus(it.status) } ?: "上次提交结果待核对，请沿用原记录查询。")
-            order?.let { SupportingText("订单 ${it.orderRef}"); SupportingText("${formatMoney(it.amountMinor, it.currency, it.currencyExponent)} → ${formatCoins(it.expectedPaidCoinUnits)}") }
-            BrandButton("查询／恢复原充值", state::queryRecharge, enabled = !state.busy)
-            if (order != null && order.paymentMethod == "alipay" && order.adapterKey == "xsd_v1" && order.status in setOf("entry_ready", "pending") && order.nextAction != null &&
-                order.expiresAt > now && order.nextAction.expiresAt > now) {
-                SupportingText("付款方式：${order.paymentMethod} · 通道：${order.adapterKey}")
-                AlipayButton("查看支付宝付款信息", { paymentReview = order }, enabled = !state.busy, modifier = Modifier.testTag("recharge-pay"))
-            }
-            if(order?.status in setOf("credited", "failed_no_charge", "expired")) BrandButton("核对完成，返回充值", state::finishRecharge, enabled = !state.busy)
-            SupportingText("返回应用后请查询状态；不要因为页面关闭或等待到账重新付款。")
-        }
+    if (walletMode) {
+        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger)
+        return // Wallet never inherits a retained purchase confirmation from another destination.
     } else if (mode == CommerceMode.Plans) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            FilterChip(selected = catalogCategory == "plan", onClick = { catalogCategory = "plan" }, label = { Text("套餐") }, modifier = Modifier.testTag("catalog-plans"))
-            FilterChip(selected = catalogCategory == "data_pack", onClick = { catalogCategory = "data_pack" }, label = { Text("流量包") }, modifier = Modifier.testTag("catalog-data-packs"))
+            FilterChip(selected = catalogCategory == "plan", onClick = { catalogCategory = "plan" }, enabled = !state.busy,
+                label = { Text("套餐") }, modifier = Modifier.testTag("catalog-plans"))
+            FilterChip(selected = catalogCategory == "data_pack", onClick = { catalogCategory = "data_pack" }, enabled = !state.busy,
+                label = { Text("流量包") }, modifier = Modifier.testTag("catalog-data-packs"))
         }
         val shownOffers = state.offers.filter { it.category == catalogCategory }
         if (shownOffers.isEmpty() && !state.busy) BrandCard {
@@ -276,14 +457,8 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             SupportingText("只展示本次服务器返回的商品。未发布的商品、档位与价格不会出现在这里。")
         }
         if (!state.pendingPurchase) shownOffers.forEach { offer ->
-            BrandCard(Modifier.testTag("plan-offer-${offer.offerRef}")) {
-                Text(if (offer.category == "data_pack") offer.title.zh else if(offer.durationDays == 365L) "年卡365天" else "${offer.durationDays}天", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("plan-title-${offer.offerRef}"))
-                Text(formatCoins(offer.baseCoinUnits), style = MaterialTheme.typography.headlineSmall)
-                SupportingText(if (offer.category == "data_pack") "${offer.trafficGb} GB · 永久有效，用完为止" else "每月流量 ${offer.monthlyTrafficGb} GB")
-                SupportingText(offer.summary.zh)
-                offer.importantNotices.zh.forEach { SupportingText(it) }
-                BrandButton("查看实时报价", { state.preview(offer) }, enabled = !state.busy, modifier = Modifier.testTag("plan-quote-${offer.offerRef}"))
-            }
+            CatalogOfferCard(offer, enabled = !state.busy && state.catalogLoaded && state.currentSession(),
+                onQuote = { state.preview(offer) })
         }
         if (state.pendingPurchase) BrandCard(Modifier.testTag("purchase-result")) {
             Text("当前套餐订单", style = MaterialTheme.typography.titleLarge)
@@ -315,38 +490,8 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         TextButton(onClick = { account.purchaseReturnRef = null }) { Text("取消保留商品") }
     }
     if (mode == CommerceMode.Orders) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            (when(state.commerceModel) {
-                CommerceModel.LEGACY -> listOf("orders" to "商城", "recharge" to "充值")
-                CommerceModel.WALLET_FIRST -> listOf("plans" to "套餐计划", "recharge" to "充值")
-                null -> listOf("recharge" to "充值")
-            }).forEach { (key, label) ->
-                FilterChip(selected = orderCategory == key, onClick = { orderCategory = key }, label = { Text(label) }, modifier = Modifier.testTag("orders-$key"))
-            }
-        }
-        when (orderCategory) {
-            "orders" -> {
-                val page = state.orderPage
-                HistoryState(page?.orders?.size, state.busy)
-                page?.orders?.forEach { order -> PurchaseHistoryCard(order) }
-                if (page?.nextCursor != null) BrandButton("加载更早订单", state::moreOrders, enabled = !state.busy)
-            }
-            "recharge" -> {
-                HistoryState(state.rechargeHistory?.size, state.busy)
-                state.rechargeHistory?.forEach { order -> BrandCard(Modifier.testTag("history-recharge-${order.orderRef}")) {
-                    if (order.paymentMethod == "alipay") AlipayBadge() else SupportingText("支付方式：${order.paymentMethod}")
-                    Text(formatMoney(order.amountMinor, order.currency, order.currencyExponent), style = MaterialTheme.typography.titleLarge)
-                    SupportingText("${formatCoins(order.expectedPaidCoinUnits)} · ${rechargeStatus(order.status)}")
-                    SupportingText("订单 ${order.orderRef}")
-                    SupportingText(localTime(order.createdAt))
-                } }
-            }
-            else -> {
-                HistoryState(state.transitions?.size, state.busy)
-                state.transitions?.forEach { order -> PurchaseHistoryCard(order) }
-            }
-        }
-        SupportingText("订单、支付与发放状态分别以服务器查询为准。关闭支付页面不代表到账；待核对订单请在钱包或套餐中恢复原记录。")
+        OrderHistoryPanel(account, state)
+        return // History has only read/local-return actions, even if a shared fixture retains a quote.
     }
     if (mode == CommerceMode.Ledger) {
         BrandButton("刷新账单", { state.loadLedger() }, enabled = !state.busy)
@@ -375,35 +520,8 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             } }, confirmButton = { TextButton(onClick = state::confirmPurchase, enabled = valid && !state.busy, modifier = Modifier.testTag("purchase-confirm")) { Text("确认购买") } },
             dismissButton = { TextButton(onClick = { state.quote = null }, enabled = !state.busy, modifier = Modifier.testTag("purchase-cancel")) { Text("取消") } })
     }
-    selectedRecharge?.let { offer ->
-        AlertDialog(onDismissRequest = { selectedRecharge = null }, title = { Text("确认创建充值订单") },
-            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState())) { Text("向 飞连vpn（portal.gccwebos.com）充值 ${formatCoins(offer.paidCoinUnits)}，应付 ${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)}。创建后还需主动打开支付页面，是否到账以服务器查询为准。") } },
-            confirmButton = { TextButton(onClick = { selectedRecharge = null; state.confirmRecharge(offer) }, enabled = !state.busy, modifier = Modifier.testTag("recharge-confirm")) { Text("创建充值订单") } },
-            dismissButton = { TextButton(onClick = { selectedRecharge = null }, modifier = Modifier.testTag("recharge-cancel")) { Text("取消") } })
-    }
-    paymentReview?.let { order ->
-        val action = order.nextAction
-        val current = state.canOpenPayment(order, now)
-        AlertDialog(onDismissRequest = { paymentReview = null }, title = { Text("核对付款信息") },
-            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("服务平台：飞连vpn · portal.gccwebos.com")
-                Text("本次一次性充值：${formatCoins(order.expectedPaidCoinUnits)}")
-                Text("服务器确认应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
-                Text("支付方式：${order.paymentMethod}；通道：${order.adapterKey}")
-                Text("将打开：${action?.let { java.net.URI(it.url).host } ?: "支付入口不可用"}")
-                Text("订单：${order.orderRef}。请在支付页面核对收款方与最终金额；返回后查询到账，不会自动购买套餐。")
-                if (!current) Text("订单已更新或付款入口已过期，请关闭并重新查询。")
-            } },
-            confirmButton = { TextButton(onClick = {
-                paymentReview = null
-                if (state.canOpenPayment(order, Instant.now()) && action != null) {
-                    try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(action.url))) }
-                    catch (_: Exception) { state.cannotOpenPayment() }
-                }
-            }, enabled = current && !state.busy, modifier = Modifier.testTag("payment-open-confirm")) { Text("打开付款页面") } },
-            dismissButton = { TextButton(onClick = { paymentReview = null }) { Text("暂不付款") } })
-    }
-    if(cancelConfirmation) AlertDialog(onDismissRequest = { cancelConfirmation = false }, title = { Text("请求取消此套餐订单？") },
+    if(cancelConfirmation) AlertDialog(onDismissRequest = { cancelConfirmation = false },
+        modifier = Modifier.testTag("purchase-order-cancel-dialog"), title = { Text("请求取消此套餐订单？") },
         text = { Text("能否取消由服务器根据当前状态和取消期限决定，请以返回结果为准。") },
         confirmButton = { TextButton(onClick = { cancelConfirmation = false; state.cancelPurchase() }) { Text("确认取消订单") } },
         dismissButton = { TextButton(onClick = { cancelConfirmation = false }) { Text("返回") } })
@@ -454,7 +572,7 @@ private fun AlipayMark(size: androidx.compose.ui.unit.Dp) {
     }
 }
 @Composable
-private fun AlipayButton(text: String, onClick: () -> Unit, enabled: Boolean = true, modifier: Modifier = Modifier) {
+internal fun AlipayButton(text: String, onClick: () -> Unit, enabled: Boolean = true, modifier: Modifier = Modifier) {
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp)
     Button(onClick, enabled = enabled, modifier = modifier.fillMaxWidth().heightIn(min = 52.dp)
         .then(Modifier.background(if (enabled) androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd))
@@ -470,16 +588,6 @@ private fun HistoryState(size: Int?, busy: Boolean, label: String = "订单") {
         SupportingText(if (size == null) "查询失败或尚未完成不代表没有订单，请重试。" else "这里只展示服务器返回的记录。")
     }
 }
-@Composable
-private fun PurchaseHistoryCard(order: PurchaseResult) {
-    BrandCard(Modifier.testTag("history-order-${order.ref}")) {
-        Text(order.offer.title.zh, style = MaterialTheme.typography.titleLarge)
-        Text(formatCoins(order.amountUnits), style = MaterialTheme.typography.titleMedium)
-        SupportingText(purchaseStatus(order))
-        if (order.offer.category == "data_pack") SupportingText("独立流量包 · ${order.offer.trafficGb} GB，永久有效，用完为止。交付与重置入口需服务器另行开放。")
-        SupportingText("订单 ${order.ref}")
-    }
-}
 
 private fun ledgerLabel(value: String) = when(value) {
     "credit" -> "入账"; "pending_to_available" -> "待确认转可用"; "pending_to_reversed" -> "待确认撤回"
@@ -489,53 +597,77 @@ private fun ledgerLabel(value: String) = when(value) {
 
 /** Native functional counterpart of mobile src/mine.jsx; account data is never hard-coded. */
 @Composable
-internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, stateOverride: CommerceController? = null, onReturnToPlans: (() -> Unit)? = null) {
+internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, stateOverride: CommerceController? = null,
+    onReturnToPlans: (() -> Unit)? = null, telegramOpener: ((String) -> Unit)? = null,
+    referralOverride: ReferralController? = null, copyOverride: ((String) -> Unit)? = null,
+    recoveryOverride: CommerceRecovery? = null, paymentOpener: ((String) -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext)) }
-    var view by remember { mutableStateOf("mine") }
+    val sessionOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
+    val state = stateOverride ?: remember(sessionOwner, recoveryOverride) { CommerceController(account, scope,
+        recoveryOverride ?: FileCommerceRecovery(context.applicationContext)) }
+    var view by remember(sessionOwner) { mutableStateOf("mine") }
+    var telegramUnavailable by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (account.factorReference != null || account.busy) account.cancelAuthentication() else view = "mine"
     }
-    if (view != "mine") TextButton(onClick = { view = "mine" }, modifier = Modifier.testTag("mine-back")) { Text("‹ 返回我的") }
+    if (view != "mine") TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
     if (view == "mine") BrandCard(Modifier.testTag("mine-welcome")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SupportingText(if (account.authenticated) "欢迎回来" else "本地订阅与账户分开管理")
-                Text(if (account.authenticated) account.account else "账户未登录", style = MaterialTheme.typography.headlineSmall)
+            Icon(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_user), null,
+                tint = Brand.Cyan, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("我的", style = MaterialTheme.typography.titleLarge)
+                Text(if (account.authenticated) account.displayEmail ?: "账户" else "账户未登录",
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("mine-account-identity"))
             }
-            if (androidx.compose.ui.platform.LocalDensity.current.fontScale <= 1.3f)
-                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_robot_welcome), null,
-                    modifier = Modifier.width(110.dp).height(146.dp), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
         }
     }
     if (view == "security") {
-        com.gccwebos.android.portal.AccountPanel(account)
+        com.gccwebos.android.portal.AccountPanel(account, compactLogin = true)
         com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad)
+    } else if (view == "referral") {
+        ReferralPanel(account, autoLoad, referralOverride, copyOverride)
     } else {
         val mode = when(view) { "ledger" -> CommerceMode.Ledger; "wallet", "recharge" -> CommerceMode.Wallet; else -> CommerceMode.Mine }
-        CommercePanel(account, mode, state, autoLoad,
+        CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
             onLedger = { if (account.authenticated) { view = "ledger"; if (autoLoad) state.loadLedger() } else view = "security" })
-        if (!account.authenticated) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
+        if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
     if (account.authenticated && account.purchaseReturnRef != null && onReturnToPlans != null) BrandCard {
         SupportingText("已保留所选商品；充值到账后请返回重新报价。")
         BrandButton("返回所选商品", onReturnToPlans, modifier = Modifier.testTag("mine-return-purchase"))
     }
-    if (view == "mine") BrandCard(Modifier.testTag("mine-menu")) {
-        TextButton(onClick = { view = if (account.authenticated) "wallet" else "security" }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("mine-wallet")) {
-            Icon(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_receipt), null, tint = Brand.Amber)
-            Spacer(Modifier.width(12.dp)); Text("钱包", modifier = Modifier.weight(1f)); Text("›")
-        }
+    if (view == "mine") Surface(Modifier.fillMaxWidth().testTag("mine-menu"), shape = Brand.Shape,
+        color = Brand.Surface.copy(alpha = .82f), border = BorderStroke(1.dp, Brand.Border)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+        MineMenuRow("钱包", "mine-wallet", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending) { view = if (account.authenticated) "wallet" else "security" }
         HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
-        TextButton(onClick = { view = "security" }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("mine-security")) {
-            Icon(androidx.compose.ui.res.painterResource(com.gccwebos.android.R.drawable.brand_lock), null, tint = Brand.Cyan)
-            Spacer(Modifier.width(12.dp)); Text("账户与安全", modifier = Modifier.weight(1f)); Text("›")
+        MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
+        HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+        MineMenuRow("推荐奖励", "mine-referral", !account.busy) { view = if (account.authenticated) "referral" else "security" }
+        HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+        MineMenuRow("Telegram频道  @flylinevpn", "mine-telegram") {
+            telegramUnavailable = false
+            try { (telegramOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) })("https://t.me/flylinevpn") }
+            catch (_: Exception) { telegramUnavailable = true }
         }
+        if (telegramUnavailable) SupportingText("暂时无法打开 Telegram 频道，请稍后重试。")
         if (account.authenticated) {
             HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
-            TextButton(onClick = account::logout, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("mine-signout")) { Text("退出登录（保留本地订阅）") }
+            MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, account::logout)
         }
+        }
+    }
+}
+
+@Composable
+private fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, onClick: () -> Unit) {
+    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag)) {
+        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.width(8.dp)); Text("›")
     }
 }

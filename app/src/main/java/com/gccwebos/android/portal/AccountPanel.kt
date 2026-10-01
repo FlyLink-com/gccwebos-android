@@ -2,9 +2,25 @@ package com.gccwebos.android.portal
 
 import android.content.Context
 import android.os.SystemClock
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
@@ -18,22 +34,37 @@ import androidx.compose.foundation.verticalScroll
 import com.gccwebos.android.ResourceCard
 import com.gccwebos.android.design.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 
 /** Source-confirmed origins; constructing a client does not contact production. */
 internal fun productionRepository(context: Context): PortalRepository {
@@ -41,14 +72,29 @@ internal fun productionRepository(context: Context): PortalRepository {
     return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime, sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context))
 }
 
+/** Process-local ownership only; identity contains no account label or bearer data. */
+internal class CommerceSessionIdentity
+
 internal class AccountController(private val repository: PortalRepository, private val scope: CoroutineScope) {
     var account by mutableStateOf("")
     var password by mutableStateOf("")
     var answer by mutableStateOf("")
     var code by mutableStateOf("")
     var challenge by mutableStateOf<HumanChallenge?>(null)
+    var challengeLoading by mutableStateOf(false)
+        private set
+    var challengeError by mutableStateOf<String?>(null)
+        private set
+    var challengeFailureReason by mutableStateOf<PortalFailure.Reason?>(null)
+        private set
+    var challengeExpired by mutableStateOf(false)
+        private set
     var factorReference by mutableStateOf<String?>(null)
     var authSessionGeneration by mutableStateOf(0L)
+    internal var commerceSessionIdentity by mutableStateOf<CommerceSessionIdentity?>(null)
+        private set
+    internal val retainingCommerceSession: Boolean get() = commerceSessionIdentity != null &&
+        (restoring || foregroundCheckPending)
     var authenticated by mutableStateOf(false)
     var busy by mutableStateOf(false)
     var clearing by mutableStateOf(false)
@@ -63,11 +109,37 @@ internal class AccountController(private val repository: PortalRepository, priva
     var restorationPending by mutableStateOf(false)
     var foregroundCheckPending by mutableStateOf(false)
     var localSubscription by mutableStateOf(LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING))
-    private var acceptedAccountId: String? = null
+    private var acceptedAccountId by mutableStateOf<String?>(null)
+    val authenticatedAccountId: String? get() = acceptedAccountId?.takeIf { authenticated }
+    private var acceptedSessionBinding: String? = null
+    /** Survives page disposal and exact same-session foreground validation, never another identity. */
+    internal var referralGenerationGuard by mutableStateOf(ReferralGenerationGuard())
+        private set
+    private class EmailHint(val accountId: String, val session: String, val generation: Long, val email: String)
+    private var emailHint by mutableStateOf<EmailHint?>(null)
+    private var secondFactorEmail: Pair<String, String?>? = null
+    /** A local display hint, never an account ID or an unverified MFA identity. */
+    val displayEmail: String? get() = emailHint?.takeIf {
+        authenticated && !restoring && !foregroundCheckPending && it.accountId == acceptedAccountId &&
+            it.session == acceptedSessionBinding && it.generation == authSessionGeneration
+    }?.email
     private var task: Job? = null
     private var expiryTask: Job? = null
     private var operation = 0L
+    private var loginFormGeneration = 0L
+    private var loginFormLease: Long? = null
+    private var automaticQuestionLease: Long? = null
+    private var questionRequest = 0L
+    private var questionJob: Job? = null
+    private var questionExpiryJob: Job? = null
+    private var automaticQuestionJob: Job? = null
+    val nodeSelection = NodeSelectionController(repository.localSubscriptions, scope,
+        authGeneration = { authSessionGeneration },
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing },
+        onSnapshot = { localSubscription = it; nodes = it.nodes })
     fun onForeground() {
+        // Handler delays can pause during sleep; the repository's elapsed clock cannot.
+        expireLoginChallengeIfNeeded()
         // Authenticator app round trips must retain the still-bounded TOTP ticket.
         if (factorReference != null || !authenticated) return
         foregroundCheckPending = true
@@ -89,63 +161,179 @@ internal class AccountController(private val repository: PortalRepository, priva
                     acceptAuthenticated(saved)
                     loadResource()
                 }
-            } finally { restoring = false; foregroundCheckPending = false }
+            } finally { restoring = false; foregroundCheckPending = false; nodeSelection.sync() }
         }
     }
     fun restoreAccount() = checkAccount(force = false)
     private fun revalidateAccount() = checkAccount(force = true)
     private fun checkAccount(force: Boolean) {
         if (busy || factorReference != null || (authenticated && !force)) return
+        val checkOperation = operation + 1
         expiryTask?.cancel(); authenticated = false; security = null
         restoring = true; restorationPending = true
         run {
             try {
                 val saved = repository.restoreSession()
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (operation != checkOperation) return@run
                 restorationPending = false
                 if (saved != null) { acceptAuthenticated(saved); loadResource() }
-            } finally { restoring = false; foregroundCheckPending = false }
+            } finally {
+                if (operation == checkOperation) {
+                    if (!authenticated) commerceSessionIdentity = null
+                    restoring = false; foregroundCheckPending = false
+                }
+            }
         }
     }
     fun readSecurity() = run { security = null; security = repository.security() }
-    fun refreshSubscription() = run {
-        localSubscription = repository.localSubscriptions.refresh(); nodes = localSubscription.nodes
+    fun refreshSubscription() = nodeSelection.refresh()
+    /** Attaching the form must not race AppShell's initial saved-session restoration. */
+    fun enterLoginForm(): Long {
+        cancelLoginQuestionWork()
+        automaticQuestionLease = null
+        return (++loginFormGeneration).also { loginFormLease = it }
     }
-    fun challenge() = run {
-        challenge = repository.humanChallenge()
+    fun leaveLoginForm(lease: Long) {
+        if (loginFormLease != lease) return
+        loginFormLease = null; automaticQuestionLease = null
+        cancelLoginQuestionWork()
+    }
+    fun ensureLoginChallenge(lease: Long) {
+        if (loginFormLease != lease || automaticQuestionLease == lease) return
+        automaticQuestionLease = lease
+        automaticQuestionJob = scope.launch {
+            androidx.compose.runtime.snapshotFlow { !busy && !restoring && !foregroundCheckPending && !clearing }
+                .first { it }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (loginFormLease == lease && !authenticated && factorReference == null) requestLoginQuestion(lease)
+        }
+    }
+    /** Explicit refresh also supports legacy controller callers with no mounted form. */
+    fun challenge() {
+        if (!canRequestLoginQuestion()) return
+        automaticQuestionLease = loginFormLease
+        automaticQuestionJob?.cancel(); automaticQuestionJob = null
+        requestLoginQuestion(loginFormLease)
+    }
+    fun refreshLoginChallenge(lease: Long) {
+        if (loginFormLease == lease) challenge()
+    }
+    private fun canRequestLoginQuestion() = !busy && !restoring && !foregroundCheckPending && !clearing &&
+        !authenticated && factorReference == null && !challengeLoading
+    private fun questionOwnerCurrent(request: Long, lease: Long?, epoch: Long) = questionRequest == request &&
+        (lease == null || loginFormLease == lease) && authSessionGeneration == epoch &&
+        !authenticated && factorReference == null && !restoring && !foregroundCheckPending && !clearing
+    private fun requestLoginQuestion(lease: Long?) {
+        if (!canRequestLoginQuestion() || (lease != null && loginFormLease != lease)) return
+        val request = ++questionRequest; val epoch = authSessionGeneration
+        questionExpiryJob?.cancel(); questionExpiryJob = null
+        challenge = null; answer = ""; challengeExpired = false; challengeError = null; challengeFailureReason = null; error = null
+        challengeLoading = true
+        questionJob = scope.launch {
+            try {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!questionOwnerCurrent(request, lease, epoch)) return@launch
+                val fresh = repository.humanChallenge()
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (!questionOwnerCurrent(request, lease, epoch)) return@launch
+                val remaining = repository.remainingHumanChallengeMillis(fresh)
+                if (remaining == 0L) { challengeExpired = true; return@launch }
+                challenge = fresh
+                if (fresh.expiresElapsed != Long.MAX_VALUE) questionExpiryJob = scope.launch {
+                    kotlinx.coroutines.delay(remaining)
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    if (questionOwnerCurrent(request, lease, epoch) && challenge == fresh) {
+                        challenge = null; answer = ""; challengeExpired = true
+                    }
+                }
+            } catch (failure: CancellationException) { throw failure }
+            catch (failure: PortalFailure) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (questionOwnerCurrent(request, lease, epoch)) {
+                    challengeFailureReason = failure.reason
+                    challengeError = when (failure.reason) {
+                        PortalFailure.Reason.NETWORK -> "无网络"
+                        PortalFailure.Reason.RATE_LIMITED -> "请求过于频繁，请稍后刷新。"
+                        PortalFailure.Reason.PROTOCOL -> "题目格式暂不受支持，请刷新。"
+                        else -> "题目读取失败，请刷新重试。"
+                    }
+                }
+            } catch (_: Exception) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (questionOwnerCurrent(request, lease, epoch)) challengeError = "验证题读取失败，请刷新重试。"
+            } finally { if (questionRequest == request) challengeLoading = false }
+        }
+    }
+    private fun cancelLoginQuestionWork() {
+        questionRequest++
+        automaticQuestionJob?.cancel(); automaticQuestionJob = null
+        questionJob?.cancel(); questionJob = null
+        questionExpiryJob?.cancel(); questionExpiryJob = null
+        challenge = null; answer = ""; challengeLoading = false; challengeError = null; challengeFailureReason = null; challengeExpired = false
+    }
+    private fun expireLoginChallengeIfNeeded(): Boolean {
+        val current = challenge ?: return false
+        if (repository.remainingHumanChallengeMillis(current) != 0L) return false
+        cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease; challengeExpired = true
+        return true
     }
     fun login() {
+        if (busy || challengeLoading) return
+        if (expireLoginChallengeIfNeeded()) return
         val human = challenge ?: return
+        val submittedAccount = account.trim()
+        val submittedEmail = submittedAccount.takeIf { Regex("[^\\s@]+@[^\\s@]+").matches(it) }
+        emailHint = null; secondFactorEmail = null
         restorationPending = false
         val submittedPassword = password; password = ""
         val submittedAnswer = answer; answer = ""
+        // A submitted challenge may be consumed even when the response is lost or rejected.
+        cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
         run {
-            when(val result = repository.login(account.trim(), submittedPassword, human, submittedAnswer)) {
-                is LoginResult.Authenticated -> { acceptAuthenticated(result.session); challenge = null; loadResource() }
-                is LoginResult.TotpRequired -> { factorReference = result.reference; challenge = null }
+            when(val result = repository.login(submittedAccount, submittedPassword, human, submittedAnswer)) {
+                is LoginResult.Authenticated -> { acceptAuthenticated(result.session, submittedEmail); challenge = null; loadResource() }
+                is LoginResult.TotpRequired -> { secondFactorEmail = result.reference to submittedEmail; factorReference = result.reference; challenge = null }
             }
         }
     }
     fun totp() {
+        if (busy) return
         val reference = factorReference ?: return
+        val submittedEmail = secondFactorEmail?.takeIf { it.first == reference }?.second
         val submitted = code; code = ""
         run {
             val result = repository.totp(reference, submitted)
-            factorReference = null; acceptAuthenticated(result.session); loadResource()
+            factorReference = null; secondFactorEmail = null; acceptAuthenticated(result.session, submittedEmail); loadResource()
         }
     }
-    private suspend fun acceptAuthenticated(value: Session) {
+    private suspend fun acceptAuthenticated(value: Session, submittedEmail: String? = null) {
         val remaining = repository.remainingSessionMillis()
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (acceptedAccountId != value.accountId) purchaseReturnRef = null
-        acceptedAccountId = value.accountId
-        security = null; account = value.accountId; authenticated = true; authSessionGeneration++
+        val binding = sessionBinding(value.token)
+        if (commerceSessionIdentity == null || acceptedAccountId != value.accountId || acceptedSessionBinding != binding)
+            commerceSessionIdentity = CommerceSessionIdentity()
+        if (acceptedAccountId != value.accountId || acceptedSessionBinding != binding)
+            referralGenerationGuard = ReferralGenerationGuard()
+        val email = submittedEmail ?: emailHint?.takeIf { it.accountId == value.accountId && it.session == binding }?.email
+        acceptedAccountId = value.accountId; acceptedSessionBinding = binding
+        nodeSelection.invalidate()
+        security = null; account = email.orEmpty(); authenticated = true; authSessionGeneration++
+        nodeSelection.sync()
+        emailHint = email?.let { EmailHint(value.accountId, binding, authSessionGeneration, it) }
         localSubscription = repository.localSubscriptions.snapshot(); nodes = localSubscription.nodes
         expiryTask?.cancel()
         val authEpoch = authSessionGeneration
         expiryTask = scope.launch {
             kotlinx.coroutines.delay(remaining)
             if (authSessionGeneration == authEpoch && authenticated) {
+                nodeSelection.invalidate()
+                account = displayEmail.orEmpty()
+                referralGenerationGuard = ReferralGenerationGuard()
+                commerceSessionIdentity = null
                 authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
+                emailHint = null; secondFactorEmail = null
                 restoring = false; restorationPending = false; foregroundCheckPending = false
                 error = "登录已到期，请重新登录"
                 repository.cancelAuthentication()
@@ -162,7 +350,8 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerce(path: String, body: String? = null, key: String? = null, expectedSession: String? = null) = repository.commerce(path, body, key, expectedSession)
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
-    fun commerceSessionExpired() { expiryTask?.cancel(); authenticated = false; security = null; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
+    fun commerceSessionExpired() { nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource() {
         importStatus = null; deliveryReceived = false; resource = null
@@ -178,6 +367,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         } finally {
             localSubscription = repository.localSubscriptions.snapshot()
             if (localSubscription.hasProfile) nodes = localSubscription.nodes
+            nodeSelection.sync()
         }
     }
 
@@ -185,11 +375,16 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun clearLocal() = reset(clearLocal = true)
     fun cancelAuthentication() = reset(clearLocal = false)
     private fun reset(clearLocal: Boolean) {
+        commerceSessionIdentity = null
+        nodeSelection.invalidate()
+        cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
+        if (authenticated) account = displayEmail.orEmpty()
         val current = ++operation
         task?.cancel(); expiryTask?.cancel()
         restoring = false; restorationPending = false; foregroundCheckPending = false
         if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
-        purchaseReturnRef = null; acceptedAccountId = null
+        purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
+        referralGenerationGuard = ReferralGenerationGuard()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
         authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
         // Keep sign-in disabled until previous operation and local deletion complete.
@@ -206,6 +401,8 @@ internal class AccountController(private val repository: PortalRepository, priva
     }
     private fun run(action: suspend () -> Unit) {
         if (busy) return
+        // Account/security work cannot race a local selection read or revive its late result.
+        if (nodeSelection.busy) nodeSelection.cancel()
         val current = ++operation
         busy = true; error = null
         task = scope.launch {
@@ -213,9 +410,16 @@ internal class AccountController(private val repository: PortalRepository, priva
             catch (failure: CancellationException) { throw failure }
             catch (failure: PortalFailure) {
                 if (current != operation) return@launch
+                if (failure.reason == PortalFailure.Reason.SESSION_EXPIRED) {
+                    account = if (authenticated) displayEmail.orEmpty() else ""
+                    referralGenerationGuard = ReferralGenerationGuard()
+                }
+                if (failure.reason in setOf(PortalFailure.Reason.SESSION_EXPIRED, PortalFailure.Reason.LOGIN_FAILED, PortalFailure.Reason.STORAGE) || !authenticated) {
+                    emailHint = null; secondFactorEmail = null
+                }
                 error = when(failure.reason) {
-                    PortalFailure.Reason.SESSION_EXPIRED -> { restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
-                    PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请重新获取验证题并登录" }
+                    PortalFailure.Reason.SESSION_EXPIRED -> { commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
+                    PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请刷新题目后重试" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
                     PortalFailure.Reason.RECOVERY_REQUIRED -> "上次交付需要恢复，请稍后重试或联系支持；不会重复领取"
                     PortalFailure.Reason.STORAGE -> "本地安全存储失败，交付状态需要恢复，请重试"
@@ -238,9 +442,32 @@ internal class AccountController(private val repository: PortalRepository, priva
 }
 
 @Composable
-internal fun AccountPanel(state: AccountController) {
+internal fun AccountPanel(state: AccountController, compactLogin: Boolean = false,
+                          registrationOpener: ((String) -> Unit)? = null,
+                          loginStartupReady: Boolean = true,
+                          registrationOverride: RegistrationController? = null) {
     var confirmReset by remember { mutableStateOf(false) }
-    BrandCard(Modifier.testTag("account-panel")) {
+    var registering by remember(state) { mutableStateOf(false) }
+    val registrationScope = rememberCoroutineScope()
+    val registration = remember(state, registrationOverride) {
+        registrationOverride ?: RegistrationController(registrationScope, productionRegistrationGateway(),
+            authGeneration = { state.authSessionGeneration },
+            registrationAllowed = { !state.authenticated && !state.busy && !state.restoring &&
+                !state.foregroundCheckPending && !state.clearing && state.factorReference == null })
+    }
+    if (compactLogin && !state.authenticated && state.factorReference == null) {
+        if (loginStartupReady) {
+            if (registering) RegistrationPanel(registration, registrationOpener, onLogin = {
+                state.account = registration.completedLoginEmail() ?: registration.email
+                registering = false
+            }) else CompactLoginPanel(state, onRegister = {
+                registration.email = state.account
+                state.password = ""
+                registering = true
+            })
+        }
+        else CircularProgressIndicator(Modifier.size(24.dp).testTag("login-starting"), color = Brand.Cyan)
+    } else AccountPanelContent(useCard = !compactLogin || state.authenticated) {
         Eyebrow("账户与资源")
         Text(if (state.authenticated) "已登录" else if (state.factorReference != null) "完成身份验证" else "欢迎回来",
             style = MaterialTheme.typography.titleLarge)
@@ -291,7 +518,7 @@ internal fun AccountPanel(state: AccountController) {
             }
             TextButton(onClick = state::challenge, enabled = !state.busy,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("login-challenge")) { Text("获取／更换验证题") }
-            BrandButton("登录", state::login, enabled = !state.busy && state.challenge != null && state.account.isNotBlank() && state.password.isNotBlank() && state.answer.isNotBlank(),
+            BrandButton("登录", state::login, enabled = !state.busy && state.challenge != null && state.account.isNotBlank() && normalizedLoginPassword(state.password).isNotEmpty() && state.answer.isNotBlank(),
                 modifier = Modifier.testTag("login-submit"))
         }
         if (!state.authenticated) {
@@ -306,6 +533,133 @@ internal fun AccountPanel(state: AccountController) {
         } },
         confirmButton = { TextButton(onClick = { confirmReset = false; state.clearLocal() }, modifier = Modifier.testTag("reset-confirm")) { Text("确认清除") } },
         dismissButton = { TextButton(onClick = { confirmReset = false }, modifier = Modifier.testTag("reset-cancel")) { Text("取消") } })
+}
+
+internal const val OFFICIAL_REGISTRATION_URL = "https://portal.gccwebos.com/portal/register/"
+
+/** Production login and second-factor forms share the background without an outer card. */
+@Composable
+private fun AccountPanelContent(useCard: Boolean, content: @Composable ColumnScope.() -> Unit) {
+    if (useCard) BrandCard(Modifier.testTag("account-panel"), content)
+    else Column(Modifier.fillMaxWidth().testTag("account-panel"),
+        verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+}
+
+/** Form entry owns only the question lifecycle, never authentication or account storage. */
+@Composable
+private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    val topGap = if (WindowInsets.ime.getBottom(LocalDensity.current) > 0) 0.dp else 36.dp
+    var loginLease by remember(state) { mutableStateOf<Long?>(null) }
+    DisposableEffect(state) {
+        val lease = state.enterLoginForm()
+        loginLease = lease
+        onDispose { state.leaveLoginForm(lease) }
+    }
+    LaunchedEffect(state, loginLease, state.busy, state.restoring, state.foregroundCheckPending) {
+        loginLease?.let(state::ensureLoginChallenge)
+    }
+    Column(Modifier.fillMaxWidth().padding(top = topGap).testTag("plain-login-layout"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.fillMaxWidth().testTag("login-form"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("欢迎回来", style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f).testTag("login-welcome"))
+            }
+            CompactLoginField(state.account, { state.account = it }, "邮箱", "login-account",
+                enabled = !state.busy, keyboardType = KeyboardType.Email)
+            CompactLoginField(state.password, { state.password = it }, "密码", "login-password",
+                enabled = !state.busy, keyboardType = KeyboardType.Password, password = true)
+            BoxWithConstraints(Modifier.fillMaxWidth().testTag("login-answer-question-row")) {
+                val answerField: @Composable (Modifier) -> Unit = { modifier ->
+                    CompactLoginField(state.answer, { state.answer = it }, "输入算术题答案", "login-answer",
+                        enabled = !state.busy && !state.challengeLoading && state.challenge != null,
+                        keyboardType = KeyboardType.Text, modifier = modifier,
+                        imeAction = ImeAction.Done, onDone = { keyboard?.hide() })
+                }
+                val question: @Composable (Modifier) -> Unit = { modifier ->
+                    LoginQuestionPanel(state, modifier, onRefresh = { loginLease?.let(state::refreshLoginChallenge) },
+                        refreshEnabled = loginLease != null && !state.busy && !state.challengeLoading && !state.clearing)
+                }
+                if (maxWidth < 300.dp || LocalDensity.current.fontScale > 1.3f) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        answerField(Modifier.fillMaxWidth())
+                        question(Modifier.fillMaxWidth())
+                    }
+                } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    answerField(Modifier.weight(.44f))
+                    question(Modifier.weight(.56f))
+                }
+            }
+            if (state.busy) CircularProgressIndicator(Modifier.size(24.dp).testTag("account-loading"), color = Brand.Cyan)
+            val status = state.error ?: if (state.busy) "正在处理，请稍候" else null
+            status?.let {
+                Text(it, color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
+                        .semantics { liveRegion = LiveRegionMode.Polite })
+            }
+            if (state.restorationPending && !state.busy) {
+                SupportingText("已保存的登录需要服务器重新验证。")
+                BrandButton("重新验证已保存登录", state::restoreAccount, modifier = Modifier.testTag("session-restore-retry"))
+            }
+            BrandButton("登录", state::login,
+                enabled = !state.busy && !state.challengeLoading && state.challenge != null && state.account.isNotBlank() && normalizedLoginPassword(state.password).isNotEmpty() && state.answer.isNotBlank(),
+                modifier = Modifier.testTag("login-submit"))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onRegister, enabled = !state.busy && !state.restoring && !state.foregroundCheckPending,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("login-register")) { Text("注册") }
+            }
+        }
+    }
+}
+
+/** Exactly one visible state occupies the refresh target; network is never a fallback placeholder. */
+internal fun loginQuestionText(state: AccountController): String = when {
+    state.challengeLoading || state.busy -> "加载中…"
+    state.challengeFailureReason == PortalFailure.Reason.NETWORK -> "无网络"
+    state.challengeExpired || state.challengeError != null -> "刷新重试"
+    state.challenge != null -> state.challenge!!.prompt
+    else -> "刷新重试"
+}
+
+@Composable
+private fun LoginQuestionPanel(state: AccountController, modifier: Modifier, onRefresh: () -> Unit,
+                               refreshEnabled: Boolean) {
+    val display = loginQuestionText(state)
+    TextButton(onClick = onRefresh, enabled = refreshEnabled,
+        modifier = modifier.heightIn(min = 48.dp).testTag("login-challenge")
+            .semantics { contentDescription = if (refreshEnabled) "$display，点击刷新验证题" else display }) {
+        Text(display, color = Brand.Cyan, fontSize = 16.sp,
+            modifier = Modifier.testTag("login-challenge-prompt").semantics { liveRegion = LiveRegionMode.Polite })
+    }
+}
+
+/** A 48dp minimum, single-line field that can grow with the user's font setting. */
+@Composable
+internal fun CompactLoginField(value: String, onValueChange: (String) -> Unit, label: String, tag: String,
+                              enabled: Boolean, keyboardType: KeyboardType, modifier: Modifier = Modifier,
+                              password: Boolean = false, imeAction: ImeAction = ImeAction.Next,
+                              onDone: (() -> Unit)? = null) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(12.dp)
+    BasicTextField(value, onValueChange, enabled = enabled, singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = if (enabled) Brand.Text else Brand.Muted, fontSize = 14.sp),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+        keyboardActions = KeyboardActions(onDone = { onDone?.invoke() }),
+        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+        interactionSource = interaction, cursorBrush = SolidColor(Brand.Cyan),
+        modifier = modifier.heightIn(min = 48.dp).clip(shape)
+            .background(Brand.Background.copy(alpha = .35f))
+            .border(1.dp, if (focused) Brand.Cyan else Brand.Border, shape)
+            .testTag(tag).semantics { contentDescription = label },
+        decorationBox = { inner ->
+            Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) Text(label, color = Brand.Muted, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp))
+                inner()
+            }
+        })
 }
 
 internal fun subscriptionImportMessage(status: ImportStatus): String = when (status) {

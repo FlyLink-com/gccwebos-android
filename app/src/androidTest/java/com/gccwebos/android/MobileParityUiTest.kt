@@ -244,8 +244,19 @@ class MobileParityUiTest {
             override fun clear() { record = null }
         }
         val profiles = MemoryLocalProfileStore()
-        val repo = PortalRepository(object : PortalTransport { override suspend fun request(path: String, body: String?, session: Secret?) = error("No Portal access for local shell") },
-            delivery, policy, {0}, {at}, SubscriptionSource { error("Cached UI does not connect") }, profiles = profiles)
+        val saved = MemorySessionStore()
+        val calls = mutableListOf<String>()
+        val repo = PortalRepository(object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                calls += path
+                return when (path) {
+                    "/api/portal/human-challenges" -> loginChallenge()
+                    "/api/portal/password/session" -> WireResponse(200, """{"session":{"sessionRef":"native_synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:30:00Z"}}""")
+                    "/api/portal/resources/current/overview" -> WireResponse(200, """{"resource":{"state":"none"}}""")
+                    else -> throw AssertionError("Unexpected offline path: $path")
+                }
+            }
+        }, delivery, policy, {0}, {at}, SubscriptionSource { error("Cached UI does not connect") }, sessions = saved, profiles = profiles)
         val raw = """proxies:
   - name: Synthetic retained subscription
     type: ss
@@ -261,21 +272,46 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
-        compose.runOnIdle { assertFalse(state.authenticated); state.logout() }
+        compose.runOnIdle { assertFalse(state.authenticated); assertTrue(calls.isEmpty()); state.logout() }
         compose.waitUntil(10_000) { !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(state.localSubscription.hasProfile)
+            assertNotNull(profiles.read()?.also { it.close() })
+            assertNull(saved.read()); assertTrue(calls.isEmpty())
+        }
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-security").performScrollTo().performClick()
+        // The signed-out compact form intentionally omits reset. Reset belongs to the
+        // authenticated account panel, so reach it through a fresh offline login.
+        compose.onNodeWithTag("account-reset").assertDoesNotExist()
+        compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
+        compose.onNodeWithTag("login-account").performScrollTo().performTextInput("fixture@example.invalid")
+        compose.onNodeWithTag("login-password").performScrollTo().performTextInput("synthetic")
+        compose.onNodeWithTag("login-answer").performScrollTo().performTextInput("3")
+        compose.onNodeWithTag("login-submit").performScrollTo().performClick()
+        compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
         compose.onNodeWithTag("account-reset").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(state.localSubscription.hasProfile); assertNotNull(saved.read()) }
         compose.onNodeWithTag("reset-cancel").performClick()
-        compose.runOnIdle { assertTrue(state.localSubscription.hasProfile) }
+        compose.runOnIdle {
+            assertTrue(state.authenticated); assertTrue(state.localSubscription.hasProfile)
+            assertNotNull(profiles.read()?.also { it.close() }); assertNotNull(saved.read())
+        }
         compose.onNodeWithTag("account-reset").performScrollTo().performClick()
         compose.onNodeWithTag("reset-confirm").performClick()
         compose.waitUntil(10_000) { !state.localSubscription.hasProfile && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
         compose.onNodeWithTag("login-screen").assertExists()
+        compose.runOnIdle {
+            assertFalse(state.authenticated); assertNull(state.authenticatedAccountId); assertNull(state.displayEmail)
+            assertNull(profiles.read()); assertNull(saved.read()); assertNull(delivery.record)
+        }
     }
     @Test fun localProfileWalletBrowserReturnRevalidatesAccountInsteadOfSigningOut() {
         lateinit var state: AccountController; var reads = 0
@@ -320,13 +356,14 @@ class MobileParityUiTest {
             override fun clear() { value = null }
         }
         val profiles = MemoryLocalProfileStore()
+        val saved = MemorySessionStore()
         val repo = PortalRepository(object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
-                if (path.endsWith("/password/session")) return WireResponse(200, """{"session":{"sessionRef":"native_account_b","accountId":"account-b@example.invalid","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:30:00Z"}}""")
+                if (path.endsWith("/password/session")) return WireResponse(200, """{"session":{"sessionRef":"native_account_b","accountId":"account_b_synthetic","issuedAt":"2026-09-30T00:00:00Z","expiresAt":"2026-09-30T00:30:00Z"}}""")
                 assertEquals("/api/portal/resources/current/overview", path)
                 throw PortalFailure(PortalFailure.Reason.NETWORK)
             }
-        }, delivery, policy, {0}, {at}, SubscriptionSource { error("Wallet login must not replace local subscription") }, profiles = profiles)
+        }, delivery, policy, {0}, {at}, SubscriptionSource { error("Wallet login must not replace local subscription") }, sessions = saved, profiles = profiles)
         repo.localSubscriptions.remember("""proxies:
   - name: Synthetic account A local node
     type: ss
@@ -347,14 +384,29 @@ class MobileParityUiTest {
         }
         compose.waitUntil(10_000) { state.authenticated && !state.busy && state.error != null }
         compose.runOnIdle {
-            assertEquals("", state.account)
-            assertEquals("account-b@example.invalid", state.authenticatedAccountId)
+            // A failed resource refresh does not undo accepted authentication. The
+            // submitted email remains a display hint, separate from the server ID.
+            assertEquals("account-b@example.invalid", state.account)
+            assertEquals("account-b@example.invalid", state.displayEmail)
+            assertEquals("account_b_synthetic", state.authenticatedAccountId)
+            assertEquals("account_b_synthetic", saved.read()?.accountId)
+            assertEquals("", state.password); assertEquals("", state.answer)
+            assertNull(state.resource)
             assertEquals("Synthetic account A local node", state.localSubscription.nodes.single().name)
             assertNull(delivery.value); state.logout()
         }
         compose.waitUntil(10_000) { !state.authenticated && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
-        compose.runOnIdle { assertTrue(state.localSubscription.hasProfile); assertNotNull(profiles.read()?.also { it.close() }) }
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals("account-b@example.invalid", state.account)
+            assertNull(state.authenticatedAccountId); assertNull(state.displayEmail); assertNull(saved.read())
+            assertTrue(state.localSubscription.hasProfile); assertNotNull(profiles.read()?.also { it.close() })
+            assertEquals("Synthetic account A local node", state.localSubscription.nodes.single().name)
+        }
     }
     @Test fun expiredLocalSubscriptionGuidesPurchaseWithoutInventingWalletAuthentication() {
         lateinit var state: AccountController

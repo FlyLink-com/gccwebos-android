@@ -28,6 +28,8 @@ import java.io.File
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
@@ -37,14 +39,28 @@ import org.junit.Test
 class SubscriptionWalletUiTest {
     @get:Rule val compose = createComposeRule()
     private val requests = AtomicInteger()
+    private val loginChallengeRequests = AtomicInteger()
+    private var expectedLoginChallengeRequests = 0
     private lateinit var account: AccountController
     private lateinit var commerce: CommerceController
     private val future = Instant.parse("2099-09-30T00:00:00Z")
     private val collected = Instant.parse("2026-09-30T00:00:00Z")
 
-    private fun accountFixture(scope: CoroutineScope): AccountController {
+    private fun accountFixture(scope: CoroutineScope, allowLoginChallenge: Boolean = false): AccountController {
         val wire = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                // The mounted login form may fetch exactly one in-memory question. This
+                // grants no authentication, commerce, subscription or actual network access.
+                if (allowLoginChallenge && path == "/api/portal/human-challenges") {
+                    assertNull(session)
+                    val submitted = JSONObject(requireNotNull(body))
+                    assertEquals(setOf("scope"), submitted.keys().asSequence().toSet())
+                    assertEquals("portal_login", submitted.getString("scope"))
+                    assertEquals("The login form must not loop its question request", 1,
+                        loginChallengeRequests.incrementAndGet())
+                    return WireResponse(201, """{"challenge":{"challengeRef":"offline_subscription_question",
+                        "type":"math","prompt":"离线题目：2 + 3 = ?","expiresInSeconds":180}}""")
+                }
                 requests.incrementAndGet()
                 throw AssertionError("Offline UI fixture attempted a request: $path")
             }
@@ -68,10 +84,12 @@ class SubscriptionWalletUiTest {
         }
     }
 
-    private fun launchShell(fontScale: Float = 1f, setup: AccountController.() -> Unit = {}) {
+    private fun launchShell(fontScale: Float = 1f, allowLoginChallenge: Boolean = false,
+        setup: AccountController.() -> Unit = {}) {
+        expectedLoginChallengeRequests = if (allowLoginChallenge) 1 else 0
         compose.setContent {
             val scope = rememberCoroutineScope()
-            val controller = remember { accountFixture(scope).apply(setup) }
+            val controller = remember { accountFixture(scope, allowLoginChallenge).apply(setup) }
             account = controller
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
@@ -116,7 +134,10 @@ class SubscriptionWalletUiTest {
         }
     }
 
-    @After fun noFixtureEverContactsNetwork() { assertEquals(0, requests.get()) }
+    @After fun noFixtureEverContactsNetwork() {
+        assertEquals(0, requests.get())
+        assertEquals(expectedLoginChallengeRequests, loginChallengeRequests.get())
+    }
 
     private fun capture(name: String) {
         compose.waitForIdle()
@@ -138,7 +159,7 @@ class SubscriptionWalletUiTest {
     )
 
     @Test fun launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage() {
-        launchShell { authenticated = false }
+        launchShell(allowLoginChallenge = true) { authenticated = false }
         compose.onNodeWithTag("brand-name").assertTextEquals("飞连vpn")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.gccwebos.android.debug", context.packageName)
@@ -163,7 +184,7 @@ class SubscriptionWalletUiTest {
     }
 
     @Test fun signedOutLoadingErrorAndUnknownNeverShowNoSubscriptionModal() {
-        launchShell { authenticated = false; resource = Resource.None }
+        launchShell(allowLoginChallenge = true) { authenticated = false; resource = Resource.None }
         compose.onNodeWithTag("login-screen").assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
         compose.onNodeWithTag("login-account").performScrollTo().assertIsDisplayed()
@@ -357,6 +378,11 @@ class SubscriptionWalletUiTest {
 
     @Test fun catalogAutoLoadWaitsOnceForRestorationAndBusyWithoutLoop() {
         val paths = mutableListOf<String>()
+        val walletPath = "/api/portal/coins/wallet"
+        val walletReads = AtomicInteger()
+        val initialBalance = CompletableDeferred<Unit>()
+        val catalogBalance = CompletableDeferred<Unit>()
+        val laterBalance = CompletableDeferred<Unit>()
         compose.setContent {
             val scope = rememberCoroutineScope()
             val owner = remember { accountFixture(scope).apply { restoring = true } }
@@ -368,14 +394,20 @@ class SubscriptionWalletUiTest {
                 }
                 val repository = CommerceRepository({ path, body, key ->
                     assertNull(body); assertNull(key); paths += path
+                    if (path == walletPath) when (walletReads.incrementAndGet()) {
+                        1 -> initialBalance.await()
+                        2 -> catalogBalance.await()
+                        3 -> laterBalance.await()
+                        else -> throw AssertionError("Catalog reads must not loop")
+                    }
                     WireResponse(200, when (path) {
-                        "/api/portal/coins/wallet" -> """{"wallet":{"status":"active","version":1,"balances":{"paidCoins":21,"bonusCoins":0,"rewardCoins":0},"spendableUnits":21,"heldUnits":0,"pendingUnits":0}}"""
+                        walletPath -> """{"wallet":{"status":"active","version":1,"balances":{"paidCoins":21,"bonusCoins":0,"rewardCoins":0},"spendableUnits":21,"heldUnits":0,"pendingUnits":0}}"""
                         "/api/portal/coins/recharge/offers", "/api/portal/commerce/deferred/offers" -> """{"offers":[]}"""
                         "/api/portal/commerce/model" -> """{"commerceModel":"wallet_first_unique_v1"}"""
                         else -> throw AssertionError("Unexpected read: $path")
                     })
                 }, recovery, "synthetic_catalog_account")
-                CommerceController(owner, scope, recovery, initialRepository = repository).apply { busy = true }
+                CommerceController(owner, scope, recovery, initialRepository = repository)
             }
             account = owner; commerce = state
             GccTheme { Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -383,16 +415,44 @@ class SubscriptionWalletUiTest {
             } }
         }
         compose.onNodeWithTag("commerce-signed-out").assertExists()
-        compose.runOnIdle { assertTrue(paths.isEmpty()); account.restoring = false }
+        compose.runOnIdle {
+            assertTrue(paths.isEmpty())
+            assertFalse(commerce.busy)
+            // Admit a real, deferred read before the eligible catalog effect recomposes.
+            // Its busy slot belongs to current-session work, not revoked restoration work.
+            account.restoring = false
+            commerce.loadBalance()
+        }
         compose.onNodeWithTag("catalog-loading").assertExists()
         compose.onNodeWithTag("commerce-refresh").assertIsNotEnabled()
-        compose.runOnIdle { assertTrue(paths.isEmpty()); commerce.busy = false }
-        compose.waitUntil(5_000) { commerce.catalogLoaded }
+        compose.runOnIdle {
+            assertEquals(listOf(walletPath), paths)
+            assertFalse(commerce.catalogLoaded)
+            initialBalance.complete(Unit)
+        }
+        compose.waitUntil(5_000) { walletReads.get() == 2 }
+        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.runOnIdle {
+            assertEquals(listOf(walletPath, walletPath), paths)
+            assertFalse(commerce.catalogLoaded)
+            catalogBalance.complete(Unit)
+        }
+        compose.waitUntil(5_000) { commerce.catalogLoaded && !commerce.busy }
         compose.waitForIdle()
         compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        // Completing another explicit balance read must not restart the loaded catalog.
+        compose.runOnIdle { commerce.loadBalance() }
+        compose.onNodeWithTag("catalog-loading").assertExists()
         compose.runOnIdle {
-            assertEquals(listOf("/api/portal/coins/wallet", "/api/portal/coins/recharge/offers",
-                "/api/portal/commerce/model", "/api/portal/commerce/deferred/offers"), paths)
+            assertTrue(commerce.catalogLoaded)
+            assertEquals(3, walletReads.get())
+            laterBalance.complete(Unit)
+        }
+        compose.waitUntil(5_000) { !commerce.busy }
+        compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        compose.runOnIdle {
+            assertEquals(listOf(walletPath, walletPath, "/api/portal/coins/recharge/offers",
+                "/api/portal/commerce/model", "/api/portal/commerce/deferred/offers", walletPath), paths)
         }
     }
 

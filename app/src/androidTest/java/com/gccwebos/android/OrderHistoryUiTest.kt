@@ -120,7 +120,7 @@ class OrderHistoryUiTest {
         compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
         compose.onNodeWithText("USD 12.345").assertExists()
         compose.onNodeWithTag("history-detail-${topup.orderRef}").performScrollTo().performClick()
-        compose.onNodeWithTag("history-recharge-state").assertTextContains("Coins 尚待到账")
+        compose.onNodeWithTag("history-recharge-state").assertTextEquals("支付已核验，Coins 尚待到账")
         compose.onNodeWithTag("history-detail-back").performClick()
         compose.onNodeWithTag("orders-recharge").assertIsSelected()
         compose.onNodeWithTag("history-recharge-${topup.orderRef}").assertIsSelected()

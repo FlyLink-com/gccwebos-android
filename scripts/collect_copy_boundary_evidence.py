@@ -48,7 +48,8 @@ def main():
             assert len(re.findall(r"E: service\b", manifest)) == 1, "Expected one service"
             assert "com.gccwebos.android.ipcqa.CopyBoundaryQaService" in manifest, "Service identity"
             assert 'Raw: ":ipcqa"' in manifest, "Service process"
-            assert re.search(r"android:exported[^\n]*\(type 0x12\)0x0", manifest), "Service exported"
+            assert re.search(r"android:exported[^\n]*=\s*(?:false|\(type 0x12\)0x0)\s*$", manifest,
+                             re.MULTILINE), "Service exported"
             assert "versionCode='1'" in badging and "versionName='0.1-e2b-lab'" in badging, "Version identity"
         else:
             assert "CopyBoundaryRunner" in manifest and 'Raw: "com.gccwebos.android.ipcqa"' in manifest, "Runner target"

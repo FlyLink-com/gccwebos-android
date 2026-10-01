@@ -152,6 +152,16 @@ internal fun ConnectionOverview(
     val now by produceState(Instant.now(), snapshot.validUntil) {
         while (true) { value = Instant.now(); delay(1_000) }
     }
+    var synchronizedNodeGeneration by remember(account) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(account, account.authSessionGeneration, snapshot, now) {
+        account.nodeSelection.sync() // Local registry/validity read only; never starts a refresh or tunnel.
+        synchronizedNodeGeneration = account.authSessionGeneration
+    }
+    val nodeSnapshot = account.nodeSelection.snapshot
+    val selectedNode = nodeSnapshot.choices.firstOrNull { it.selection === nodeSnapshot.selected }?.takeIf {
+        synchronizedNodeGeneration == account.authSessionGeneration && !account.nodeSelection.busy &&
+            nodeSnapshot.status == LocalSubscriptionStatus.READY && nodeSnapshot.validUntil?.let { until -> until > now } != false
+    }
     val presentation = connectionOverviewPresentation(snapshot, now, control)
     val accent = when (presentation.tone) {
         ConnectionVisualTone.Neutral -> Brand.Muted
@@ -202,6 +212,28 @@ internal fun ConnectionOverview(
                     modifier = Modifier.testTag("local-subscription-title"))
             }
         }
+        TextButton(onClick = openNodes, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val summary: @Composable (Modifier) -> Unit = { modifier ->
+                    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("当前节点", color = Brand.Muted, style = MaterialTheme.typography.labelSmall)
+                        Text(if (account.nodeSelection.busy) "正在刷新" else selectedNode?.name ?: "未选择",
+                            color = Brand.Text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("connection-node-name"))
+                        selectedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
+                    }
+                }
+                if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        summary(Modifier.fillMaxWidth())
+                        Text("选择节点 ›", modifier = Modifier.align(Alignment.End))
+                    }
+                } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    summary(Modifier.weight(1f)); Text("选择节点 ›")
+                }
+            }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 SupportingText("剩余时间")
@@ -214,9 +246,6 @@ internal fun ConnectionOverview(
                     textAlign = TextAlign.Center, modifier = Modifier.testTag("subscription-usage-unavailable"))
             }
         }
-        val nodes: @Composable (Modifier) -> Unit = { modifier ->
-            TextButton(onClick = openNodes, modifier = modifier.heightIn(min = 48.dp).testTag("connection-nodes")) { Text("节点 ›") }
-        }
         val subscriptionAction: @Composable (Modifier) -> Unit = { modifier ->
             val action: Triple<String, String, () -> Unit> = when {
                 presentation.status == LocalSubscriptionStatus.EXPIRED -> Triple("续费", "expired-subscription-renew", openPlans)
@@ -228,14 +257,6 @@ internal fun ConnectionOverview(
             TextButton(onClick = action.third, enabled = operable,
                 modifier = modifier.heightIn(min = 48.dp).testTag(action.second)) { Text(action.first) }
         }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            if (maxWidth < 300.dp || LocalDensity.current.fontScale > 1.3f) {
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    nodes(Modifier.fillMaxWidth()); subscriptionAction(Modifier.fillMaxWidth())
-                }
-            } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                nodes(Modifier.weight(1f)); subscriptionAction(Modifier.weight(1f))
-            }
-        }
+        subscriptionAction(Modifier.fillMaxWidth())
     }
 }

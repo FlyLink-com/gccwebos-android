@@ -67,8 +67,8 @@ private enum class Destination(@StringRes val title: Int, @DrawableRes val icon:
     Profile(R.string.tab_profile, R.drawable.brand_user),
 }
 
-// Nodes and history remain destinations, reached from the component that owns them.
-private val primaryDestinations = listOf(Destination.Connect, Destination.Plans, Destination.Profile)
+// Nodes are a primary destination; account-owned order and ledger history stays inside My.
+private val primaryDestinations = listOf(Destination.Connect, Destination.Lines, Destination.Plans, Destination.Profile)
 
 /** The same lifecycle handler is used by production and memory-backed UI fixtures. */
 internal class AccountForegroundObserver(private val account: AccountController) : LifecycleEventObserver {
@@ -94,6 +94,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     val scope = rememberCoroutineScope()
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = remember(accountOverride) { accountOverride ?: AccountController(productionRepository(context), scope) }
+    // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
+    LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
+        account.restoring, account.foregroundCheckPending, account.clearing) { account.nodeSelection.sync() }
     // Keep an accepted power command outside keyed destinations. Navigation cannot replay it
     // while the controller is still publishing acceptance/rejection. A new snapshot/revision is the ack.
     var acceptedConnectionCommand by remember(connectionControlState, account) { mutableStateOf(false) }
@@ -244,7 +247,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending,
-                        openAccount)
+                        authenticated = account.authenticated, openAccount = openAccount)
                 }
                 Destination.Plans -> {
                     Text("套餐", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)

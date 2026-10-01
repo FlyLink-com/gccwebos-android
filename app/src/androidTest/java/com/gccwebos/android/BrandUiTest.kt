@@ -170,11 +170,11 @@ class BrandUiTest {
             compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream)
         }
     }
-    @Test fun threePrimaryDestinationsAndDisabledProductionVpn() {
+    @Test fun fourPrimaryDestinationsAndDisabledProductionVpn() {
         launch()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         capture("connect")
-        listOf("Plans", "Profile").forEach { page ->
+        listOf("Lines", "Plans", "Profile").forEach { page ->
             compose.onNodeWithTag("nav-$page").performClick()
             compose.onNodeWithTag("page-$page").assertIsDisplayed()
             capture(page.lowercase())
@@ -417,11 +417,11 @@ class BrandUiTest {
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("page-Connect").assertIsDisplayed()
     }
-    @Test fun smallerFontStillRendersThreeAccessibleTabs() {
+    @Test fun smallerFontStillRendersFourAccessibleTabs() {
         launch(.85f)
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         capture("connect-font-85")
-        listOf("Connect", "Plans", "Profile").forEach { page ->
+        listOf("Connect", "Lines", "Plans", "Profile").forEach { page ->
             compose.onNodeWithTag("nav-$page").assertIsDisplayed()
         }
     }

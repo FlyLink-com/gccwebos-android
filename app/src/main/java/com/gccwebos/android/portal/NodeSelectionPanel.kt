@@ -17,7 +17,8 @@ import kotlinx.coroutines.delay
 
 @Composable
 internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<SafeProxyConfig.NodeSummary>,
-    resource: Resource?, hasCapability: Boolean, accountBusy: Boolean, openAccount: () -> Unit) {
+    resource: Resource?, hasCapability: Boolean, accountBusy: Boolean, authenticated: Boolean = false,
+    openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.sync() }
     LaunchedEffect(state.snapshot.validUntil) {
         if (state.snapshot.validUntil != null) while (true) { delay(1000); state.sync() }
@@ -47,7 +48,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
         if (state.busy) TextButton(onClick = state::cancel,
             modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-cancel")) { Text("取消") }
     } else TextButton(onClick = openAccount, enabled = !accountBusy,
-        modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-account")) { Text("查看账户订阅") }
+        modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-account")) { Text(if (authenticated) "查看／领取订阅" else "登录领取订阅") }
     if (value.status == LocalSubscriptionStatus.READY) value.choices.forEachIndexed { index, choice ->
         val chosen = value.selected === choice.selection
         Surface(Modifier.fillMaxWidth().heightIn(min = 64.dp)

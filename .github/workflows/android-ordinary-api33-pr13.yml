@@ -1,0 +1,463 @@
+name: PR13 ordinary API33 diagnostic (immutable b2779cd APKs)
+on:
+  push:
+    branches: [ci/pr13-ordinary-api33-b2779cd]
+    paths:
+      - '.github/workflows/android-ordinary-api33-pr13.yml'
+      - 'scripts/ordinary-api33-pr13.sh'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: pr13-ordinary-api33-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  immutable-ordinary-api33:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Refresh these pins together only after the new exact-head build artifact is verified.
+    env:
+      SOURCE_COMMIT: 'b2779cd0160f35a244be8d31f262aee722bd4e22'
+      SOURCE_TREE: '84023b74d28fff074bee5a5f3a992e1e6f94da9f'
+      SOURCE_RUN: '36877527658'
+      SOURCE_ARTIFACT: '11170326023'
+      SOURCE_ARCHIVE_BYTES: '14305140'
+      SOURCE_ARCHIVE_SHA256: '5aab82b58bc514c185b063c636218edca8402ade0c96b300749cf5b208a44e7c'
+      SOURCE_APP_SHA256: '31e5acea98280ea25532a2cc9421aa19cccf6137c5b4f809ba2ab3d96a3ddd8d'
+      SOURCE_TEST_SHA256: '7dc01b0d98c3a413fd912fd58ea23c411484e3b2d6de20d63994fd0152a63bc6'
+      SOURCE_CERT_SHA256: 'aa7d71442bd165bed61b0a1e849e9dc88f526b761d9ca7ff6c0ed0f322f71350'
+      EXPECTED_UNIT_TESTS: '435'
+      EXPECTED_INSTRUMENTATION_CASES: '110'
+      # Approved 720s cap: 49 cases/234.16s implied ~521s for original 109 (+38%); retain cap for 110.
+      # Individual test assertions, ANR/foreground gates, job timeout and no-retry policy are unchanged.
+      SUITE_TIMEOUT_SECONDS: '720'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Fetch and verify exact same-head ordinary APK pair without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/runtime-api33
+          gh api "repos/gccwebos-com/gccwebos-android/actions/artifacts/$SOURCE_ARTIFACT" > .build-output/runtime-api33/source-artifact-metadata.json
+          gh api "repos/gccwebos-com/gccwebos-android/actions/runs/$SOURCE_RUN" > .build-output/runtime-api33/source-run.json
+          gh api "repos/gccwebos-com/gccwebos-android/commits/$SOURCE_COMMIT" > .build-output/runtime-api33/source-commit.json
+          gh api "repos/gccwebos-com/gccwebos-android/actions/artifacts/$SOURCE_ARTIFACT/zip" > "$RUNNER_TEMP/ordinary-source-artifact.zip"
+          python3 - <<'PY'
+          import hashlib, io, json, os, re, subprocess
+          from pathlib import Path
+          from zipfile import ZipFile
+          SOURCE = os.environ['SOURCE_COMMIT']
+          TREE = os.environ['SOURCE_TREE']
+          ARTIFACT = int(os.environ['SOURCE_ARTIFACT'])
+          RUN = int(os.environ['SOURCE_RUN'])
+          REPO = 1393547812
+          SIZE = int(os.environ['SOURCE_ARCHIVE_BYTES'])
+          ZIP_SHA = os.environ['SOURCE_ARCHIVE_SHA256']
+          CERT = os.environ['SOURCE_CERT_SHA256']
+          HASHES = {
+              'app/build/outputs/apk/debug/app-debug.apk': os.environ['SOURCE_APP_SHA256'],
+              'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk': os.environ['SOURCE_TEST_SHA256'],
+          }
+          ALLOWED = {'.github/workflows/android-ordinary-api33-pr13.yml', 'scripts/ordinary-api33-pr13.sh'}
+          OUT = Path('.build-output/runtime-api33')
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          def digest(data):
+              return hashlib.sha256(data).hexdigest()
+          def validate_metadata(meta, run, commit):
+              assert meta['id'] == ARTIFACT and meta['expired'] is False
+              assert meta['name'] == 'gccwebos-m0-debug-' + SOURCE
+              assert meta['size_in_bytes'] == SIZE and meta['digest'] == 'sha256:' + ZIP_SHA
+              origin = meta['workflow_run']
+              assert origin['id'] == RUN and origin['head_sha'] == SOURCE
+              assert origin['repository_id'] == origin['head_repository_id'] == REPO
+              assert run['id'] == RUN and run['head_sha'] == SOURCE
+              assert run['repository']['id'] == run['head_repository']['id'] == REPO
+              assert run['path'] == '.github/workflows/android.yml'
+              assert run['status'] == 'completed' and run['conclusion'] == 'failure'
+              assert commit['sha'] == SOURCE and commit['commit']['tree']['sha'] == TREE
+          def validate_archive(path):
+              assert path.stat().st_size == SIZE, 'Wrong archive size'
+              assert digest(path.read_bytes()) == ZIP_SHA, 'Archive identity mismatch'
+              with ZipFile(path) as archive:
+                  expected = set(HASHES) | {'.build-output/build-manifest.json', '.build-output/apks.sha256',
+                                           '.build-output/apk-signature.log', '.build-output/test-apk-signature.log'}
+                  assert len(archive.namelist()) == len(expected) and set(archive.namelist()) == expected
+                  assert archive.testzip() is None
+                  manifest = json.loads(archive.read('.build-output/build-manifest.json'))
+                  assert manifest['revision'] == SOURCE and manifest['variant'] == 'debug'
+                  assert manifest['native_engine_embedded'] is False and manifest['native_libraries_sha256'] == {}
+                  assert manifest['production_or_store_release'] is False and manifest['real_vpn'] == 'not_integrated'
+                  assert manifest['application_id'] == 'com.gccwebos.android.debug'
+                  assert manifest['version_code'] == 6 and manifest['version_name'] == '0.4.0-mobile-parity-debug'
+                  assert manifest['unit_tests'] == dict(tests=int(os.environ['EXPECTED_UNIT_TESTS']), failures=0, errors=0, skipped=0)
+                  assert manifest['lint_error_count'] == 0
+                  assert manifest['sha256'] == HASHES['app/build/outputs/apk/debug/app-debug.apk']
+                  payloads = {name: archive.read(name) for name in HASHES}
+                  for name, payload in payloads.items():
+                      assert digest(payload) == HASHES[name], 'APK identity mismatch'
+                      with ZipFile(io.BytesIO(payload)) as apk:
+                          assert apk.testzip() is None
+                          # Ordinary APK includes AndroidX graphics support, but never the Mihomo VPN engine.
+                          assert not any(n.endswith('/libgccmihomo.so') for n in apk.namelist()), 'Unexpected native VPN engine'
+                  assert manifest['bytes'] == len(payloads[manifest['artifact']])
+                  signatures = {name: archive.read('.build-output/' + name).decode() for name in ('apk-signature.log', 'test-apk-signature.log')}
+                  for signature in signatures.values():
+                      assert re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)', signature) == [CERT]
+                  return manifest, payloads, signatures
+          metadata = json.loads((OUT / 'source-artifact-metadata.json').read_text())
+          run = json.loads((OUT / 'source-run.json').read_text())
+          commit = json.loads((OUT / 'source-commit.json').read_text())
+          validate_metadata(metadata, run, commit)
+          assert git('rev-parse', SOURCE + '^{tree}') == TREE, 'Source tree differs'
+          subprocess.run(['git', 'merge-base', '--is-ancestor', SOURCE, 'HEAD'], check=True)
+          changes = set(git('diff', '--name-only', SOURCE, 'HEAD').splitlines())
+          assert changes == ALLOWED, 'Diagnostic commit must change only the two harness files'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'Tracked checkout is dirty'
+          manifest, payloads, signatures = validate_archive(Path(os.environ['RUNNER_TEMP']) / 'ordinary-source-artifact.zip')
+          # Enumerate every @Test from immutable source, rather than accepting an old case count.
+          cases = []
+          for name in git('ls-tree', '-r', '--name-only', SOURCE, 'app/src/androidTest').splitlines():
+              if not name.endswith('.kt'):
+                  continue
+              source = git('show', SOURCE + ':' + name)
+              tests = re.findall(r'@Test\s+fun\s+(\w+)\s*\(', source)
+              assert len(tests) == len(re.findall(r'@Test\b', source)), 'Unrecognized test annotation'
+              if tests:
+                  package = re.search(r'^package\s+([\w.]+)', source, re.M).group(1)
+                  cls = re.search(r'^class\s+(\w+)', source, re.M).group(1)
+                  cases.extend(package + '.' + cls + '#' + test for test in tests)
+          assert len(cases) == len(set(cases)) == int(os.environ['EXPECTED_INSTRUMENTATION_CASES']), 'Unexpected complete source suite'
+          # Nothing is extracted until metadata, source, archive and both APK digests all pass.
+          for name, payload in payloads.items():
+              target = Path(name)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(payload)
+          for name, signature in signatures.items():
+              (OUT / ('source-' + name)).write_text(signature)
+          (OUT / 'expected-instrumentation-cases.json').write_text(json.dumps(sorted(cases), indent=2) + '\n')
+          (OUT / 'source-build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          provenance = dict(provenance_verified=True, binary_source_commit=SOURCE, binary_source_tree=TREE,
+                            harness_commit=git('rev-parse', 'HEAD'), harness_tree=git('rev-parse', 'HEAD^{tree}'),
+                            source_workflow_run=RUN, source_artifact_id=ARTIFACT, source_archive_sha256=ZIP_SHA,
+                            apk_sha256=HASHES, certificate_sha256=CERT, runtime_api_under_test=33,
+                            native_engine_embedded=False, expected_instrumentation_cases=len(cases),
+                            suite_timeout_seconds=int(os.environ['SUITE_TIMEOUT_SECONDS']),
+                            api36_status=f'source_workflow_failed_run_{RUN}_not_retested_here',
+                            physical_device_tested=False, real_tun_traffic_tested=False, runtime_status='not_run_yet')
+          (OUT / 'provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
+          print(f'PASS: exact source/run/tree/artifact and immutable ordinary APK pair; {len(cases)} source cases; no rebuild or resign')
+          PY
+      - name: Verify APK signatures, package metadata and alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          timeout 300 "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" 'build-tools;36.0.0' 'platform-tools'
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          for kind in app test; do
+            if [ "$kind" = app ]; then apk=app/build/outputs/apk/debug/app-debug.apk; else apk=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk; fi
+            "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" | tee ".build-output/runtime-api33/runtime-$kind-signature.txt"
+            "$SDK_ROOT/build-tools/36.0.0/aapt2" dump badging "$apk" > ".build-output/runtime-api33/runtime-$kind-badging.txt"
+            "$SDK_ROOT/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
+          done
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          root = Path('.build-output/runtime-api33')
+          badging = (root / 'runtime-app-badging.txt').read_text()
+          assert "package: name='com.gccwebos.android.debug' versionCode='6' versionName='0.4.0-mobile-parity-debug'" in badging
+          for name, value in [('minSdkVersion', '26'), ('targetSdkVersion', '36')]:
+              assert re.search(r'^' + name + ":'" + value + "'$", badging, re.M), name
+          assert re.search(r"\bcompileSdkVersion='36'", badging)
+          assert "package: name='com.gccwebos.android.debug.test'" in (root / 'runtime-test-badging.txt').read_text()
+          for kind in ('app', 'test'):
+              text = (root / ('runtime-' + kind + '-signature.txt')).read_text()
+              assert re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)', text) == [os.environ['SOURCE_CERT_SHA256']]
+          PY
+      - name: Run full source-pinned ordinary suite on fresh official API33
+        id: runtime
+        shell: bash
+        run: bash scripts/ordinary-api33-pr13.sh
+      - name: Record separate binary and diagnostic identities with complete runtime result
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/runtime-api33
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          def record_result(root, status, runtime_outcome):
+              path = root / 'provenance.json'
+              data = json.loads(path.read_text()) if path.exists() else {'provenance_verified': False}
+              data['runtime_status'] = status
+              data['runtime_step_outcome'] = runtime_outcome
+              tests = root / 'device/ordinary-test-result.json'
+              data['instrumentation'] = json.loads(tests.read_text()) if tests.exists() else None
+              error = None
+              try:
+                  if status == 'success':
+                      assert runtime_outcome == 'success', 'Runtime step did not pass'
+                      assert data['provenance_verified'] is True, 'Unverified provenance'
+                      assert data['instrumentation'] is not None, 'Missing complete instrumentation result'
+                      assert data['instrumentation']['tests'] == data['expected_instrumentation_cases']
+                      assert data['instrumentation']['passed'] == data['expected_instrumentation_cases'] - 1
+                      assert data['instrumentation']['assumption_skipped'] == 1
+                      assert (root / 'device/result.log').is_file(), 'Missing final runtime pass marker'
+              except (AssertionError, KeyError, TypeError) as exc:
+                  error = str(exc) or 'Runtime proof validation failed'
+                  data['runtime_status'] = 'failure'
+                  data['result_validation_error'] = error
+              (root / 'result.json').write_text(json.dumps(data, indent=2) + '\n')
+              assert error is None, error
+              return data
+          record_result(Path('.build-output/runtime-api33'), os.environ['JOB_STATUS'], os.environ['RUNTIME_OUTCOME'])
+          PY
+      - name: Package and reconstruct full evidence into portable lossless pieces
+        id: package
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import gzip, hashlib, json, os, shutil, tarfile, tempfile
+          from pathlib import Path
+          PART_BYTES = 20 * 1024 * 1024
+          MAX_PARTS = 8
+          INDEX_BYTES = 8 * 1024 * 1024
+          ARTIFACT_LIMIT = 28 * 1024 * 1024
+          def digest_file(path):
+              digest = hashlib.sha256()
+              with path.open('rb') as source:
+                  for chunk in iter(lambda: source.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              return digest.hexdigest()
+          def package_evidence(root, destination, artifact_base, part_bytes=PART_BYTES, max_parts=MAX_PARTS):
+              assert 0 < part_bytes <= PART_BYTES and 0 < max_parts <= MAX_PARTS
+              assert root.is_dir() and root.resolve() not in destination.resolve().parents
+              destination.mkdir(parents=True, exist_ok=False)
+              index = destination / 'index'
+              index.mkdir()
+              paths = sorted(root.rglob('*'), key=lambda path: path.relative_to(root).as_posix())
+              assert not any(path.is_symlink() for path in paths), 'Evidence symlinks are unsupported'
+              paths = [path for path in paths if path.is_file()]
+              assert paths, 'No evidence files'
+              assert not any(path.suffix in ('.apk', '.so', '.aar', '.zip') for path in paths), 'Unexpected binary artifact in evidence'
+              files = []
+              for path in paths:
+                  stat = path.stat()
+                  files.append(dict(path=path.relative_to(root).as_posix(), bytes=stat.st_size,
+                                    sha256=digest_file(path), mode=stat.st_mode & 0o777, mtime_ns=stat.st_mtime_ns))
+              with tempfile.TemporaryDirectory(prefix='gccwebos-evidence-') as folder:
+                  archive = Path(folder) / 'evidence.tar.gz'
+                  # Deterministic ordering and normalized container metadata; original bytes and metadata stay in the manifest.
+                  with archive.open('wb') as raw:
+                      with gzip.GzipFile(filename='', mode='wb', fileobj=raw, mtime=0, compresslevel=6) as compressed:
+                          with tarfile.open(fileobj=compressed, mode='w|', format=tarfile.PAX_FORMAT) as tar:
+                              for entry in files:
+                                  info = tarfile.TarInfo(entry['path'])
+                                  info.size = entry['bytes']
+                                  info.mode = 0o644
+                                  info.mtime = info.uid = info.gid = 0
+                                  with (root / entry['path']).open('rb') as source:
+                                      tar.addfile(info, source)
+                  archive_size = archive.stat().st_size
+                  archive_sha = digest_file(archive)
+                  count = (archive_size + part_bytes - 1) // part_bytes
+                  assert count <= max_parts, f'{count} pieces exceed fixed {max_parts}-piece capacity; retain raw fallback without truncating'
+                  parts = []
+                  reconstructed = hashlib.sha256()
+                  with archive.open('rb') as source:
+                      for number in range(1, count + 1):
+                          piece_dir = destination / f'part-{number:02d}'
+                          piece_dir.mkdir()
+                          name = f'evidence.tar.gz.part-{number:02d}'
+                          target = piece_dir / name
+                          target.write_bytes(source.read(part_bytes))
+                          # Reread disk pieces in order to verify exact reconstruction, not just buffers supplied to write().
+                          piece = target.read_bytes()
+                          reconstructed.update(piece)
+                          parts.append(dict(order=number, filename=name, bytes=len(piece),
+                                            sha256=hashlib.sha256(piece).hexdigest(), artifact_name=f'{artifact_base}-part-{number:02d}'))
+                      assert source.read(1) == b'', 'Unsharded bytes remain'
+                  assert reconstructed.hexdigest() == archive_sha
+                  assert sum(part['bytes'] for part in parts) == archive_size
+                  # Independently validate every archived logical file against the original byte digest.
+                  with tarfile.open(archive, 'r:gz') as tar:
+                      members = tar.getmembers()
+                      assert [member.name for member in members] == [entry['path'] for entry in files]
+                      for member, entry in zip(members, files):
+                          assert member.isfile() and member.size == entry['bytes']
+                          content = tar.extractfile(member)
+                          digest = hashlib.sha256()
+                          for chunk in iter(lambda: content.read(1024 * 1024), b''):
+                              digest.update(chunk)
+                          assert digest.hexdigest() == entry['sha256'], 'Archived evidence changed'
+              # Readily accessible originals live in the small index as well as the complete archive.
+              priority = ['provenance.json', 'result.json', 'device/instrumentation.log', 'device/ordinary-test-result.json',
+                          'device/progress.log', 'device/result.log']
+              candidates = priority + [entry['path'] for entry in files if '/' not in entry['path'] and entry['path'] not in priority]
+              by_name = {entry['path']: entry for entry in files}
+              copied, used = [], 0
+              for name in candidates:
+                  if name not in by_name or len(copied) >= 64 or used + by_name[name]['bytes'] > INDEX_BYTES:
+                      continue
+                  target = index / name
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(root / name, target)
+                  assert digest_file(target) == by_name[name]['sha256']
+                  copied.append(name)
+                  used += by_name[name]['bytes']
+              # Catch any source-file addition/removal/change while packaging; originals are never renamed or deleted.
+              assert [path.relative_to(root).as_posix() for path in sorted(root.rglob('*'), key=lambda path: path.relative_to(root).as_posix()) if path.is_file()] == [entry['path'] for entry in files]
+              assert all((root / entry['path']).stat().st_size == entry['bytes'] and digest_file(root / entry['path']) == entry['sha256'] for entry in files)
+              runtime = json.loads((root / 'result.json').read_text()) if (root / 'result.json').exists() else {}
+              manifest = dict(format='gccwebos-lossless-evidence-v1', evidence_root='runtime-api33',
+                              runtime_status=runtime.get('runtime_status', 'unknown'), runtime_step_outcome=runtime.get('runtime_step_outcome', 'unknown'),
+                              binary_source_commit=runtime.get('binary_source_commit'), harness_commit=runtime.get('harness_commit'),
+                              archive=dict(format='tar+gzip', bytes=archive_size, sha256=archive_sha),
+                              part_max_bytes=part_bytes, piece_capacity=max_parts, parts=parts, files=files,
+                              index_artifact_name=f'{artifact_base}-index', index_original_paths=copied,
+                              reconstruction='Download and unzip the named piece artifacts. Verify each part size and SHA-256. Concatenate filenames in ascending manifest order into evidence.tar.gz. Verify the combined size and SHA-256, unpack the tar.gz, and verify every original logical path, size and SHA-256 against files. Original mode and mtime_ns are recorded for optional restoration.',
+                              verification='All disk pieces reconstruct the archive digest; every archived file matches its original digest. Packaging never changes runtime_status.')
+              manifest_bytes = (json.dumps(manifest, indent=2, sort_keys=True) + '\n').encode()
+              (index / 'evidence-manifest.json').write_bytes(manifest_bytes)
+              assert sum(path.stat().st_size for path in index.rglob('*') if path.is_file()) < ARTIFACT_LIMIT - 1024 * 1024, 'Reserve ZIP container overhead within portable artifact limit'
+              for part in parts:
+                  piece_dir = destination / f"part-{part['order']:02d}"
+                  (piece_dir / 'evidence-manifest.json').write_bytes(manifest_bytes)
+                  assert sum(path.stat().st_size for path in piece_dir.iterdir()) < ARTIFACT_LIMIT - 1024 * 1024, 'Reserve ZIP container overhead within portable artifact limit'
+              return manifest
+          root = Path('.build-output/runtime-api33')
+          destination = Path('.build-output/runtime-api33-portable')
+          base = 'gccwebos-pr13-ordinary-api33-evidence-' + os.environ['GITHUB_SHA']
+          manifest = package_evidence(root, destination, base)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('index=true', file=output)
+              for part in manifest['parts']:
+                  print(f"part_{part['order']:02d}=true", file=output)
+          print(f"PASS: preserved {len(manifest['files'])} original files in {len(manifest['parts'])} verified pieces; runtime_status={manifest['runtime_status']}")
+          PY
+      - name: Upload small evidence index and original summary logs
+        id: upload_index
+        if: always() && steps.package.outputs.index == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-index
+          path: .build-output/runtime-api33-portable/index/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 01
+        id: upload_part_01
+        if: always() && steps.package.outputs.part_01 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-01
+          path: .build-output/runtime-api33-portable/part-01/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 02
+        id: upload_part_02
+        if: always() && steps.package.outputs.part_02 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-02
+          path: .build-output/runtime-api33-portable/part-02/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 03
+        id: upload_part_03
+        if: always() && steps.package.outputs.part_03 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-03
+          path: .build-output/runtime-api33-portable/part-03/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 04
+        id: upload_part_04
+        if: always() && steps.package.outputs.part_04 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-04
+          path: .build-output/runtime-api33-portable/part-04/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 05
+        id: upload_part_05
+        if: always() && steps.package.outputs.part_05 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-05
+          path: .build-output/runtime-api33-portable/part-05/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 06
+        id: upload_part_06
+        if: always() && steps.package.outputs.part_06 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-06
+          path: .build-output/runtime-api33-portable/part-06/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 07
+        id: upload_part_07
+        if: always() && steps.package.outputs.part_07 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-07
+          path: .build-output/runtime-api33-portable/part-07/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload complete evidence piece 08
+        id: upload_part_08
+        if: always() && steps.package.outputs.part_08 == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-part-08
+          path: .build-output/runtime-api33-portable/part-08/
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Preserve originals if portable packaging or upload failed (nonportable fallback)
+        if: always() && (steps.package.outcome != 'success' || steps.upload_index.outcome == 'failure' || steps.upload_part_01.outcome == 'failure' || steps.upload_part_02.outcome == 'failure' || steps.upload_part_03.outcome == 'failure' || steps.upload_part_04.outcome == 'failure' || steps.upload_part_05.outcome == 'failure' || steps.upload_part_06.outcome == 'failure' || steps.upload_part_07.outcome == 'failure' || steps.upload_part_08.outcome == 'failure')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}-PACKAGING-FAILED-raw
+          path: .build-output/runtime-api33/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

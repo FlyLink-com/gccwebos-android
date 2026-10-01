@@ -1,0 +1,233 @@
+name: PR13 ordinary API33 diagnostic (immutable 9d7f3c1 APKs)
+on:
+  push:
+    branches: [ci/pr13-ordinary-api33-9d7f3c1]
+    paths:
+      - '.github/workflows/android-ordinary-api33-pr13.yml'
+      - 'scripts/ordinary-api33-pr13.sh'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: pr13-ordinary-api33-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  immutable-ordinary-api33:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Refresh these pins together only after the new exact-head build artifact is verified.
+    env:
+      SOURCE_COMMIT: '9d7f3c1a7e8087ab94d47c5f253ff0cfbae616b8'
+      SOURCE_TREE: '4a3f8ab176c9dab54bded59773d169464a303b92'
+      SOURCE_RUN: '36873217136'
+      SOURCE_ARTIFACT: '11168343491'
+      SOURCE_ARCHIVE_BYTES: '14301442'
+      SOURCE_ARCHIVE_SHA256: 'e890accd70606251667aec482d141dbd6ca25a9bfecb877aad8c0057a12d38de'
+      SOURCE_APP_SHA256: '81ca78117025c3c9576ef9c99ac114f6838f4666dc08d0c248810dd8fd1c44e3'
+      SOURCE_TEST_SHA256: '83b7ec1eadd52b56688784fb9aae5ea811f424d13dbb1fb2b28a781c7b3997ce'
+      SOURCE_CERT_SHA256: '65b3f42889b4279a3cf4f15dd98dbd65dd549cac20413d75838c67a276d3dd9c'
+      EXPECTED_UNIT_TESTS: '435'
+      EXPECTED_INSTRUMENTATION_CASES: '110'
+      # Approved 720s cap: 49 cases/234.16s implied ~521s for original 109 (+38%); retain cap for 110.
+      # Individual test assertions, ANR/foreground gates, job timeout and no-retry policy are unchanged.
+      SUITE_TIMEOUT_SECONDS: '720'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Fetch and verify exact same-head ordinary APK pair without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/runtime-api33
+          gh api "repos/gccwebos-com/gccwebos-android/actions/artifacts/$SOURCE_ARTIFACT" > .build-output/runtime-api33/source-artifact-metadata.json
+          gh api "repos/gccwebos-com/gccwebos-android/actions/runs/$SOURCE_RUN" > .build-output/runtime-api33/source-run.json
+          gh api "repos/gccwebos-com/gccwebos-android/commits/$SOURCE_COMMIT" > .build-output/runtime-api33/source-commit.json
+          gh api "repos/gccwebos-com/gccwebos-android/actions/artifacts/$SOURCE_ARTIFACT/zip" > "$RUNNER_TEMP/ordinary-source-artifact.zip"
+          python3 - <<'PY'
+          import hashlib, io, json, os, re, subprocess
+          from pathlib import Path
+          from zipfile import ZipFile
+          SOURCE = os.environ['SOURCE_COMMIT']
+          TREE = os.environ['SOURCE_TREE']
+          ARTIFACT = int(os.environ['SOURCE_ARTIFACT'])
+          RUN = int(os.environ['SOURCE_RUN'])
+          REPO = 1393547812
+          SIZE = int(os.environ['SOURCE_ARCHIVE_BYTES'])
+          ZIP_SHA = os.environ['SOURCE_ARCHIVE_SHA256']
+          CERT = os.environ['SOURCE_CERT_SHA256']
+          HASHES = {
+              'app/build/outputs/apk/debug/app-debug.apk': os.environ['SOURCE_APP_SHA256'],
+              'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk': os.environ['SOURCE_TEST_SHA256'],
+          }
+          ALLOWED = {'.github/workflows/android-ordinary-api33-pr13.yml', 'scripts/ordinary-api33-pr13.sh'}
+          OUT = Path('.build-output/runtime-api33')
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          def digest(data):
+              return hashlib.sha256(data).hexdigest()
+          def validate_metadata(meta, run, commit):
+              assert meta['id'] == ARTIFACT and meta['expired'] is False
+              assert meta['name'] == 'gccwebos-m0-debug-' + SOURCE
+              assert meta['size_in_bytes'] == SIZE and meta['digest'] == 'sha256:' + ZIP_SHA
+              origin = meta['workflow_run']
+              assert origin['id'] == RUN and origin['head_sha'] == SOURCE
+              assert origin['repository_id'] == origin['head_repository_id'] == REPO
+              assert run['id'] == RUN and run['head_sha'] == SOURCE
+              assert run['repository']['id'] == run['head_repository']['id'] == REPO
+              assert run['path'] == '.github/workflows/android.yml'
+              assert run['status'] == 'completed' and run['conclusion'] == 'failure'
+              assert commit['sha'] == SOURCE and commit['commit']['tree']['sha'] == TREE
+          def validate_archive(path):
+              assert path.stat().st_size == SIZE, 'Wrong archive size'
+              assert digest(path.read_bytes()) == ZIP_SHA, 'Archive identity mismatch'
+              with ZipFile(path) as archive:
+                  expected = set(HASHES) | {'.build-output/build-manifest.json', '.build-output/apks.sha256',
+                                           '.build-output/apk-signature.log', '.build-output/test-apk-signature.log'}
+                  assert len(archive.namelist()) == len(expected) and set(archive.namelist()) == expected
+                  assert archive.testzip() is None
+                  manifest = json.loads(archive.read('.build-output/build-manifest.json'))
+                  assert manifest['revision'] == SOURCE and manifest['variant'] == 'debug'
+                  assert manifest['native_engine_embedded'] is False and manifest['native_libraries_sha256'] == {}
+                  assert manifest['production_or_store_release'] is False and manifest['real_vpn'] == 'not_integrated'
+                  assert manifest['application_id'] == 'com.gccwebos.android.debug'
+                  assert manifest['version_code'] == 6 and manifest['version_name'] == '0.4.0-mobile-parity-debug'
+                  assert manifest['unit_tests'] == dict(tests=int(os.environ['EXPECTED_UNIT_TESTS']), failures=0, errors=0, skipped=0)
+                  assert manifest['lint_error_count'] == 0
+                  assert manifest['sha256'] == HASHES['app/build/outputs/apk/debug/app-debug.apk']
+                  payloads = {name: archive.read(name) for name in HASHES}
+                  for name, payload in payloads.items():
+                      assert digest(payload) == HASHES[name], 'APK identity mismatch'
+                      with ZipFile(io.BytesIO(payload)) as apk:
+                          assert apk.testzip() is None
+                          # Ordinary APK includes AndroidX graphics support, but never the Mihomo VPN engine.
+                          assert not any(n.endswith('/libgccmihomo.so') for n in apk.namelist()), 'Unexpected native VPN engine'
+                  assert manifest['bytes'] == len(payloads[manifest['artifact']])
+                  signatures = {name: archive.read('.build-output/' + name).decode() for name in ('apk-signature.log', 'test-apk-signature.log')}
+                  for signature in signatures.values():
+                      assert re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)', signature) == [CERT]
+                  return manifest, payloads, signatures
+          metadata = json.loads((OUT / 'source-artifact-metadata.json').read_text())
+          run = json.loads((OUT / 'source-run.json').read_text())
+          commit = json.loads((OUT / 'source-commit.json').read_text())
+          validate_metadata(metadata, run, commit)
+          assert git('rev-parse', SOURCE + '^{tree}') == TREE, 'Source tree differs'
+          subprocess.run(['git', 'merge-base', '--is-ancestor', SOURCE, 'HEAD'], check=True)
+          changes = set(git('diff', '--name-only', SOURCE, 'HEAD').splitlines())
+          assert changes == ALLOWED, 'Diagnostic commit must change only the two harness files'
+          assert not git('status', '--porcelain', '--untracked-files=no'), 'Tracked checkout is dirty'
+          manifest, payloads, signatures = validate_archive(Path(os.environ['RUNNER_TEMP']) / 'ordinary-source-artifact.zip')
+          # Enumerate every @Test from immutable source, rather than accepting an old case count.
+          cases = []
+          for name in git('ls-tree', '-r', '--name-only', SOURCE, 'app/src/androidTest').splitlines():
+              if not name.endswith('.kt'):
+                  continue
+              source = git('show', SOURCE + ':' + name)
+              tests = re.findall(r'@Test\s+fun\s+(\w+)\s*\(', source)
+              assert len(tests) == len(re.findall(r'@Test\b', source)), 'Unrecognized test annotation'
+              if tests:
+                  package = re.search(r'^package\s+([\w.]+)', source, re.M).group(1)
+                  cls = re.search(r'^class\s+(\w+)', source, re.M).group(1)
+                  cases.extend(package + '.' + cls + '#' + test for test in tests)
+          assert len(cases) == len(set(cases)) == int(os.environ['EXPECTED_INSTRUMENTATION_CASES']), 'Unexpected complete source suite'
+          # Nothing is extracted until metadata, source, archive and both APK digests all pass.
+          for name, payload in payloads.items():
+              target = Path(name)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(payload)
+          for name, signature in signatures.items():
+              (OUT / ('source-' + name)).write_text(signature)
+          (OUT / 'expected-instrumentation-cases.json').write_text(json.dumps(sorted(cases), indent=2) + '\n')
+          (OUT / 'source-build-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          provenance = dict(provenance_verified=True, binary_source_commit=SOURCE, binary_source_tree=TREE,
+                            harness_commit=git('rev-parse', 'HEAD'), harness_tree=git('rev-parse', 'HEAD^{tree}'),
+                            source_workflow_run=RUN, source_artifact_id=ARTIFACT, source_archive_sha256=ZIP_SHA,
+                            apk_sha256=HASHES, certificate_sha256=CERT, runtime_api_under_test=33,
+                            native_engine_embedded=False, expected_instrumentation_cases=len(cases),
+                            suite_timeout_seconds=int(os.environ['SUITE_TIMEOUT_SECONDS']),
+                            api36_status=f'source_workflow_failed_run_{RUN}_not_retested_here',
+                            physical_device_tested=False, real_tun_traffic_tested=False, runtime_status='not_run_yet')
+          (OUT / 'provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
+          print(f'PASS: exact source/run/tree/artifact and immutable ordinary APK pair; {len(cases)} source cases; no rebuild or resign')
+          PY
+      - name: Verify APK signatures, package metadata and alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          timeout 300 "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" 'build-tools;36.0.0' 'platform-tools'
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          for kind in app test; do
+            if [ "$kind" = app ]; then apk=app/build/outputs/apk/debug/app-debug.apk; else apk=app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk; fi
+            "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk" | tee ".build-output/runtime-api33/runtime-$kind-signature.txt"
+            "$SDK_ROOT/build-tools/36.0.0/aapt2" dump badging "$apk" > ".build-output/runtime-api33/runtime-$kind-badging.txt"
+            "$SDK_ROOT/build-tools/36.0.0/zipalign" -c -P 16 4 "$apk"
+          done
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          root = Path('.build-output/runtime-api33')
+          badging = (root / 'runtime-app-badging.txt').read_text()
+          assert "package: name='com.gccwebos.android.debug' versionCode='6' versionName='0.4.0-mobile-parity-debug'" in badging
+          for name, value in [('minSdkVersion', '26'), ('targetSdkVersion', '36')]:
+              assert re.search(r'^' + name + ":'" + value + "'$", badging, re.M), name
+          assert re.search(r"\bcompileSdkVersion='36'", badging)
+          assert "package: name='com.gccwebos.android.debug.test'" in (root / 'runtime-test-badging.txt').read_text()
+          for kind in ('app', 'test'):
+              text = (root / ('runtime-' + kind + '-signature.txt')).read_text()
+              assert re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)', text) == [os.environ['SOURCE_CERT_SHA256']]
+          PY
+      - name: Run full source-pinned ordinary suite on fresh official API33
+        shell: bash
+        run: bash scripts/ordinary-api33-pr13.sh
+      - name: Record separate binary and diagnostic identities with complete runtime result
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/runtime-api33
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path('.build-output/runtime-api33')
+          path = root / 'provenance.json'
+          data = json.loads(path.read_text()) if path.exists() else {'provenance_verified': False}
+          data['runtime_status'] = os.environ['JOB_STATUS']
+          tests = root / 'device/ordinary-test-result.json'
+          data['instrumentation'] = json.loads(tests.read_text()) if tests.exists() else None
+          (root / 'result.json').write_text(json.dumps(data, indent=2) + '\n')
+          if os.environ['JOB_STATUS'] == 'success':
+              assert data['provenance_verified'] is True
+              assert data['instrumentation']['tests'] == data['expected_instrumentation_cases']
+              assert data['instrumentation']['passed'] == data['expected_instrumentation_cases'] - 1
+              assert data['instrumentation']['assumption_skipped'] == 1
+              assert (root / 'device/result.log').is_file()
+          PY
+          # Keep full diagnostics, losslessly compressing only large logs. Never truncate evidence.
+          find .build-output/runtime-api33 -type f -name '*.log' -size +2M -exec gzip '{}' \;
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [p for p in Path('.build-output/runtime-api33').rglob('*') if p.is_file()]
+          assert not any(p.suffix in ('.apk', '.so', '.aar', '.zip') for p in files)
+          assert sum(p.stat().st_size for p in files) < 28 * 1024 * 1024, 'Evidence exceeds existing small-bundle budget; retain and report'
+          PY
+      - name: Retain full runtime evidence without APK or native libraries
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gccwebos-pr13-ordinary-api33-evidence-${{ github.sha }}
+          path: .build-output/runtime-api33/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

@@ -110,7 +110,7 @@ def static_checks() -> dict:
         'versionName = "0.1-e2b-b2-lab"',
         'sourceCompatibility = JavaVersion.VERSION_17',
         'targetCompatibility = JavaVersion.VERSION_17',
-        'sourceSets.getByName("main").java.srcDir(generatedB1Sources)',
+        'sourceSets.getByName("main").java.srcDir(generatedB1Sources.get().asFile)',
         'tasks.register<Sync>("syncSharedB1Sources")',
         'from(rootProject.layout.projectDirectory.dir("copyBoundaryLab/src/main/java"))',
         'include(sharedB1Files)', 'into(generatedB1Sources)',

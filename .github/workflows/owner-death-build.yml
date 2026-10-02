@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/owner-death-build.yml'
       - 'scripts/collect_owner_death_evidence.py'
+      - 'scripts/verify-owner-death-source.py'
       - 'ownerDeathLab/**'
       - 'copyBoundaryLab/src/main/java/**'
       - 'settings.gradle.kts'

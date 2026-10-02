@@ -1,7 +1,7 @@
-# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-provision-runtime.
+# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-bootstrap-runtime.
 # Reuses default-main registered entry; default-main native workflow is unchanged.
 # Exact committed harness input and frozen hashes remain mandatory.
-name: Approved official SDK and frozen B2 Binder runtime API33
+name: Approved CLI layout repair and frozen B2 Binder runtime API33
 on:
   workflow_dispatch:
     inputs:
@@ -17,14 +17,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   frozen-b2-api33:
-    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-provision-runtime' && github.run_attempt == 1
+    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-bootstrap-runtime' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       APPROVED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
       APPROVED_FREEZE_SHA256: f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad
-      APPROVED_HARNESS_MANIFEST_SHA256: ccdf8c214a342d80ee84c0ca39b4ea5e8f8cd8cc183e7a63b983d229b530129c
-      APPROVED_ENVIRONMENT_SHA256: cc9f163a98f2defbac8aaba35cd4d932511d586da80e5f8fbb0dce76ede7b77a
+      APPROVED_HARNESS_MANIFEST_SHA256: e1160c213053c3997a3289b3b5fdd6833a72a0b635815a6c8aae630d97b53b2f
+      APPROVED_ENVIRONMENT_SHA256: d09768c852ad45568a23fe0481b55a6aec3a76e00848256cf20d73649dbb7118
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -58,6 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 runtime-proposals/b2/provision-and-run.py
       - name: Retain bounded runtime-only evidence on success or failure
+        id: bounded_evidence
         if: always()
         shell: bash
         env:
@@ -89,7 +90,7 @@ jobs:
           assert sum(p.stat().st_size for p in files) < 28 * 1024 * 1024
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: always() && steps.bounded_evidence.outcome == 'success'
         with:
           name: owner-death-b2-runtime-${{ github.sha }}
           path: .build-output/b2-runtime/

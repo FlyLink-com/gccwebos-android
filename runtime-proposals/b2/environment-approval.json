@@ -15,7 +15,63 @@
       "sha256": "ce1b8274302b0f372476a3977b665be7d95a455c43692593a58fabdff898081a"
     }
   ],
-  "branch": "codex/lucky-b2-provision-runtime",
+  "branch": "codex/lucky-b2-bootstrap-runtime",
+  "cached_bootstrap": {
+    "bootstrap_tool_available_to_dependency_gate": false,
+    "declared_package_id": "cmdline-tools;12.0",
+    "missing_package_xml_permitted": true,
+    "not_downloaded_or_installed": true,
+    "optional_sdkmanager_registration": {
+      "accepted_observed_ids": [
+        "cmdline-tools;12.0",
+        "cmdline-tools;latest"
+      ],
+      "all_other_original_private_cache_bytes_immutable": true,
+      "classification": "registration metadata of existing cached bootstrap, not additional software",
+      "dependencies": {},
+      "extra_sdkmanager_invocations": 0,
+      "latest_alias_boundary": "narrow validator compatibility choice, not independently proven CLI12 output behavior",
+      "only_initially_missing_private_path": "cmdline-tools/latest/package.xml",
+      "record_declared_and_observed_id_separately": true,
+      "revision": [
+        12,
+        0,
+        0
+      ]
+    },
+    "original_software_and_properties_bytes_immutable": true,
+    "preinstall_dependency_baseline_ids": [
+      "platform-tools",
+      "build-tools;36.0.0"
+    ],
+    "registered_cache_pins": {
+      "build-tools;36.0.0": {
+        "dependencies": {},
+        "package_xml_sha256": "531aeef4af6fc79796abc58da5b1024c4b7f7acf5b04018ed05118ea0e8772c9",
+        "revision": [
+          36,
+          0,
+          0
+        ]
+      },
+      "platform-tools": {
+        "dependencies": {},
+        "package_xml_sha256": "26465ee68290f3af08a0fa759d5711573b8787c5ed2a0cd5ecb727ba65a91bb3",
+        "revision": [
+          37,
+          0,
+          1
+        ]
+      }
+    },
+    "revision": [
+      12,
+      0,
+      0
+    ],
+    "source_properties_sha256": "d4eb560d17731d9919dbb91bfecb2d90418cb60c21e07b6c02302a682fbb760e",
+    "wrapper_metadata_synthesis_allowed": false
+  },
   "case_attempts": 1,
   "catalog_urls": [
     "https://dl.google.com/android/repository/repository2-3.xml",
@@ -28,13 +84,24 @@
     "sdk_root_prefix": "gccwebos-b2-sdk-prep.",
     "uncertain_state": "retain diagnostics and fail"
   },
+  "continuation_authorization": {
+    "channel": "parent delegation",
+    "diagnostic_capture": "CLI12 source.properties exists; CLI package.xml absent; platform-tools and build-tools registration complete",
+    "instruction": "locate validator inventory rejection, retain useful diagnostics, repair format/path/normal missing-package handling within approved official environment preparation, preserve source/license restrictions, continue frozen f1 actual tests; no blind retry",
+    "old_missing_item_evidence": "UNKNOWN in old run; current diagnostic does not reconstruct deleted old cache",
+    "prior_preparation_run_id": 37004797145,
+    "prior_preparation_stop": "STOP_CACHED_PACKAGE_INVENTORY",
+    "prior_runtime_calls": 0,
+    "readonly_diagnostic_run_id": 37007881505,
+    "source_thread": "01a0f0d1-54e3-77e0-98ae-eb87ae68d016"
+  },
   "environment_approval": {
     "approved_request": "Google official emulator and fixed API33/default/x86_64 image plus minimal temporary KVM access; continue same frozen f1 APK P7-P9 once, owner2 worker1; existing accepted SDK terms only",
     "assistant_message": "1790939387.762099",
     "slack_thread": "1790747278.924809",
     "source_thread": "01a0f0d1-54e3-77e0-98ae-eb87ae68d016",
     "user_message": "1790939604.094629",
-    "user_text": "允许"
+    "user_text": "\u5141\u8bb8"
   },
   "fault_budget": {
     "owner": 2,
@@ -79,7 +146,7 @@
     "slack_thread": "1790747278.924809",
     "source_thread": "01a0f0d1-54e3-77e0-98ae-eb87ae68d016",
     "user_message": "1790937372.853329",
-    "user_text": "同意进行测试"
+    "user_text": "\u540c\u610f\u8fdb\u884c\u6d4b\u8bd5"
   },
   "package_ids": [
     "emulator",
@@ -95,7 +162,7 @@
   "repository": "gccwebos-com/gccwebos-android",
   "runtime_authorized": true,
   "schema": 1,
-  "scope": "one new temporary GitHub-hosted Ubuntu 24.04 job; official Google packages only; no persistent runner change",
+  "scope": "one corrected temporary GitHub-hosted Ubuntu 24.04 job after zero-runtime inventory stop; same original approved software, licenses, KVM and fault scope",
   "source_commit": "f1e6722920871280645fcbbeb5e03b3d4577d7b2",
   "source_tree": "c83b36ece434a1acb170a50a84aa99bf66f8e010",
   "test_cases": [

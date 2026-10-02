@@ -6,6 +6,7 @@ describes only the inner harness; it does not describe this preparation scope.
 No runtime claim is made by parsing or reviewing this source on another host.
 """
 import hashlib
+import io
 import json
 import os
 import re
@@ -22,7 +23,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REPOSITORY = "gccwebos-com/gccwebos-android"
-BRANCH = "refs/heads/codex/lucky-b2-provision-runtime"
+BRANCH = "refs/heads/codex/lucky-b2-bootstrap-runtime"
 PACKAGES = ("emulator", "system-images;android-33;default;x86_64")
 METHODS = ("p7OwnerDeathKeepsWorkerAndQuarantine", "p8ExactEvidenceWaitsForCallAndDisposition", "p9WorkerDeathAndStaleEvidenceStayScoped")
 CATALOGS = (
@@ -37,6 +38,15 @@ CORE = {
     "freeze.json": "f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad",
 }
 CACHE_TREES = ("cmdline-tools/latest", "platform-tools", "build-tools/36.0.0", "licenses")
+CACHED_TOOLS = ("platform-tools/adb", "cmdline-tools/latest/bin/sdkmanager", "cmdline-tools/latest/bin/avdmanager",
+                "build-tools/36.0.0/aapt2", "build-tools/36.0.0/apksigner")
+REGISTERED_CACHE_PINS = {
+    "platform-tools": {"revision": [37, 0, 1], "package_xml_sha256": "26465ee68290f3af08a0fa759d5711573b8787c5ed2a0cd5ecb727ba65a91bb3", "dependencies": {}},
+    "build-tools;36.0.0": {"revision": [36, 0, 0], "package_xml_sha256": "531aeef4af6fc79796abc58da5b1024c4b7f7acf5b04018ed05118ea0e8772c9", "dependencies": {}},
+}
+CLI_PROPERTIES_SHA256 = "d4eb560d17731d9919dbb91bfecb2d90418cb60c21e07b6c02302a682fbb760e"
+CLI_PACKAGE = "cmdline-tools;12.0"
+CLI_REGISTRATION_IDS = (CLI_PACKAGE, "cmdline-tools;latest")
 NS_ROOT = (
     "http://schemas.android.com/sdk/android/repo/repository2/03",
     "http://schemas.android.com/sdk/android/repo/sys-img2/03",
@@ -348,6 +358,156 @@ def dependency_gate(selected, cached):
         visit(key)
 
 
+def parse_bootstrap_properties(raw):
+    need(isinstance(raw, bytes) and 0 < len(raw) <= 4096, "STOP_BOOTSTRAP_PROPERTIES_SIZE")
+    need(all(byte in (10, 13) or 32 <= byte <= 126 for byte in raw), "STOP_BOOTSTRAP_PROPERTIES_ASCII")
+    fields = {}
+    for line in raw.decode("ascii").splitlines():
+        need(re.fullmatch(r"Pkg\.(?:Revision|Path|Desc)=[ -~]+", line), "STOP_BOOTSTRAP_PROPERTIES_FORMAT")
+        key, value = line.split("=", 1)
+        need(key not in fields, "STOP_BOOTSTRAP_PROPERTIES_DUPLICATE")
+        fields[key] = value
+    expected = {"Pkg.Revision": "12.0", "Pkg.Path": CLI_PACKAGE, "Pkg.Desc": "Android SDK Command-line Tools"}
+    need(fields == expected, "STOP_BOOTSTRAP_PROPERTIES_IDENTITY")
+    parts = tuple(map(int, fields["Pkg.Revision"].split(".")))
+    need(parts == (12, 0) and fields["Pkg.Path"] == "cmdline-tools;" + fields["Pkg.Revision"], "STOP_BOOTSTRAP_PATH_REVISION")
+    need(sha(raw) == CLI_PROPERTIES_SHA256, "STOP_BOOTSTRAP_PROPERTIES_HASH")
+    return {"fields": fields, "revision": [12, 0, 0], "bytes": len(raw), "sha256": sha(raw)}
+
+
+def validate_cached_bootstrap(sdk, registered):
+    need(all(registered.get(key) == value for key, value in REGISTERED_CACHE_PINS.items()), "STOP_REGISTERED_CACHE_IDENTITY")
+    properties = sdk / "cmdline-tools/latest/source.properties"
+    need(properties.is_file() and not properties.is_symlink(), "STOP_BOOTSTRAP_PROPERTIES_FILE")
+    observed = parse_bootstrap_properties(properties.read_bytes())
+    cli_xml = sdk / "cmdline-tools/latest/package.xml"
+    initial_xml_present = cli_xml.exists() or cli_xml.is_symlink()
+    cmdline_names = [name for name in registered if re.fullmatch(r"cmdline-tools;(?:latest|[0-9]+(?:\.[0-9]+)*)", name)]
+    if initial_xml_present:
+        # Preserve the registered-CLI baseline route; the fixed cache pins and
+        # immutable properties additionally bind this tool to observed CLI12.
+        need(len(cmdline_names) == 1 and set(registered) == {cmdline_names[0], "platform-tools", "build-tools;36.0.0"}, "STOP_CACHED_PACKAGE_INVENTORY")
+        cli_id = cmdline_names[0]
+        need(cli_id in CLI_REGISTRATION_IDS and registered[cli_id]["revision"] == observed["revision"]
+             and registered[cli_id]["dependencies"] == {}, "STOP_REGISTERED_CLI_IDENTITY")
+        verify_cli_generic_type(cli_xml.read_bytes())
+    else:
+        need(not cmdline_names and set(registered) == set(REGISTERED_CACHE_PINS), "STOP_CACHED_PACKAGE_INVENTORY")
+    return {**observed, "declared_package_id": CLI_PACKAGE, "initial_package_xml_present": initial_xml_present,
+            "classification": "registered cached CLI tool" if initial_xml_present else "unregistered immutable cached bootstrap tool",
+            "installed_sdk_package": initial_xml_present, "available_to_preinstall_dependency_gate": False,
+            "initial_registered_package_id": cmdline_names[0] if initial_xml_present else None,
+            "alias_evidence_scope": "validator compatibility decision; no prior claim of verified CLI12 runtime alias behavior",
+            "not_installed_by_this_wrapper": True, "no_xml_synthesized_by_wrapper": True}
+
+
+def verify_cli_generic_type(raw):
+    package = one(xml(raw), "localPackage")
+    details = one(package, "type-details")
+    qname = details.get("{http://www.w3.org/2001/XMLSchema-instance}type", "")
+    need(qname.count(":") == 1 and qname.split(":", 1)[1] == "genericDetailsType", "STOP_BOOTSTRAP_REGISTRATION_TYPE")
+    prefix = qname.split(":", 1)[0]
+    bindings = {uri for _, (name, uri) in ET.iterparse(io.BytesIO(raw), events=("start-ns",)) if name == prefix}
+    need(len(bindings) == 1 and next(iter(bindings)) in {
+        "http://schemas.android.com/repository/android/generic/01",
+        "http://schemas.android.com/repository/android/generic/02"}, "STOP_BOOTSTRAP_REGISTRATION_TYPE_NAMESPACE")
+    return package
+
+
+def save_cached_observations(cache, sdk, out, sources, copies, registered):
+    observed = {"schema": 1, "phase": "unparsed" if registered is None else "parsed", "registered_packages": registered, "metadata": {}, "tools": {},
+                "source_licenses": sources["licenses"], "private_licenses": copies["licenses"]}
+    for role, relative in (("cli", "cmdline-tools/latest"), ("platform-tools", "platform-tools"), ("build-tools-36", "build-tools/36.0.0")):
+        for origin, parent in (("source", cache), ("private", sdk)):
+            for name in ("package.xml", "source.properties"):
+                path = parent / relative / name
+                entry = {"exists": path.exists(), "is_symlink": path.is_symlink(), "regular_file": path.is_file()}
+                if entry["regular_file"]:
+                    actual = safe_cache_member(path, cache) if origin == "source" else path
+                    raw = actual.read_bytes()
+                    need(len(raw) <= 512 * 1024, "STOP_CACHED_OBSERVATION_METADATA_SIZE")
+                    saved = "cached-" + origin + "-" + role + "-" + name
+                    (out / saved).write_bytes(raw)
+                    entry.update(path=saved, bytes=len(raw), sha256=sha(raw))
+                observed["metadata"][origin + "/" + relative + "/" + name] = entry
+    for relative in CACHED_TOOLS:
+        tree = next(root for root in CACHE_TREES if relative.startswith(root + "/"))
+        key = "." + relative[len(tree):]
+        need(sources[tree][key] == copies[tree][key], "STOP_CACHED_TOOL_COPY_IDENTITY")
+        observed["tools"][relative] = copies[tree][key]
+    write_json(out / "cached-observations.json", observed)
+    return sha((out / "cached-observations.json").read_bytes())
+
+
+def save_post_cli_observation(sdk, out):
+    path = sdk / "cmdline-tools/latest/package.xml"
+    observed = {"schema": 1, "phase": "after normal SDKmanager wait, before inventory or identity validation",
+                "relative_path": "cmdline-tools/latest/package.xml", "exists": path.exists(),
+                "is_symlink": path.is_symlink(), "regular_file": path.is_file(), "raw_retained": False}
+    try:
+        if observed["regular_file"] and not observed["is_symlink"]:
+            nonlink_chain(path)
+            need(path.resolve(strict=True).parent == sdk / "cmdline-tools/latest", "STOP_POST_CLI_OBSERVATION_PATH")
+            digest = hashlib.sha256()
+            length = 0
+            prefix = bytearray()
+            with path.open("rb") as stream:
+                while True:
+                    chunk = stream.read(65536)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                    length += len(chunk)
+                    if len(prefix) < 512 * 1024 + 1:
+                        prefix.extend(chunk[:512 * 1024 + 1 - len(prefix)])
+            observed.update(bytes=length, sha256=digest.hexdigest())
+            if length <= 512 * 1024:
+                saved = "post-sdkmanager-cli-package.xml"
+                (out / saved).write_bytes(prefix)
+                observed.update(raw_retained=True, path=saved)
+            else:
+                observed["raw_retention_reason"] = "bounded diagnostic raw retention; validation limits unchanged"
+    except Exception as error:
+        observed["capture_error"] = str(error) if isinstance(error, Stop) else "STOP_POST_CLI_OBSERVATION_" + type(error).__name__
+    write_json(out / "post-cli-metadata.json", observed)
+    return sha((out / "post-cli-metadata.json").read_bytes())
+
+
+def verify_post_sdkmanager_cache(sdk, before_registered, after_registered, bootstrap, copies, out):
+    expected_ids = set(before_registered) | set(PACKAGES)
+    extra_ids = set(after_registered) - expected_ids
+    optional = (not bootstrap["initial_package_xml_present"] and len(extra_ids) == 1
+                and next(iter(extra_ids)) in CLI_REGISTRATION_IDS)
+    need(set(after_registered) == expected_ids | (extra_ids if optional else set()), "STOP_INSTALLED_SOFTWARE_SCOPE")
+    need(all(after_registered[key] == value for key, value in before_registered.items()), "STOP_CACHED_PACKAGE_CHANGED")
+    expected_copies = {root: dict(contents) for root, contents in copies.items()}
+    registration = {"generated_by_sdkmanager": optional, "classification": "metadata registration only; not additional software",
+                    "bootstrap_available_to_preinstall_dependency_gate": bootstrap["available_to_preinstall_dependency_gate"],
+                    "declared_source_properties_identity": CLI_PACKAGE,
+                    "registration_identity_allowlist": list(CLI_REGISTRATION_IDS),
+                    "alias_evidence_scope": "validator compatibility decision; no prior claim of verified CLI12 runtime alias behavior"}
+    if optional:
+        registered_id = next(iter(extra_ids))
+        record = after_registered[registered_id]
+        need(record["revision"] == bootstrap["revision"] and record["dependencies"] == {}, "STOP_BOOTSTRAP_REGISTRATION_IDENTITY")
+        cli_xml = sdk / "cmdline-tools/latest/package.xml"
+        need(cli_xml.is_file() and not cli_xml.is_symlink(), "STOP_BOOTSTRAP_REGISTRATION_FILE")
+        raw = cli_xml.read_bytes()
+        need(sha(raw) == record["package_xml_sha256"] and len(raw) <= 8 * 1024 * 1024, "STOP_BOOTSTRAP_REGISTRATION_HASH_SIZE")
+        package = verify_cli_generic_type(raw)
+        need(package.get("path") == registered_id, "STOP_BOOTSTRAP_REGISTRATION_PATH")
+        saved = "sdkmanager-generated-bootstrap-package.xml"
+        (out / saved).write_bytes(raw)
+        entry = {"kind": "file", "bytes": len(raw), "sha256": sha(raw)}
+        need("./package.xml" not in copies["cmdline-tools/latest"], "STOP_BOOTSTRAP_REGISTRATION_NOT_ABSENT")
+        expected_copies["cmdline-tools/latest"]["./package.xml"] = entry
+        registration.update(package_id=registered_id, revision=record["revision"], dependencies=record["dependencies"],
+                            path=saved, bytes=len(raw), sha256=sha(raw), permitted_new_relative_path="cmdline-tools/latest/package.xml")
+    for root in CACHE_TREES:
+        need(tree_bytes(sdk / root) == expected_copies[root], "STOP_PRIVATE_CACHE_BYTES_CHANGED")
+    return expected_copies, registration
+
+
 def kvm_snapshot():
     # Nonroot listxattr can hide trusted.*. This isolated cached-Python helper is
     # privileged read-only, has a literal path, and emits only hashes of raw
@@ -578,6 +738,7 @@ def main():
     cache = None
     source_before = {}
     copied_before = {}
+    private_expected_after_preparation = None
     kvm_before = None
     harness_result = None
     cleanup_errors = []
@@ -615,15 +776,17 @@ def main():
             copied_before[relative] = tree_bytes(destination)
             need(source_before[relative] == copied_before[relative], "STOP_CACHE_COPY_BYTES")
         need(len(source_before["licenses"]) > 1, "STOP_EXISTING_LICENSES_MISSING")
-        for relative in ("platform-tools/adb", "cmdline-tools/latest/bin/sdkmanager", "cmdline-tools/latest/bin/avdmanager", "build-tools/36.0.0/aapt2", "build-tools/36.0.0/apksigner"):
+        for relative in CACHED_TOOLS:
             need((sdk / relative).is_file() and os.access(sdk / relative, os.X_OK), "STOP_CACHED_TOOL_MISSING")
-        before_packages = inventory(sdk)
-        cmdline_names = [name for name in before_packages if re.fullmatch(r"cmdline-tools;(?:latest|[0-9]+(?:\.[0-9]+)*)", name)]
-        need(len(cmdline_names) == 1 and set(before_packages) == {cmdline_names[0], "platform-tools", "build-tools;36.0.0"}, "STOP_CACHED_PACKAGE_INVENTORY")
-        state["cached_packages"] = before_packages
         write_json(out / "cached-byte-inventory.json", {"source_sdk": str(cache), "source_before": source_before,
                                                         "private_copy_before": copied_before, "copy_scope": "independent regular bytes; no cache hardlinks or symlinks"})
         state["cached_byte_inventory_sha256"] = sha((out / "cached-byte-inventory.json").read_bytes())
+        state["cached_observations_sha256"] = save_cached_observations(cache, sdk, out, source_before, copied_before, None)
+        before_packages = inventory(sdk)
+        state["cached_packages"] = before_packages
+        state["cached_observations_sha256"] = save_cached_observations(cache, sdk, out, source_before, copied_before, before_packages)
+        bootstrap = validate_cached_bootstrap(sdk, before_packages)
+        state["cached_cli_bootstrap"] = bootstrap
         selected = {}
         raw_total = 0
         for index, url in enumerate(CATALOGS):
@@ -633,7 +796,11 @@ def main():
             name = "official-repository.xml" if index == 0 else "official-system-image.xml"
             (out / name).write_bytes(raw)
             selected[PACKAGES[index]] = select_package(xml(raw, NS_ROOT[index]), PACKAGES[index], url)
-        dependency_gate(selected, before_packages)
+        # CLI remains an executable cached bootstrap, never a catalog dependency
+        # provider, including when an initial valid CLI registration is present.
+        dependency_baseline = {key: before_packages[key] for key in REGISTERED_CACHE_PINS}
+        state["preinstall_dependency_registered_packages"] = dependency_baseline
+        dependency_gate(selected, dependency_baseline)
         state["selected_official_packages"] = selected
         write_json(out / "official-package-selection.json", selected)
         private_home = root / "java-user-home"
@@ -649,10 +816,13 @@ def main():
                                 "PATH": str(java / "bin") + os.pathsep + os.environ.get("PATH", "")})
         state["sdkmanager_exit"] = child_once([str(sdk / "cmdline-tools/latest/bin/sdkmanager"), "--sdk_root=" + str(sdk), "--channel=0", "--install", *PACKAGES],
                                                preparation_env, out / "sdkmanager.log", 600, state, "sdkmanager")
+        if state["sdkmanager_stopped"] and state.get("sdkmanager_normal_wait_completed"):
+            state["post_cli_metadata_sha256"] = save_post_cli_observation(sdk, out)
         need(state["sdkmanager_exit"] == 0 and state["sdkmanager_stopped"], "STOP_SDKMANAGER_FAILED")
         after_packages = inventory(sdk)
-        need(set(after_packages) == set(before_packages) | set(PACKAGES), "STOP_INSTALLED_SOFTWARE_SCOPE")
-        need(all(after_packages[key] == value for key, value in before_packages.items()), "STOP_CACHED_PACKAGE_CHANGED")
+        state["after_sdkmanager_registered_packages"] = after_packages
+        private_expected_after_preparation, registration = verify_post_sdkmanager_cache(sdk, before_packages, after_packages, bootstrap, copied_before, out)
+        state["bootstrap_metadata_registration"] = registration
         for name in PACKAGES:
             need(after_packages[name]["revision"] == selected[name]["revision"], "STOP_INSTALLED_REVISION_CHANGED")
             need(after_packages[name]["dependencies"] == selected[name]["dependencies"], "STOP_INSTALLED_DEPENDENCIES_CHANGED")
@@ -676,9 +846,10 @@ def main():
              and (sdk / "emulator/emulator").is_file() and not (sdk / "emulator/emulator").is_symlink()
              and os.access(sdk / "emulator/emulator", os.X_OK), "STOP_INSTALLED_PAYLOAD_MISSING")
         for relative in CACHE_TREES:
-            need(tree_bytes(cache / relative, cache) == source_before[relative] and tree_bytes(sdk / relative) == copied_before[relative], "STOP_CACHE_OR_LICENSE_BYTES_CHANGED")
+            need(tree_bytes(cache / relative, cache) == source_before[relative] and tree_bytes(sdk / relative) == private_expected_after_preparation[relative], "STOP_CACHE_OR_LICENSE_BYTES_CHANGED")
         state.update(sdk_preparation_status="VERIFIED_TWO_OFFICIAL_PACKAGES", installed_packages=after_packages,
-                     software_scope_exact=True, cached_sources_unchanged=True, license_bytes_unchanged=True)
+                     software_scope_exact=True, software_additions=list(PACKAGES), cached_software_payloads_unchanged=True,
+                     cached_sources_unchanged=True, license_bytes_unchanged=True)
         kvm_before = kvm_snapshot()
         need(kvm_before["uid"] == 0 and kvm_before["mode"] & 0o600 == 0o600, "STOP_KVM_INITIAL_OWNER_MODE")
         state["kvm"]["before"] = kvm_evidence(kvm_before)
@@ -763,6 +934,8 @@ def main():
                     state["license_bytes_unchanged"] = (tree_bytes(cache / "licenses", cache) == source_before["licenses"]
                                                         and tree_bytes(root / "sdk/licenses") == copied_before["licenses"])
                     need(state["cached_sources_unchanged"] and state["license_bytes_unchanged"], "STOP_FINAL_CACHE_LICENSE_CHANGED")
+                    if private_expected_after_preparation is not None:
+                        need(all(tree_bytes(root / "sdk" / relative) == expected for relative, expected in private_expected_after_preparation.items()), "STOP_FINAL_PRIVATE_CACHE_BYTES_CHANGED")
             except Exception as exc:
                 cleanup_errors.append(str(exc) if isinstance(exc, Stop) else "STOP_FINAL_CACHE_LICENSE_EXCEPTION")
             # Verification failures still fail the result, but do not suppress

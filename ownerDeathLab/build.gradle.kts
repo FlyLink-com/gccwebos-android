@@ -1,5 +1,15 @@
 plugins { id("com.android.application") }
 
+// AGP's automatic Kotlin runtime is unused by this Java-only fixture. Keep the
+// exclusion local to APK classpaths; app and compiler/lint tools are unaffected.
+val labApkClasspaths = setOf(
+    "debugCompileClasspath", "debugRuntimeClasspath",
+    "debugAndroidTestCompileClasspath", "debugAndroidTestRuntimeClasspath",
+)
+configurations.matching { it.name in labApkClasspaths }.configureEach {
+    exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+}
+
 // Reuse only the three public B1 protocol sources, preserving their packages and bytes.
 // Sync removes stale generated files; no B1 service, guard, runner or tests enter this module.
 val sharedB1Files = listOf(

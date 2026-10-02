@@ -1,5 +1,8 @@
 # E2-B / B2: Binder host death preparation
 
+This records the initial source-only stage at `8042ab7`. The subsequently authorized
+build-only stage is documented in `E2B-B2-BUILD-ONLY.md`; runtime remains separate.
+
 Baseline: main merge `e4b3cf3a06e0e6a8add01ac895b3ed524847a845`, tree
 `1fc83fa6042fd055455b21445c6ec1cbbfbd1165` (B1 PR16 already merged).
 Independent branch: `codex/lucky-b2-preparation`; independent directory `lucky-b2`.

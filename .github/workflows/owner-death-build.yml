@@ -1,0 +1,81 @@
+name: B2 APK build only
+on:
+  push:
+    branches: [codex/lucky-b2-preparation]
+    paths:
+      - '.github/workflows/owner-death-build.yml'
+      - 'scripts/collect_owner_death_evidence.py'
+      - 'ownerDeathLab/**'
+      - 'copyBoundaryLab/src/main/java/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle/**'
+      - 'gradlew'
+permissions:
+  contents: read
+concurrency:
+  group: b2-build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile-candidate:
+    if: github.ref == 'refs/heads/codex/lucky-b2-preparation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify exact source and existing build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/owner-death-build
+          test -n "${JAVA_HOME_17_X64:-}"
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          test -f "$SDK_ROOT/platforms/android-36/android.jar"
+          test -x "$SDK_ROOT/build-tools/36.0.0/aapt2"
+          test -x "$SDK_ROOT/build-tools/36.0.0/apksigner"
+          test -x "$SDK_ROOT/build-tools/36.0.0/zipalign"
+          test -x "$SDK_ROOT/build-tools/36.0.0/dexdump"
+          test -x "$SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer"
+          echo "B2_BUILD_SDK=$SDK_ROOT" >> "$GITHUB_ENV"
+          git rev-parse HEAD > .build-output/owner-death-build/source-commit.log
+          git rev-parse 'HEAD^{tree}' > .build-output/owner-death-build/source-tree.log
+          git diff --check HEAD^ HEAD
+          sh scripts/bootstrap-wrapper.sh
+          python3 scripts/verify-owner-death-source.py --android-sdk "$SDK_ROOT" --require-android \
+            --output-dir .build-output/owner-death-build/source
+      - name: Compile only the isolated B2 debug target and test APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain -PownerDeathLab=true \
+            :ownerDeathLab:assembleDebug :ownerDeathLab:assembleDebugAndroidTest :ownerDeathLab:lintDebug \
+            2>&1 | tee .build-output/owner-death-build/build.log
+          ./gradlew --no-daemon --console=plain -PownerDeathLab=true :ownerDeathLab:tasks --all \
+            2>&1 | tee .build-output/owner-death-build/ownerDeathLab-tasks.txt
+      - name: Inspect compiled packages and freeze exact identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/collect_owner_death_evidence.py "$B2_BUILD_SDK" .build-output/owner-death-build \
+            --release-proof .build-output/owner-death-build/ownerDeathLab-tasks.txt --require-dexdump
+          test -z "$(git status --porcelain)"
+      - name: Retain immutable candidate APKs and binary inspection evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-death-build-${{ github.sha }}
+          path: |
+            ownerDeathLab/build/outputs/apk/
+            ownerDeathLab/build/reports/
+            .build-output/owner-death-build/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

@@ -145,7 +145,9 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("同名节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
         compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        // This signed-out fixture exposes registration guidance, never a VPN command.
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
 
@@ -236,7 +238,9 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
         screenshot("changed-cache-after-real-activity-recreation-unselected")
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()

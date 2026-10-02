@@ -21,3 +21,8 @@ include(":app")
 if (providers.gradleProperty("copyBoundaryLab").orNull == "true") {
     include(":copyBoundaryLab")
 }
+
+// Source-only B2 candidate. APK build and Android execution remain separate gates.
+if (providers.gradleProperty("ownerDeathLab").orNull == "true") {
+    include(":ownerDeathLab")
+}

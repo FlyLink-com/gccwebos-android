@@ -1,0 +1,41 @@
+name: B2 source-only preparation
+on:
+  push:
+    branches: [codex/lucky-b2-preparation]
+permissions:
+  contents: read
+concurrency:
+  group: b2-source-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify-source:
+    if: github.ref == 'refs/heads/codex/lucky-b2-preparation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify source and compile Java with existing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${JAVA_HOME_17_X64:-}"
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          test -f "$SDK_ROOT/platforms/android-36/android.jar"
+          python3 scripts/verify-owner-death-source.py \
+            --android-sdk "$SDK_ROOT" --require-android \
+            --output-dir .build-output/owner-death-source
+      - name: Retain source-only verification receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owner-death-source-${{ github.sha }}
+          path: .build-output/owner-death-source/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

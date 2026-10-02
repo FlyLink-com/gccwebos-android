@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:label="GCC owner death QA">
+        <service android:name=".OwnerDeathQaService"
+            android:process=":ownerqa"
+            android:exported="false"
+            android:stopWithTask="false" />
+        <service android:name=".WorkerDeathQaService"
+            android:process=":workerqa"
+            android:exported="false"
+            android:stopWithTask="false" />
+    </application>
+</manifest>

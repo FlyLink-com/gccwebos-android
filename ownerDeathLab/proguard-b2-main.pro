@@ -1,0 +1,24 @@
+# Preserve all fixture members and names; shrink only unused compiler output.
+-dontoptimize
+-dontobfuscate
+-keep class com.gccwebos.android.ipcqa.Wire { *; }
+-keep class com.gccwebos.android.ipcqa.Wire$* { *; }
+-keep class com.gccwebos.android.ipcqa.CopyLedger { *; }
+-keep class com.gccwebos.android.ipcqa.CopyLedger$* { *; }
+-keep class com.gccwebos.android.ipcqa.RemoteCopyClient { *; }
+-keep class com.gccwebos.android.ipcqa.RemoteCopyClient$* { *; }
+-keep class com.gccwebos.android.ipcqa.b2.B2Control { *; }
+-keep class com.gccwebos.android.ipcqa.b2.B2Control$* { *; }
+-keep class com.gccwebos.android.ipcqa.b2.DeathQaClient { *; }
+-keep class com.gccwebos.android.ipcqa.b2.DeathQaClient$* { *; }
+-keep class com.gccwebos.android.ipcqa.b2.DeathRecoveryLedger { *; }
+-keep class com.gccwebos.android.ipcqa.b2.DeathRecoveryLedger$* { *; }
+-keep class com.gccwebos.android.ipcqa.b2.DeathSessionGuard { *; }
+-keep class com.gccwebos.android.ipcqa.b2.DeathSessionGuard$* { *; }
+-keep class com.gccwebos.android.ipcqa.b2.EndpointWatch { *; }
+-keep class com.gccwebos.android.ipcqa.b2.EndpointWatch$* { *; }
+-keep class com.gccwebos.android.ipcqa.b2.OwnerDeathQaService { *; }
+-keep class com.gccwebos.android.ipcqa.b2.OwnerDeathQaService$* { *; }
+-keep class com.gccwebos.android.ipcqa.b2.WorkerDeathQaService { *; }
+-keep class com.gccwebos.android.ipcqa.b2.WorkerDeathQaService$* { *; }
+

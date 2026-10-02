@@ -1,11 +1,12 @@
 name: B2 APK build only
 on:
   push:
-    branches: [codex/lucky-b2-preparation]
+    branches: [codex/lucky-b2-strict-packaging]
     paths:
       - '.github/workflows/owner-death-build.yml'
       - 'scripts/collect_owner_death_evidence.py'
       - 'scripts/verify-owner-death-source.py'
+      - 'scripts/b2-classpath.init.gradle'
       - 'ownerDeathLab/**'
       - 'copyBoundaryLab/src/main/java/**'
       - 'settings.gradle.kts'
@@ -19,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   compile-candidate:
-    if: github.ref == 'refs/heads/codex/lucky-b2-preparation'
+    if: github.ref == 'refs/heads/codex/lucky-b2-strict-packaging'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -57,9 +58,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon --console=plain -PownerDeathLab=true \
+          ./gradlew --no-daemon --console=plain -PownerDeathLab=true --init-script scripts/b2-classpath.init.gradle \
             :ownerDeathLab:assembleDebug :ownerDeathLab:assembleDebugAndroidTest :ownerDeathLab:lintDebug \
             2>&1 | tee .build-output/owner-death-build/build.log
+          export B2_DIAG_SOURCE="$(git rev-parse HEAD)"
+          ./gradlew --no-daemon --console=plain -PownerDeathLab=true --init-script scripts/b2-classpath.init.gradle \
+            :ownerDeathLab:inspectB2Classpaths 2>&1 | tee .build-output/owner-death-build/classpath.log
+          cp .build-output/b2-classpath/classpaths.json .build-output/owner-death-build/
           ./gradlew --no-daemon --console=plain -PownerDeathLab=true :ownerDeathLab:tasks --all \
             2>&1 | tee .build-output/owner-death-build/ownerDeathLab-tasks.txt
       - name: Inspect compiled packages and freeze exact identities

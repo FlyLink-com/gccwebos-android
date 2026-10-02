@@ -42,8 +42,17 @@ android {
     // directory is populated by the explicit preBuild -> Sync dependency below.
     sourceSets.getByName("main").java.srcDir(generatedB1Sources.get().asFile)
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        // The fixture uses Java 8 syntax/APIs. Avoid Java 17 nest-access markers.
+        // JDK 17 remains the compiler and host verifier; Java source bytes stay fixed.
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+    buildTypes.getByName("debug") {
+        // Remove unreferenced generated R/global-synthetics classes before packaging.
+        // Rules keep the fixture and B1 protocol members, disable optimization/renaming.
+        isMinifyEnabled = true
+        proguardFiles("proguard-b2-main.pro")
+        testProguardFiles("proguard-b2-test.pro")
     }
     lint { abortOnError = true }
 }

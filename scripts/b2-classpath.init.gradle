@@ -1,6 +1,7 @@
 import groovy.json.JsonOutput
 import java.security.MessageDigest
 import java.util.zip.ZipFile
+import org.gradle.api.attributes.Attribute
 
 gradle.projectsEvaluated {
     def lab = gradle.rootProject.findProject(':ownerDeathLab')
@@ -27,18 +28,35 @@ gradle.projectsEvaluated {
             def result = [sourceCommit:System.getenv('B2_DIAG_SOURCE'), configurations:[:], bootClasspath:[], javaTasks:[:]]
             ['debugCompileClasspath','debugRuntimeClasspath','debugAndroidTestCompileClasspath','debugAndroidTestRuntimeClasspath'].each { name ->
                 def config = lab.configurations.getByName(name)
-                result.configurations[name] = [
-                    declaredDependencies:config.allDependencies.collect { [type:it.class.name,group:it.group,name:it.name,version:it.version] },
-                    resolvedFiles:config.files.collect { fileProof(it) },
-                    resolvedComponents:config.incoming.resolutionResult.allComponents.collect { it.id.displayName }]
+                def proof = [declaredDependencies:config.allDependencies.collect { [type:it.class.name,group:it.group,name:it.name,version:it.version] }]
+                result.configurations[name] = proof
+                try {
+                    def view = config.incoming.artifactView {
+                        attributes.attribute(Attribute.of('artifactType',String),'android-classes-jar')
+                    }
+                    proof.resolvedFiles = view.files.files.collect { fileProof(it) }
+                    proof.resolvedComponents = config.incoming.resolutionResult.allComponents.collect { it.id.displayName }
+                    proof.status = 'RESOLVED'
+                } catch (Exception problem) {
+                    proof.status = 'RESOLUTION_DIAGNOSTIC'
+                    proof.error = problem.message.take(2048)
+                }
             }
             result.bootClasspath = lab.extensions.getByName('android').bootClasspath.collect { fileProof(it) }
             ['compileDebugJavaWithJavac','compileDebugAndroidTestJavaWithJavac'].each { name ->
                 def task = lab.tasks.getByName(name)
-                result.javaTasks[name] = [classpath:task.classpath.files.findAll { it.isFile() }.collect { fileProof(it) },
+                try { result.javaTasks[name] = [classpath:task.classpath.files.findAll { it.isFile() }.collect { fileProof(it) },
                      bootstrapClasspath:task.options.bootstrapClasspath?.files?.collect { fileProof(it) },
-                     sourceCompatibility:task.sourceCompatibility,targetCompatibility:task.targetCompatibility]
+                     sourceCompatibility:task.sourceCompatibility,targetCompatibility:task.targetCompatibility] }
+                catch (Exception problem) { result.javaTasks[name] = [error:problem.message.take(2048)] }
             }
+            def loader = lab.plugins.findPlugin('com.android.application').class.classLoader
+            def options = loader.loadClass('com.android.build.gradle.options.BooleanOption').enumConstants
+            result.globalSyntheticsOption = options.findAll { it.name().contains('GLOBAL_SYNTHETICS') }.collect {
+                [name:it.name(), propertyName:it.propertyName, defaultValue:it.defaultValue]
+            }
+            result.debugMinified = lab.extensions.getByName('android').buildTypes.getByName('debug').minifyEnabled
+            result.globalSyntheticsTasks = lab.tasks.findAll { it.name.toLowerCase().contains('globalsynthetics') }.collect { it.name }
             def directory = gradle.rootProject.file('.build-output/b2-classpath')
             directory.mkdirs()
             new File(directory,'classpaths.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(result)) + '\n'

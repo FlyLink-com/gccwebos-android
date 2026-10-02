@@ -1,21 +1,13 @@
 package com.gccwebos.android
 
-import android.app.Activity
-import android.app.Application
 import android.graphics.Bitmap
-import android.os.Bundle
-import androidx.activity.compose.setContent
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.filters.SdkSuppress
 import com.gccwebos.android.core.ConnectionSelection
 import com.gccwebos.android.portal.*
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -25,31 +17,28 @@ import org.junit.runner.Description
 import org.junit.runners.model.Statement
 import java.io.File
 import java.time.Instant
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real MainActivity instances and saved state, with a fresh fake account/repository per Activity.
- * The test replaces only the Activity's Compose content; it is not a production Portal E2E test.
- * The legitimate process authority is shared, just as in production. Cached bytes are synthetic,
- * memory-backed, and both transports reject every request. This does not simulate process death.
+/** Unmodified MainActivity and its default account/repository restore a synthetic encrypted cache.
+ * No Activity content replacement or restore call manufactures a post-recreation result. Test-side
+ * managers only inspect the legitimate process authority after recreation. This is configuration
+ * recreation, not process death or a production Portal E2E test. Only Connect/Nodes/radio are used:
+ * a valid cached profile and absent session/delivery keep both production HTTP paths unreachable.
  * Run only on a fresh isolated candidate, never against a user's installed account/configuration.
  */
-@SdkSuppress(minSdkVersion = 29) // onActivityPostCreated; the evidence lanes are API33/API36.
 class SelectedNodeActivityRecreationTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
-    private val profiles = MemoryLocalProfileStore()
-    private val url = Secret("https://sub.invalid/sub/a/activity-recreation-fixture")
+    private lateinit var profiles: EncryptedLocalProfileStore
+    private lateinit var inspector: LocalSubscriptionManager
+    private val url = Secret("https://sub.gccwebos.com/sub/a/activity-recreation-fixture")
     private val expiry = Instant.now().plusSeconds(3600)
-    private val portalRequests = AtomicInteger()
     private val subscriptionReads = AtomicInteger()
-    private val owners = CopyOnWriteArrayList<AccountController>()
-    private val repositories = CopyOnWriteArrayList<PortalRepository>()
-    private var deliveryPresent = true
+    private val policy = OriginPolicy("https://portal.gccwebos.com", setOf("https://sub.gccwebos.com"))
     private val delivery = object : DeliveryStore {
-        override fun read() = if (deliveryPresent) DeliveryRecord("fixture", "fixture", "fixture", "fixture", url, null, false) else null
+        override fun read(): DeliveryRecord? = null
         override fun save(record: DeliveryRecord) = error("No delivery writes in recreation fixture")
-        override fun clear() { deliveryPresent = false }
+        override fun clear() = Unit
     }
     private val bytes = """proxies:
   - name: 同名节点
@@ -66,38 +55,17 @@ class SelectedNodeActivityRecreationTest {
     password: synthetic-only
 """.toByteArray()
 
-    private fun repository() = PortalRepository(object : PortalTransport {
-        override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
-            portalRequests.incrementAndGet()
-            error("Activity recreation fixture forbids every Portal request")
-        }
-    }, delivery, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
-        subscription = SubscriptionSource {
+    private fun manager() = LocalSubscriptionManager(delivery, profiles,
+        SubscriptionSource {
             subscriptionReads.incrementAndGet()
-            error("Cached Activity recreation must never download a subscription")
-        }, sessions = MemorySessionStore(), profiles = profiles)
-
-    private fun account(scope: CoroutineScope): AccountController {
-        val repository = repository()
-        repositories += repository
-        return AccountController(repository, scope).also { owners += it }
-    }
-
-    // Both initial and recreated Activities use exactly this content call site for saved-state keys.
-    // PostCreated is deliberately used: MainActivity's own onCreate must finish before replacement.
-    private fun installFixture(activity: MainActivity) {
-        activity.setContent {
-            val scope = rememberCoroutineScope()
-            val owner = remember { account(scope) }
-            LaunchedEffect(owner) { owner.restore() }
-            AppShell(owner, autoLoadCommerce = false)
-        }
-    }
+            error("Inspector must never download a subscription")
+        }, policy, { Instant.now() })
 
     private val fixtureRule = object : TestRule {
         override fun apply(base: Statement, description: Description) = object : Statement() {
             override fun evaluate() {
-                val context = InstrumentationRegistry.getInstrumentation().targetContext
+                val instrumentation = InstrumentationRegistry.getInstrumentation()
+                val context = instrumentation.targetContext
                 // Check before the Activity rule can launch the default production content.
                 // Never delete or overwrite an existing encrypted account/profile/delivery.
                 listOf("portal-session.bin", "portal-profile.bin", "portal-delivery.bin").forEach { name ->
@@ -106,24 +74,26 @@ class SelectedNodeActivityRecreationTest {
                             File(context.noBackupFilesDir, name + suffix).exists())
                     }
                 }
-                val application = context.applicationContext as Application
-                val seed = repository()
-                val callbacks = lifecycleCallbacks()
-                var registered = false
+                // All guards passed before ownership or any typed clear/write is permitted.
+                profiles = EncryptedLocalProfileStore(context)
+                val seed = manager()
+                inspector = seed
+                var writeStarted = false
                 try {
-                    seed.localSubscriptions.unlink() // Only memory fixture/process registry; no user stores.
-                    deliveryPresent = true
-                    assertEquals(LocalSubscriptionStatus.READY,
-                        seed.localSubscriptions.remember(bytes, url, expiry).status)
-                    application.registerActivityLifecycleCallbacks(callbacks)
-                    registered = true
-                    base.evaluate() // The same postCreated callback installs both Activity contents.
-                    assertEquals("Fake Portal made no authentication/commerce calls", 0, portalRequests.get())
-                    assertEquals("Fake subscription source was never used", 0, subscriptionReads.get())
+                    instrumentation.runOnMainSync {
+                        writeStarted = true
+                        seed.unlink() // Fresh guarded fixture only; reset prior suite registry state.
+                        CachedSubscription(sessionBinding(url), bytes, expiry, url).use { profiles.save(it) }
+                        assertEquals(LocalSubscriptionStatus.READY, seed.remember(bytes, url, expiry).status)
+                        assertEquals(LocalSubscriptionStatus.READY, runBlocking { seed.restore() }.status)
+                    }
+                    base.evaluate() // Default MainActivity creates/restores its own real owners.
+                    assertEquals("Inspector subscription source was never used", 0, subscriptionReads.get())
+                    assertPrivateAccountStoresAbsent()
                 } finally {
-                    // Inner Compose/Activity rule has already disposed and destroyed its owner.
-                    if (registered) application.unregisterActivityLifecycleCallbacks(callbacks)
-                    seed.localSubscriptions.unlink()
+                    // Inner Compose/Activity rule has already disposed and destroyed its Activity.
+                    // A guard failure never reaches this block and never clears an existing store.
+                    if (writeStarted) instrumentation.runOnMainSync { seed.unlink() }
                 }
             }
         }
@@ -131,32 +101,33 @@ class SelectedNodeActivityRecreationTest {
 
     @get:Rule val rules: TestRule = RuleChain.outerRule(fixtureRule).around(compose)
 
-    private fun lifecycleCallbacks() = object : Application.ActivityLifecycleCallbacks {
-            override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
-                if (activity is MainActivity) installFixture(activity)
+    private fun assertPrivateAccountStoresAbsent() {
+        val directory = InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
+        listOf("portal-session.bin", "portal-delivery.bin").forEach { name ->
+            listOf("", ".bak", ".new").forEach { suffix ->
+                assertFalse("No account or delivery created: $name$suffix", File(directory, name + suffix).exists())
             }
-            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
-            override fun onActivityStarted(activity: Activity) = Unit
-            override fun onActivityResumed(activity: Activity) = Unit
-            override fun onActivityPaused(activity: Activity) = Unit
-            override fun onActivityStopped(activity: Activity) = Unit
-            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
-            override fun onActivityDestroyed(activity: Activity) = Unit
+        }
     }
 
-    private fun waitForRestoredOwner(count: Int) {
-        compose.waitUntil(5000) {
-            owners.size == count && !owners.last().restoring &&
-                owners.last().localSubscription.status == LocalSubscriptionStatus.READY &&
-                owners.last().nodeSelection.snapshot.choices.size == 2
+    private fun waitForReadyNodes() {
+        try {
+            compose.waitUntil(5000) {
+                inspector.nodeSelectionSnapshot().let { it.status == LocalSubscriptionStatus.READY && it.choices.size == 2 }
+            }
+            compose.waitForIdle()
+        } catch (failure: Throwable) {
+            val state = inspector.nodeSelectionSnapshot()
+            throw AssertionError("Registry status=${state.status}, choices=${state.choices.size}, selected=${state.selected != null}", failure)
         }
-        compose.waitForIdle()
     }
 
     private fun selectSecondAndNavigate(): ConnectionSelection {
-        waitForRestoredOwner(1)
+        waitForReadyNodes()
         compose.onNodeWithTag("nav-Lines").performClick()
-        val selected = owners.last().nodeSelection.snapshot.choices[1].selection
+        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        compose.onNodeWithTag("nodes-account").assertDoesNotExist()
+        val selected = inspector.nodeSelectionSnapshot().choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         repeat(2) {
@@ -166,30 +137,29 @@ class SelectedNodeActivityRecreationTest {
             compose.onNodeWithTag("node-choice-1").assertIsSelected()
             compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         }
-        compose.runOnIdle { assertSame(selected, owners.last().nodeSelection.snapshot.selected) }
+        compose.runOnIdle { assertSame(selected, inspector.nodeSelectionSnapshot().selected) }
         return selected
     }
 
     private fun assertSelectedConnection() {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("同名节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
 
-    private fun recreateAndVerifyFreshOwner() {
+    private fun recreateDefaultActivityAndVerify() {
         val oldActivity = compose.activity
-        val oldOwner = owners.last()
-        val oldManager = repositories.last().localSubscriptions
+        val oldInspector = inspector
         compose.activityRule.scenario.recreate()
-        waitForRestoredOwner(2)
+        // Constructor/observations only. No restore/remember/refresh/select manufactures recovery.
+        inspector = manager()
+        assertNotSame(oldInspector, inspector)
+        waitForReadyNodes()
         compose.activityRule.scenario.onActivity { current ->
             assertNotSame(oldActivity, current)
             assertEquals(Lifecycle.State.DESTROYED, oldActivity.lifecycle.currentState)
-        }
-        compose.runOnIdle {
-            assertNotSame(oldOwner, owners.last())
-            assertNotSame(oldManager, repositories.last().localSubscriptions)
         }
         // Nodes is a non-default tab: this asserts restored saved state, not an accidental default.
         listOf("Connect", "Lines", "Plans", "Profile").forEach {
@@ -198,6 +168,8 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
         compose.onNodeWithTag("page-Lines").assertExists()
         compose.onNodeWithTag("nav-Lines").assertIsSelected()
+        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        compose.onNodeWithTag("nodes-account").assertDoesNotExist()
     }
 
     private fun screenshot(name: String) {
@@ -220,11 +192,11 @@ class SelectedNodeActivityRecreationTest {
     @Test fun selectedSameNameSecondNodeSurvivesRealActivityRecreationWithTheSameOpaqueIdentity() {
         val selected = selectSecondAndNavigate()
         screenshot("selected-node-before-real-activity-recreation")
-        recreateAndVerifyFreshOwner()
+        recreateDefaultActivityAndVerify()
         compose.runOnIdle {
-            assertSame(selected, owners.last().nodeSelection.snapshot.selected)
-            assertSame(selected, owners.last().nodeSelection.snapshot.choices[1].selection)
-            assertNotSame(selected, owners.last().nodeSelection.snapshot.choices[0].selection)
+            assertSame(selected, inspector.nodeSelectionSnapshot().selected)
+            assertSame(selected, inspector.nodeSelectionSnapshot().choices[1].selection)
+            assertNotSame(selected, inspector.nodeSelectionSnapshot().choices[0].selection)
         }
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
@@ -239,36 +211,39 @@ class SelectedNodeActivityRecreationTest {
         compose.runOnIdle {
             val cached = requireNotNull(profiles.read())
             try {
-                val changed = cached.copyBytes().toString(Charsets.UTF_8).replace("192.0.2.41", "192.0.2.42").toByteArray()
+                val raw = cached.copyBytes()
+                val changed = try { raw.toString(Charsets.UTF_8).replace("192.0.2.41", "192.0.2.42").toByteArray() }
+                    finally { raw.fill(0) }
                 val replacement = CachedSubscription(cached.binding, changed, cached.validUntil, cached.url)
                 try { profiles.save(replacement) } finally { replacement.close(); changed.fill(0) }
             } finally { cached.close() }
+            assertSame("Cache write alone must not clear the selected opaque handle", old, inspector.nodeSelectionSnapshot().selected)
         }
-        recreateAndVerifyFreshOwner()
+        recreateDefaultActivityAndVerify()
         compose.runOnIdle {
-            val snapshot = owners.last().nodeSelection.snapshot
+            val snapshot = inspector.nodeSelectionSnapshot()
             assertNull(snapshot.selected)
             assertEquals(listOf("同名节点", "同名节点"), snapshot.choices.map { it.name })
             assertTrue(snapshot.choices.none { it.selection === old })
-            assertFalse(repositories.last().localSubscriptions.selectNode(old))
-            owners.last().nodeSelection.select(old)
-            assertNull(owners.last().nodeSelection.snapshot.selected)
+            assertFalse(inspector.selectNode(old))
+            assertNull(inspector.nodeSelectionSnapshot().selected)
         }
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
-        compose.onNodeWithTag("node-selection-message").assertTextEquals("节点已失效，请刷新后重新选择。")
+        compose.onNodeWithTag("node-selection-status").assertTextEquals("请选择节点")
         screenshot("changed-cache-after-real-activity-recreation-nodes-unselected")
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         screenshot("changed-cache-after-real-activity-recreation-unselected")
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle {
-            assertSame(owners.last().nodeSelection.snapshot.choices[1].selection, owners.last().nodeSelection.snapshot.selected)
-            assertNotSame(old, owners.last().nodeSelection.snapshot.selected)
+            assertSame(inspector.nodeSelectionSnapshot().choices[1].selection, inspector.nodeSelectionSnapshot().selected)
+            assertNotSame(old, inspector.nodeSelectionSnapshot().selected)
         }
     }
 }

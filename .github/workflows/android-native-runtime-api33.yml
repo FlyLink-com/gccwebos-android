@@ -1,98 +1,80 @@
-# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-provision-runtime.
-# Reuses default-main registered entry; default-main native workflow is unchanged.
-# Exact committed harness input and frozen hashes remain mandatory.
-name: Approved official SDK and frozen B2 Binder runtime API33
+# Read-only cache metadata diagnosis after authorized preparation STOP.
+name: Read-only B2 cached package inventory diagnosis
 on:
   workflow_dispatch:
     inputs:
       reviewed_harness_commit:
-        description: Exact full harness commit separately approved before dispatch
+        description: Exact full independently reviewed metadata diagnostic commit
         required: true
         type: string
 permissions:
   contents: read
-  actions: read
 concurrency:
   group: frozen-b2-runtime
   cancel-in-progress: false
 jobs:
-  frozen-b2-api33:
-    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-provision-runtime' && github.run_attempt == 1
+  cached-metadata-only:
+    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-inventory-diagnostic' && github.run_attempt == 1
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 8
     env:
-      APPROVED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
-      APPROVED_FREEZE_SHA256: f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad
-      APPROVED_HARNESS_MANIFEST_SHA256: ccdf8c214a342d80ee84c0ca39b4ea5e8f8cd8cc183e7a63b983d229b530129c
-      APPROVED_ENVIRONMENT_SHA256: cc9f163a98f2defbac8aaba35cd4d932511d586da80e5f8fbb0dce76ede7b77a
+      APPROVED_DIAGNOSTIC_COMMIT: ${{ inputs.reviewed_harness_commit }}
+      APPROVED_DIAGNOSTIC_SHA256: e5456a281c39cca1d92540e86c608de8028206fe922b5a5617ec7d7339a6793a
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
           fetch-depth: 0
-      - name: Verify separately reviewed harness and freeze; do not build APKs
+      - name: Verify exact metadata diagnostic source and frozen APK source paths
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$APPROVED_HARNESS_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$APPROVED_FREEZE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$APPROVED_HARNESS_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          test "$(git rev-parse HEAD)" = "$APPROVED_HARNESS_COMMIT"
-          PROPOSAL=runtime-proposals/b2
-          printf '%s  %s\n' "$APPROVED_HARNESS_MANIFEST_SHA256" "$PROPOSAL/harness-sha256.json" | sha256sum -c -
-          python3 - "$PROPOSAL" <<'PY'
-          import hashlib, json, sys
-          from pathlib import Path
-          root = Path(sys.argv[1])
-          hashes = json.loads((root/'harness-sha256.json').read_text())['files']
-          expected = {'ENVIRONMENT-README.md', 'README.md', 'b2-runtime-api33.sh', 'b2-runtime-evidence.py', 'environment-approval.json', 'freeze.json', 'proposed-workflow.yml.disabled', 'provision-and-run.py'}
-          assert set(hashes) == expected
-          assert all(hashlib.sha256((root/p).read_bytes()).hexdigest() == h for p,h in hashes.items())
-          PY
-          printf '%s  %s\n' "$APPROVED_FREEZE_SHA256" "$PROPOSAL/freeze.json" | sha256sum -c -
-          python3 "$PROPOSAL/b2-runtime-evidence.py" check-ready "$PROPOSAL/freeze.json"
-      - name: Prepare only approved official packages and temporary KVM; frozen P7-P9 once
+          [[ "$APPROVED_DIAGNOSTIC_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$APPROVED_DIAGNOSTIC_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(git rev-parse HEAD)" = "$APPROVED_DIAGNOSTIC_COMMIT"
+          git merge-base --is-ancestor 2fe45ac4022aecf57f21effdefbec6df77acbd97 HEAD
+          git diff --exit-code 2fe45ac4022aecf57f21effdefbec6df77acbd97 HEAD -- app native copyBoundaryLab ownerDeathLab scripts settings.gradle.kts
+          printf '%s  %s\n' "$APPROVED_DIAGNOSTIC_SHA256" runtime-proposals/b2/cache-inventory-diagnostic.py | sha256sum -c -
+      - name: Record existing three cached component metadata and exact rejected items
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 runtime-proposals/b2/provision-and-run.py
-      - name: Retain bounded runtime-only evidence on success or failure
+        run: python3 -B runtime-proposals/b2/cache-inventory-diagnostic.py
+      - name: Retain metadata diagnostics including failure; no runtime result
+        id: diagnostic_evidence
         if: always()
         shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
-          mkdir -p .build-output/b2-runtime
+          mkdir -p .build-output/b2-inventory-diagnostic
           python3 - <<'PY'
-          import json, os
+          import hashlib, json, os
           from pathlib import Path
-          root = Path('.build-output/b2-runtime')
-          result = root/'result.json'
-          if not result.exists():
-              result.write_text(json.dumps({'status':'FAILED','overall_exit':1,
-                  'job_status':os.environ['JOB_STATUS'],'runtime_summary_missing':True,
-                  'owned_child_stopped':False,'owned_serial_absent':False,
-                  'owned_temporary_directory_removed':False},indent=2)+'\n')
-          data = json.loads(result.read_text())
-          data['job_status'] = os.environ['JOB_STATUS']
-          prep = root/'environment-preparation.json'
-          if not prep.exists() or json.loads(prep.read_text()).get('status') != 'PASS':
-              data['status'], data['overall_exit'] = 'FAILED', 1
-          if data['job_status'] != 'success':
-              data['status'], data['overall_exit'] = 'FAILED', 1
-          result.write_text(json.dumps(data,indent=2)+'\n')
-          files = [p for p in root.rglob('*') if p.is_file()]
+          root = Path('.build-output/b2-inventory-diagnostic')
+          capture = root/'cache-inventory-diagnostic.json'
+          summary = {'status':'FAILED_BEFORE_CAPTURE','runtime_status':'NOT_RUN',
+              'sdkmanager_invocations':0,'harness_invocations':0,'kvm_permission_changes':0,
+              'job_status':os.environ['JOB_STATUS']}
+          if capture.exists():
+              raw = capture.read_bytes()
+              data = json.loads(raw)
+              summary.update(status=data['status'],capture_path=capture.name,
+                  capture_sha256=hashlib.sha256(raw).hexdigest(),
+                  capture_complete=data.get('capture_complete'),
+                  predicate_evaluated=data.get('predicate_evaluated'),
+                  predicate_pass=data.get('predicate_pass'))
+          (root/'result.json').write_text(json.dumps(summary,indent=2)+'\n')
           assert not any(p.is_symlink() for p in root.rglob('*'))
+          files = [p for p in root.rglob('*') if p.is_file()]
           assert not any(p.suffix.lower() in ('.apk','.so','.aar','.zip') for p in files)
-          assert sum(p.stat().st_size for p in files) < 28 * 1024 * 1024
+          assert sum(p.stat().st_size for p in files) < 6 * 1024 * 1024
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
+        if: always() && steps.diagnostic_evidence.outcome == 'success'
         with:
-          name: owner-death-b2-runtime-${{ github.sha }}
-          path: .build-output/b2-runtime/
+          name: owner-death-b2-inventory-${{ github.sha }}
+          path: .build-output/b2-inventory-diagnostic/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

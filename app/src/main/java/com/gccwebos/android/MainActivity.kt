@@ -17,24 +17,30 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.*
 import com.gccwebos.android.commerce.CommerceMode
@@ -123,58 +129,62 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
         onDispose { lifecycle?.removeObserver(observer) }
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
+    var startRegistration by rememberSaveable { mutableStateOf(false) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
     BackHandler(enabled = selected != Destination.Connect) {
         if (selected == Destination.Profile && !account.authenticated &&
             (account.factorReference != null || account.busy)) account.cancelAuthentication()
         else selectedName = Destination.Connect.name
     }
-    // Guidance belongs to the authenticated lifecycle, outside the keyed destination composition.
-    var guidance by remember { mutableStateOf(ResourceGuidanceState()) }
-    val currentGuidance = guidance.reconcile(
-        authenticated = account.authenticated,
-        accountKey = account.authenticatedAccountId ?: if (accountOverride != null) account.account.trim() else "",
-        sessionGeneration = account.authSessionGeneration,
-        resource = account.resource,
-        busy = account.busy,
-        error = account.error,
-        onConnectionPage = selected == Destination.Connect,
-    )
-    SideEffect { if (guidance != currentGuidance) guidance = currentGuidance }
     GccTheme {
         Surface(Modifier.fillMaxSize(), color = Brand.Background) {
-            Scaffold(containerColor = Brand.Background, bottomBar = {
-                Surface(color = Brand.Background) {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        NavigationBar(Modifier.widthIn(max = 760.dp).fillMaxWidth()
-                            .heightIn(min = if (LocalDensity.current.fontScale > 1.3f) 112.dp else 80.dp),
-                            containerColor = Brand.Surface, tonalElevation = 0.dp) {
-                            primaryDestinations.forEach { destination ->
-                                val title = stringResource(destination.title)
-                                NavigationBarItem(
-                                    modifier = Modifier.testTag("nav-${destination.name}"),
-                                    selected = destination == selected,
-                                    onClick = { selectedName = destination.name },
-                                    icon = { Icon(painterResource(destination.icon), contentDescription = null) },
-                                    label = { Text(title) },
-                                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Brand.Cyan,
-                                        selectedTextColor = Brand.Cyan, indicatorColor = Brand.SurfaceRaised,
-                                        unselectedIconColor = Brand.Muted, unselectedTextColor = Brand.Muted),
-                                )
+            // One continuous backdrop also remains visible behind the floating navigation bar.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                val loginPage = selected == Destination.Profile && !account.authenticated && !account.retainingCommerceSession
+                val backdropModifier = if (loginPage) Modifier.fillMaxSize() else Modifier.widthIn(max = 680.dp).fillMaxSize()
+                Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
+                    modifier = backdropModifier)
+                Box(backdropModifier.background(Brand.Background.copy(alpha = if (loginPage) .86f else .30f)))
+                Scaffold(containerColor = Color.Transparent, bottomBar = {
+                    Box(Modifier.fillMaxWidth().navigationBarsPadding()
+                        .padding(start = 14.dp, end = 14.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
+                        Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth(),
+                            shape = RoundedCornerShape(25.dp), color = Color(0xFF142A46).copy(alpha = .92f),
+                            border = BorderStroke(1.dp, Color(0xFF83B1DF).copy(alpha = .50f)), shadowElevation = 8.dp) {
+                            // A minimum, not a fixed height: wrapped or enlarged labels grow this row.
+                            Row(Modifier.fillMaxWidth().selectableGroup().heightIn(min = 70.dp).padding(horizontal = 6.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                primaryDestinations.forEach { destination ->
+                                    val title = stringResource(destination.title)
+                                    val chosen = destination == selected
+                                    Column(Modifier.weight(1f).heightIn(min = 44.dp)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(if (chosen) Brand.Cyan.copy(alpha = .15f) else Color.Transparent)
+                                        .testTag("nav-${destination.name}")
+                                        .selectable(selected = chosen, onClick = { if (destination == Destination.Profile) startRegistration = false; selectedName = destination.name }, role = Role.Tab)
+                                        .padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(painterResource(destination.icon), contentDescription = null,
+                                            tint = if (chosen) Brand.Cyan else Brand.Muted, modifier = Modifier.size(23.dp))
+                                        Text(title, color = if (chosen) Brand.Cyan else Brand.Muted,
+                                            style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+                                    }
+                                }
                             }
                         }
                     }
+                }) { padding ->
+                    // Scaffold measures the entire bar, its gap and system inset for content clearance.
+                    key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
+                        commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
+                        openAccount = { startRegistration = false; selectedName = Destination.Profile.name }, openPlans = { selectedName = Destination.Plans.name },
+                        openNodes = { selectedName = Destination.Lines.name },
+                        openRegistration = { startRegistration = true; selectedName = Destination.Profile.name },
+                        startRegistration = startRegistration, registrationOpener = registrationOpener,
+                        loginStartupReady = loginStartupReady, registrationOverride = registrationOverride) }
                 }
-             }) { padding -> key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
-                 commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
-                 openAccount = { selectedName = Destination.Profile.name }, openPlans = { selectedName = Destination.Plans.name },
-                 openNodes = { selectedName = Destination.Lines.name }, registrationOpener = registrationOpener,
-                 loginStartupReady = loginStartupReady, registrationOverride = registrationOverride) } }
-            if (currentGuidance.visible) NoResourceGuidance(
-                onDismiss = { guidance = currentGuidance.dismiss() },
-                openPlans = { guidance = currentGuidance.dismiss(); selectedName = Destination.Plans.name },
-                openWallet = { guidance = currentGuidance.dismiss(); selectedName = Destination.Profile.name },
-            )
+
+            }
         }
     }
 }
@@ -182,11 +192,8 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
 @Composable
 private fun LoginScreen(account: AccountController, registrationOpener: ((String) -> Unit)?,
                          loginStartupReady: Boolean, registrationOverride: RegistrationController?,
-                         padding: PaddingValues) {
+                         padding: PaddingValues, startRegistration: Boolean) {
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
-        Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize())
-        Box(Modifier.fillMaxSize().background(Brand.Background.copy(alpha = .86f)))
         Column(Modifier.widthIn(max = 520.dp).fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp).testTag("login-screen"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -205,7 +212,7 @@ private fun LoginScreen(account: AccountController, registrationOpener: ((String
                     BrandButton("重新读取本地订阅", account::restoreLocal, enabled = !account.busy, modifier = Modifier.testTag("local-subscription-retry"))
                 }
                 AccountPanel(account, compactLogin = true, registrationOpener = registrationOpener,
-                    loginStartupReady = loginStartupReady, registrationOverride = registrationOverride)
+                    loginStartupReady = loginStartupReady, registrationOverride = registrationOverride, startRegistration = startRegistration)
             }
         }
     }
@@ -217,20 +224,18 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery?, paymentOpenerOverride: ((String) -> Unit)?,
                   connectionControlState: ConnectionControlState, onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)?,
                   openAccount: () -> Unit, openPlans: () -> Unit, openNodes: () -> Unit,
+                  openRegistration: () -> Unit, startRegistration: Boolean,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
                   registrationOverride: RegistrationController?) {
     if (destination == Destination.Profile) {
         LaunchedEffect(account) { if (!account.authenticated && account.localSubscription.hasProfile) account.restoreAccount() }
         if (!account.authenticated && !account.retainingCommerceSession) {
-            LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride, padding)
+            LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride, padding, startRegistration)
             return
         }
     }
     val compact = destination == Destination.Connect || destination == Destination.Lines || destination == Destination.Plans || destination == Destination.Orders || destination == Destination.Profile
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
-        Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
-            modifier = Modifier.widthIn(max = 680.dp).fillMaxSize())
-        Box(Modifier.widthIn(max = 680.dp).fillMaxSize().background(Brand.Background.copy(alpha = .30f)))
         // Readable line lengths on tablets; no fixed-height account forms or data cards.
         Column(Modifier.widthIn(max = 680.dp).fillMaxSize()
             .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = if (compact) 16.dp else 20.dp)
@@ -240,7 +245,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
             when (destination) {
                 Destination.Connect -> {
                     ConnectionOverview(account, openAccount, openPlans, openNodes, connectionControlState,
-                        onConnectionPowerAction)
+                        onConnectionPowerAction, openRegistration)
                 }
                 Destination.Lines -> {
                     Text("订阅节点", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -277,17 +282,10 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans,
                         recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride)
                     var details by remember(account.authSessionGeneration) { mutableStateOf(false) }
-                    TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-more")) { Text(if (details) "收起更多" else "更多") }
-                    if (details) {
-                    BrandCard(Modifier.testTag("permissions-status")) {
-                        Text("连接权限与后台运行", style = MaterialTheme.typography.titleMedium)
-                        SupportingText("生产 VPN 仍未开放。后续连接会按需申请系统 VPN 授权与通知权限，后台状态由前台服务通知展示。")
-                        SupportingText("当前不宣称已经完成锁屏、网络切换或系统回收后的连接恢复。主动停止、撤销授权或强制停止都应结束连接。")
-                        SupportingText("无需位置、电话或广泛存储权限；不会自动修改电池优化设置。")
+                    TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-more")) {
+                        Text(if (details) "收起关于与更新" else "关于与更新")
                     }
-                    BrandCard { UpdatePanel() }
-                    if (BuildConfig.DEBUG) BrandCard { DebugBuildPanel() }
-                    }
+                    if (details) BrandCard { UpdatePanel() }
                 }
             }
             if (!compact) Text(stringResource(R.string.build_stage), color = Brand.Muted,
@@ -410,25 +408,3 @@ private fun InfoCard(title: String, detail: String) {
     }
 }
 
-
-@Composable
-private fun NoResourceGuidance(onDismiss: () -> Unit, openPlans: () -> Unit, openWallet: () -> Unit) {
-    AlertDialog(
-        modifier = Modifier.testTag("no-resource-guidance"),
-        onDismissRequest = onDismiss,
-        title = { Text("还没有订阅资源") },
-        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            Text("服务器已确认当前账号暂无资源。可以查看套餐购买，或先到钱包充值；到账与资源发放以服务器确认为准。")
-        } },
-        confirmButton = { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = openPlans, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .testTag("guidance-plans")) { Text("查看套餐") }
-            TextButton(onClick = openWallet, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .testTag("guidance-wallet")) { Text("前往钱包充值") }
-            // Keep all three actions in one measured column. Separate AlertDialog action slots
-            // can overlap a full-width multi-row confirm slot at real system font_scale=2.0.
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .testTag("guidance-dismiss")) { Text("稍后再说") }
-        } },
-    )
-}

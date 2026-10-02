@@ -54,7 +54,7 @@ class AppShellTest {
         return controller
     }
 
-    @Test fun signedOutLaunchShowsFourOrderedTabsAndTruthfullyDisabledConnection() {
+    @Test fun signedOutLaunchShowsFourOrderedTabsAndExplicitOpeningIntentWithoutEngineClaims() {
         launch()
         compose.onNodeWithTag("page-Connect").assertExists()
         val tabs = listOf("Connect", "Lines", "Plans", "Profile").map { compose.onNodeWithTag("nav-$it").assertExists() }
@@ -62,12 +62,21 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Lines").assertTextEquals("节点")
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
-        compose.onNodeWithTag("connection-power").assertExists()
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
+        compose.onNodeWithTag("connection-welcome").assertExists()
+        compose.onNodeWithTag("account-usage-card").assertExists()
         compose.onNodeWithTag("subscription-waterdrop").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
-        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接暂不可用")
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("未配置")
-        compose.onNodeWithTag("subscription-usage-unavailable").assertTextEquals("暂不可用")
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-usage-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
+        compose.onNodeWithTag("usage-guest-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().performClick()
+        compose.onNodeWithTag("usage-guest-guidance").assertExists()
+        compose.onNodeWithTag("usage-guest-login").assertIsEnabled()
+        compose.onNodeWithTag("usage-guest-register").assertIsEnabled()
+        compose.onNodeWithTag("login-screen").assertDoesNotExist()
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
     }
 
@@ -79,9 +88,11 @@ class AppShellTest {
         }
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
-        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接暂不可用").assertIsNotEnabled()
+        // A saved local profile cannot authenticate this account card or open a production engine.
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
         compose.onNodeWithText("已连接").assertDoesNotExist()
-        compose.onNodeWithTag("subscription-usage-unavailable").assertTextEquals("暂不可用")
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
+        compose.onNodeWithTag("subscription-usage-unavailable").assertDoesNotExist()
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
     }
 
@@ -93,7 +104,7 @@ class AppShellTest {
             state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
                 hasCapability = true, validUntil = Instant.now().plusSeconds(600))
         }
-        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled().performClick()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithTag("nav-Connect").performClick()
@@ -103,19 +114,19 @@ class AppShellTest {
             control.value = ConnectionControlState(ConnectionPhase.Connecting, revision = 1)
         }
         compose.onNodeWithTag("connection-status").assertTextEquals("连接中")
-        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接中").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("连接中").assertIsNotEnabled()
         compose.runOnIdle {
             state.busy = true // Account work cannot remove a real controller's cancellation capability.
             control.value = control.value.copy(canCancel = true, revision = 2)
         }
-        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("取消连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("取消连接").assertIsEnabled().performClick()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
         compose.runOnIdle {
             assertEquals(listOf(ConnectionPowerAction.Connect, ConnectionPowerAction.Cancel), actions.toList())
             control.value = ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true, revision = 3)
         }
         compose.onNodeWithTag("connection-status").assertTextEquals("已连接")
-        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("断开连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("断开").assertIsEnabled().performClick()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
         compose.runOnIdle {
             assertEquals(listOf(ConnectionPowerAction.Connect, ConnectionPowerAction.Cancel, ConnectionPowerAction.Disconnect), actions.toList())
@@ -132,7 +143,8 @@ class AppShellTest {
         restoration.emulateSavedInstanceStateRestore()
         compose.onNodeWithTag("page-Connect").assertExists()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("connection-welcome").assertExists()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
     }
 
@@ -150,6 +162,26 @@ class AppShellTest {
             assertEquals("navigation@example.invalid", state.account)
             check(requests.all { it == "/api/portal/human-challenges" })
         }
+    }
+
+    @Test fun guestOpeningRequiresExplicitLoginOrRegistrationChoiceAndReturnsToConnection() {
+        launch()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().performClick()
+        compose.onNodeWithTag("usage-guest-guidance").assertExists()
+        compose.runOnIdle { assertTrue(requests.isEmpty()) }
+        compose.onNodeWithTag("usage-guest-login").performClick()
+        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("registration-form").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("usage-guest-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().performClick()
+        compose.onNodeWithTag("usage-guest-register").performClick()
+        compose.onNodeWithTag("registration-form").assertExists()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("registration-form").assertDoesNotExist()
+        compose.runOnIdle { check(requests.all { it == "/api/portal/human-challenges" }) }
     }
 
     @Test fun anonymousPlansNeverExposePrivateCatalogOrBalanceAndNodesHaveIndependentTab() {
@@ -185,7 +217,7 @@ class AppShellTest {
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
         compose.onNodeWithTag("page-Profile").assertDoesNotExist()
         compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
         compose.runOnIdle { check(requests.all { it == "/api/portal/human-challenges" }) }
     }
 
@@ -252,7 +284,7 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
         repeat(2) {
             compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
             compose.onNodeWithTag("node-choice-1").assertIsSelected()
@@ -266,15 +298,18 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
         compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
-        compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
-        compose.onNodeWithTag("local-subscription-refresh").performScrollTo().performClick()
-        compose.waitUntil(5000) { nodeReads.get() == 3 && nodeAccount.nodeSelection.busy }
-        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("正在刷新")
-        compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
-        compose.runOnIdle { pendingNodeRead!!.complete(Unit); pendingNodeRead = null }
-        compose.waitUntil(5000) { !nodeAccount.nodeSelection.busy }
-        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
-        compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
+        val refreshGate = CompletableDeferred<Unit>()
+        try {
+            compose.runOnIdle { pendingNodeRead = refreshGate }
+            compose.onNodeWithTag("local-subscription-refresh").performScrollTo().performClick()
+            compose.waitUntil(5000) { nodeReads.get() == 3 && nodeAccount.nodeSelection.busy }
+            compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("正在刷新")
+            compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
+            compose.runOnIdle { refreshGate.complete(Unit); pendingNodeRead = null }
+            compose.waitUntil(5000) { !nodeAccount.nodeSelection.busy }
+            compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
+            compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
+        } finally { refreshGate.complete(Unit); pendingNodeRead = null }
     }
 
     @Test fun changedContentClearsConnectionSummaryAndNeedsExplicitNewOpaqueSelection() {
@@ -301,6 +336,7 @@ class AppShellTest {
 
     @Test fun cancelledAndAccountChangedLateReadsCannotReviveConnectionNodeSummary() {
         launchLoadedNodes()
+        try {
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
         compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
@@ -325,6 +361,7 @@ class AppShellTest {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
         compose.runOnIdle { assertNull(nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
+        } finally { pendingNodeRead?.complete(Unit); pendingNodeRead = null }
     }
 
     @Test fun onlyKnownExpiryShowsRenewalWhileRetryAndStorageKeepDistinctStates() {
@@ -341,7 +378,7 @@ class AppShellTest {
             state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
                 hasCapability = true, validUntil = Instant.EPOCH)
         }
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("订阅已过期")
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("本地配置已到期")
         compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertExists()
     }
 

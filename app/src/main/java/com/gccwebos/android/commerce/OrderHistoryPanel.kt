@@ -2,13 +2,19 @@ package com.gccwebos.android.commerce
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -37,10 +43,13 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
     DisposableEffect(details) { onDispose { details.dispose() } }
     BackHandler(enabled = details.visible, onBack = details::back)
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("按记录核对进度", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        TextButton(onClick = state::load, enabled = !state.busy,
-            modifier = Modifier.heightIn(min = 48.dp).testTag("commerce-refresh")) { Text("刷新订单") }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("订单", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f))
+        IconButton(onClick = state::load, enabled = !state.busy,
+            modifier = Modifier.size(48.dp).testTag("commerce-refresh")) {
+            Icon(painterResource(com.gccwebos.android.R.drawable.brand_refresh), "刷新订单", tint = Brand.Cyan)
+        }
     }
     if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("orders-loading"), color = Brand.Cyan)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -54,42 +63,50 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                 label = { Text(label) }, modifier = Modifier.heightIn(min = 48.dp).testTag("orders-$key"))
         }
     }
-    when (category) {
-        "orders" -> {
-            val page = state.orderPage
-            HistoryReadState(page?.orders?.size, state.busy, state.purchaseHistoryError, "商城订单", state.error)
-            page?.orders?.forEach { order ->
-                val selection = HistorySelection(HistoryKind.Legacy, order.ref)
-                HistorySummary("history-order-${order.ref}", order.offer.title.zh,
-                    formatCoins(order.amountUnits), purchaseStatus(order), order.ref, order.createdAt,
-                    details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
+    Column(Modifier.fillMaxWidth().testTag("orders-state-separation"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when (category) {
+            "orders" -> {
+                val page = state.orderPage
+                HistoryReadState(page?.orders?.size, state.busy, state.purchaseHistoryError, "商城订单", state.error)
+                HistoryGroups(page?.orders.orEmpty(), { it.createdAt }) { order ->
+                    val selection = HistorySelection(HistoryKind.Legacy, order.ref)
+                    HistorySummary("history-order-${order.ref}", historyOfferTitle(order.offer),
+                        formatCoins(order.amountUnits), if (order.offer.category == "data_pack") "流量包购买" else "套餐购买",
+                        purchaseStatePairs(order), null,
+                        order.ref, order.createdAt, com.gccwebos.android.R.drawable.brand_receipt,
+                        details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
+                }
+                if (page?.nextCursor != null) BrandButton("加载更早订单", state::moreOrders, enabled = !state.busy,
+                    modifier = Modifier.testTag("orders-more"))
             }
-            if (page?.nextCursor != null) BrandButton("加载更早订单", state::moreOrders, enabled = !state.busy,
-                modifier = Modifier.testTag("orders-more"))
-        }
-        "plans" -> {
-            HistoryReadState(state.transitions?.size, state.busy, state.purchaseHistoryError, "套餐计划", state.error)
-            state.transitions?.forEach { order ->
-                val selection = HistorySelection(HistoryKind.Deferred, order.ref)
-                HistorySummary("history-order-${order.ref}", order.offer.title.zh,
-                    formatCoins(order.amountUnits), purchaseStatus(order), order.ref, order.createdAt,
-                    details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
-            }
-        }
-        "recharge" -> {
-            HistoryReadState(state.rechargeHistory?.size, state.busy, state.rechargeHistoryError, "充值", state.error)
-            state.rechargeHistory?.forEach { order ->
-                val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
-                HistorySummary("history-recharge-${order.orderRef}", "充值 ${formatCoins(order.expectedPaidCoinUnits)}",
-                    formatMoney(order.amountMinor, order.currency, order.currencyExponent), rechargeStatus(order.status),
-                    order.orderRef, order.createdAt, details.selected == selection, !state.busy && !details.busy) {
-                    details.open(selection)
+            "plans" -> {
+                HistoryReadState(state.transitions?.size, state.busy, state.purchaseHistoryError, "套餐计划", state.error)
+                HistoryGroups(state.transitions.orEmpty(), { it.createdAt }) { order ->
+                    val selection = HistorySelection(HistoryKind.Deferred, order.ref)
+                    HistorySummary("history-order-${order.ref}", historyOfferTitle(order.offer),
+                        formatCoins(order.amountUnits), "套餐计划", purchaseStatePairs(order), null,
+                        order.ref, order.createdAt, com.gccwebos.android.R.drawable.brand_receipt,
+                        details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
                 }
             }
+            "recharge" -> {
+                HistoryReadState(state.rechargeHistory?.size, state.busy, state.rechargeHistoryError, "充值", state.error)
+                HistoryGroups(state.rechargeHistory.orEmpty(), { it.createdAt }) { order ->
+                    val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
+                    HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
+                        formatMoney(order.amountMinor, order.currency, order.currencyExponent), "支付充值",
+                        listOf("充值" to historyRechargeStatus(order.status), "到账" to historyCreditState(order.status)),
+                        "预计 ${formatCoins(order.expectedPaidCoinUnits)}", order.orderRef, order.createdAt,
+                        com.gccwebos.android.R.drawable.brand_wallet,
+                        details.selected == selection, !state.busy && !details.busy) {
+                        details.open(selection)
+                    }
+                }
+            }
+            else -> HistoryReadState(null, state.busy, state.purchaseHistoryError, "订单类型", state.error)
         }
-        else -> HistoryReadState(null, state.busy, state.purchaseHistoryError, "订单类型", state.error)
     }
-    SupportingText("支付、Coins 到账与资源交付分别核对。", Modifier.testTag("orders-state-separation"))
     if (details.visible) OrderDetailsDialog(details)
 }
 
@@ -97,15 +114,20 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
 private fun HistoryReadState(size: Int?, busy: Boolean, specificError: String?, label: String, globalError: String?) {
     val error = historyReadError(size, busy, specificError, globalError)
     if (error != null) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("history-error"))
-    if (size == null || size == 0) BrandCard(Modifier.testTag("history-read-state")) {
-        Text(when {
-            busy -> "正在查询$label"
-            size == null && error != null -> "${label}查询失败"
-            size == null -> "${label}尚未读取"
-            label == "商城订单" -> "暂无这类订单"
-            else -> "暂无${label}记录"
-        }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("history-read-title"))
-        SupportingText(if (size == null) "未完成查询不代表没有记录，请重试。" else "服务器本次返回了空列表。")
+    if (size == null || size == 0) Surface(Modifier.fillMaxWidth().testTag("history-read-state"),
+        shape = Brand.Shape, color = Brand.Surface.copy(alpha = .92f), border = BorderStroke(1.dp, Brand.Border)) {
+        Row(Modifier.heightIn(min = 48.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(painterResource(com.gccwebos.android.R.drawable.brand_receipt), null, tint = Brand.Muted,
+                modifier = Modifier.size(24.dp))
+            Text(when {
+                busy -> "正在查询$label"
+                size == null && error != null -> "${label}查询失败"
+                size == null -> "${label}尚未读取"
+                label == "商城订单" -> "暂无这类订单"
+                else -> "暂无${label}记录"
+            }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("history-read-title"))
+        }
     }
 }
 
@@ -114,21 +136,69 @@ internal fun historyReadError(size: Int?, busy: Boolean, specificError: String?,
     specificError ?: globalError?.takeIf { size == null && !busy }
 
 @Composable
-private fun HistorySummary(tag: String, title: String, amount: String, status: String,
-    ref: String, createdAt: Instant, isSelected: Boolean, enabled: Boolean, onDetail: () -> Unit) {
+private fun <T> HistoryGroups(rows: List<T>, createdAt: (T) -> Instant, content: @Composable (T) -> Unit) {
+    // Preserve the server's cursor/order. Only consecutive rows on the same local day share a heading.
+    rows.forEachIndexed { index, row ->
+        val timestamp = createdAt(row)
+        val day = historyDay(timestamp)
+        if (index == 0 || day != historyDay(createdAt(rows[index - 1]))) {
+            Text(historyDateHeading(timestamp), color = Brand.Muted, style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 6.dp, start = 4.dp).testTag("history-date-$day"))
+        }
+        content(row)
+    }
+}
+
+@Composable
+private fun HistorySummary(tag: String, title: String, amount: String, type: String,
+    states: List<Pair<String, String>>, expected: String?, ref: String, createdAt: Instant, icon: Int,
+    isSelected: Boolean, enabled: Boolean, onDetail: () -> Unit) {
     Surface(Modifier.fillMaxWidth().testTag(tag).semantics { selected = isSelected },
-        shape = Brand.Shape, color = Brand.Surface.copy(alpha = .82f),
+        shape = RoundedCornerShape(18.dp), color = Brand.Surface.copy(alpha = .92f),
         border = BorderStroke(1.dp, if (isSelected) Brand.Cyan else Brand.Border)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(amount, style = MaterialTheme.typography.titleMedium)
-            SupportingText(status)
-            SupportingText(historyTime(createdAt))
-            SupportingText("记录 $ref")
-            TextButton(onClick = onDetail, enabled = enabled,
-                modifier = Modifier.heightIn(min = 48.dp).testTag("history-detail-$ref")) { Text("查看详情  ›") }
+        BoxWithConstraints {
+            val stackedAmount = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.5f || amount.length > 13
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                .clickable(enabled = enabled, role = Role.Button, onClickLabel = "查看详情", onClick = onDetail)
+                .testTag("history-detail-$ref").padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(shape = RoundedCornerShape(10.dp), color = Brand.SurfaceRaised,
+                    modifier = Modifier.size(34.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(painterResource(icon), null, tint = Brand.Cyan, modifier = Modifier.size(22.dp))
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (stackedAmount) {
+                        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        HistoryAmount(amount, "$tag-amount")
+                    } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold)
+                        HistoryAmount(amount, "$tag-amount")
+                    }
+                    Text("${historyClock(createdAt)} · $type", color = Brand.Muted,
+                        style = MaterialTheme.typography.labelMedium, modifier = Modifier.testTag("$tag-time"))
+                    states.forEachIndexed { index, (label, value) ->
+                        Text("$label · $value", color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("$tag-state-$index"))
+                    }
+                    expected?.let { Text(it, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag("$tag-expected")) }
+                }
+                Icon(painterResource(com.gccwebos.android.R.drawable.brand_arrow), null, tint = Brand.Muted,
+                    modifier = Modifier.size(16.dp))
+            }
         }
     }
+}
+
+@Composable
+private fun HistoryAmount(amount: String, tag: String) {
+    // An order amount is neither a debit nor a confirmed wallet credit.
+    Text(amount, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+        color = Brand.Text, modifier = Modifier.testTag(tag))
 }
 
 @Composable
@@ -149,7 +219,6 @@ private fun OrderDetailsDialog(state: OrderDetailController) {
                     is HistoryDetail.Recharge -> RechargeDetails(detail.value)
                     null -> Unit
                 }
-                SupportingText("返回只关闭详情，保留列表；不会取消或重建订单。")
             }
         },
         confirmButton = { TextButton(onClick = state::back,
@@ -196,11 +265,11 @@ private fun RechargeDetails(value: RechargeOrder) {
     DetailField("充值金额", formatMoney(value.amountMinor, value.currency, value.currencyExponent))
     DetailField("预计到账", formatCoins(value.expectedPaidCoinUnits))
     DetailField("充值状态", rechargeStatus(value.status), "history-recharge-state")
+    DetailField("Coins 到账", historyCreditState(value.status), "history-credit-state")
     DetailField("支付方式", when (value.paymentMethod) { "alipay" -> "支付宝"; "wechat_pay" -> "微信支付"; else -> "PayPal" })
     DetailField("订单有效至", historyTime(value.expiresAt))
     DetailField("创建时间", historyTime(value.createdAt))
     DetailField("更新时间", historyTime(value.updatedAt))
-    SupportingText("支付已核验需继续查询 Coins 到账；充值到账后购买商品仍需另行确认。")
 }
 
 @Composable
@@ -226,4 +295,25 @@ internal fun deferredState(value: String) = when (value) {
     "cancelled" -> "已取消"; else -> "需要对账，请勿重复购买"
 }
 private fun coinTypeLabel(value: String) = when (value) { "paid_coins" -> "充值 Coins"; "bonus_coins" -> "赠送 Coins"; else -> "奖励 Coins" }
+private fun historyOfferTitle(offer: Offer) = if (offer.category == "plan" && offer.durationDays != null)
+    "${offer.durationDays} 天套餐" else offer.title.zh
+private fun purchaseStatePairs(value: PurchaseResult): List<Pair<String, String>> = when (value) {
+    is PurchaseResult.Order -> listOf("扣币" to paymentState(value.paymentStatus),
+        "交付" to fulfillmentState(value.fulfillmentStatus))
+    is PurchaseResult.Deferred -> listOf("计划" to deferredState(value.state))
+}
+private fun historyRechargeStatus(status: String) = when (status) {
+    "created" -> "订单已创建"; "entry_ready" -> "等待付款"; "pending" -> "等待支付确认"
+    "payment_verified" -> "支付已核验"; "credited" -> "充值已到账"
+    "failed_no_charge" -> "服务器确认未扣款"; "expired" -> "订单已过期"
+    else -> "需要对账，请勿重复付款"
+}
+private fun historyCreditState(status: String) = when (status) {
+    "credited" -> "Coins 已到账"; "payment_verified" -> "等待 Coins 到账"; else -> "未记为到账"
+}
+private fun historyDay(value: Instant) = value.atZone(ZoneId.systemDefault()).toLocalDate().toString()
+private fun historyDateHeading(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd z")
+    .withZone(ZoneId.systemDefault()).format(value)
+private fun historyClock(value: Instant) = DateTimeFormatter.ofPattern("HH:mm")
+    .withZone(ZoneId.systemDefault()).format(value)
 private fun historyTime(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z").withZone(ZoneId.systemDefault()).format(value)

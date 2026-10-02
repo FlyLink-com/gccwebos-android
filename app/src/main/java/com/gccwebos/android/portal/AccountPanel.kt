@@ -112,6 +112,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     private var acceptedAccountId by mutableStateOf<String?>(null)
     val authenticatedAccountId: String? get() = acceptedAccountId?.takeIf { authenticated }
     private var acceptedSessionBinding: String? = null
+    private var usageAuthentication: AccountUsageAuthentication? = null
     /** Survives page disposal and exact same-session foreground validation, never another identity. */
     internal var referralGenerationGuard by mutableStateOf(ReferralGenerationGuard())
         private set
@@ -137,16 +138,36 @@ internal class AccountController(private val repository: PortalRepository, priva
         authGeneration = { authSessionGeneration },
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing },
         onSnapshot = { localSubscription = it; nodes = it.nodes })
+    val accountUsage = AccountUsageController(scope,
+        reader = { owner, epoch -> repository.readAccountOverview(owner, epoch) },
+        onSessionExpired = { commerceSessionExpired() })
+    fun refreshAccountUsage() = accountUsage.update()
+    fun cancelAccountUsageUpdate() = accountUsage.cancel()
+    private fun clearAccountUsage() {
+        usageAuthentication = null
+        accountUsage.bind(null, null, authSessionGeneration)
+    }
+    internal fun acceptAccountOverviewObservation(overview: BoundAccountOverview,
+        expectedAuthentication: AccountUsageAuthentication, expectedAuthEpoch: Long): Boolean {
+        if (!authenticated || expectedAuthEpoch != authSessionGeneration || expectedAuthentication != usageAuthentication ||
+            overview.context.owner != expectedAuthentication.owner || overview.context.repositoryEpoch != expectedAuthentication.repositoryEpoch)
+            return false
+        if (!accountUsage.observeExternal(overview, expectedAuthEpoch)) return false
+        resource = overview.resource
+        return true
+    }
     fun onForeground() {
         // Handler delays can pause during sleep; the repository's elapsed clock cannot.
         expireLoginChallengeIfNeeded()
         // Authenticator app round trips must retain the still-bounded TOTP ticket.
         if (factorReference != null || !authenticated) return
+        accountUsage.suspendForVerification()
         foregroundCheckPending = true
         if (!busy) revalidateAccount()
     }
     fun restore() {
         if (busy) return
+        clearAccountUsage()
         expiryTask?.cancel()
         authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null
         restoring = true; restorationPending = true
@@ -168,6 +189,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     private fun revalidateAccount() = checkAccount(force = true)
     private fun checkAccount(force: Boolean) {
         if (busy || factorReference != null || (authenticated && !force)) return
+        accountUsage.suspendForVerification()
         val checkOperation = operation + 1
         expiryTask?.cancel(); authenticated = false; security = null
         restoring = true; restorationPending = true
@@ -180,7 +202,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                 if (saved != null) { acceptAuthenticated(saved); loadResource() }
             } finally {
                 if (operation == checkOperation) {
-                    if (!authenticated) commerceSessionIdentity = null
+                    if (!authenticated) { commerceSessionIdentity = null; clearAccountUsage() }
                     restoring = false; foregroundCheckPending = false
                 }
             }
@@ -309,6 +331,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     }
     private suspend fun acceptAuthenticated(value: Session, submittedEmail: String? = null) {
         val remaining = repository.remainingSessionMillis()
+        val usageIdentity = repository.captureAccountUsageAuthentication(AccountUsageOwner.fromSession(value))
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (acceptedAccountId != value.accountId) purchaseReturnRef = null
         val binding = sessionBinding(value.token)
@@ -320,6 +343,8 @@ internal class AccountController(private val repository: PortalRepository, priva
         acceptedAccountId = value.accountId; acceptedSessionBinding = binding
         nodeSelection.invalidate()
         security = null; account = email.orEmpty(); authenticated = true; authSessionGeneration++
+        usageAuthentication = usageIdentity
+        accountUsage.bind(usageIdentity.owner, usageIdentity.repositoryEpoch, authSessionGeneration)
         nodeSelection.sync()
         emailHint = email?.let { EmailHint(value.accountId, binding, authSessionGeneration, it) }
         localSubscription = repository.localSubscriptions.snapshot(); nodes = localSubscription.nodes
@@ -328,6 +353,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         expiryTask = scope.launch {
             kotlinx.coroutines.delay(remaining)
             if (authSessionGeneration == authEpoch && authenticated) {
+                clearAccountUsage()
                 nodeSelection.invalidate()
                 account = displayEmail.orEmpty()
                 referralGenerationGuard = ReferralGenerationGuard()
@@ -351,17 +377,32 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
-    fun commerceSessionExpired() { nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource() {
+        val expectedUsage = usageAuthentication
+        val expectedAuthEpoch = authSessionGeneration
+        fun publish(overview: BoundAccountOverview) {
+            // Original typed read context is retained even for singleton None/Reconciliation.
+            if (!authenticated || expectedAuthEpoch != authSessionGeneration || expectedUsage == null ||
+                overview.context.owner != expectedUsage.owner || overview.context.repositoryEpoch != expectedUsage.repositoryEpoch)
+                throw CancellationException("Resource observation owner changed")
+            // Auth matching alone is insufficient: the original read must also win the
+            // resource/cycle publication fence before the legacy resource field changes.
+            acceptAccountOverviewObservation(overview, expectedUsage, expectedAuthEpoch)
+        }
         importStatus = null; deliveryReceived = false; resource = null
         try {
             if (localSubscription.hasProfile) {
                 // Wallet login never silently replaces a separately saved local VPN capability.
-                resource = repository.refresh()
+                publish(repository.refreshWithObservation())
             } else {
-                val snapshot = repository.refreshAndImport(onResource = { resource = it }, onDeliveryReceived = { deliveryReceived = true })
-                resource = snapshot.resource; importStatus = snapshot.status
+                val snapshot = repository.refreshAndImportObserved(onOverview = ::publish, onDeliveryReceived = { deliveryReceived = true })
+                if (!authenticated || expectedAuthEpoch != authSessionGeneration || expectedUsage != usageAuthentication)
+                    throw CancellationException("Resource observation owner changed")
+                // onOverview already published the ordered resource. Do not overwrite it
+                // again after setup/download with a possibly superseded snapshot.
+                importStatus = snapshot.status
                 nodes = snapshot.nodes
             }
         } finally {
@@ -375,6 +416,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun clearLocal() = reset(clearLocal = true)
     fun cancelAuthentication() = reset(clearLocal = false)
     private fun reset(clearLocal: Boolean) {
+        clearAccountUsage()
         commerceSessionIdentity = null
         nodeSelection.invalidate()
         cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
@@ -418,7 +460,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                     emailHint = null; secondFactorEmail = null
                 }
                 error = when(failure.reason) {
-                    PortalFailure.Reason.SESSION_EXPIRED -> { commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
+                    PortalFailure.Reason.SESSION_EXPIRED -> { clearAccountUsage(); commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请刷新题目后重试" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
                     PortalFailure.Reason.RECOVERY_REQUIRED -> "上次交付需要恢复，请稍后重试或联系支持；不会重复领取"
@@ -445,9 +487,10 @@ internal class AccountController(private val repository: PortalRepository, priva
 internal fun AccountPanel(state: AccountController, compactLogin: Boolean = false,
                           registrationOpener: ((String) -> Unit)? = null,
                           loginStartupReady: Boolean = true,
-                          registrationOverride: RegistrationController? = null) {
+                          registrationOverride: RegistrationController? = null,
+                          startRegistration: Boolean = false) {
     var confirmReset by remember { mutableStateOf(false) }
-    var registering by remember(state) { mutableStateOf(false) }
+    var registering by remember(state, startRegistration) { mutableStateOf(startRegistration) }
     val registrationScope = rememberCoroutineScope()
     val registration = remember(state, registrationOverride) {
         registrationOverride ?: RegistrationController(registrationScope, productionRegistrationGateway(),

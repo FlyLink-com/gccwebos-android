@@ -49,9 +49,11 @@ internal fun GccTheme(content: @Composable () -> Unit) {
 
 @Composable
 internal fun BrandCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = Brand.Shape, color = Brand.Surface.copy(alpha = .82f),
-        border = BorderStroke(1.dp, Brand.Border)) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    Surface(modifier.fillMaxWidth(), shape = Brand.Shape, color = Color.Transparent,
+        border = BorderStroke(1.dp, Color(0xFFA9CCF1).copy(alpha = .46f))) {
+        Column(Modifier.background(Brush.linearGradient(listOf(
+            Color(0xFF182B4B).copy(alpha = .94f), Color(0xFF1E2549).copy(alpha = .90f))))
+            .padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
     }
 }
 
@@ -60,14 +62,14 @@ internal fun BrandButton(text: String, onClick: () -> Unit, modifier: Modifier =
                          enabled: Boolean = true) {
     val shape = RoundedCornerShape(14.dp)
     Button(onClick, enabled = enabled,
-        modifier = modifier.fillMaxWidth().heightIn(min = 52.dp).clip(shape)
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape)
             .background(if (enabled) Brush.horizontalGradient(listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd))
                 else Brush.horizontalGradient(listOf(Brand.SurfaceRaised, Brand.SurfaceRaised))),
         shape = shape,
         colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent,
             contentColor = Brand.Text, disabledContainerColor = Color.Transparent,
             disabledContentColor = Brand.Muted),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp)) {
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
         Text(text, fontWeight = FontWeight.SemiBold)
     }
 }

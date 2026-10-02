@@ -146,7 +146,7 @@ class CommerceEligibilityUiTest {
         compose.waitUntil(5000) {
             !account.busy && !commerce.busy && if (mode == CommerceMode.Plans) commerce.catalogLoaded else commerce.walletLoaded
         }
-        if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购套餐")
         else compose.onNodeWithTag("wallet-balance").assertTextEquals("$units Coins")
         if (mode == CommerceMode.Wallet && !commerce.pendingRecharge) compose.onNodeWithTag("recharge-offers-empty").assertExists()
     }

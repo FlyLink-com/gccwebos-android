@@ -10,11 +10,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.gccwebos.android.R
 import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
 import java.time.Instant
@@ -34,6 +36,15 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     val wallet = state.wallet
     val walletFailure = state.walletError ?: state.error?.takeIf { !state.walletLoaded && !state.busy }
     BalanceCard(Modifier.testTag("wallet-card")) {
+        if (mode == CommerceMode.Mine) Row(Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("余额", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            IconButton(onClick = state::loadBalance, enabled = !state.busy,
+                modifier = Modifier.size(48.dp).testTag("commerce-refresh")) {
+                Icon(painterResource(R.drawable.brand_refresh), contentDescription = "刷新余额",
+                    tint = Brand.Cyan, modifier = Modifier.size(20.dp))
+            }
+        }
         WalletBalanceMetrics(wallet)
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("wallet-loading"), color = Brand.Cyan)
         walletFailure?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("wallet-error")) }
@@ -62,8 +73,6 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                     recharge(Modifier.weight(1f)); ledger(Modifier.weight(1f))
                 }
             }
-            TextButton(onClick = state::loadBalance, enabled = !state.busy,
-                modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp).testTag("commerce-refresh")) { Text("刷新") }
         }
     }
     if (mode != CommerceMode.Wallet) return

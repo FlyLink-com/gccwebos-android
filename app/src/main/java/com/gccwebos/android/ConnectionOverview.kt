@@ -1,38 +1,28 @@
 package com.gccwebos.android
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.gccwebos.android.design.Brand
-import com.gccwebos.android.design.SupportingText
-import com.gccwebos.android.design.remainingValidity
+import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.LocalSubscriptionSnapshot
 import com.gccwebos.android.portal.LocalSubscriptionStatus
 import java.time.Instant
+import java.time.Duration
 import kotlinx.coroutines.delay
 
 internal enum class ConnectionVisualTone { Neutral, Connecting, Connected, Error }
@@ -138,7 +128,7 @@ internal fun connectionOverviewPresentation(
         action = action, powerLabel = powerLabel)
 }
 
-/** A single power component. Production supplies no engine state or command handler yet. */
+/** Welcome and account overview are independent of local configuration and engine admission. */
 @Composable
 internal fun ConnectionOverview(
     account: AccountController,
@@ -147,14 +137,27 @@ internal fun ConnectionOverview(
     openNodes: () -> Unit,
     control: ConnectionControlState = ConnectionControlState(),
     onPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
+    openRegistration: () -> Unit = openAccount,
+    nowSource: () -> Instant = Instant::now,
 ) {
     val snapshot = account.localSubscription
-    val now by produceState(Instant.now(), snapshot.validUntil) {
-        while (true) { value = Instant.now(); delay(1_000) }
+    val usage by account.accountUsage.state.collectAsState()
+    val clock by rememberUpdatedState(nowSource)
+    val now by produceState(clock(), snapshot.validUntil) {
+        value = clock()
+        while (snapshot.validUntil != null) { delay(1_000); value = clock() }
+    }
+    // The account card wakes only at actual cycle/service boundaries, without another GET.
+    val usageNow by produceState(clock(), usage.resource, account.authSessionGeneration, usage.verifying) {
+        while (true) {
+            value = clock()
+            val boundary = nextAccountUsageBoundary(usage.resource, value) ?: break
+            delay((Duration.between(value, boundary).toMillis() + 1).coerceAtLeast(1))
+        }
     }
     var synchronizedNodeGeneration by remember(account) { mutableStateOf<Long?>(null) }
     LaunchedEffect(account, account.authSessionGeneration, snapshot, now) {
-        account.nodeSelection.sync() // Local registry/validity read only; never starts a refresh or tunnel.
+        account.nodeSelection.sync() // Local validity only. No configuration import or HTTP.
         synchronizedNodeGeneration = account.authSessionGeneration
     }
     val nodeSnapshot = account.nodeSelection.snapshot
@@ -162,56 +165,55 @@ internal fun ConnectionOverview(
         synchronizedNodeGeneration == account.authSessionGeneration && !account.nodeSelection.busy &&
             nodeSnapshot.status == LocalSubscriptionStatus.READY && nodeSnapshot.validUntil?.let { until -> until > now } != false
     }
-    val presentation = connectionOverviewPresentation(snapshot, now, control)
-    val accent = when (presentation.tone) {
-        ConnectionVisualTone.Neutral -> Brand.Muted
-        ConnectionVisualTone.Connecting -> Brand.Blue
-        ConnectionVisualTone.Connected -> Brand.Green
-        ConnectionVisualTone.Error -> Color(0xFFFF658E)
-    }
+    val local = connectionOverviewPresentation(snapshot, now, control)
     val operable = !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing
+    val verifiedUsage = account.authenticated && usage.authenticated && !usage.verifying
+    val display = accountUsagePresentation(if (verifiedUsage) usage.resource else null, usageNow, usage.notUpdated)
+    var showGuestChoice by remember(account.authSessionGeneration) { mutableStateOf(false) }
     var acceptedCommand by remember(control, account) { mutableStateOf(false) }
-    // Session refresh/login must not prevent a controller-authorized cancel or disconnect.
-    val powerEnabled = onPowerAction != null && !acceptedCommand && presentation.action != ConnectionPowerAction.None &&
-        (presentation.action != ConnectionPowerAction.Connect || !account.clearing)
-    Column(Modifier.fillMaxWidth().testTag("connection-overview"), horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Box(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp).testTag("connection-power"),
-            contentAlignment = Alignment.Center) {
-            Button(onClick = {
-                if (powerEnabled && !acceptedCommand) {
-                    acceptedCommand = true
-                    onPowerAction?.invoke(presentation.action)
+    // Only an actual controller phase may expose a connection command. Production still has no engine.
+    val controlMode = control.phase in setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected,
+        ConnectionPhase.Disconnecting) || control.canConnect || control.commandPending
+    val controlEnabled = onPowerAction != null && !acceptedCommand && local.action != ConnectionPowerAction.None &&
+        (local.action != ConnectionPowerAction.Connect || !account.clearing)
+    Column(Modifier.fillMaxWidth().testTag("connection-overview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ConnectionWelcome()
+        Text(local.connectionText, style = MaterialTheme.typography.bodySmall,
+            color = if (control.phase == ConnectionPhase.Connected) Brand.Green else Brand.Muted,
+            modifier = Modifier.testTag("connection-status"))
+        AccountUsageCard(display, authenticated = account.authenticated,
+            onRefresh = account::refreshAccountUsage, onLogin = openAccount, onRegister = openRegistration,
+            loading = usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
+            error = usage.error, refreshEnabled = verifiedUsage,
+            primaryLabel = when {
+                !account.authenticated -> "开通飞连vpn"
+                display.state == AccountUsageState.NoActivePlan -> "开通飞连vpn"
+                display.state == AccountUsageState.Available -> "一键连接"
+                else -> "重试"
+            },
+            primaryEnabled = operable && (!account.authenticated || verifiedUsage && display.state == AccountUsageState.NoActivePlan),
+            onPrimaryAction = { if (!account.authenticated) showGuestChoice = true else if (verifiedUsage &&
+                display.state == AccountUsageState.NoActivePlan && usage.error == null) openPlans() },
+            showPrimary = !controlMode, primaryTestTag = "vpn-connect")
+        if (usage.busy) TextButton(account::cancelAccountUsageUpdate,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-usage-cancel")) { Text("取消更新") }
+        if (controlMode) BrandButton(
+            when (local.action) {
+                ConnectionPowerAction.Connect -> "一键连接"
+                ConnectionPowerAction.Cancel -> "取消连接"
+                ConnectionPowerAction.Disconnect -> "断开"
+                ConnectionPowerAction.None -> local.powerLabel
+            }, {
+                if (controlEnabled && !acceptedCommand) { acceptedCommand = true; onPowerAction?.invoke(local.action) }
+            }, enabled = controlEnabled,
+            modifier = Modifier.testTag("vpn-connect").semantics {
+                contentDescription = when (local.action) {
+                    ConnectionPowerAction.Connect -> "一键连接"
+                    ConnectionPowerAction.Disconnect -> "断开"
+                    else -> local.powerLabel
                 }
-            }, enabled = powerEnabled, shape = CircleShape, contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.size(184.dp)
-                    .background(Brush.radialGradient(listOf(accent.copy(alpha = .20f), accent.copy(alpha = .04f))), CircleShape)
-                    .border(1.5.dp, accent.copy(alpha = .65f), CircleShape)
-                    .semantics {
-                        contentDescription = presentation.powerLabel
-                        stateDescription = listOf(presentation.connectionText, presentation.title).filter { it.isNotEmpty() }.joinToString(" · ")
-                    }.testTag("vpn-connect"),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = accent,
-                    disabledContainerColor = Color.Transparent, disabledContentColor = accent)) {
-                Canvas(Modifier.size(72.dp)) {
-                    drawArc(accent, startAngle = -45f, sweepAngle = 270f, useCenter = false,
-                        topLeft = Offset(size.width * .16f, size.height * .22f),
-                        size = Size(size.width * .68f, size.height * .68f),
-                        style = Stroke(5.dp.toPx(), cap = StrokeCap.Round))
-                    drawLine(accent, Offset(size.width * .5f, size.height * .09f),
-                        Offset(size.width * .5f, size.height * .5f), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            Text(presentation.connectionText, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.testTag("connection-status"))
-            if (presentation.title.isNotEmpty()) {
-                SupportingText(" · ")
-                Text(presentation.title, color = accent, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.testTag("local-subscription-title"))
-            }
-        }
+                stateDescription = local.connectionText
+            })
         TextButton(onClick = openNodes, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val summary: @Composable (Modifier) -> Unit = { modifier ->
@@ -223,40 +225,64 @@ internal fun ConnectionOverview(
                             style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
                     }
                 }
-                if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) {
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        summary(Modifier.fillMaxWidth())
-                        Text("选择节点 ›", modifier = Modifier.align(Alignment.End))
-                    }
+                if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) Column(Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    summary(Modifier.fillMaxWidth()); Text("选择节点 ›", modifier = Modifier.align(Alignment.End))
                 } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     summary(Modifier.weight(1f)); Text("选择节点 ›")
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SupportingText("剩余时间")
-                Text(presentation.countdown?.removePrefix("剩余 ") ?: "暂不可用", style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center, modifier = Modifier.testTag("subscription-validity-countdown"))
+        // Local configuration evidence has no account/resource binding and is never the account usage.
+        if (snapshot.status != LocalSubscriptionStatus.MISSING) {
+            val localTitle = if (local.status == LocalSubscriptionStatus.EXPIRED) "本地配置已到期" else local.title
+            if (localTitle.isNotEmpty()) SupportingText(localTitle, Modifier.testTag("local-subscription-title"))
+            local.countdown?.let { Text("本地配置有效时间 $it", color = Brand.Muted,
+                style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("subscription-validity-countdown")) }
+            val action = when {
+                local.status == LocalSubscriptionStatus.EXPIRED -> Triple("查看套餐", "expired-subscription-renew", openPlans)
+                local.status == LocalSubscriptionStatus.INVALID_LINK -> Triple("登录恢复订阅", "open-account", openAccount)
+                snapshot.hasCapability -> Triple("刷新本地配置", "local-subscription-refresh", account::refreshSubscription)
+                else -> null
             }
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                SupportingText("剩余流量")
-                Text(presentation.usageText, style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center, modifier = Modifier.testTag("subscription-usage-unavailable"))
-            }
+            action?.let { TextButton(it.third, enabled = operable,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(it.second)) { Text(it.first) } }
         }
-        val subscriptionAction: @Composable (Modifier) -> Unit = { modifier ->
-            val action: Triple<String, String, () -> Unit> = when {
-                presentation.status == LocalSubscriptionStatus.EXPIRED -> Triple("续费", "expired-subscription-renew", openPlans)
-                presentation.status == LocalSubscriptionStatus.INVALID_LINK -> Triple("登录恢复订阅", "open-account", openAccount)
-                snapshot.hasCapability -> Triple("刷新订阅", "local-subscription-refresh", account::refreshSubscription)
-                account.authenticated -> Triple("领取／同步订阅", "local-subscription-sync", account::refresh)
-                else -> Triple("登录领取订阅", "open-account", openAccount)
-            }
-            TextButton(onClick = action.third, enabled = operable,
-                modifier = modifier.heightIn(min = 48.dp).testTag(action.second)) { Text(action.first) }
+    }
+    if (showGuestChoice && !account.authenticated) AlertDialog(
+        modifier = Modifier.testTag("usage-guest-guidance"), onDismissRequest = { showGuestChoice = false },
+        title = { Text("开通飞连vpn") }, text = { Text("登录或注册后查看套餐") },
+        confirmButton = { Column {
+            TextButton({ showGuestChoice = false; openAccount() }, modifier = Modifier.heightIn(min = 48.dp)
+                .testTag("usage-guest-login")) { Text("登录") }
+            TextButton({ showGuestChoice = false; openRegistration() }, modifier = Modifier.heightIn(min = 48.dp)
+                .testTag("usage-guest-register")) { Text("注册") }
+        } }, dismissButton = { TextButton({ showGuestChoice = false }) { Text("取消") } })
+}
+
+/** Draw only the upper 53% of the approved mobile asset; its old chest brand is excluded. */
+@Composable
+private fun ConnectionWelcome() {
+    val robot = ImageBitmap.imageResource(R.drawable.brand_welcome_wave)
+    val sourceHeight = (robot.height * .53f).toInt().coerceAtLeast(1)
+    val greeting: @Composable (Modifier) -> Unit = { modifier ->
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("欢迎回来", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            SupportingText("飞连vpn·与你同行")
         }
-        subscriptionAction(Modifier.fillMaxWidth())
+    }
+    val image: @Composable (Modifier) -> Unit = { modifier ->
+        Canvas(modifier.width(104.dp).aspectRatio(robot.width.toFloat() / sourceHeight)) {
+            drawImage(robot, srcOffset = IntOffset.Zero, srcSize = IntSize(robot.width, sourceHeight),
+                dstSize = IntSize(size.width.toInt(), size.height.toInt()))
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().testTag("connection-welcome")) {
+        if (maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.5f) Column(Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            greeting(Modifier.fillMaxWidth()); image(Modifier.align(Alignment.End))
+        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) { greeting(Modifier.weight(1f)); image(Modifier) }
     }
 }

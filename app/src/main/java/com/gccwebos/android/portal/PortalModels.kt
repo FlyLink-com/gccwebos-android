@@ -24,8 +24,12 @@ sealed interface Resource {
                          val durationDays: Long? = null, val monthlyTrafficGb: Double? = null) : Resource
 }
 data class Usage(val totalBytes: Long, val usedBytes: Long?, val remainingBytes: Long?,
-                 val status: String, val updatedAt: Instant?) {
+                 val status: String, val updatedAt: Instant?,
+                 // Older in-memory fixtures have no period. Wire reads must supply both.
+                 val cycleStartedAt: Instant? = null, val cycleEndsAt: Instant? = null) {
     init {
+        require((cycleStartedAt == null) == (cycleEndsAt == null))
+        if (cycleStartedAt != null) require(cycleStartedAt < requireNotNull(cycleEndsAt))
         require(totalBytes in 0..MAX_SAFE && (usedBytes == null || usedBytes in 0..MAX_SAFE))
         require(status in setOf("pending", "measured_zero", "measured", "stale"))
         if (status == "pending") require(usedBytes == null && remainingBytes == null && updatedAt == null)

@@ -31,6 +31,23 @@ class GlassMaterialPolicyTest {
         assertThrows(IllegalArgumentException::class.java) { GlassMaterialPolicy.sampleSize(10, 10, 0) }
     }
 
+    @Test fun clearOriginalDecodeBudgetIsBoundedToTheActualBundledArtwork() {
+        assertTrue(GlassMaterialPolicy.clearDecodeAllowed(853, 1844))
+        assertFalse(GlassMaterialPolicy.clearDecodeAllowed(854, 1844))
+        assertFalse(GlassMaterialPolicy.clearDecodeAllowed(853, 1845))
+        assertFalse(GlassMaterialPolicy.clearDecodeAllowed(Int.MAX_VALUE, Int.MAX_VALUE))
+        assertFalse(GlassMaterialPolicy.clearDecodeAllowed(-1, 1844))
+        assertFalse(GlassMaterialPolicy.clearDecodeAllowed(853, 0))
+    }
+
+    @Test fun decodeFailurePendingOrMissingGeometryNeverEnablesTransparentFrost() {
+        assertTrue(GlassMaterialPolicy.frosted(GlassMode.Softened, true, true, true))
+        assertFalse(GlassMaterialPolicy.frosted(GlassMode.Solid, true, true, true))
+        assertFalse(GlassMaterialPolicy.frosted(GlassMode.Softened, false, true, true))
+        assertFalse(GlassMaterialPolicy.frosted(GlassMode.Softened, true, false, true))
+        assertFalse(GlassMaterialPolicy.frosted(GlassMode.Softened, true, true, false))
+    }
+
     @Test fun landscapeCropUsesActualWindowOriginAndKeepsAdjacentCardsAligned() {
         val upper = GlassMaterialPolicy.placement(400, 200, 10f, 20f, 200f, 200f, 10f, 20f)
         val lower = GlassMaterialPolicy.placement(400, 200, 10f, 20f, 200f, 200f, 110f, 120f)

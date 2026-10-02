@@ -65,6 +65,12 @@ internal fun BrandCard(modifier: Modifier = Modifier, selected: Boolean = false,
     }
 }
 
+/** Keep existing positional (modifier, content) wrappers compatible without editing authentication UI. */
+@Composable
+internal fun BrandCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
+    BrandCard(modifier = modifier, selected = false, contentPadding = PaddingValues(16.dp), content = content)
+}
+
 @Composable
 internal fun BrandButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
                          enabled: Boolean = true) {

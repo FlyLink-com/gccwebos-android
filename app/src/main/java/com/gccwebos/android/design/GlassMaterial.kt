@@ -23,7 +23,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -41,6 +40,9 @@ internal enum class GlassSurfaceKind { Card, Navigation }
 /** Pure rules; no device, preference, account or network state is changed. */
 internal object GlassMaterialPolicy {
     const val MaxBackdropDimension = 360
+    // The bundled brand_lounge.webp is 853x1844 (1,572,932 px); never silently decode a larger replacement.
+    const val MaxClearBackdropDimension = 1844
+    const val MaxClearBackdropPixels = 1_572_932L
     const val CardStartArgb = 0xFF112540L
     const val CardEndArgb = 0xFF181F3AL
     const val CardSolidArgb = 0xFF162A46L
@@ -59,6 +61,13 @@ internal object GlassMaterialPolicy {
 
     fun mode(apiLevel: Int, lowRam: Boolean, forceSolid: Boolean): GlassMode =
         if (apiLevel < 26 || lowRam || forceSolid) GlassMode.Solid else GlassMode.Softened
+
+    fun clearDecodeAllowed(width: Int, height: Int): Boolean =
+        width > 0 && height > 0 && width <= MaxClearBackdropDimension && height <= MaxClearBackdropDimension &&
+            width.toLong() * height <= MaxClearBackdropPixels
+
+    fun frosted(mode: GlassMode, clearReady: Boolean, softenedReady: Boolean, insideBounds: Boolean): Boolean =
+        mode == GlassMode.Softened && clearReady && softenedReady && insideBounds
 
     fun sampleSize(width: Int, height: Int, maximum: Int = MaxBackdropDimension): Int {
         require(width > 0 && height > 0 && maximum > 0)
@@ -131,11 +140,13 @@ internal fun softenBackdropArgb(input: IntArray, width: Int, height: Int,
 
 internal class GlassBackdropState {
     var bounds by mutableStateOf<Rect?>(null)
+    var original by mutableStateOf<ImageBitmap?>(null)
     var softened by mutableStateOf<SoftBackdrop?>(null)
     var unavailable by mutableStateOf(false)
 }
 
 internal data class SoftBackdrop(val image: ImageBitmap, val originalWidth: Int, val originalHeight: Int)
+private data class StaticBackdropAsset(val original: ImageBitmap, val softened: SoftBackdrop?)
 
 internal val LocalGlassMode = staticCompositionLocalOf { GlassMode.Solid }
 private val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdropState?> { null }
@@ -152,36 +163,45 @@ internal fun ProvideGlassMaterial(mode: GlassMode?, content: @Composable () -> U
     CompositionLocalProvider(LocalGlassMode provides selected, LocalGlassBackdrop provides state, content = content)
 }
 
-/** A single process-local cached image, not a per-card bitmap or unbounded history. */
+/** One process-local original/softened pair (~6 MiB for the original), never per-card or unbounded history. */
 private object SoftBackdropCache {
     private val mutex = Mutex()
     private var attempted = false
-    private var image: SoftBackdrop? = null
+    private var image: StaticBackdropAsset? = null
 
-    suspend fun get(resources: Resources): SoftBackdrop? = withContext(Dispatchers.Default) {
+    suspend fun get(resources: Resources): StaticBackdropAsset? = withContext(Dispatchers.Default) {
         mutex.withLock {
             if (!attempted) {
                 attempted = true
                 image = try {
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true; inScaled = false }
                     BitmapFactory.decodeResource(resources, R.drawable.brand_lounge, bounds)
-                    val options = BitmapFactory.Options().apply {
-                        inSampleSize = GlassMaterialPolicy.sampleSize(bounds.outWidth, bounds.outHeight)
-                        inScaled = false
-                        inPreferredConfig = Bitmap.Config.ARGB_8888
-                    }
-                    val decoded = BitmapFactory.decodeResource(resources, R.drawable.brand_lounge, options)
+                    if (!GlassMaterialPolicy.clearDecodeAllowed(bounds.outWidth, bounds.outHeight)) return@withLock null
+                    val original = BitmapFactory.decodeResource(resources, R.drawable.brand_lounge,
+                        BitmapFactory.Options().apply { inScaled = false; inPreferredConfig = Bitmap.Config.ARGB_8888 })
                         ?: return@withLock null
+                    var originalPublished = false
                     try {
-                        if (decoded.width > GlassMaterialPolicy.MaxBackdropDimension || decoded.height > GlassMaterialPolicy.MaxBackdropDimension) null
-                        else {
-                            val pixels = IntArray(decoded.width * decoded.height)
-                            decoded.getPixels(pixels, 0, decoded.width, 0, 0, decoded.width, decoded.height)
-                            SoftBackdrop(Bitmap.createBitmap(softenBackdropArgb(pixels, decoded.width, decoded.height),
-                                decoded.width, decoded.height, Bitmap.Config.ARGB_8888).asImageBitmap(),
-                                bounds.outWidth, bounds.outHeight)
-                        }
-                    } finally { decoded.recycle() }
+                        if (!GlassMaterialPolicy.clearDecodeAllowed(original.width, original.height)) return@withLock null
+                        val softened = try {
+                            val options = BitmapFactory.Options().apply {
+                                inSampleSize = GlassMaterialPolicy.sampleSize(bounds.outWidth, bounds.outHeight)
+                                inScaled = false; inPreferredConfig = Bitmap.Config.ARGB_8888
+                            }
+                            val decoded = BitmapFactory.decodeResource(resources, R.drawable.brand_lounge, options)
+                            if (decoded == null) null else try {
+                                if (decoded.width > GlassMaterialPolicy.MaxBackdropDimension || decoded.height > GlassMaterialPolicy.MaxBackdropDimension) null
+                                else {
+                                    val pixels = IntArray(decoded.width * decoded.height)
+                                    decoded.getPixels(pixels, 0, decoded.width, 0, 0, decoded.width, decoded.height)
+                                    SoftBackdrop(Bitmap.createBitmap(softenBackdropArgb(pixels, decoded.width, decoded.height),
+                                        decoded.width, decoded.height, Bitmap.Config.ARGB_8888).asImageBitmap(),
+                                        bounds.outWidth, bounds.outHeight)
+                                }
+                            } finally { decoded.recycle() }
+                        } catch (_: RuntimeException) { null } catch (_: OutOfMemoryError) { null }
+                        StaticBackdropAsset(original.asImageBitmap(), softened).also { originalPublished = true }
+                    } finally { if (!originalPublished) original.recycle() }
                 } catch (_: RuntimeException) { null } catch (_: OutOfMemoryError) { null }
             }
             image
@@ -198,13 +218,15 @@ internal fun BrandBackdrop(modifier: Modifier = Modifier, loginPage: Boolean = f
     LaunchedEffect(state, mode) {
         if (state != null && mode == GlassMode.Softened) {
             val image = SoftBackdropCache.get(context.resources)
-            state.softened = image
+            state.original = image?.original
+            state.softened = image?.softened
             state.unavailable = image == null
         }
     }
-    val solid = mode == GlassMode.Solid || state?.unavailable == true
+    val original = state?.original
+    val solid = mode == GlassMode.Solid || state?.unavailable == true || original == null
     Box(modifier.onGloballyPositioned { state?.bounds = it.boundsInWindow() }) {
-        if (!solid) Image(painterResource(R.drawable.brand_lounge), contentDescription = null,
+        if (!solid && original != null) Image(original, contentDescription = null,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             drawRect(Brand.Background.copy(alpha = if (solid) 1f else if (loginPage) .18f else .10f))
@@ -232,7 +254,8 @@ internal fun GlassSurface(modifier: Modifier = Modifier, shape: Shape = Brand.Sh
         GlassMaterialPolicy.placement(softened.originalWidth, softened.originalHeight, backdrop.left, backdrop.top,
             backdrop.width, backdrop.height, surface.left, surface.top)
     } else null
-    val frosted = requested == GlassMode.Softened && state?.unavailable != true && image != null && placement != null
+    val frosted = state?.unavailable != true && GlassMaterialPolicy.frosted(requested,
+        state?.original != null, image != null, placement != null)
     val brush = when {
         selected -> Brush.linearGradient(listOf(Brand.ActionStart.copy(alpha = if (frosted) .90f else 1f),
             Brand.ActionEnd.copy(alpha = if (frosted) .90f else 1f)))

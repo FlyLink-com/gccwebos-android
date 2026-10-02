@@ -416,7 +416,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     LaunchedEffect(state, account.authSessionGeneration, mode, catalogCategory, state.catalogLoaded,
         state.offers, state.commerceModel, accountReady, state.busy, state.pendingPurchase, state.quote) {
         if (mode == CommerceMode.Plans && !initialSelectionHandled && state.catalogLoaded &&
-            accountReady && !state.busy && !state.pendingPurchase && state.commerceModel != null) {
+            state.canOperate() && !state.busy && !state.pendingPurchase && state.commerceModel != null) {
             initialSelectionHandled = true
             if (catalogCategory == "plan" && selectedSnapshot == null && state.quote == null &&
                 account.purchaseReturnRef == null) {

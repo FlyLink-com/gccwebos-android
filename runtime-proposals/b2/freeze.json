@@ -1,0 +1,122 @@
+{
+  "apks": [
+    {
+      "bytes": 39747,
+      "package": "com.gccwebos.android.ipcqa.b2",
+      "path": "ownerDeathLab/build/outputs/apk/debug/ownerDeathLab-debug.apk",
+      "role": "target",
+      "sha256": "df3068cdb6366290ae3e1202169a474f19e2efa052409035788e2a9b5c46ba8a"
+    },
+    {
+      "bytes": 22036,
+      "package": "com.gccwebos.android.ipcqa.b2.test",
+      "path": "ownerDeathLab/build/outputs/apk/androidTest/debug/ownerDeathLab-debug-androidTest.apk",
+      "role": "test",
+      "sha256": "ce1b8274302b0f372476a3977b665be7d95a455c43692593a58fabdff898081a"
+    }
+  ],
+  "approval_reference": "source_thread=01a0f0d1-54e3-77e0-98ae-eb87ae68d016; Slack thread=1790747278.924809; assistant_message=1790937353.025969; user_message=1790937372.853329; approval=\"\u540c\u610f\u8fdb\u884c\u6d4b\u8bd5\"",
+  "archive_bytes": 495192,
+  "archive_sha256": "013c87c73a97c2ddc6024b39220b940c7967ed6728363cb62dc45bcc6de9a2e8",
+  "artifact_id": 11220247839,
+  "artifact_name": "owner-death-build-f1e6722920871280645fcbbeb5e03b3d4577d7b2",
+  "build_candidate": {
+    "path": ".build-output/owner-death-build/candidate.json",
+    "sha256": "84a46725172b69189a437f8e860026df801e99c4f548fdd8f8988ea1a6b618a0"
+  },
+  "build_run_id": 36992973378,
+  "build_tools": "36.0.0",
+  "certificate_sha256": "c18dabe07cc64cedf430f1cd3f3b5617eedfc6d9b5b1ab29d6f76806eb1b14ad",
+  "compiled_manifest_sha256": {
+    "target": "569d4a26a1686aee775ce5112b04862461e9eddb77c89b1c562591f0d64c7a04",
+    "test": "80924b90d221d077ac0fb77722800272b1c62675b94537b1f174c9f9d6e2c470"
+  },
+  "download_receipt": {
+    "path": "C:\\Users\\g\\Documents\\Codex\\2026-10-01\\task\\output\\b2-build-f1e6722\\download-receipt.json",
+    "sha256": "aae19b1acb38a1dfa1fb095d1e32ac4f06267479632d70d54a4c12ee9095caca"
+  },
+  "fault_budget": {
+    "owner": 2,
+    "worker": 1
+  },
+  "identity_frozen": true,
+  "image": "system-images;android-33;default;x86_64",
+  "independent_reviews": [
+    {
+      "path": "C:\\Users\\g\\Documents\\Codex\\2026-10-01\\task\\output\\b2-package-review\\frozen-f1e6722\\final-independent-review.json",
+      "scope": "combined_build_binary_review",
+      "sha256": "7136a8a40652d1763a4049d3f8e9c3d891d61ceb051a0e136a9f628cdf14972b",
+      "status": "PASS",
+      "subreviews": [
+        {
+          "bytes": 28091,
+          "name": "actual_axml_and_v2_signature",
+          "path": "C:\\Users\\g\\Documents\\Codex\\2026-10-01\\task\\output\\b2-package-review\\frozen-f1e6722\\identity\\independent-apk-review.json",
+          "scope": "independent actual AXML, APK-v2 RSA and protected content byte verification",
+          "sha256": "1f1b9cda84c8e36bc2f5b5689b112afaae346a87e1f48f7be6e86cf538ef6c4d",
+          "status": "VERIFIED_FINAL_BYTES"
+        },
+        {
+          "bytes": 8569,
+          "name": "source_and_saved_ci_provenance",
+          "path": "C:\\Users\\g\\Documents\\Codex\\2026-10-01\\task\\output\\b2-package-review\\frozen-f1e6722\\source-provenance-review.json",
+          "scope": "local_frozen_source_and_ci_provenance_review",
+          "sha256": "52fcc0fc3f5d08a77569e10228c2e4c472747da6be244daeb972bc5e66eb26c4",
+          "status": "PASS"
+        },
+        {
+          "bytes": 6859,
+          "name": "strict_dex_and_all_compiled_members",
+          "path": "C:\\Users\\g\\Documents\\Codex\\2026-10-01\\task\\output\\b2-package-review\\frozen-f1e6722\\dex\\final-dex-and-javac-review.json",
+          "scope": "Independent actual DEX strict roster/type/native/assets scan, source non-compiler retention, all actual javac members including synthetic members, and exact compiler-addition body shapes",
+          "sha256": "27ce6dd3bb5af3ca675c214077979c2bc0396ea2d647aaecc972369c9092c85b",
+          "status": "PASS"
+        },
+        {
+          "bytes": 102687,
+          "name": "actual_build_r8_classpath_release_and_lint",
+          "path": "C:\\Users\\g\\Documents\\Codex\\2026-10-01\\task\\output\\b2-package-review\\frozen-f1e6722\\log-review\\log-review.json",
+          "scope": "Independent B2 raw build/config/classpath log review",
+          "sha256": "983e709e14a430ad8ccc4bb2741dcf9dcb7d98a2521473e9c1dacad227a743e2",
+          "status": "VERIFIED_BUILD_ONLY_LOG_SCOPE"
+        }
+      ]
+    }
+  ],
+  "inspection_status": {
+    "android_execution": "NOT_RUN",
+    "ci_conclusion": "success",
+    "compiled_manifest_signature_alignment": "PASS",
+    "independent_binary_identity_isolation": "PASS",
+    "independent_strict_dex": "PASS",
+    "installations": 0,
+    "original_collector_candidate_status": "VERIFIED_BUILD_ONLY",
+    "original_dex_gate": "PASS",
+    "process_exits": 0,
+    "runtime_materialization": "BUILD_IDENTITY_VERIFIED_RUNTIME_APPROVED_NOT_RUN"
+  },
+  "proposal_status": "APPROVED_SINGLE_RUN_NOT_DISPATCHED",
+  "repository": "gccwebos-com/gccwebos-android",
+  "runtime_authorized": true,
+  "scope": "one disposable hosted AVD; P7,P8,P9 once each; metadata-only QA",
+  "source_candidate": "8042ab7",
+  "source_commit": "f1e6722920871280645fcbbeb5e03b3d4577d7b2",
+  "source_file_sha256": {
+    "ownerDeathLab/build.gradle.kts": "d2677910d1e6585dd78cff5035551724c46476311ef35d78e3af818dc45d9bec",
+    "ownerDeathLab/src/androidTest/AndroidManifest.xml": "5f54f1881a70a8fee405b30fa6e52f0a25a7226ec8c1a7f971e626c9abdf78fa",
+    "ownerDeathLab/src/androidTest/java/com/gccwebos/android/ipcqa/b2/OwnerDeathIpcTest.java": "5e8def86e6baaf379cf280f054e3c74d3f67a02878427c2a0ac369a9977cd5ed",
+    "ownerDeathLab/src/androidTest/java/com/gccwebos/android/ipcqa/b2/OwnerDeathRunner.java": "8e618a48070f90ce923682b8a49f84419743d1fd840ce5bee84e694624c3af58",
+    "ownerDeathLab/src/main/AndroidManifest.xml": "34b6415ec396c2dd4cf24bce88cff649bc29b9794741a54b0f51180225aeb7ae",
+    "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/B2Control.java": "de64ba5bf952e7685a61c8631ac276a5f3730fa2cbbfa708e3c3ebca1a8d855a",
+    "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/DeathQaClient.java": "0e4cb268f8382e39a46d52cca642ad225fca2359029efd860c3e06d4bcfa910f",
+    "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/DeathRecoveryLedger.java": "52a995c0bf53aa0050fdba2491bb247014527d2cf77903e1e2e64dd248612f80",
+    "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/DeathSessionGuard.java": "fd2ea186af0755752c896c333a7c11e9a70d53d5632481888423808364b6b9ae",
+    "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/EndpointWatch.java": "584299f65f2dba67d966d6ed157c57b0f188f98686e5e1c95aa28034f39d66b7",
+    "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/OwnerDeathQaService.java": "d644ddb9653de422409f518387f53bd1cc6410b47369b00443c6fd128cb7dda9",
+    "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/WorkerDeathQaService.java": "bcdf7935f9a950a547f622aab198e15ab417c097085c5cebeef027fe9394dde5",
+    "ownerDeathLab/src/test/java/com/gccwebos/android/ipcqa/b2/DeathRecoveryLedgerSmoke.java": "dade36c1d47b0f34c37681f5f093d066cc2a36a42a925f4d80d966a8340d90af",
+    "scripts/collect_owner_death_evidence.py": "7919852c18a6237a7469916d888f57a48c6a31650a76d25474c33a835d5aec60",
+    "settings.gradle.kts": "a68b942849d21bc94ecd81e5ec701646d3b67897204b4d89f92562d4037959e6"
+  },
+  "source_tree": "c83b36ece434a1acb170a50a84aa99bf66f8e010"
+}

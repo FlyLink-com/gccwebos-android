@@ -1,112 +1,149 @@
-name: Native runtime API33 (immutable APK)
+# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-runtime.
+# Reuses default-main registered entry; default-main native workflow is unchanged.
+# Exact committed harness input and frozen hashes remain mandatory.
+name: Approved frozen B2 Binder death runtime API33
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - '.github/workflows/android-native-runtime-api33.yml'
-      - 'scripts/native-runtime-api33.sh'
-      - 'scripts/materialize-native-runtime.py'
+    inputs:
+      reviewed_harness_commit:
+        description: Exact full harness commit separately approved before dispatch
+        required: true
+        type: string
 permissions:
   contents: read
   actions: read
 concurrency:
-  group: native-runtime-api33-${{ github.ref }}
-  cancel-in-progress: true
+  group: frozen-b2-runtime
+  cancel-in-progress: false
 jobs:
-  immutable-native-api33:
+  frozen-b2-api33:
+    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-runtime' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      APPROVED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
+      APPROVED_FREEZE_SHA256: f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad
+      APPROVED_HARNESS_MANIFEST_SHA256: befb89912f6e1e7cfb62d174cc25bb902316ee6f429dc1722612eca3833799ab
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
-        with:
-          distribution: temurin
-          java-version: '17'
-      - name: Fetch exact immutable source artifact
+      - name: Verify separately reviewed harness and freeze; do not build APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$APPROVED_HARNESS_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$APPROVED_FREEZE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$APPROVED_HARNESS_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(git rev-parse HEAD)" = "$APPROVED_HARNESS_COMMIT"
+          PROPOSAL=runtime-proposals/b2
+          printf '%s  %s\n' "$APPROVED_HARNESS_MANIFEST_SHA256" "$PROPOSAL/harness-sha256.json" | sha256sum -c -
+          python3 - "$PROPOSAL" <<'PY'
+          import hashlib, json, sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          hashes = json.loads((root/'harness-sha256.json').read_text())['files']
+          expected = {'b2-runtime-api33.sh','b2-runtime-evidence.py','freeze.json','README.md','proposed-workflow.yml.disabled'}
+          assert set(hashes) == expected
+          assert all(hashlib.sha256((root/p).read_bytes()).hexdigest() == h for p,h in hashes.items())
+          PY
+          printf '%s  %s\n' "$APPROVED_FREEZE_SHA256" "$PROPOSAL/freeze.json" | sha256sum -c -
+          python3 "$PROPOSAL/b2-runtime-evidence.py" check-ready "$PROPOSAL/freeze.json"
+          mkdir -p .build-output/b2-runtime
+          git rev-parse HEAD > .build-output/b2-runtime/harness-commit.txt
+          cp "$PROPOSAL/harness-sha256.json" .build-output/b2-runtime/
+      - name: Record read-only cached tool image and KVM inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-output/b2-runtime
+          python3 - <<'PY'
+          import hashlib, json, os, shutil
+          from pathlib import Path
+          sdk_value = os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
+          sdk = Path(sdk_value) if sdk_value else None
+          fixed = {
+              'adb': 'platform-tools/adb', 'emulator': 'emulator/emulator',
+              'avdmanager': 'cmdline-tools/latest/bin/avdmanager',
+              'aapt2': 'build-tools/36.0.0/aapt2',
+              'apksigner': 'build-tools/36.0.0/apksigner'}
+          tools = {}
+          for name, relative in fixed.items():
+              path = sdk / relative if sdk else None
+              tools[name] = {'path': str(path) if path else None,
+                  'is_file': bool(path and path.is_file()),
+                  'executable': bool(path and os.access(path, os.X_OK))}
+          for name in ('java', 'python3', 'gh', 'timeout', 'ss'):
+              found = shutil.which(name)
+              tools[name] = {'path': found, 'is_file': bool(found and Path(found).is_file()),
+                  'executable': bool(found and os.access(found, os.X_OK))}
+          image = sdk / 'system-images/android-33/default/x86_64' if sdk else None
+          image_metadata = {}
+          for name in ('source.properties', 'package.xml'):
+              path = image / name if image else None
+              readable = bool(path and path.is_file() and os.access(path, os.R_OK))
+              image_metadata[name] = {'path': str(path) if path else None,
+                  'readable': readable,
+                  'sha256': hashlib.sha256(path.read_bytes()).hexdigest() if readable else None}
+          kvm = Path('/dev/kvm')
+          kvm_record = {'path': str(kvm), 'exists': kvm.exists(),
+              'readable': os.access(kvm, os.R_OK), 'writable': os.access(kvm, os.W_OK)}
+          missing = [name for name, value in tools.items()
+              if not value['is_file'] or not value['executable']]
+          missing += [name for name, value in image_metadata.items() if not value['readable']]
+          if not all(kvm_record[key] for key in ('exists', 'readable', 'writable')):
+              missing.append('KVM')
+          record = {'schema': 1, 'kind': 'read-only cached runtime inventory',
+              'status': 'STOP_CACHED_PREREQUISITES_MISSING' if missing else 'AVAILABLE_METADATA_ONLY',
+              'sdk_path': str(sdk) if sdk else None,
+              'expected_image': 'system-images;android-33;default;x86_64',
+              'tools': tools, 'image_metadata': image_metadata, 'kvm': kvm_record,
+              'missing': missing, 'tool_executions': 0, 'downloads': 0,
+              'permission_repairs': 0, 'android_execution': 'NOT_RUN'}
+          Path('.build-output/b2-runtime/cached-inventory.json').write_text(
+              json.dumps(record, indent=2, sort_keys=True) + '\n')
+          if missing:
+              raise SystemExit('STOP cached prerequisites unavailable: ' + ','.join(missing))
+          PY
+      - name: Preflight cached tools; run exact frozen P7-P9 once; require teardown
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p .build-output/runtime-api33
-          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11085461506 \
-            > "$RUNNER_TEMP/native-artifact-metadata.json"
-          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11085461506/zip \
-            > "$RUNNER_TEMP/native-source-artifact.zip"
-          python3 scripts/materialize-native-runtime.py \
-            "$RUNNER_TEMP/native-source-artifact.zip" "$RUNNER_TEMP/native-artifact-metadata.json"
-      - name: Verify saved APK signatures, package metadata and alignment
-        run: |
-          set -euo pipefail
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          test -n "$SDK_ROOT"
-          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" 'build-tools;36.0.0' 'platform-tools'
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk \
-            | tee .build-output/runtime-api33/runtime-apk-signature.txt
-          "$SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-            | tee .build-output/runtime-api33/runtime-test-apk-signature.txt
-          "$SDK_ROOT/build-tools/36.0.0/aapt2" dump badging app/build/outputs/apk/debug/app-debug.apk \
-            > .build-output/runtime-api33/runtime-apk-badging.txt
-          python3 - <<'PYCODE'
-          import re
-          from pathlib import Path
-          root = Path('.build-output/runtime-api33')
-          badging = (root / 'runtime-apk-badging.txt').read_text()
-          def sdk_value(name):
-              match = re.search(r'^' + name + r":'(\d+)'$", badging, re.MULTILINE)
-              assert match, 'Missing exact SDK metadata: ' + name
-              return int(match.group(1))
-          assert sdk_value('minSdkVersion') == 26
-          assert sdk_value('targetSdkVersion') == 36
-          compile_sdk = re.search(r"\bcompileSdkVersion='(\d+)'", badging)
-          assert compile_sdk and int(compile_sdk.group(1)) == 36
-          assert "package: name='com.gccwebos.android.debug' versionCode='4' versionName='0.2.1-ui-debug'" in badging
-          pattern = r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)'
-          app = re.findall(pattern, (root / 'runtime-apk-signature.txt').read_text())
-          test = re.findall(pattern, (root / 'runtime-test-apk-signature.txt').read_text())
-          assert len(app) == 1 and app == test, 'App/test signing certificates differ'
-          PYCODE
-          "$SDK_ROOT/build-tools/36.0.0/zipalign" -c -P 16 4 app/build/outputs/apk/debug/app-debug.apk
-      - name: Run the same native APK on official Android13 API33
-        env:
-          REQUIRE_NATIVE_JNI: 'true'
-        run: bash scripts/native-runtime-api33.sh
-      - name: Record distinct binary and harness results
+        run: bash runtime-proposals/b2/b2-runtime-api33.sh
+      - name: Retain bounded runtime-only evidence on success or failure
         if: always()
+        shell: bash
         env:
           JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
-          mkdir -p .build-output/runtime-api33
+          mkdir -p .build-output/b2-runtime
           python3 - <<'PY'
           import json, os
           from pathlib import Path
-          path = Path('.build-output/runtime-api33/provenance.json')
-          data = json.loads(path.read_text()) if path.exists() else {'provenance_verified': False}
-          data['runtime_status'] = os.environ['JOB_STATUS']
-          data['api36_status'] = 'still_blocked_in_prior_run_not_retested_here'
-          data['physical_device_tested'] = False
-          data['real_tun_traffic_tested'] = False
-          Path('.build-output/runtime-api33/result.json').write_text(json.dumps(data, indent=2) + '\n')
+          root = Path('.build-output/b2-runtime')
+          result = root/'result.json'
+          if not result.exists():
+              result.write_text(json.dumps({'status':'FAILED','overall_exit':1,
+                  'job_status':os.environ['JOB_STATUS'],'runtime_summary_missing':True,
+                  'owned_child_stopped':False,'owned_serial_absent':False,
+                  'owned_temporary_directory_removed':False},indent=2)+'\n')
+          data = json.loads(result.read_text())
+          data['job_status'] = os.environ['JOB_STATUS']
+          if data['job_status'] != 'success':
+              data['status'], data['overall_exit'] = 'FAILED', 1
+          result.write_text(json.dumps(data,indent=2)+'\n')
+          files = [p for p in root.rglob('*') if p.is_file()]
+          assert not any(p.suffix.lower() in ('.apk','.so','.aar','.zip') for p in files)
+          assert sum(p.stat().st_size for p in files) < 28 * 1024 * 1024
           PY
-          # Lossless compression keeps full diagnostics while making evidence portable.
-          find .build-output/runtime-api33 -type f -name '*.log' -size +2M -exec gzip '{}' \;
-          python3 - <<'PY'
-          from pathlib import Path
-          files = [p for p in Path('.build-output/runtime-api33').rglob('*') if p.is_file()]
-          assert not any(p.suffix in ('.apk', '.so', '.aar', '.zip') for p in files)
-          assert sum(p.stat().st_size for p in files) < 28 * 1024 * 1024, 'Small evidence bundle exceeds safe transfer budget'
-          PY
-      - name: Upload small runtime-only evidence (no APK or native libraries)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: gccwebos-native-api33-evidence-${{ github.event.pull_request.head.sha || github.sha }}
-          path: .build-output/runtime-api33/
+          name: owner-death-b2-runtime-${{ github.sha }}
+          path: .build-output/b2-runtime/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

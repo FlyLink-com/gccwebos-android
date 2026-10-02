@@ -1,0 +1,126 @@
+{
+  "apk_identity": {
+    "apks": [
+      {
+        "bytes": 39747,
+        "package": "com.gccwebos.android.ipcqa.b2",
+        "path": "ownerDeathLab/build/outputs/apk/debug/ownerDeathLab-debug.apk",
+        "role": "target",
+        "sha256": "df3068cdb6366290ae3e1202169a474f19e2efa052409035788e2a9b5c46ba8a"
+      },
+      {
+        "bytes": 22036,
+        "package": "com.gccwebos.android.ipcqa.b2.test",
+        "path": "ownerDeathLab/build/outputs/apk/androidTest/debug/ownerDeathLab-debug-androidTest.apk",
+        "role": "test",
+        "sha256": "ce1b8274302b0f372476a3977b665be7d95a455c43692593a58fabdff898081a"
+      }
+    ],
+    "archive_bytes": 495192,
+    "archive_sha256": "013c87c73a97c2ddc6024b39220b940c7967ed6728363cb62dc45bcc6de9a2e8",
+    "artifact_id": 11220247839,
+    "artifact_name": "owner-death-build-f1e6722920871280645fcbbeb5e03b3d4577d7b2",
+    "build_candidate": {
+      "path": ".build-output/owner-death-build/candidate.json",
+      "sha256": "84a46725172b69189a437f8e860026df801e99c4f548fdd8f8988ea1a6b618a0"
+    },
+    "build_run_id": 36992973378,
+    "certificate_sha256": "c18dabe07cc64cedf430f1cd3f3b5617eedfc6d9b5b1ab29d6f76806eb1b14ad",
+    "compiled_manifest_sha256": {
+      "target": "569d4a26a1686aee775ce5112b04862461e9eddb77c89b1c562591f0d64c7a04",
+      "test": "80924b90d221d077ac0fb77722800272b1c62675b94537b1f174c9f9d6e2c470"
+    },
+    "source_commit": "f1e6722920871280645fcbbeb5e03b3d4577d7b2",
+    "source_file_sha256": {
+      "ownerDeathLab/build.gradle.kts": "d2677910d1e6585dd78cff5035551724c46476311ef35d78e3af818dc45d9bec",
+      "ownerDeathLab/src/androidTest/AndroidManifest.xml": "5f54f1881a70a8fee405b30fa6e52f0a25a7226ec8c1a7f971e626c9abdf78fa",
+      "ownerDeathLab/src/androidTest/java/com/gccwebos/android/ipcqa/b2/OwnerDeathIpcTest.java": "5e8def86e6baaf379cf280f054e3c74d3f67a02878427c2a0ac369a9977cd5ed",
+      "ownerDeathLab/src/androidTest/java/com/gccwebos/android/ipcqa/b2/OwnerDeathRunner.java": "8e618a48070f90ce923682b8a49f84419743d1fd840ce5bee84e694624c3af58",
+      "ownerDeathLab/src/main/AndroidManifest.xml": "34b6415ec396c2dd4cf24bce88cff649bc29b9794741a54b0f51180225aeb7ae",
+      "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/B2Control.java": "de64ba5bf952e7685a61c8631ac276a5f3730fa2cbbfa708e3c3ebca1a8d855a",
+      "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/DeathQaClient.java": "0e4cb268f8382e39a46d52cca642ad225fca2359029efd860c3e06d4bcfa910f",
+      "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/DeathRecoveryLedger.java": "52a995c0bf53aa0050fdba2491bb247014527d2cf77903e1e2e64dd248612f80",
+      "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/DeathSessionGuard.java": "fd2ea186af0755752c896c333a7c11e9a70d53d5632481888423808364b6b9ae",
+      "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/EndpointWatch.java": "584299f65f2dba67d966d6ed157c57b0f188f98686e5e1c95aa28034f39d66b7",
+      "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/OwnerDeathQaService.java": "d644ddb9653de422409f518387f53bd1cc6410b47369b00443c6fd128cb7dda9",
+      "ownerDeathLab/src/main/java/com/gccwebos/android/ipcqa/b2/WorkerDeathQaService.java": "bcdf7935f9a950a547f622aab198e15ab417c097085c5cebeef027fe9394dde5",
+      "ownerDeathLab/src/test/java/com/gccwebos/android/ipcqa/b2/DeathRecoveryLedgerSmoke.java": "dade36c1d47b0f34c37681f5f093d066cc2a36a42a925f4d80d966a8340d90af",
+      "scripts/collect_owner_death_evidence.py": "7919852c18a6237a7469916d888f57a48c6a31650a76d25474c33a835d5aec60",
+      "settings.gradle.kts": "a68b942849d21bc94ecd81e5ec701646d3b67897204b4d89f92562d4037959e6"
+    },
+    "source_tree": "c83b36ece434a1acb170a50a84aa99bf66f8e010"
+  },
+  "approval_reference": "source_thread=01a0f0d1-54e3-77e0-98ae-eb87ae68d016; Slack thread=1790747278.924809; assistant_message=1790937353.025969; user_message=1790937372.853329; approval=\"\u540c\u610f\u8fdb\u884c\u6d4b\u8bd5\"",
+  "default_main_modified": false,
+  "entry_registration": "Reuse default-main registered entry; only the new runtime branch receives this shim",
+  "evidence": {
+    "approving_user_message": "1790937372.853329",
+    "assistant_message": "1790937353.025969",
+    "provenance": "Authorization evidence supplied by parent task; no new connector query",
+    "reply": "\u540c\u610f\u8fdb\u884c\u6d4b\u8bd5",
+    "slack_thread": "1790747278.924809",
+    "source_thread": "01a0f0d1-54e3-77e0-98ae-eb87ae68d016"
+  },
+  "execution_record": {
+    "android_execution": "NOT_RUN",
+    "installations": 0,
+    "process_exits": 0,
+    "run_id": null,
+    "state": "NOT_DISPATCHED"
+  },
+  "immutable_original_proposal_sha256": {
+    "README.md": "7a8882470c9c408955da6b4e91ddec03f758983d3add55281283128ff7d9aa6f",
+    "b2-runtime-api33.sh": "cc13dcd3b88b54077e4c51da572e644d72818fd95e26dcbbe0c753140ce8cff6",
+    "b2-runtime-evidence.py": "cc3cbe2fcc0c81191c40ee64c23e8f9848a62107600d947f1fa439b9709397b0",
+    "freeze.json": "011540287dc050e4a9a0e0a34b569671428af2173b53b962ce02b627b24b6b64",
+    "harness-sha256.json": "b26036806857333183883ea96095a32c5a5d1379595bc84168fa9a46d710524b",
+    "proposed-workflow.yml.disabled": "a63894550d16b799b9a7298d932e744fc171c4f486764c142a5b9ab94466a10c",
+    "static-checks.json": "ce27c5866dd4956f5bcd56a580769b7b10a5d956043418d42fa3d2338601e261"
+  },
+  "max_dispatches": 1,
+  "max_harness_invocations": 1,
+  "repository": "gccwebos-com/gccwebos-android",
+  "reviewed_harness_commit": "Exact full root commit required at dispatch",
+  "runtime_authorized": true,
+  "runtime_branch": "codex/lucky-b2-runtime",
+  "runtime_scope": {
+    "VPN": false,
+    "apk_rebuild": false,
+    "build_tools": "36.0.0",
+    "cached_only": true,
+    "default_suite": false,
+    "disposable_AVDs": 1,
+    "evidence_cap_MiB": 28,
+    "evidence_retention_days": 14,
+    "fault_budget": {
+      "owner": 2,
+      "worker": 1
+    },
+    "guest_network_operations": false,
+    "host": "fresh GitHub-hosted ubuntu-24.04",
+    "metadata_only_evidence": true,
+    "methods_once_each": [
+      "p7OwnerDeathKeepsWorkerAndQuarantine",
+      "p8ExactEvidenceWaitsForCallAndDisposition",
+      "p9WorkerDeathAndStaleEvidenceStayScoped"
+    ],
+    "native_engine": false,
+    "no_provisioning_or_permission_repair": true,
+    "official_cached_image": "system-images;android-33;default;x86_64",
+    "owned_teardown_required": true,
+    "physical_devices": false,
+    "private_ADB_socket_only": true,
+    "production": false,
+    "requires_KVM": true,
+    "reruns": 0,
+    "retries": 0,
+    "stop_on_first_failure": true,
+    "timeout_minutes": 30,
+    "user_configuration": false,
+    "zero_APK_permissions": true
+  },
+  "schema": 1,
+  "status": "APPROVED_SINGLE_RUN_NOT_DISPATCHED",
+  "trigger": "workflow_dispatch_only",
+  "workflow_path": ".github/workflows/android-native-runtime-api33.yml"
+}

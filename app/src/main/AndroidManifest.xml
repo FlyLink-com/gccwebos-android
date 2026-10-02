@@ -1,14 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:allowBackup="false"
-        android:label="@string/app_name"
+        android:label="${connectionAppLabel}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:usesCleartextTraffic="false"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <service android:name=".vpn.ConnectionOwnerService" android:exported="false" />
+        <!-- A user-configured VPN qualifies for systemExempted. Lint models only the
+             exact-alarm permission alternative. prepare() is checked before foreground().
+             https://developer.android.com/develop/background-work/services/fgs/service-types -->
+        <service android:name=".vpn.ProductionVpnService" android:exported="false"
+            android:process=":vpn" android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="systemExempted" tools:ignore="ForegroundServicePermission">
+            <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />
+        </service>
         <activity
             android:name=".MainActivity"
             android:exported="true">

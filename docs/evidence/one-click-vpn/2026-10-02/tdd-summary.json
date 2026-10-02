@@ -1,0 +1,32 @@
+{
+  "permission_tickets": {
+    "tests": 8,
+    "red_failures": 1,
+    "green_failures": 0
+  },
+  "prepared_material": {
+    "tests": 3,
+    "red_failures": 3,
+    "green_failures": 0
+  },
+  "binding_receipt": {
+    "tests": 7,
+    "red_failures": 4,
+    "green_failures": 0
+  },
+  "admission_deadline": {
+    "tests": 10,
+    "red_failures": 3,
+    "green_failures": 0
+  },
+  "binder_flags": {
+    "tests": 4,
+    "red_failures": 1,
+    "green_failures": 0
+  },
+  "dns_fixture": {
+    "tests": 7,
+    "red_failures": 1,
+    "green_failures": 0
+  }
+}

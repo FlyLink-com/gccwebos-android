@@ -1,8 +1,13 @@
-# Local connection lifecycle contract (offline slice)
+# Local connection lifecycle contract (historical offline slice)
 
-This slice is pure Kotlin and uses fake engine adapters only. Ordinary APK production VPN
-remains disabled. UI, brand, manifests, Android permission handling, native packaging,
-backend contracts, wallet/payment gates, and the accepted SS/TUN lab are unchanged.
+This document describes the earlier pure-Kotlin slice with fake engine adapters. Statements
+about missing Android adapters and disabled APK connectivity are historical, not the current
+implementation status. Current wiring, one-click policy, build evidence and runtime limits
+are recorded in [One-click VPN connection](one-click-vpn-connection.md) and
+[Preparation and current evidence](vpn-production-preparation.md).
+
+The contract below remains useful for authority, generation and cleanup semantics. It does
+not by itself establish Android or production VPN verification.
 
 ## Local admission, separate from account actions
 
@@ -64,19 +69,25 @@ cannot publish Connected. Owner scope cancellation also cleans up.
 
 `LifecycleTunnel.accept` must synchronously accept/copy the prepared bytes before returning.
 It runs inside the command and capability fences. Posting an Intent, starting a service, or
-queueing work is not accepted engine activation. No production adapter implements this API.
+queueing work is not accepted engine activation. No production adapter existed at this
+slice's baseline; the current adapter and evidence are described in the linked one-click
+connection document.
 The config is one-use, rechecks capability/epoch/expiry, atomically replaces the app-private
 no-backup prepared file, then calls the bounded engine acceptance function. The file has no
 load/start API. Stop does not treat any leftover file as authority. Secret temporary copies
 are wiped; failed/stale preparation cannot write or activate after the stop/clear fence.
+In the current Android path, file replacement occurs during activation after transport
+preparation, not during permission. Independent material debt conservatively tracks cleanup;
+it is not evidence that every denied/cancelled permission attempt wrote a file.
 
-An Android adapter still needs its own bounded cancellation/watchdog and fd ownership:
+An Android adapter requires its own bounded cancellation/watchdog and fd ownership:
 coroutine cancellation cannot forcibly interrupt arbitrary blocking native work. Platform
 permission/foreground-service lifecycle, native death delivery, revocation, service/process
 restoration, protected sockets, tunnel-path probing, real device and release packaging checks
-remain production blockers. There is no new backend identity/limit/reset/rotation dependency.
+were outside this offline slice. Current implementation and unresolved runtime evidence
+must be assessed separately. There is no new backend identity/limit/reset/rotation dependency.
 
-## Verification
+## Historical diagnostic verification
 
 Run the repository's offline diagnostic JVM suite using an existing verified tool directory:
 `KOTLIN_TOOLS_DIR=/path/to/verified-kotlin-tools bash scripts/test-domain-offline.sh`.

@@ -35,12 +35,22 @@ for path in (ROOT / 'app/src').rglob('*.xml'):
 manifest = ET.parse(ROOT / 'app/src/main/AndroidManifest.xml').getroot()
 android = '{http://schemas.android.com/apk/res/android}'
 assert manifest.find('application').get(android + 'usesCleartextTraffic') == 'false'
-assert {p.get(android + 'name') for p in manifest.findall('uses-permission')} == {'android.permission.INTERNET'}, 'M1 only permits HTTPS API/update access; VPN remains gated'
-assert not manifest.findall('.//service'), 'M0 must not expose a fake VpnService'
+assert {p.get(android + 'name') for p in manifest.findall('uses-permission')} == {
+    'android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE',
+    'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED',
+    'android.permission.POST_NOTIFICATIONS'}
+services = {s.get(android + 'name'): s for s in manifest.findall('.//service')}
+assert set(services) == {'.vpn.ConnectionOwnerService', '.vpn.ProductionVpnService'}
+assert all(s.get(android + 'exported') == 'false' for s in services.values())
+vpn = services['.vpn.ProductionVpnService']
+assert vpn.get(android + 'permission') == 'android.permission.BIND_VPN_SERVICE'
+assert vpn.get(android + 'process') == ':vpn'
+assert vpn.get(android + 'foregroundServiceType') == 'systemExempted'
+assert vpn.find('meta-data').get(android + 'value') == 'false'
 for directory in ('main', 'release'):
     for path in (ROOT / f'app/src/{directory}').rglob('*.kt'):
         assert 'class LocalDiagnosticGateways' not in path.read_text(), 'Debug simulator leaked into production source'
-# Native lab is an opt-in debug-only service. Keep the release/main permission boundary intact.
+# Lab components remain opt-in debug-only; production JNI packaging has its own boundary.
 lab_path = ROOT / 'app/src/debug/AndroidManifest.xml'
 if lab_path.exists():
     lab = ET.parse(lab_path).getroot()

@@ -48,6 +48,37 @@ class SyntheticSsFixtureTest {
             assertEquals(1, fixture.dnsRequests.get()); assertTrue(fixture.errors.isEmpty())
         }
     }
+    @Test fun distinctDnsAnswerPreservesLiteralTcpDestinationAndNonceProofs() {
+        SyntheticSsFixture(dnsAnswerLastOctet = 11).use { fixture ->
+            Socket("127.0.0.1", fixture.port).use { socket ->
+                socket.soTimeout = 3000
+                val stream = SyntheticSsFixture.AeadStream(socket, fixture.key)
+                val query = fixture.dnsQuestion()
+                stream.write(byteArrayOf(1, 1, 1, 1, 1, 0, 53, 0, query.size.toByte()) + query)
+                val reply = stream.read().drop(2).toByteArray()
+                assertTrue("DNS response echoes the exact nonce question",
+                    reply.copyOfRange(12, query.size).contentEquals(query.copyOfRange(12, query.size)))
+                val answer = reply.takeLast(4).toByteArray()
+                assertArrayEquals(byteArrayOf(198.toByte(), 18, 0, 11), answer)
+                assertFalse("DNS answer differs from the literal traffic destination",
+                    answer.contentEquals(SyntheticSsFixture.address(SyntheticSsFixture.TCP_PORT).copyOfRange(1, 5)))
+            }
+            Socket("127.0.0.1", fixture.port).use { socket ->
+                socket.soTimeout = 3000
+                val stream = SyntheticSsFixture.AeadStream(socket, fixture.key)
+                stream.write(SyntheticSsFixture.address(SyntheticSsFixture.TCP_PORT) +
+                    "GET /${fixture.token} HTTP/1.1\r\nHost: fixture.invalid\r\n\r\n".toByteArray())
+                assertTrue("TCP still requires the per-run nonce", String(stream.read()).endsWith(fixture.tcpProof))
+            }
+            assertEquals(1, fixture.dnsRequests.get()); assertEquals(1, fixture.tcpRequests.get())
+            assertTrue(fixture.errors.isEmpty())
+        }
+    }
+    @Test fun dnsAnswerOctetRejectsInvalidOrReservedHostValues() {
+        for (octet in listOf(-1, 0, 255, 256)) {
+            assertThrows(IllegalArgumentException::class.java) { SyntheticSsFixture(dnsAnswerLastOctet = octet) }
+        }
+    }
     @Test fun secretsArePerRunAndUnsupportedDestinationsAreRejected() {
         SyntheticSsFixture().use { fixture ->
             SyntheticSsFixture().use { other -> assertNotEquals(fixture.password, other.password) }

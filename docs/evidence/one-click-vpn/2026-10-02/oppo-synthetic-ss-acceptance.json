@@ -1,0 +1,62 @@
+{
+  "base_head": "e4b3cf3a06e0e6a8add01ac895b3ed524847a845",
+  "device": {
+    "manufacturer": "OPPO",
+    "model": "PFJM10",
+    "android_api": 33,
+    "user": 0
+  },
+  "synthetic": true,
+  "scope": "candidate app only",
+  "installed": [
+    "com.gccwebos.android.candidate",
+    "com.gccwebos.android.candidate.test"
+  ],
+  "cleanup": {
+    "com.gccwebos.android.candidate.test": {
+      "host_exit_code": 0,
+      "success": true
+    },
+    "com.gccwebos.android.candidate": {
+      "host_exit_code": 0,
+      "success": true
+    }
+  },
+  "selected_case": "oneClickRealNativeTrafficSurvivesNavigationAndRecreationThenReconnectsFresh",
+  "ordinary_before": {
+    "version_code": 6,
+    "version_name": "0.4.0-mobile-parity-debug"
+  },
+  "apks": [
+    {
+      "package": "com.gccwebos.android.candidate",
+      "sha256": "f4377c2bf382efdd35d3c0c571a53fbc20efd0b2bb42263a72f80872c7950c98",
+      "bytes": 143117361
+    },
+    {
+      "package": "com.gccwebos.android.candidate.test",
+      "sha256": "f01a58d861b148c048df5db0ef1144ce5e14c69bc38c39179041e066608bcae3",
+      "bytes": 1622111
+    }
+  ],
+  "device_start_epoch": 1790970390,
+  "host_exit_code": 0,
+  "host_timeout": false,
+  "host_duration_ms": 33906,
+  "instrumentation_status_codes": [
+    1,
+    0
+  ],
+  "junit_one_pass": true,
+  "acceptance_rows": 51,
+  "candidate_packages_remaining": [],
+  "candidate_processes_remaining": [],
+  "ordinary_after": {
+    "version_code": 6,
+    "version_name": "0.4.0-mobile-parity-debug"
+  },
+  "ordinary_version_unchanged": true,
+  "signer_certificate_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+  "interpretation": "Synthetic SS peer, actual production Activity/owner/permission/Binder/JNI/TUN and candidate-only TCP/UDP/DNS; no real subscription interop claim",
+  "test_duration_seconds": 32.733
+}

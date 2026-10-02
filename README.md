@@ -1,4 +1,10 @@
-> 0.4.0 mobile parity: encrypted local-subscription shell with account-only login gates, server-validated native-session restore, actual subscription-node metadata, server-driven wallet/catalog/orders and approved robot/飞连vpn launcher artwork. [Scope and limits](docs/mobile-login-account-parity.md). Production VPN remains disabled.
+> One-click VPN candidate: the service-owned local subscription path now reaches Android consent, a one-shot native TUN process and a VPN-bound traffic probe. Engine libraries must be verified and packaged; connection is enabled on API 30+ where the VPN Network owner can be verified. [Implementation and validation](docs/one-click-vpn-connection.md) · [Windows toolchain](docs/android-development-toolchain.md).
+
+## 先前版本记录
+
+以下内容保留各历史切片的状态；当前连接实现、版本与验收结果以上方候选文档为准。
+
+> 0.4.0 mobile parity baseline: encrypted local-subscription shell with account-only login gates, server-validated native-session restore, actual subscription-node metadata, server-driven wallet/catalog/orders and approved robot/飞连vpn launcher artwork. [Scope and limits](docs/mobile-login-account-parity.md). Production VPN was disabled at this baseline.
 
 > Offline protocol contract v1: bounded SS AEAD, VLESS TCP TLS/Reality, Hysteria2 and TUIC v5 projection; production VPN remains disabled. See [support limits and evidence](docs/offline-protocol-contract.md).
 

@@ -1,0 +1,51 @@
+GCCConnectionEngine: phase=process-ready
+GCCConnectionEngine: phase=transport-ready
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=copy-entered
+GCCConnectionEngine: phase=copy-armed
+GCCConnectionEngine: phase=copy-accepted
+GCCConnectionEngine: phase=owner-lease-ready
+GCCConnectionEngine: phase=owner-working-TRAFFIC
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=native-STARTING
+GCCConnectionEngine: phase=native-ENGINE_RUNNING_UNVERIFIED
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=owner-Connected
+GCCConnectionAcceptance: phase=first-connected downloads=2 probes=1 probeFailures=0 tcp=1 udp=1 dns=1
+GCCConnectionAcceptance: phase=recreated-still-connected downloads=2 probes=1 probeFailures=0 tcp=2 udp=2 dns=1
+GCCConnectionEngine: phase=owner-Disconnecting
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=native-STOPPING
+GCCConnectionEngine: phase=native-STOPPING
+GCCConnectionEngine: phase=native-IDLE
+GCCConnectionEngine: phase=owner-Disconnected
+GCCConnectionAcceptance: phase=disconnected downloads=2 probes=1 probeFailures=0 tcp=2 udp=2 dns=2
+GCCConnectionEngine: phase=owner-working-CONFIG
+GCCConnectionEngine: phase=owner-working-PERMISSION
+GCCConnectionEngine: phase=owner-working-TUNNEL
+GCCConnectionEngine: phase=process-ready
+GCCConnectionEngine: phase=transport-ready
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=copy-entered
+GCCConnectionEngine: phase=copy-armed
+GCCConnectionEngine: phase=copy-accepted
+GCCConnectionEngine: phase=owner-lease-ready
+GCCConnectionEngine: phase=owner-working-TRAFFIC
+GCCConnectionEngine: phase=native-STARTING
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=native-ENGINE_RUNNING_UNVERIFIED
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=owner-Connected
+GCCConnectionAcceptance: phase=fresh-reconnected downloads=3 probes=2 probeFailures=0 tcp=3 udp=3 dns=3
+GCCConnectionEngine: phase=owner-Disconnecting
+GCCConnectionEngine: phase=control-flags-18
+GCCConnectionEngine: phase=native-STOPPING
+GCCConnectionEngine: phase=native-STOPPING
+GCCConnectionEngine: phase=native-IDLE
+GCCConnectionEngine: phase=owner-Disconnected
+GCCConnectionAcceptance: phase=disconnected downloads=3 probes=2 probeFailures=0 tcp=3 udp=3 dns=3
+GCCConnectionEngine: phase=owner-Disconnecting
+GCCConnectionEngine: phase=owner-Disconnected
+GCCConnectionAcceptance: phase=cleanup-stopped downloads=3 probes=2 probeFailures=0 tcp=3 udp=3 dns=3
+GCCConnectionEngine: phase=owner-Disconnecting
+GCCConnectionEngine: phase=owner-Disconnected

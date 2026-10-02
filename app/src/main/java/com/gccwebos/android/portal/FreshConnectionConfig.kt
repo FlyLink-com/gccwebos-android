@@ -19,13 +19,29 @@ fun interface ConnectionLineResolver {
 }
 
 /** Write-only storage. An old file is never admission authority and has no load/start API.
- * The caller supplies an app-private no-backup directory. No production instance is wired.
+ * The connection owner supplies an app-private no-backup directory.
  * Replacement must be atomic; unsupported filesystems fail closed without a fallback copy.
  */
 /** Borrowed bytes; production uses AtomicPreparedConfigStore, offline contracts inject a fake writer. */
-fun interface PreparedConfigStore { fun replace(bytes: ByteArray) }
+fun interface PreparedConfigStore {
+    fun replace(bytes: ByteArray)
+    fun clear() = Unit
+}
 class AtomicPreparedConfigStore(private val directory: File) : PreparedConfigStore {
-    override fun replace(bytes: ByteArray) {
+    /** Fixed write-only scratch target; clearing never traverses directories or loads credentials. */
+    @Synchronized override fun clear() {
+        require(directory.isDirectory && !Files.isSymbolicLink(directory.toPath()))
+        Files.deleteIfExists(File(directory, "prepared-connection.json").toPath())
+        // An interrupted process may never execute replace()'s finally. Only direct, ordinary
+        // scratch files belonging to this writer are removable; never traverse a directory/link.
+        Files.newDirectoryStream(directory.toPath(), ".prepared-*.tmp").use { files ->
+            files.forEach { path ->
+                require(Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                Files.delete(path)
+            }
+        }
+    }
+    @Synchronized override fun replace(bytes: ByteArray) {
         require(bytes.size in 1..com.gccwebos.android.vpn.SafeProxyConfig.MAX_BYTES)
         require(directory.isDirectory && !Files.isSymbolicLink(directory.toPath()))
         val target = File(directory, "prepared-connection.json").toPath()

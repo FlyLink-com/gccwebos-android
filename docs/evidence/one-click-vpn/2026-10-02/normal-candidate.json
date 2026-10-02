@@ -1,0 +1,16 @@
+{
+  "package": "com.gccwebos.android.candidate",
+  "version_code": 6,
+  "version_name": "0.4.0-mobile-parity-connection-candidate",
+  "display_name": "飞连 VPN 测试",
+  "bytes": 143117665,
+  "sha256": "76536c1ce2d9878460f7644f3b7dee31f3ee0d6c5a6f539baa33a6d1bc8b3a30",
+  "signer_certificate_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+  "synthetic_acceptance": false,
+  "test_fixture_classes_absent": true,
+  "production_traffic_probe": "VPN Network bound HTTPS 204",
+  "device_installation": "Success; installed APK SHA-256 matches local normal candidate",
+  "real_subscription_interop": "not tested",
+  "test_package_absent": true,
+  "ordinary_version_unchanged": true
+}

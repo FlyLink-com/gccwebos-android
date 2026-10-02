@@ -1,0 +1,21 @@
+{
+  "totals": {
+    "tests": 537,
+    "failures": 8,
+    "errors": 0,
+    "skipped": 0
+  },
+  "failed_test_names": [
+    "com.gccwebos.android.portal.LocalSubscriptionTest.everyPreparationDownloadsAgainAndWorksWithoutPortalToken",
+    "com.gccwebos.android.portal.SubscriptionImportTest.resolverSelectsSecondExplicitlyMappedNodeWithoutInventingIndexIdentity",
+    "com.gccwebos.android.portal.SubscriptionImportTest.legacyRereadsSetupAfterAckAndAcrossRestartWithoutAdoptingOldPendingReceipt",
+    "com.gccwebos.android.portal.SubscriptionImportTest.restartedPreparationFetchesNewBytesRatherThanReadingPriorConfigFile",
+    "com.gccwebos.android.portal.SubscriptionImportTest.freshWalletRetriesPersistedKeyAndPendingAckWithoutAnotherClaim",
+    "com.gccwebos.android.portal.SubscriptionImportTest.stalePermissionAttemptCannotApplyAfterNewerSwitch",
+    "com.gccwebos.android.portal.SubscriptionImportTest.failedFreshDownloadNeverReusesOldFileOrCachedPreview",
+    "com.gccwebos.android.portal.SubscriptionImportTest.everyAdmittedConnectReconnectAndSwitchRefreshesDownloadsAndWritesBeforeStart"
+  ],
+  "pass": 529,
+  "baseline_failure": "Windows NTFS lacks required POSIX initial attributes; fail-closed behavior preserved",
+  "build": "Debug/test/unsigned release assemble and Lint completed; overall full-suite command failed on eight baseline unit tests. Normal candidate assemble+Lint separately succeeded."
+}

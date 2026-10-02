@@ -1,6 +1,11 @@
 package com.gccwebos.android
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.os.Bundle
+import android.os.IBinder
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.lifecycle.Lifecycle
@@ -9,6 +14,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
@@ -44,18 +50,103 @@ import com.gccwebos.android.portal.AccountPanel
 import com.gccwebos.android.portal.RegistrationController
 import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.NodeSelectionPanel
+import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.productionRepository
 import com.gccwebos.android.update.UpdatePanel
+import com.gccwebos.android.vpn.ActivityVpnPermission
+import com.gccwebos.android.vpn.ConnectionOwnerService
 import java.time.Instant
 import java.time.ZoneId
+import java.util.UUID
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+    private data class ConsentAttachment(
+        val permission: ActivityVpnPermission,
+        val attachment: ActivityVpnPermission.Attachment,
+    )
+    private var owner by mutableStateOf<ConnectionOwnerService.LocalBinder?>(null)
+    private var bindingFailure by mutableStateOf(false)
+    private var bound = false
+    private var attachedPermission: ConsentAttachment? = null
+    private var launchedPermission: ConsentAttachment? = null
+    // Recreated activities never restore a consent result into a new request identity.
+    private val vpnPermission = activityResultRegistry.register(
+        "production-vpn-consent-${UUID.randomUUID()}", this, ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val original = launchedPermission
+        launchedPermission = null
+        original?.permission?.deliver(original.attachment, result.resultCode)
+    }
+    private val ownerConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            val local = binder as? ConnectionOwnerService.LocalBinder ?: run { bindingUnavailable(); return }
+            detachPermission()
+            val permission = local.permission
+            lateinit var attachment: ActivityVpnPermission.Attachment
+            attachment = permission.attach { intent ->
+                check(launchedPermission == null) { "A previous VPN consent result is still outstanding" }
+                val original = ConsentAttachment(permission, attachment)
+                launchedPermission = original
+                try { vpnPermission.launch(intent) }
+                catch (failure: Exception) {
+                    if (launchedPermission === original) launchedPermission = null
+                    throw failure
+                }
+            }
+            attachedPermission = ConsentAttachment(permission, attachment)
+            bindingFailure = false
+            owner = local
+        }
+        override fun onServiceDisconnected(name: ComponentName) = bindingUnavailable()
+        override fun onBindingDied(name: ComponentName) = bindingUnavailable()
+        override fun onNullBinding(name: ComponentName) = bindingUnavailable()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
-        setContent { AppShell() }
+        setContent {
+            val current = owner
+            if (current == null) {
+                GccTheme {
+                    Surface(Modifier.fillMaxSize(), color = Brand.Background) {
+                        Column(Modifier.fillMaxSize().testTag(if (bindingFailure) "connection-owner-unavailable" else "connection-owner-initializing"),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            if (!bindingFailure) CircularProgressIndicator(color = Brand.Cyan)
+                            Text(if (bindingFailure) "连接服务暂不可用" else "正在初始化连接服务",
+                                modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            } else {
+                val control by current.control.collectAsState()
+                AppShell(repositoryOverride = current.repository, connectionControlState = control,
+                    onConnectionPowerAction = { action -> current.power(action) })
+            }
+        }
+        bound = try { bindService(Intent(this, ConnectionOwnerService::class.java), ownerConnection, Context.BIND_AUTO_CREATE) }
+            catch (_: Exception) { false }
+        if (!bound) bindingFailure = true
+    }
+
+    private fun bindingUnavailable() {
+        detachPermission()
+        owner = null
+        bindingFailure = true
+    }
+
+    private fun detachPermission() {
+        attachedPermission?.let { it.permission.detach(it.attachment) }
+        attachedPermission = null
+    }
+
+    override fun onDestroy() {
+        detachPermission()
+        if (bound) { unbindService(ownerConnection); bound = false }
+        // onStop keeps the binding: Android's own consent screen may cover this activity.
+        super.onDestroy()
     }
 }
 
@@ -89,11 +180,16 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery? = null,
     paymentOpenerOverride: ((String) -> Unit)? = null,
     connectionControlState: ConnectionControlState = ConnectionControlState(),
-    onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null) {
+    onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
+    repositoryOverride: PortalRepository? = null) {
     val context = LocalContext.current.applicationContext
-    val scope = rememberCoroutineScope()
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
-    val account = remember(accountOverride) { accountOverride ?: AccountController(productionRepository(context), scope) }
+    val account = key(accountOverride, repositoryOverride) {
+        val scope = rememberCoroutineScope()
+        remember(accountOverride, repositoryOverride) {
+            accountOverride ?: AccountController(repositoryOverride ?: productionRepository(context), scope)
+        }
+    }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
     LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
         account.restoring, account.foregroundCheckPending, account.clearing) { account.nodeSelection.sync() }

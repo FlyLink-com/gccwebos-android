@@ -278,7 +278,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 val bytes = SafeProxyConfig.project(raw, selected.index)
                 try {
                     var consumed = false
-                    prepared = AuthorizedConfig(selected.lineId, bytes) { action -> synchronized(lock) {
+                    prepared = AuthorizedConfig(selected.lineId, bytes, snapshot.validUntil) { action -> synchronized(lock) {
                         check(!consumed); consumed = true
                         check(revision == epoch && sameCapability(binding)) { "Subscription changed" }
                         check(snapshot.validUntil == null || snapshot.validUntil > now()) { "Subscription expired" }
@@ -310,7 +310,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     val bytes = SafeProxyConfig.project(raw, index)
                     try {
                         var consumed = false
-                        material = AuthorizedConfig("local-selection", bytes) { action -> synchronized(lock) {
+                        material = AuthorizedConfig("local-selection", bytes, fresh.validUntil) { action -> synchronized(lock) {
                             check(!consumed); consumed = true
                             requireCurrent(epoch, binding, fresh.validUntil)
                             val copy = requireNotNull(material).copyMaterial()
@@ -406,5 +406,6 @@ class LocalSubscriptionConfigGateway(private val manager: LocalSubscriptionManag
     private val files: PreparedConfigStore) : LocalConfigGateway {
     override suspend fun prepare(intent: SelectionIntent): ConfigPreparation = manager.prepare(intent, files)
     override fun invalidatePending() = manager.invalidatePending()
+    override fun clearPreparedMaterial() = files.clear()
     override fun observeClear(onClear: () -> Unit): Closeable = manager.observeClear(onClear)
 }

@@ -26,6 +26,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
+          fetch-depth: 2
       - name: Verify exact source and existing build tools
         shell: bash
         run: |

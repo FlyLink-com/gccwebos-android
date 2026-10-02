@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:label="GCC copy boundary QA">
+        <service android:name=".CopyBoundaryQaService"
+            android:process=":ipcqa"
+            android:exported="false"
+            android:stopWithTask="false" />
+    </application>
+</manifest>

@@ -73,7 +73,7 @@ gradle.projectsEvaluated {
                 [name:it.name(), propertyName:it.propertyName, defaultValue:it.defaultValue]
             }
             result.debugMinified = lab.extensions.getByName('android').buildTypes.getByName('debug').minifyEnabled
-            result.agpVersion = lab.extensions.getByName('androidComponents').pluginVersion.toString()
+            result.agpVersion = lab.extensions.getByName('androidComponents').pluginVersion.version
             result.testGeneratedProguardRulesBefore = lab.tasks.getByName('minifyDebugAndroidTestWithR8').extensions.extraProperties.get('b2GeneratedRulesBefore')
             result.testGeneratedProguardRules = lab.tasks.getByName('minifyDebugAndroidTestWithR8').proguardConfigurations.toList()
             result.globalSyntheticsTasks = lab.tasks.findAll { it.name.toLowerCase().contains('globalsynthetics') }.collect { it.name }

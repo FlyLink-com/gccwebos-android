@@ -1,0 +1,48 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
+gradle.projectsEvaluated {
+    def lab = gradle.rootProject.findProject(':ownerDeathLab')
+    if (lab == null) throw new GradleException('B2 opt-in module required')
+    lab.tasks.register('inspectB2Classpaths') {
+        doLast {
+            def fileProof = { File file ->
+                def md = MessageDigest.getInstance('SHA-256')
+                file.withInputStream { stream ->
+                    byte[] buffer = new byte[65536]
+                    int size
+                    while ((size = stream.read(buffer)) > 0) md.update(buffer, 0, size)
+                }
+                def names = []
+                if (file.name.endsWith('.jar')) {
+                    def zip = new ZipFile(file)
+                    try { names = zip.entries().toList().collect { it.name } }
+                    finally { zip.close() }
+                }
+                [path:file.absolutePath, bytes:file.length(), sha256:md.digest().encodeHex().toString(),
+                 androidClassEntries:names.count { it.startsWith('android/') && it.endsWith('.class') },
+                 kotlinClassEntries:names.count { it.startsWith('kotlin/') && it.endsWith('.class') }]
+            }
+            def result = [sourceCommit:System.getenv('B2_DIAG_SOURCE'), configurations:[:], bootClasspath:[], javaTasks:[:]]
+            ['debugCompileClasspath','debugRuntimeClasspath','debugAndroidTestCompileClasspath','debugAndroidTestRuntimeClasspath'].each { name ->
+                def config = lab.configurations.getByName(name)
+                result.configurations[name] = [
+                    declaredDependencies:config.allDependencies.collect { [type:it.class.name,group:it.group,name:it.name,version:it.version] },
+                    resolvedFiles:config.files.collect { fileProof(it) },
+                    resolvedComponents:config.incoming.resolutionResult.allComponents.collect { it.id.displayName }]
+            }
+            result.bootClasspath = lab.extensions.getByName('android').bootClasspath.collect { fileProof(it) }
+            ['compileDebugJavaWithJavac','compileDebugAndroidTestJavaWithJavac'].each { name ->
+                def task = lab.tasks.getByName(name)
+                result.javaTasks[name] = [classpath:task.classpath.files.findAll { it.isFile() }.collect { fileProof(it) },
+                     bootstrapClasspath:task.options.bootstrapClasspath?.files?.collect { fileProof(it) },
+                     sourceCompatibility:task.sourceCompatibility,targetCompatibility:task.targetCompatibility]
+            }
+            def directory = gradle.rootProject.file('.build-output/b2-classpath')
+            directory.mkdirs()
+            new File(directory,'classpaths.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(result)) + '\n'
+            println 'B2_CLASS_PATHS_RECORDED_NO_APK_BUILD'
+        }
+    }
+}

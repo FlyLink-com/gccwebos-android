@@ -1,0 +1,35 @@
+name: B2 classpath diagnosis only
+on:
+  push:
+    branches: [codex/lucky-b2-strict-packaging]
+    paths: ['.github/workflows/owner-death-classpath.yml', 'scripts/b2-classpath.init.gradle']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Record only B2 compile and runtime classpath inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export B2_DIAG_SOURCE="$(git rev-parse HEAD)"
+          mkdir -p .build-output/b2-classpath
+          git rev-parse HEAD > .build-output/b2-classpath/source-commit.log
+          git rev-parse 'HEAD^{tree}' > .build-output/b2-classpath/source-tree.log
+          sh scripts/bootstrap-wrapper.sh
+          ./gradlew --no-daemon --console=plain -PownerDeathLab=true \
+            --init-script scripts/b2-classpath.init.gradle :ownerDeathLab:inspectB2Classpaths \
+            2>&1 | tee .build-output/b2-classpath/diagnosis.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: b2-classpath-${{ github.sha }}
+          path: .build-output/b2-classpath/
+          retention-days: 14

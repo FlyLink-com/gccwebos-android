@@ -1,17 +1,18 @@
 {
   "android_execution": "NOT_RUN_BY_BINDING",
   "files": {
-    "ENVIRONMENT-README.md": "0c0cad62c16508ac126bd336dab76fc1dd12f8e113bf2131df4202bcaaf012bf",
+    "ENVIRONMENT-README.md": "6e2a6ab87bb950caa99c9f3a3d502d49c46a121e5ee3c90696542989a79afa78",
     "README.md": "e3d34a0c08e7de7cc2c05d17d75841126a4aeb87f159f7a2c412a050d3d0d933",
     "b2-runtime-api33.sh": "cc13dcd3b88b54077e4c51da572e644d72818fd95e26dcbbe0c753140ce8cff6",
     "b2-runtime-evidence.py": "cc3cbe2fcc0c81191c40ee64c23e8f9848a62107600d947f1fa439b9709397b0",
-    "environment-approval.json": "f034b614960ddd1d0a76030ef3aa3f669f70e4a7172e2d18b107e4fcf4a559c6",
+    "environment-approval.json": "cae5a54520237344cef02eb489926cfd17ccc687a6b7cd4a6bc7a6634ca03c84",
     "freeze.json": "f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad",
+    "prepare-system-libraries.py": "0462ec547ff019719df1c23891d29402f10078c2705817e7056ceab5e965d960",
     "proposed-workflow.yml.disabled": "a63894550d16b799b9a7298d932e744fc171c4f486764c142a5b9ab94466a10c",
-    "provision-and-run.py": "3d86274867cf049c1228338a8ca0dab4d094e99e55258911b17d7fb345ddec31"
+    "provision-and-run.py": "9320362a361247416dc7827ee1cefe5a1b4d0fc54b5796110e7025a312df5b6e"
   },
-  "hashes_bind": "exact eight file bytes; excludes this manifest and supplementary prior approval.json",
-  "kind": "Authorized cache layout repair and exact frozen B2 runtime",
+  "hashes_bind": "exact nine file bytes; excludes this manifest and supplementary prior approval.json",
+  "kind": "Authorized standard Ubuntu runtime libraries and exact frozen B2 runtime",
   "runtime_authorized": true,
   "schema": 1
 }

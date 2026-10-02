@@ -1,7 +1,7 @@
-# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-archive-runtime.
+# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-system-runtime.
 # Reuses default-main registered entry; default-main native workflow is unchanged.
 # Exact committed harness input and frozen hashes remain mandatory.
-name: Approved x64 catalog repair and frozen B2 Binder runtime API33
+name: Approved Ubuntu runtime libraries and frozen B2 Binder runtime API33
 on:
   workflow_dispatch:
     inputs:
@@ -17,14 +17,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   frozen-b2-api33:
-    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-archive-runtime' && github.run_attempt == 1
+    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-system-runtime' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       APPROVED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
       APPROVED_FREEZE_SHA256: f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad
-      APPROVED_HARNESS_MANIFEST_SHA256: 4aec8c965a37534102407deb95fc54393631614ae66a26438ac5b12c6be2ced9
-      APPROVED_ENVIRONMENT_SHA256: f034b614960ddd1d0a76030ef3aa3f669f70e4a7172e2d18b107e4fcf4a559c6
+      APPROVED_HARNESS_MANIFEST_SHA256: 5bb454af7c830e462108989d970972e351c1c068aa46763fb32e08d585888289
+      APPROVED_ENVIRONMENT_SHA256: cae5a54520237344cef02eb489926cfd17ccc687a6b7cd4a6bc7a6634ca03c84
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -46,13 +46,13 @@ jobs:
           from pathlib import Path
           root = Path(sys.argv[1])
           hashes = json.loads((root/'harness-sha256.json').read_text())['files']
-          expected = {'ENVIRONMENT-README.md', 'README.md', 'b2-runtime-api33.sh', 'b2-runtime-evidence.py', 'environment-approval.json', 'freeze.json', 'proposed-workflow.yml.disabled', 'provision-and-run.py'}
+          expected = {'ENVIRONMENT-README.md', 'README.md', 'b2-runtime-api33.sh', 'b2-runtime-evidence.py', 'environment-approval.json', 'freeze.json', 'proposed-workflow.yml.disabled', 'provision-and-run.py', 'prepare-system-libraries.py'}
           assert set(hashes) == expected
           assert all(hashlib.sha256((root/p).read_bytes()).hexdigest() == h for p,h in hashes.items())
           PY
           printf '%s  %s\n' "$APPROVED_FREEZE_SHA256" "$PROPOSAL/freeze.json" | sha256sum -c -
           python3 "$PROPOSAL/b2-runtime-evidence.py" check-ready "$PROPOSAL/freeze.json"
-      - name: Prepare only approved official packages and temporary KVM; frozen P7-P9 once
+      - name: Prepare approved SDK and exact Ubuntu libraries with service veto; frozen P7-P9 once
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

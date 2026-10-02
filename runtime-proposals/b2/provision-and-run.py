@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """One approved hosted preparation and one invocation of the immutable B2 harness.
 
-This wrapper provisions two official packages. The original cached-image receipt
+This wrapper provisions two official SDK packages and approved pinned Ubuntu
+runtime libraries. The original cached-image receipt
 describes only the inner harness; it does not describe this preparation scope.
 No runtime claim is made by parsing or reviewing this source on another host.
 """
@@ -23,7 +24,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REPOSITORY = "gccwebos-com/gccwebos-android"
-BRANCH = "refs/heads/codex/lucky-b2-archive-runtime"
+BRANCH = "refs/heads/codex/lucky-b2-system-runtime"
 PACKAGES = ("emulator", "system-images;android-33;default;x86_64")
 METHODS = ("p7OwnerDeathKeepsWorkerAndQuarantine", "p8ExactEvidenceWaitsForCallAndDisposition", "p9WorkerDeathAndStaleEvidenceStayScoped")
 CATALOGS = (
@@ -685,8 +686,8 @@ def host_guard(here):
     manifest_record = read_json(here / "harness-sha256.json")
     need(manifest_record.get("schema") == 1 and manifest_record.get("runtime_authorized") is True, "STOP_HARNESS_MANIFEST_POLICY")
     manifest = manifest_record.get("files", {})
-    need(isinstance(manifest, dict) and len(manifest) == 8 and all(isinstance(k, str) and "/" not in k and "\\" not in k and k not in (".", "..", "harness-sha256.json") for k in manifest), "STOP_HARNESS_MANIFEST_SCOPE")
-    need(set(manifest) == set(CORE) | {"README.md", "provision-and-run.py", "environment-approval.json", "ENVIRONMENT-README.md"}, "STOP_HARNESS_MANIFEST_MEMBERS")
+    need(isinstance(manifest, dict) and len(manifest) == 9 and all(isinstance(k, str) and "/" not in k and "\\" not in k and k not in (".", "..", "harness-sha256.json") for k in manifest), "STOP_HARNESS_MANIFEST_SCOPE")
+    need(set(manifest) == set(CORE) | {"README.md", "provision-and-run.py", "prepare-system-libraries.py", "environment-approval.json", "ENVIRONMENT-README.md"}, "STOP_HARNESS_MANIFEST_MEMBERS")
     for name, digest in manifest.items():
         need(re.fullmatch(r"[0-9a-f]{64}", digest) and sha((here / name).read_bytes()) == digest, "STOP_HARNESS_MEMBER_HASH")
     policy = read_json(here / "environment-approval.json")
@@ -694,6 +695,23 @@ def host_guard(here):
          and policy.get("no_other_software") is True and policy.get("repository") == REPOSITORY
          and policy.get("branch") == BRANCH.removeprefix("refs/heads/") and policy.get("job_attempts") == 1
          and policy.get("case_attempts") == 1 and policy.get("catalog_urls") == list(CATALOGS), "STOP_ENVIRONMENT_APPROVAL")
+    libraries = policy.get("system_runtime_libraries", {})
+    need(libraries.get("authorized") is True and libraries.get("requested_package") == "libpulse0:amd64"
+         and libraries.get("distro") == {"id": "ubuntu", "version_id": "24.04", "architecture": "amd64", "machine": "x86_64"}
+         and libraries.get("allowed_existing_repository_hosts") == ["archive.ubuntu.com", "azure.archive.ubuntu.com", "security.ubuntu.com"]
+         and all(libraries.get(key) is False for key in ("allow_index_update", "allow_upgrade", "allow_remove", "install_recommends", "allow_services", "accept_new_terms")),
+         "STOP_SYSTEM_LIBRARY_APPROVAL")
+    pins = libraries.get("packages")
+    need(isinstance(pins, list) and 1 <= len(pins) <= 32 and all(isinstance(pin, dict)
+         and re.fullmatch(r"lib[a-z0-9][a-z0-9+.-]*(?::amd64)?", pin.get("name", ""))
+         and re.fullmatch(r"[0-9][A-Za-z0-9.+:~\-]*", pin.get("version", ""))
+         and pin.get("architecture") == "amd64" for pin in pins), "STOP_SYSTEM_LIBRARY_PINS")
+    pin_names = [pin["name"].removesuffix(":amd64") for pin in pins]
+    need(len(set(pin_names)) == len(pin_names) and "libpulse0" in pin_names, "STOP_SYSTEM_LIBRARY_PIN_SCOPE")
+    diagnostic = libraries.get("source_diagnostic", {})
+    need(isinstance(diagnostic.get("run_id"), int) and diagnostic["run_id"] > 0
+         and re.fullmatch(r"[0-9a-f]{40}", diagnostic.get("head_sha", ""))
+         and re.fullmatch(r"[0-9a-f]{64}", diagnostic.get("artifact_sha256", "")), "STOP_SYSTEM_LIBRARY_DIAGNOSTIC_BINDING")
     kvm = policy.get("kvm", {})
     need(all(kvm.get(k) == v for k, v in {"mechanism": "temporary_owner_only", "target": "/dev/kvm", "grantee": "current_job_uid_only", "restore_required": True, "mode_group_acl_changes_allowed": False}.items()), "STOP_KVM_APPROVAL")
     need(policy.get("licenses", {}).get("existing_only") is True and policy["licenses"].get("accept_new_terms") is False
@@ -727,6 +745,8 @@ def main():
              "freeze_sha256": CORE["freeze.json"], "harness_manifest_sha256": sha((here / "harness-sha256.json").read_bytes()),
              "fault_budget": policy["fault_budget"], "fault_count_evidence": "budget only; observed counts require original raw test traces",
              "sdk_preparation_status": "FAILED", "sdkmanager_invocations": 0, "sdkmanager_stopped": True,
+             "system_libraries_preparation_status": "NOT_RUN", "system_libraries_invocations": 0, "system_libraries_stopped": True,
+             "system_libraries_exit": None, "system_runtime_library_scope_exact": False,
              "harness_invocations": 0, "harness_stopped": True, "harness_exit": None, "harness_result_status": None,
              "harness_cleanup_confirmed": False, "sdk_root_removed": False, "cached_sources_unchanged": False,
              "license_bytes_unchanged": False, "software_scope_exact": False, "errors": [],
@@ -736,7 +756,7 @@ def main():
                      "owner_control_boundary": "temporary owner also controls the node; wrapper only changes/restores owner",
                      "identity_check_use_boundary": "trusted fixed hosted device; pathname check/chown is not atomic",
                      "ctime_equality_required": False},
-             "trust_boundary": "wrapper provisions two official packages; cached-image.json no-provisioning wording applies only to the unchanged inner harness"}
+             "trust_boundary": "wrapper provisions two official SDK packages and the separately approved pinned Ubuntu runtime libraries; cached-image.json no-provisioning wording applies only to the unchanged inner harness"}
     root = None
     identity = None
     parent = None
@@ -855,6 +875,39 @@ def main():
         state.update(sdk_preparation_status="VERIFIED_TWO_OFFICIAL_PACKAGES", installed_packages=after_packages,
                      software_scope_exact=True, software_additions=list(PACKAGES), cached_software_payloads_unchanged=True,
                      cached_sources_unchanged=True, license_bytes_unchanged=True)
+        state["system_libraries_exit"] = child_once([sys.executable, "-B", str(here / "prepare-system-libraries.py"),
+                                                      "--policy", str(here / "environment-approval.json"), "--output", str(out)],
+                                                     preparation_env, out / "system-library-wrapper.log", 420, state, "system_libraries")
+        state["system_libraries_helper_stopped"] = state["system_libraries_stopped"]
+        state["system_libraries_stopped"] = False
+        system_receipt_path = out / "system-library-preparation.json"
+        need(system_receipt_path.is_file() and not system_receipt_path.is_symlink(), "STOP_SYSTEM_LIBRARY_RECEIPT_MISSING")
+        system_receipt_raw = system_receipt_path.read_bytes()
+        state["system_library_preparation_sha256"] = sha(system_receipt_raw)
+        system_receipt = read_json(system_receipt_path)
+        state["system_libraries_preparation_status"] = system_receipt.get("status")
+        need(system_receipt.get("schema") == 1 and system_receipt.get("run_id") == state["run_id"]
+             and system_receipt.get("head_sha") == head and system_receipt.get("environment_approval_sha256") == state["environment_approval_sha256"],
+             "STOP_SYSTEM_LIBRARY_RECEIPT_IDENTITY")
+        state["system_library_service_veto_verified"] = system_receipt.get("service_veto_verified") is True
+        state["system_library_service_veto_restored"] = system_receipt.get("service_veto_restored") is True
+        state["system_libraries_stopped"] = state["system_libraries_helper_stopped"] and (
+            system_receipt.get("apt_install_invocations") == 0 or (system_receipt.get("apt_install_invocations") == 1
+            and system_receipt.get("apt_install_normal_wait_completed") is True)) and (
+            system_receipt.get("root_wrapper_invocations") == 0 or (system_receipt.get("root_wrapper_invocations") == 1
+            and state["system_library_service_veto_restored"]))
+        need(state["system_libraries_exit"] == 0 and state["system_libraries_stopped"]
+             and system_receipt.get("schema") == 1 and system_receipt.get("status") == "VERIFIED_STANDARD_RUNTIME_LIBRARIES"
+             and system_receipt.get("overall_exit") == 0 and system_receipt.get("run_id") == state["run_id"]
+             and system_receipt.get("head_sha") == head and system_receipt.get("environment_approval_sha256") == state["environment_approval_sha256"]
+             and system_receipt.get("approved_new_packages") == policy["system_runtime_libraries"]["packages"]
+             and system_receipt.get("apt_install_invocations") == 1 and system_receipt.get("apt_install_normal_wait_completed") is True
+             and system_receipt.get("root_wrapper_invocations") == 1
+             and all(system_receipt.get(key) is True for key in ("package_scope_exact", "old_packages_unchanged", "no_new_running_services",
+                                                               "service_veto_verified", "service_veto_restored")),
+             "STOP_SYSTEM_LIBRARY_PREPARATION_FAILED")
+        state["system_runtime_library_scope_exact"] = True
+        state["system_runtime_library_additions"] = system_receipt["approved_new_packages"]
         kvm_before = kvm_snapshot()
         need(kvm_before["uid"] == 0 and kvm_before["mode"] & 0o600 == 0o600, "STOP_KVM_INITIAL_OWNER_MODE")
         state["kvm"]["before"] = kvm_evidence(kvm_before)
@@ -900,6 +953,29 @@ def main():
         # signals to emulator/ADB; only the immutable harness owns their teardown.
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
+        if state["system_libraries_invocations"] == 1:
+            # Normal helper exit alone cannot prove its privileged APT child
+            # stopped. Missing/bad evidence or an interrupted install retains SDK.
+            state["system_libraries_stopped"] = False
+            try:
+                system_receipt_path = out / "system-library-preparation.json"
+                need(system_receipt_path.is_file() and not system_receipt_path.is_symlink(), "STOP_SYSTEM_LIBRARY_STOP_EVIDENCE")
+                system_receipt_raw = system_receipt_path.read_bytes()
+                state["system_library_preparation_sha256"] = sha(system_receipt_raw)
+                system_receipt = read_json(system_receipt_path)
+                need(system_receipt.get("schema") == 1 and system_receipt.get("run_id") == state["run_id"]
+                     and system_receipt.get("head_sha") == head and system_receipt.get("environment_approval_sha256") == state["environment_approval_sha256"],
+                     "STOP_SYSTEM_LIBRARY_STOP_EVIDENCE_IDENTITY")
+                state["system_libraries_helper_stopped"] = state.get("system_libraries_normal_wait_completed") is True
+                state["system_library_service_veto_verified"] = system_receipt.get("service_veto_verified") is True
+                state["system_library_service_veto_restored"] = system_receipt.get("service_veto_restored") is True
+                state["system_libraries_stopped"] = state["system_libraries_helper_stopped"] and (
+                    system_receipt.get("apt_install_invocations") == 0 or (system_receipt.get("apt_install_invocations") == 1
+                    and system_receipt.get("apt_install_normal_wait_completed") is True)) and (
+                    system_receipt.get("root_wrapper_invocations") == 0 or (system_receipt.get("root_wrapper_invocations") == 1
+                    and state["system_library_service_veto_restored"]))
+            except Exception as exc:
+                cleanup_errors.append(str(exc) if isinstance(exc, Stop) else "STOP_SYSTEM_LIBRARY_STOP_EVIDENCE_EXCEPTION")
         if kvm_before is not None:
             try:
                 if state["kvm"]["restoration_required"]:
@@ -946,7 +1022,7 @@ def main():
             # Verification failures still fail the result, but do not suppress
             # independently safe removal of this minted, fully stopped root.
             try:
-                stopped = state["sdkmanager_stopped"] and state["harness_stopped"]
+                stopped = state["sdkmanager_stopped"] and state["system_libraries_stopped"] and state["harness_stopped"]
                 allowed = state["harness_invocations"] == 0 or state["harness_cleanup_confirmed"]
                 need(stopped and allowed, "STOP_RETAIN_SDK_UNPROVED_TEARDOWN")
                 remove_owned(root, parent, identity)
@@ -955,6 +1031,7 @@ def main():
                 cleanup_errors.append(str(exc) if isinstance(exc, Stop) else "STOP_SDK_CLEANUP_EXCEPTION")
         state["errors"].extend(cleanup_errors)
         success = (not state["errors"] and state["sdk_preparation_status"] == "VERIFIED_TWO_OFFICIAL_PACKAGES"
+                   and state["system_libraries_preparation_status"] == "VERIFIED_STANDARD_RUNTIME_LIBRARIES" and state["system_runtime_library_scope_exact"]
                    and state["harness_invocations"] == 1 and state["harness_exit"] == 0 and state["harness_result_status"] == "PASS"
                    and state["harness_cleanup_confirmed"] and state["kvm"]["restored"] and state["sdk_root_removed"]
                    and state["cached_sources_unchanged"] and state["license_bytes_unchanged"] and state["software_scope_exact"])

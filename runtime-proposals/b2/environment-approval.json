@@ -45,7 +45,7 @@
     },
     "selection_boundary": "fixed host-format alias only; stable channel, uniqueness, complete archive, dependencies, Google URL and license constraints remain"
   },
-  "branch": "codex/lucky-b2-archive-runtime",
+  "branch": "codex/lucky-b2-system-runtime",
   "cached_bootstrap": {
     "bootstrap_tool_available_to_dependency_gate": false,
     "declared_package_id": "cmdline-tools;12.0",
@@ -116,12 +116,16 @@
   },
   "continuation_authorization": {
     "channel": "parent delegation",
+    "cleanup_boundary": "prior harness private root and SDK retained because teardown unproved; provider ephemeral runner recycling is separate from proved cleanup",
     "diagnostic_capture": "CLI12 source.properties exists; CLI package.xml absent; platform-tools and build-tools registration complete",
     "instruction": "locate validator inventory rejection, retain useful diagnostics, repair format/path/normal missing-package handling within approved official environment preparation, preserve source/license restrictions, continue frozen f1 actual tests; no blind retry",
-    "latest_preparation_run_id": 37011158617,
-    "latest_preparation_stop": "STOP_ARCHIVE_SELECTION",
-    "latest_runtime_calls": 0,
+    "latest_case_calls": 0,
+    "latest_faults_observed": 0,
+    "latest_preparation_run_id": 37012696115,
+    "latest_preparation_stop": "official emulator installed; version loader could not resolve libpulse.so.0 before guest launch",
+    "latest_runtime_calls": 1,
     "old_missing_item_evidence": "UNKNOWN in old run; current diagnostic does not reconstruct deleted old cache",
+    "parent_clarification": "Necessary standard system runtime dependencies from the runner official Linux distribution repositories are within approved temporary official emulator installation; verify distro/source/closure, prevent audio or unrelated services, no persistent settings or new terms; no manual unknown libraries or loader bypass",
     "prior_preparation_run_id": 37004797145,
     "prior_preparation_stop": "STOP_CACHED_PACKAGE_INVENTORY",
     "prior_runtime_calls": 0,
@@ -142,11 +146,8 @@
   },
   "forbidden": [
     "new license acceptance",
-    "additional packages",
     "SDK update",
-    "apt",
     "usermod",
-    "chmod",
     "setfacl",
     "shared SDK modification",
     "persistent permissions",
@@ -156,7 +157,13 @@
     "OPPO",
     "production VPN",
     "real subscription/config/token",
-    "production writes"
+    "production writes",
+    "software outside approved Google SDK and exact Ubuntu runtime library pins",
+    "APT index/source/keyring changes",
+    "APT upgrades/removals/recommends",
+    "audio or unrelated service startup",
+    "manual library copying or loader path bypass",
+    "mode changes outside newly created temporary service-veto file"
   ],
   "freeze_sha256": "f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad",
   "job_attempts": 1,
@@ -174,6 +181,7 @@
     "immutable_existing_bytes": true
   },
   "no_other_software": true,
+  "no_other_software_boundary": "Only Google SDK package_ids plus system_runtime_libraries.packages; no other software",
   "original_runtime_approval": {
     "assistant_message": "1790937353.025969",
     "slack_thread": "1790747278.924809",
@@ -195,9 +203,85 @@
   "repository": "gccwebos-com/gccwebos-android",
   "runtime_authorized": true,
   "schema": 1,
-  "scope": "one corrected temporary GitHub-hosted Ubuntu 24.04 x86_64 job after zero-runtime catalog format stop; original approved software, licenses, KVM and fault scope",
+  "scope": "one corrected temporary GitHub-hosted Ubuntu24.04 job with official Google SDK and precisely reviewed standard Ubuntu emulator libraries; frozen f1 P7-P9 once",
+  "service_prevention": {
+    "absent_file": "one exclusive no-follow fixed deny creation for installation only; verify identity/hash then remove in finally",
+    "boundary": "standard service manager veto plus trusted exact Ubuntu library packages and running service snapshots; not complete transient process observation",
+    "existing_file": "accept only independently checked fixed deny bytes, root ownership and safe mode; never modify",
+    "fixed_action": "exit 101",
+    "path": "/usr/sbin/policy-rc.d",
+    "unknown_restore": "fail, retain SDK, do not enter KVM or harness"
+  },
   "source_commit": "f1e6722920871280645fcbbeb5e03b3d4577d7b2",
   "source_tree": "c83b36ece434a1acb170a50a84aa99bf66f8e010",
+  "system_runtime_libraries": {
+    "accept_new_terms": false,
+    "allow_index_update": false,
+    "allow_remove": false,
+    "allow_services": false,
+    "allow_upgrade": false,
+    "allowed_existing_repository_hosts": [
+      "archive.ubuntu.com",
+      "azure.archive.ubuntu.com",
+      "security.ubuntu.com"
+    ],
+    "authorized": true,
+    "distro": {
+      "architecture": "amd64",
+      "id": "ubuntu",
+      "machine": "x86_64",
+      "version_id": "24.04"
+    },
+    "install_recommends": false,
+    "packages": [
+      {
+        "architecture": "amd64",
+        "name": "libasyncns0",
+        "version": "0.8-6build4"
+      },
+      {
+        "architecture": "amd64",
+        "name": "libflac12t64",
+        "version": "1.4.3+ds-2.1ubuntu2"
+      },
+      {
+        "architecture": "amd64",
+        "name": "libmp3lame0",
+        "version": "3.100-6build1"
+      },
+      {
+        "architecture": "amd64",
+        "name": "libmpg123-0t64",
+        "version": "1.32.5-1ubuntu1.1"
+      },
+      {
+        "architecture": "amd64",
+        "name": "libopus0",
+        "version": "1.4-1build1"
+      },
+      {
+        "architecture": "amd64",
+        "name": "libpulse0",
+        "version": "1:16.1+dfsg1-2ubuntu10.1"
+      },
+      {
+        "architecture": "amd64",
+        "name": "libsndfile1",
+        "version": "1.2.2-1ubuntu5.24.04.1"
+      },
+      {
+        "architecture": "amd64",
+        "name": "libvorbisenc2",
+        "version": "1.3.7-1build3"
+      }
+    ],
+    "requested_package": "libpulse0:amd64",
+    "source_diagnostic": {
+      "artifact_sha256": "3c3486d56526515031c7f74281a94124082d5a21f8ce750b585ce4078cbb3bff",
+      "head_sha": "747649af3fbf77b92e4fad91a5af38366a5b0ef0",
+      "run_id": 37017018974
+    }
+  },
   "test_cases": [
     "p7OwnerDeathKeepsWorkerAndQuarantine",
     "p8ExactEvidenceWaitsForCallAndDisposition",

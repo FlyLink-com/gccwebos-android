@@ -14,12 +14,12 @@ concurrency:
   cancel-in-progress: false
 jobs:
   readonly-library-diagnostic:
-    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-library-diagnostic' && github.run_attempt == 1
+    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-library-plan' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
       APPROVED_DIAGNOSTIC_COMMIT: ${{ inputs.reviewed_diagnostic_commit }}
-      APPROVED_DIAGNOSTIC_SHA256: 7952c378c2ecb6d874fee7c4b76d0d460430a47fa3698500f24e1afa1a8e859b
+      APPROVED_DIAGNOSTIC_SHA256: 3e660137aed0c2765cf52e3b9716482f67622e0636e19fc5c686da039e4565c7
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -45,11 +45,11 @@ jobs:
           JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
-          mkdir -p .build-output/b2-library-diagnostic
+          mkdir -p .build-output/b2-library-plan
           python3 - <<'PY'
           import hashlib, json, os
           from pathlib import Path
-          root=Path('.build-output/b2-library-diagnostic')
+          root=Path('.build-output/b2-library-plan')
           capture=root/'library-preparation-diagnostic.json'
           summary={'scope':'read-only system metadata and package simulation; B2 runtime NOT_RUN','job_status':os.environ['JOB_STATUS']}
           if capture.is_file() and not capture.is_symlink():
@@ -66,8 +66,8 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && steps.bounded_diagnostic.outcome == 'success'
         with:
-          name: owner-death-b2-library-diagnostic-${{ github.sha }}
-          path: .build-output/b2-library-diagnostic/
+          name: owner-death-b2-library-plan-${{ github.sha }}
+          path: .build-output/b2-library-plan/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

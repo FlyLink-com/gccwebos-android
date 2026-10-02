@@ -15,8 +15,8 @@ import urllib.parse
 from pathlib import Path
 
 REPOSITORY = "gccwebos-com/gccwebos-android"
-BRANCH = "refs/heads/codex/lucky-b2-library-diagnostic"
-OUTPUT = ".build-output/b2-library-diagnostic"
+BRANCH = "refs/heads/codex/lucky-b2-library-plan"
+OUTPUT = ".build-output/b2-library-plan"
 ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C", "LANG": "C"}
 MAX_FILE = 4 * 1024 * 1024
 MAX_COMMAND = 1024 * 1024
@@ -26,7 +26,7 @@ COMMANDS = {
     "libpulse-package-files": ["/usr/bin/dpkg-query", "-L", "libpulse0"],
     "libpulse-policy": ["/usr/bin/apt-cache", "-o", "Dir::Cache::pkgcache=", "-o", "Dir::Cache::srcpkgcache=", "policy", "libpulse0"],
     "libpulse-dependencies": ["/usr/bin/apt-cache", "-o", "Dir::Cache::pkgcache=", "-o", "Dir::Cache::srcpkgcache=", "depends", "--important", "libpulse0"],
-    "libpulse-simulation": ["/usr/bin/apt-get", "-s", "--no-download", "-o", "Debug::NoLocking=true",
+    "libpulse-simulation": ["/usr/bin/apt-get", "-s", "-o", "Debug::NoLocking=true",
                            "-o", "Dir::Cache::pkgcache=", "-o", "Dir::Cache::srcpkgcache=",
                            "-o", "APT::Get::List-Cleanup=false", "--no-install-recommends", "--no-upgrade", "install", "libpulse0"],
     "loader-cache": ["/usr/sbin/ldconfig", "-p"],
@@ -125,7 +125,7 @@ def command_once(name, argv, out, deadline):
 
 
 def source_provenance():
-    files = [Path("/etc/apt/sources.list")]
+    files = [Path("/etc/apt/sources.list"), Path("/etc/apt/apt-mirrors.txt")]
     directory = Path("/etc/apt/sources.list.d")
     if directory.is_dir():
         entries = sorted(directory.iterdir())

@@ -23,7 +23,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REPOSITORY = "gccwebos-com/gccwebos-android"
-BRANCH = "refs/heads/codex/lucky-b2-bootstrap-runtime"
+BRANCH = "refs/heads/codex/lucky-b2-archive-runtime"
 PACKAGES = ("emulator", "system-images;android-33;default;x86_64")
 METHODS = ("p7OwnerDeathKeepsWorkerAndQuarantine", "p8ExactEvidenceWaitsForCallAndDisposition", "p9WorkerDeathAndStaleEvidenceStayScoped")
 CATALOGS = (
@@ -240,7 +240,7 @@ def select_package(root, wanted, catalog_url):
         bits = text_of(archive, "host-bits", True)
         arch = text_of(archive, "host-arch", True)
         if (host == "linux" if wanted == "emulator" else host in (None, "linux")):
-            if bits in (None, "64") and arch in (None, "x86_64"):
+            if bits in (None, "64") and arch in (None, "x86_64", "x64"):
                 compatible.append(archive)
     need(len(compatible) == 1, "STOP_ARCHIVE_SELECTION")
     archive = compatible[0]
@@ -259,6 +259,10 @@ def select_package(root, wanted, catalog_url):
         "license_ref": use.get("ref"), "license_body_sha256": licenses[use.get("ref")],
         "archive_url": official_url(urllib.parse.urljoin(catalog_url, text_of(complete, "url"))),
         "archive_bytes": size, "catalog_checksum_algorithm": algorithm, "catalog_checksum": digest,
+        "archive_host_os": text_of(archive, "host-os", True),
+        "archive_host_bits": text_of(archive, "host-bits", True),
+        "archive_host_arch": text_of(archive, "host-arch", True),
+        "archive_host_arch_normalized": "x86_64",
         "checksum_evidence_scope": "selected official catalog metadata; downloaded ZIP bytes not independently observed",
     }
 
@@ -658,6 +662,7 @@ def remove_owned(root, parent, identity):
 
 def host_guard(here):
     need(sys.platform == "linux" and os.getuid() == os.geteuid() != 0 and os.getgid() == os.getegid(), "STOP_HOST_PLATFORM")
+    need(os.uname().machine == "x86_64", "STOP_HOST_ARCHITECTURE")
     required = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_OS": "Linux",
                 "GITHUB_REPOSITORY": REPOSITORY, "GITHUB_REF": BRANCH, "GITHUB_RUN_ATTEMPT": "1"}
     need(all(os.environ.get(key) == value for key, value in required.items()), "STOP_HOST_CONTEXT")
@@ -717,7 +722,7 @@ def main():
         (out / name).write_bytes((here / name).read_bytes())
     state = {"schema": 1, "status": "FAILED", "overall_exit": 1, "run_id": int(os.environ["GITHUB_RUN_ID"]),
              "harness_commit": head, "head_sha": head, "run_attempt": 1, "repository": REPOSITORY, "branch": BRANCH,
-             "host_identity": {"uid": os.getuid(), "euid": os.geteuid(), "gid": os.getgid(), "egid": os.getegid(), "supplementary_groups": os.getgroups()},
+             "host_identity": {"uid": os.getuid(), "euid": os.geteuid(), "gid": os.getgid(), "egid": os.getegid(), "supplementary_groups": os.getgroups(), "machine": os.uname().machine},
              "environment_approval_sha256": sha((here / "environment-approval.json").read_bytes()),
              "freeze_sha256": CORE["freeze.json"], "harness_manifest_sha256": sha((here / "harness-sha256.json").read_bytes()),
              "fault_budget": policy["fault_budget"], "fault_count_evidence": "budget only; observed counts require original raw test traces",

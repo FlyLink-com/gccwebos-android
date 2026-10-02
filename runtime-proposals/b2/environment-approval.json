@@ -15,7 +15,37 @@
       "sha256": "ce1b8274302b0f372476a3977b665be7d95a455c43692593a58fabdff898081a"
     }
   ],
-  "branch": "codex/lucky-b2-bootstrap-runtime",
+  "archive_host_compatibility": {
+    "accepted_catalog_architectures": [
+      null,
+      "x64",
+      "x86_64"
+    ],
+    "actual_host_machine_required": "x86_64",
+    "normalized_architecture": "x86_64",
+    "other_host_architectures_allowed": false,
+    "raw_catalog_observation": {
+      "archive_bytes": 349654171,
+      "archive_relative_url": "emulator-linux_x64-16428233.zip",
+      "catalog_bytes": 419185,
+      "catalog_checksum": "cd7362ea55dfb86a418958138dc396e74165dd01",
+      "catalog_checksum_algorithm": "sha1",
+      "downloaded_bytes_independently_verified": false,
+      "file": "official-repository.xml",
+      "host_arch": "x64",
+      "host_bits": null,
+      "host_os": "linux",
+      "run_id": 37011158617,
+      "sha256": "c9e2f9e8b118dcc9c5584904ea27cbcefb217a5807029cedadfaa0b2f842fa8d",
+      "stable_emulator_revision": [
+        37,
+        2,
+        12
+      ]
+    },
+    "selection_boundary": "fixed host-format alias only; stable channel, uniqueness, complete archive, dependencies, Google URL and license constraints remain"
+  },
+  "branch": "codex/lucky-b2-archive-runtime",
   "cached_bootstrap": {
     "bootstrap_tool_available_to_dependency_gate": false,
     "declared_package_id": "cmdline-tools;12.0",
@@ -88,6 +118,9 @@
     "channel": "parent delegation",
     "diagnostic_capture": "CLI12 source.properties exists; CLI package.xml absent; platform-tools and build-tools registration complete",
     "instruction": "locate validator inventory rejection, retain useful diagnostics, repair format/path/normal missing-package handling within approved official environment preparation, preserve source/license restrictions, continue frozen f1 actual tests; no blind retry",
+    "latest_preparation_run_id": 37011158617,
+    "latest_preparation_stop": "STOP_ARCHIVE_SELECTION",
+    "latest_runtime_calls": 0,
     "old_missing_item_evidence": "UNKNOWN in old run; current diagnostic does not reconstruct deleted old cache",
     "prior_preparation_run_id": 37004797145,
     "prior_preparation_stop": "STOP_CACHED_PACKAGE_INVENTORY",
@@ -162,7 +195,7 @@
   "repository": "gccwebos-com/gccwebos-android",
   "runtime_authorized": true,
   "schema": 1,
-  "scope": "one corrected temporary GitHub-hosted Ubuntu 24.04 job after zero-runtime inventory stop; same original approved software, licenses, KVM and fault scope",
+  "scope": "one corrected temporary GitHub-hosted Ubuntu 24.04 x86_64 job after zero-runtime catalog format stop; original approved software, licenses, KVM and fault scope",
   "source_commit": "f1e6722920871280645fcbbeb5e03b3d4577d7b2",
   "source_tree": "c83b36ece434a1acb170a50a84aa99bf66f8e010",
   "test_cases": [

@@ -71,21 +71,31 @@ afterEvaluate {
     check(androidComponents.pluginVersion.toString() == "9.2.0") {
         "B2 test keep adapter requires the reviewed AGP 9.2.0"
     }
-    tasks.named<com.android.build.gradle.internal.tasks.BaseR8Task>(
-        "minifyDebugAndroidTestWithR8",
-    ).configure {
+    tasks.named("minifyDebugAndroidTestWithR8").configure {
+        check(javaClass.superclass.name == "com.android.build.gradle.internal.tasks.R8Task") {
+            "B2 test keep adapter: unexpected task type"
+        }
+        // The base class layout differs across AGP versions; require the exact
+        // actual task getter rather than compiling against a newer base type.
+        val ruleValue = javaClass.getMethod("getProguardConfigurations").invoke(this)
+        check(ruleValue is MutableList<*> && ruleValue.all { it is String }) {
+            "B2 test keep adapter: unexpected generated rule representation"
+        }
+        @Suppress("UNCHECKED_CAST")
+        val generatedRules = ruleValue as MutableList<String>
         val generatedKeepAll = setOf(
             "-keep class * {*;}",
             "-keep interface * {*;}",
             "-keep enum * {*;}",
         )
-        val before = proguardConfigurations.toList()
+        val before = generatedRules.toList()
         check("-keepattributes *" in before) { "B2 test attributes rule changed" }
         check(generatedKeepAll.all { rule -> before.count { it == rule } == 1 }) {
             "B2 test keep adapter: generated rules changed; refuse packaging"
         }
-        proguardConfigurations.removeAll(generatedKeepAll)
-        check(proguardConfigurations == before.filterNot { it in generatedKeepAll }) {
+        check("-dontshrink" !in before) { "B2 test shrinking disabled; refuse packaging" }
+        generatedRules.removeAll(generatedKeepAll)
+        check(generatedRules == before.filterNot { it in generatedKeepAll }) {
             "B2 test keep adapter changed an unrelated generated rule"
         }
         extensions.extraProperties.set("b2GeneratedRulesBefore", before)

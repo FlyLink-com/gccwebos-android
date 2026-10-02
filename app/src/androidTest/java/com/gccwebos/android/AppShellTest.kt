@@ -1,27 +1,383 @@
 package com.gccwebos.android
 
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.StateRestorationTester
+import com.gccwebos.android.portal.*
+import com.gccwebos.android.commerce.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import java.time.Instant
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Rule
 import org.junit.Test
 
 class AppShellTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @get:Rule val compose = createComposeRule()
+    private val requests = CopyOnWriteArrayList<String>()
+    private fun account(scope: CoroutineScope) = AccountController(PortalRepository(
+        object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                requests += path
+                check(path == "/api/portal/human-challenges") { "UI fixture refuses all account and commerce writes" }
+                check(session == null)
+                return WireResponse(201, """{"challenge":{"challengeRef":"human_ui_navigation","type":"math","prompt":"离线题目：7 + 2 = ?","expiresInSeconds":180}}""")
+            }
+        }, object : DeliveryStore {
+            override fun read(): DeliveryRecord? = null
+            override fun save(record: DeliveryRecord) = error("No delivery in navigation fixture")
+            override fun clear() = Unit
+        }, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
+        subscription = SubscriptionSource { error("Navigation fixture cannot download configuration") }), scope)
 
-    @Test fun signedOutLaunchCannotExposeMainOrVpn() {
-        compose.onNodeWithTag("login-screen").assertExists()
-        compose.onNodeWithTag("vpn-connect").assertDoesNotExist()
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
-        compose.onNodeWithTag("page-Profile").assertDoesNotExist()
-    }
-    @Test fun signedOutActivityRecreationStaysBehindLoginGate() {
-        compose.activityRule.scenario.recreate()
-        compose.waitForIdle()
-        compose.onNodeWithTag("login-screen").assertExists()
-        listOf("Connect", "Lines", "Plans", "Orders", "Profile").forEach { name ->
-            compose.onNodeWithTag("nav-$name").assertDoesNotExist()
+    private fun launch(control: () -> ConnectionControlState = { ConnectionControlState() },
+        onPowerAction: ((ConnectionPowerAction) -> Unit)? = null): AccountController {
+        lateinit var controller: AccountController
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val state = remember { account(scope) }
+            controller = state
+            AppShell(state, autoLoadCommerce = false, connectionControlState = control(),
+                onConnectionPowerAction = onPowerAction)
         }
+        return controller
+    }
+
+    @Test fun signedOutLaunchShowsFourOrderedTabsAndTruthfullyDisabledConnection() {
+        launch()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        val tabs = listOf("Connect", "Lines", "Plans", "Profile").map { compose.onNodeWithTag("nav-$it").assertExists() }
+        assertTrue(tabs.map { it.fetchSemanticsNode().boundsInRoot.left }.zipWithNext().all { (left, right) -> left < right })
+        compose.onNodeWithTag("nav-Lines").assertTextEquals("节点")
+        compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
+        compose.onNodeWithTag("login-screen").assertDoesNotExist()
+        compose.onNodeWithTag("connection-power").assertExists()
+        compose.onNodeWithTag("subscription-waterdrop").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接暂不可用")
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("未配置")
+        compose.onNodeWithTag("subscription-usage-unavailable").assertTextEquals("暂不可用")
+        compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
+    }
+
+    @Test fun readyConfigurationNeverShowsConnectedOrEnablesUnwiredProductionPower() {
+        val state = launch()
+        compose.runOnIdle {
+            state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
+                hasCapability = true, validUntil = Instant.now().plusSeconds(600))
+        }
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接暂不可用").assertIsNotEnabled()
+        compose.onNodeWithText("已连接").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-usage-unavailable").assertTextEquals("暂不可用")
+        compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
+    }
+
+    @Test fun controllerPowerCannotReplayOnNavigationAndAccountWorkDoesNotBlockCancelOrDisconnect() {
+        val control = mutableStateOf(ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true))
+        val actions = CopyOnWriteArrayList<ConnectionPowerAction>()
+        val state = launch({ control.value }, { actions += it })
+        compose.runOnIdle {
+            state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
+                hasCapability = true, validUntil = Instant.now().plusSeconds(600))
+        }
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.runOnIdle {
+            assertEquals(listOf(ConnectionPowerAction.Connect), actions.toList())
+            control.value = ConnectionControlState(ConnectionPhase.Connecting, revision = 1)
+        }
+        compose.onNodeWithTag("connection-status").assertTextEquals("连接中")
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接中").assertIsNotEnabled()
+        compose.runOnIdle {
+            state.busy = true // Account work cannot remove a real controller's cancellation capability.
+            control.value = control.value.copy(canCancel = true, revision = 2)
+        }
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("取消连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.runOnIdle {
+            assertEquals(listOf(ConnectionPowerAction.Connect, ConnectionPowerAction.Cancel), actions.toList())
+            control.value = ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true, revision = 3)
+        }
+        compose.onNodeWithTag("connection-status").assertTextEquals("已连接")
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("断开连接").assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click(); click() }
+        compose.runOnIdle {
+            assertEquals(listOf(ConnectionPowerAction.Connect, ConnectionPowerAction.Cancel, ConnectionPowerAction.Disconnect), actions.toList())
+            assertEquals(emptyList<String>(), requests.toList())
+        }
+    }
+
+    @Test fun signedOutRecreationRetainsConnectionWithoutAuthenticationRequests() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            val scope = rememberCoroutineScope()
+            AppShell(remember { account(scope) }, autoLoadCommerce = false)
+        }
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("login-screen").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
+    }
+
+    @Test fun profileLoginAndRegistrationRemainLocalAndReturnToConnection() {
+        val state = launch()
+        compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("login-account").performScrollTo().performTextInput("navigation@example.invalid")
+        compose.onNodeWithTag("login-register").performScrollTo().performClick()
+        compose.onNodeWithTag("registration-form").assertExists()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("login-screen").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals("navigation@example.invalid", state.account)
+            check(requests.all { it == "/api/portal/human-challenges" })
+        }
+    }
+
+    @Test fun anonymousPlansNeverExposePrivateCatalogOrBalanceAndNodesHaveIndependentTab() {
+        launch()
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithText("选择适合你的套餐").assertExists()
+        compose.onNodeWithText("当前套餐尚未加载").assertExists()
+        compose.onNodeWithTag("anonymous-plans-login").assertIsEnabled()
+        compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
+        compose.onNodeWithTag("page-Lines").assertExists()
+        compose.onNodeWithTag("nav-Lines").assertExists().assertIsSelected()
+        compose.onNodeWithTag("nodes-account").assertTextEquals("登录领取订阅").assertIsEnabled()
+        compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
+    }
+
+    @Test fun missingNodeGuideRoutesToMyAndPrivateGateSurvivesComposeRestoration() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            val scope = rememberCoroutineScope()
+            AppShell(remember { account(scope) }, autoLoadCommerce = false)
+        }
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-account").performScrollTo().performClick()
+        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
+        compose.onNodeWithTag("page-Profile").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.runOnIdle { check(requests.all { it == "/api/portal/human-challenges" }) }
+    }
+
+    private val nodeReads = AtomicInteger()
+    private lateinit var nodeAccount: AccountController
+    private var pendingNodeRead: CompletableDeferred<Unit>? = null
+    private var nodeBytes = """proxies:
+  - name: 重复节点
+    type: ss
+    server: 192.0.2.40
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+  - name: 重复节点
+    type: ss
+    server: 192.0.2.41
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+""".toByteArray()
+
+    private fun launchLoadedNodes() {
+        val expiry = Instant.now().plusSeconds(3600)
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val owner = remember {
+                val store = object : DeliveryStore {
+                    override fun read() = DeliveryRecord("fixture", "fixture", "fixture", "fixture",
+                        Secret("https://sub.invalid/sub/a/appshell-nodes-fixture"), null, false)
+                    override fun save(record: DeliveryRecord) = error("No delivery writes")
+                    override fun clear() = Unit
+                }
+                val source = object : SubscriptionSource {
+                    override suspend fun download(url: Secret) = read(url).bytes
+                    override suspend fun read(url: Secret): SubscriptionRead {
+                        nodeReads.incrementAndGet()
+                        val gate = pendingNodeRead
+                        if (gate != null) withContext(NonCancellable) { gate.await() }
+                        return SubscriptionRead(nodeBytes.copyOf(), expiry)
+                    }
+                }
+                AccountController(PortalRepository(object : PortalTransport {
+                    override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                        requests += path; error("Node navigation must not access Portal")
+                    }
+                }, store, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
+                    subscription = source, sessions = MemorySessionStore(), profiles = MemoryLocalProfileStore()), scope)
+                    .also { it.nodeSelection.invalidate(); nodeAccount = it }
+            }
+            LaunchedEffect(owner) { owner.nodeSelection.refresh() } // Explicit synthetic local-config fixture setup.
+            AppShell(owner, autoLoadCommerce = false)
+        }
+        compose.waitUntil(5000) { ::nodeAccount.isInitialized && !nodeAccount.nodeSelection.busy &&
+            nodeAccount.nodeSelection.snapshot.status == LocalSubscriptionStatus.READY }
+    }
+
+    @Test fun selectedOpaqueNodeReturnsToConnectionAndSurvivesTabsAndSameContentFreshRead() {
+        launchLoadedNodes()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
+        compose.onNodeWithTag("nav-Lines").performClick()
+        val second = nodeAccount.nodeSelection.snapshot.choices[1].selection
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
+        compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        repeat(2) {
+            compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
+            compose.onNodeWithTag("node-choice-1").assertIsSelected()
+            compose.onNodeWithTag("nav-Connect").performClick()
+        }
+        compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertEquals(1, nodeReads.get()) }
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.waitUntil(5000) { nodeReads.get() == 2 && !nodeAccount.nodeSelection.busy }
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
+        compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
+        compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
+        compose.onNodeWithTag("local-subscription-refresh").performScrollTo().performClick()
+        compose.waitUntil(5000) { nodeReads.get() == 3 && nodeAccount.nodeSelection.busy }
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("正在刷新")
+        compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
+        compose.runOnIdle { pendingNodeRead!!.complete(Unit); pendingNodeRead = null }
+        compose.waitUntil(5000) { !nodeAccount.nodeSelection.busy }
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
+        compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
+    }
+
+    @Test fun changedContentClearsConnectionSummaryAndNeedsExplicitNewOpaqueSelection() {
+        launchLoadedNodes()
+        compose.onNodeWithTag("nav-Lines").performClick()
+        val old = nodeAccount.nodeSelection.snapshot.choices[1].selection
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        compose.runOnIdle { nodeBytes = nodeBytes.toString(Charsets.UTF_8).replace("192.0.2.41", "192.0.2.42").toByteArray() }
+        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.waitUntil(5000) { nodeReads.get() == 2 && !nodeAccount.nodeSelection.busy }
+        compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
+        compose.onNodeWithTag("node-selection-message").assertTextEquals("配置已变化，请重新选择节点。")
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
+        compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
+        compose.runOnIdle { nodeAccount.nodeSelection.select(old); assertNull(nodeAccount.nodeSelection.snapshot.selected) }
+        compose.onNodeWithTag("nav-Lines").performClick()
+        val current = nodeAccount.nodeSelection.snapshot.choices[0].selection
+        compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
+        compose.runOnIdle { assertSame(current, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
+    }
+
+    @Test fun cancelledAndAccountChangedLateReadsCannotReviveConnectionNodeSummary() {
+        launchLoadedNodes()
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
+        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.waitUntil(5000) { nodeAccount.nodeSelection.busy && nodeReads.get() == 2 }
+        compose.onNodeWithTag("nodes-cancel").performScrollTo().performClick()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
+        compose.runOnIdle { pendingNodeRead!!.complete(Unit); pendingNodeRead = null }
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.waitUntil(5000) { nodeReads.get() == 3 && !nodeAccount.nodeSelection.busy }
+        compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
+        compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
+        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.waitUntil(5000) { nodeAccount.nodeSelection.busy && nodeReads.get() == 4 }
+        compose.runOnIdle { nodeAccount.authSessionGeneration++ }
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
+        compose.runOnIdle { pendingNodeRead!!.complete(Unit); pendingNodeRead = null }
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
+        compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
+        compose.runOnIdle { assertNull(nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
+    }
+
+    @Test fun onlyKnownExpiryShowsRenewalWhileRetryAndStorageKeepDistinctStates() {
+        val state = launch()
+        compose.runOnIdle {
+            state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.RETRY_REQUIRED, validUntil = Instant.EPOCH)
+        }
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("读取失败")
+        compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
+        compose.runOnIdle { state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR) }
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("本地存储异常")
+        compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
+        compose.runOnIdle {
+            state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
+                hasCapability = true, validUntil = Instant.EPOCH)
+        }
+        compose.onNodeWithTag("local-subscription-title").assertTextEquals("订阅已过期")
+        compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertExists()
+    }
+
+    @Test fun mineHistoryKeepsOrdersAndLedgerReadOnlyEvenWithARetainedQuote() {
+        val recovery = object : CommerceRecovery {
+            override fun read(binding: String, kind: String): PendingCommerce? = error("No recovery read in UI-only fixture")
+            override fun save(binding: String, value: PendingCommerce) = error("No order writes")
+            override fun clear(binding: String, kind: String) = error("No recovery clear")
+        }
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val owner = remember { offlineUiAccount(scope) }
+            val state = remember {
+                CommerceController(owner, scope, recovery, includeHistory = true).apply {
+                    commerceModel = CommerceModel.LEGACY; catalogLoaded = true
+                    orderPage = OrderPage(emptyList()); ledgerPage = WalletLedgerPage(emptyList(), null)
+                    val offer = Offer("offer_fixture_navigation", "version_fixture_navigation", LocalizedText("离线商品", "Offline"),
+                        LocalizedText("离线", "Offline"), LocalizedNotices(emptyList(), emptyList()), 73, 7300,
+                        listOf("paid_coins"), 47, 17, 0)
+                    quote = Quote("quote_fixture_navigation", offer, 73, 0, "available", 0,
+                        emptyList(), QuoteBalances(CoinBalance(0, 100, 0, 0), CoinBalance(0, 27, 0, 0)),
+                        Instant.now().plusSeconds(600), null)
+                }
+            }
+            AppShell(owner, autoLoadCommerce = false, commerceOverride = state, commerceRecoveryOverride = recovery)
+        }
+        compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-history").performScrollTo().performClick()
+        compose.onNodeWithTag("orders-orders").assertExists()
+        compose.onNodeWithTag("orders-state-separation").assertExists()
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("mine-history-ledger").performScrollTo().performClick()
+        compose.onNodeWithText("暂无账单记录").assertExists()
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("mine-back").performScrollTo().performClick()
+        compose.onNodeWithTag("mine-history").performScrollTo().assertExists()
+        compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
     }
 }

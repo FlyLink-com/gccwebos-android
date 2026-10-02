@@ -86,7 +86,9 @@ class SubscriptionWalletUiTest {
 
     private fun launchShell(fontScale: Float = 1f, allowLoginChallenge: Boolean = false,
         setup: AccountController.() -> Unit = {}) {
-        expectedLoginChallengeRequests = if (allowLoginChallenge) 1 else 0
+        // Permitting an offline question does not mount the private login page.
+        // Anonymous launch stays on Connect; only an explicit My action requests it.
+        expectedLoginChallengeRequests = 0
         compose.setContent {
             val scope = rememberCoroutineScope()
             val controller = remember { accountFixture(scope, allowLoginChallenge).apply(setup) }
@@ -159,7 +161,9 @@ class SubscriptionWalletUiTest {
     )
 
     @Test fun launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage() {
-        launchShell(allowLoginChallenge = true) { authenticated = false }
+        launchShell { authenticated = false }
+        compose.onNodeWithTag("page-Connect").assertIsDisplayed()
+        compose.onNodeWithTag("login-screen").assertDoesNotExist()
         compose.onNodeWithTag("brand-name").assertTextEquals("飞连vpn")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.gccwebos.android.debug", context.packageName)
@@ -185,25 +189,37 @@ class SubscriptionWalletUiTest {
 
     @Test fun signedOutLoadingErrorAndUnknownNeverShowNoSubscriptionModal() {
         launchShell(allowLoginChallenge = true) { authenticated = false; resource = Resource.None }
+        compose.onNodeWithTag("page-Connect").assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").assertIsDisplayed()
+        compose.onNodeWithTag("login-screen").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, loginChallengeRequests.get()) }
+        expectedLoginChallengeRequests = 1
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("login-screen").assertIsDisplayed()
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
         compose.onNodeWithTag("login-account").performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, loginChallengeRequests.get()) }
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.runOnIdle { account.authenticated = true; account.busy = true }
-        compose.onNodeWithTag("local-subscription-loading").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("local-subscription-sync").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithText("正在读取资源").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.runOnIdle { account.busy = false; account.error = "离线同步失败" }
-        compose.onNodeWithTag("local-subscription-error").performScrollTo().assertTextEquals("离线同步失败")
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithText("资源暂时无法确认").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("resource-error").performScrollTo().assertTextEquals("离线同步失败")
+        capture("resource-error")
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        capture("resource-error")
         compose.runOnIdle { account.error = null; account.resource = null }
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("nav-Plans").performClick()
@@ -275,7 +291,18 @@ class SubscriptionWalletUiTest {
         compose.runOnIdle { account.resource = available().copy(validUntil = Instant.EPOCH) }
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextEquals("已到期")
         compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("portal-expired-renew").performScrollTo().assertIsDisplayed()
+        // Portal resource expiry cannot establish the separate local configuration's validity.
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
+        compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
+        compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
+        compose.runOnIdle {
+            account.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.EXPIRED,
+                hasProfile = true, hasCapability = true, validUntil = Instant.EPOCH)
+        }
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("订阅已过期")
+        compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
+        compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextEquals("已到期")
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
     }
 
@@ -324,18 +351,21 @@ class SubscriptionWalletUiTest {
 
     @Test fun walletUnknownAndErrorNeverBecomeZeroAndConfirmedBalanceIsExact() {
         launchCommerce(CommerceMode.Wallet)
-        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("尚未读取")
+        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("— Coins")
         compose.runOnIdle { commerce.error = "离线余额读取失败" }
         compose.onNodeWithTag("wallet-error").performScrollTo().assertTextEquals("离线余额读取失败")
-        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("尚未读取")
+        compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("— Coins")
         capture("wallet-error")
         compose.runOnIdle {
             commerce.error = null
             commerce.wallet = Wallet("active", 1, 12, 5, 3, 20, 3, 4)
         }
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("20 Coins")
-        compose.onNodeWithText("充值 Coins 余额 12 Coins · 赠送 5 Coins · 奖励 3 Coins").assertExists()
-        compose.onNodeWithText("冻结中 3 Coins · 待到账 4 Coins").assertExists()
+        compose.onNodeWithTag("wallet-paid").assertTextEquals("12 Coins")
+        compose.onNodeWithTag("wallet-bonus").assertTextEquals("5 Coins")
+        compose.onNodeWithTag("wallet-reward").assertTextEquals("3 Coins")
+        compose.onNodeWithTag("wallet-held").assertTextEquals("3 Coins")
+        compose.onNodeWithTag("wallet-pending").assertTextEquals("4 Coins")
         capture("wallet-confirmed-fixture")
         compose.runOnIdle { account.authenticated = false }
         compose.onNodeWithTag("commerce-signed-out").performScrollTo().assertIsDisplayed()
@@ -513,6 +543,7 @@ class SubscriptionWalletUiTest {
         val fixture = rechargeOffer()
         launchCommerce(CommerceMode.Wallet, fontScale = 2f) { rechargeOffers = listOf(fixture) }
         compose.onNodeWithTag("recharge-select-${fixture.offerRef}").performScrollTo().performClick()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-confirm").assertIsDisplayed().assertIsEnabled()
         compose.onNodeWithTag("recharge-cancel").assertIsDisplayed()
         capture("recharge-confirm-font-200")

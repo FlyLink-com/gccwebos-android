@@ -107,6 +107,7 @@ class CommerceEligibilityUiTest {
     }
 
     private fun submitLogin() {
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.waitUntil(5000) { ::account.isInitialized && account.challenge != null && !account.challengeLoading && !account.busy }
         compose.onNodeWithTag("login-account").performTextReplacement("eligibility_$owner@example.invalid")
         compose.onNodeWithTag("login-password").performTextReplacement("synthetic-only")
@@ -132,7 +133,7 @@ class CommerceEligibilityUiTest {
             assertFalse(commerce.busy); assertTrue(commerceReads.isEmpty())
         }
         if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-status").assertTextEquals("商品尚未读取")
-        else compose.onNodeWithTag("wallet-balance").assertTextEquals("尚未读取")
+        else compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
     }
 
     private fun expectedReads(mode: CommerceMode) = when (mode) {
@@ -184,6 +185,7 @@ class CommerceEligibilityUiTest {
     @Test fun cancelledLoginDiscardsALateResourceResponseAndDeferredWalletRead() {
         launch(); openWhileResourcePending(CommerceMode.Wallet)
         compose.runOnIdle { account.cancelAuthentication() }
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("login-screen").assertExists()
         compose.runOnIdle {
             assertFalse(account.authenticated); assertTrue(account.clearing); assertTrue(commerceReads.isEmpty())

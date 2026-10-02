@@ -121,6 +121,7 @@ class BrandUiTest {
                 } else AppShell(account, autoLoadCommerce = false, registrationOverride = registration)
             }
         }
+        if (!signedIn) compose.onNodeWithTag("nav-Profile").performClick()
         return controller
     }
     private fun assertQuestionPresentation(expected: String, enabled: Boolean = true) {
@@ -169,11 +170,11 @@ class BrandUiTest {
             compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream)
         }
     }
-    @Test fun fourNativeDestinationsAndDisabledProductionVpn() {
+    @Test fun fourPrimaryDestinationsAndDisabledProductionVpn() {
         launch()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         capture("connect")
-        listOf("Lines", "Plans", "Orders", "Profile").forEach { page ->
+        listOf("Lines", "Plans", "Profile").forEach { page ->
             compose.onNodeWithTag("nav-$page").performClick()
             compose.onNodeWithTag("page-$page").assertIsDisplayed()
             capture(page.lowercase())
@@ -186,7 +187,7 @@ class BrandUiTest {
         val state = launch(signedIn = false, challengeFixture = fixture)
         awaitAutomaticQuestion(state, fixture)
         compose.onNodeWithTag("login-screen").assertIsDisplayed()
-        compose.onNodeWithTag("nav-Connect").assertDoesNotExist()
+        compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("login-account").performScrollTo().performTextClearance()
         compose.onNodeWithTag("login-account").performTextInput("ui-fixture@example.invalid")
         capture("login")
@@ -420,7 +421,7 @@ class BrandUiTest {
         launch(.85f)
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         capture("connect-font-85")
-        listOf("Connect", "Lines", "Plans", "Orders", "Profile").forEach { page ->
+        listOf("Connect", "Lines", "Plans", "Profile").forEach { page ->
             compose.onNodeWithTag("nav-$page").assertIsDisplayed()
         }
     }
@@ -428,12 +429,13 @@ class BrandUiTest {
         launch()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
-        compose.onNodeWithTag("connection-unavailable").assertTextEquals("连接暂未开放")
+        compose.onNodeWithTag("connection-power").assertExists()
+        compose.onNodeWithTag("subscription-waterdrop").assertDoesNotExist()
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("尚未保存本地订阅")
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
         capture("compact-connect")
-        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("subscription-node-name-0").assertTextEquals("合成验收线路 Alpha")
         compose.onNodeWithTag("subscription-node-details-0").assertTextEquals("SS · 可解析")
         compose.onNodeWithTag("subscription-node-0").assert(SemanticsMatcher("Node row has no production click action") {
@@ -449,11 +451,11 @@ class BrandUiTest {
             localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.RETRY_REQUIRED)
             resource = (resource as Resource.Available).copy(validUntil = java.time.Instant.EPOCH)
         })
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("订阅更新尚未完成")
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("读取失败")
         compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
         compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
         compose.runOnIdle { state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR) }
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("本地安全存储需要处理")
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("本地存储异常")
         compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
         compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
         compose.runOnIdle {
@@ -462,7 +464,7 @@ class BrandUiTest {
             state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.RETRY_REQUIRED, hasCapability = true)
         }
         compose.onNodeWithTag("local-subscription-refresh").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("node-selection-status").assertTextEquals("尚无订阅配置")
         compose.onNodeWithTag("nodes-refresh").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("subscription-node-0").assertDoesNotExist()
@@ -476,9 +478,9 @@ class BrandUiTest {
             )
         })
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("connection-unavailable").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
         capture("compact-connect-narrow-font-200")
-        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("subscription-node-name-0").performScrollTo().assertTextEquals(name)
         compose.onNodeWithTag("subscription-node-name-1").performScrollTo().assertTextEquals(name)
         compose.onNodeWithTag("subscription-node-details-1").performScrollTo().assertTextEquals("VMESS · 暂不兼容")

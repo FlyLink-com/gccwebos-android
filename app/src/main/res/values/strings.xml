@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">飞连vpn</string>
     <string name="tab_connect">连接</string>
-    <string name="tab_lines">线路</string>
+    <string name="tab_lines">节点</string>
     <string name="tab_plans">套餐</string>
     <string name="tab_orders">订单</string>
     <string name="tab_profile">我的</string>

@@ -68,7 +68,9 @@ androidComponents {
 // snapshots; no class file, DEX, signed APK or inspection policy is edited.
 // This internal adapter is deliberately pinned and refuses changed AGP behavior.
 afterEvaluate {
-    check(androidComponents.pluginVersion == com.android.build.api.AndroidPluginVersion(9, 2, 0)) {
+    val pluginVersion = androidComponents.pluginVersion
+    check(pluginVersion.major == 9 && pluginVersion.minor == 2 &&
+        pluginVersion.micro == 0 && pluginVersion.previewType == null) {
         "B2 test keep adapter requires the reviewed AGP 9.2.0"
     }
     tasks.named("minifyDebugAndroidTestWithR8").configure {

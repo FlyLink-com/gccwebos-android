@@ -1,0 +1,106 @@
+{
+  "apks": [
+    {
+      "bytes": 39747,
+      "package": "com.gccwebos.android.ipcqa.b2",
+      "path": "ownerDeathLab/build/outputs/apk/debug/ownerDeathLab-debug.apk",
+      "role": "target",
+      "sha256": "df3068cdb6366290ae3e1202169a474f19e2efa052409035788e2a9b5c46ba8a"
+    },
+    {
+      "bytes": 22036,
+      "package": "com.gccwebos.android.ipcqa.b2.test",
+      "path": "ownerDeathLab/build/outputs/apk/androidTest/debug/ownerDeathLab-debug-androidTest.apk",
+      "role": "test",
+      "sha256": "ce1b8274302b0f372476a3977b665be7d95a455c43692593a58fabdff898081a"
+    }
+  ],
+  "branch": "codex/lucky-b2-provision-runtime",
+  "case_attempts": 1,
+  "catalog_urls": [
+    "https://dl.google.com/android/repository/repository2-3.xml",
+    "https://dl.google.com/android/repository/sys-img/android/sys-img2-3.xml"
+  ],
+  "certificate_sha256": "c18dabe07cc64cedf430f1cd3f3b5617eedfc6d9b5b1ab29d6f76806eb1b14ad",
+  "cleanup": {
+    "after_harness_requires_actual_owned_teardown": true,
+    "private_sdk_only": true,
+    "sdk_root_prefix": "gccwebos-b2-sdk-prep.",
+    "uncertain_state": "retain diagnostics and fail"
+  },
+  "environment_approval": {
+    "approved_request": "Google official emulator and fixed API33/default/x86_64 image plus minimal temporary KVM access; continue same frozen f1 APK P7-P9 once, owner2 worker1; existing accepted SDK terms only",
+    "assistant_message": "1790939387.762099",
+    "slack_thread": "1790747278.924809",
+    "source_thread": "01a0f0d1-54e3-77e0-98ae-eb87ae68d016",
+    "user_message": "1790939604.094629",
+    "user_text": "允许"
+  },
+  "fault_budget": {
+    "owner": 2,
+    "worker": 1
+  },
+  "forbidden": [
+    "new license acceptance",
+    "additional packages",
+    "SDK update",
+    "apt",
+    "usermod",
+    "chmod",
+    "setfacl",
+    "shared SDK modification",
+    "persistent permissions",
+    "APK rebuild",
+    "device fallback",
+    "test reruns",
+    "OPPO",
+    "production VPN",
+    "real subscription/config/token",
+    "production writes"
+  ],
+  "freeze_sha256": "f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad",
+  "job_attempts": 1,
+  "kvm": {
+    "grantee": "current_job_uid_only",
+    "mechanism": "temporary_owner_only",
+    "mode_group_acl_changes_allowed": false,
+    "owner_control_boundary": "temporary ownership also grants node-owner control; wrapper only changes/restores owner",
+    "restore_required": true,
+    "target": "/dev/kvm"
+  },
+  "licenses": {
+    "accept_new_terms": false,
+    "existing_only": true,
+    "immutable_existing_bytes": true
+  },
+  "no_other_software": true,
+  "original_runtime_approval": {
+    "assistant_message": "1790937353.025969",
+    "slack_thread": "1790747278.924809",
+    "source_thread": "01a0f0d1-54e3-77e0-98ae-eb87ae68d016",
+    "user_message": "1790937372.853329",
+    "user_text": "同意进行测试"
+  },
+  "package_ids": [
+    "emulator",
+    "system-images;android-33;default;x86_64"
+  ],
+  "prior_attempt": {
+    "android_runtime": "NOT_RUN",
+    "conclusion": "failure",
+    "faults_observed": 0,
+    "reason": "cached emulator/API33 metadata unavailable and KVM inaccessible",
+    "run_id": 36998104813
+  },
+  "repository": "gccwebos-com/gccwebos-android",
+  "runtime_authorized": true,
+  "schema": 1,
+  "scope": "one new temporary GitHub-hosted Ubuntu 24.04 job; official Google packages only; no persistent runner change",
+  "source_commit": "f1e6722920871280645fcbbeb5e03b3d4577d7b2",
+  "source_tree": "c83b36ece434a1acb170a50a84aa99bf66f8e010",
+  "test_cases": [
+    "p7OwnerDeathKeepsWorkerAndQuarantine",
+    "p8ExactEvidenceWaitsForCallAndDisposition",
+    "p9WorkerDeathAndStaleEvidenceStayScoped"
+  ]
+}

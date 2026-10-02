@@ -1,7 +1,7 @@
-# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-runtime.
+# APPROVED SINGLE RUN: manual dispatch only on codex/lucky-b2-provision-runtime.
 # Reuses default-main registered entry; default-main native workflow is unchanged.
 # Exact committed harness input and frozen hashes remain mandatory.
-name: Approved frozen B2 Binder death runtime API33
+name: Approved official SDK and frozen B2 Binder runtime API33
 on:
   workflow_dispatch:
     inputs:
@@ -17,13 +17,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   frozen-b2-api33:
-    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-runtime' && github.run_attempt == 1
+    if: github.repository == 'gccwebos-com/gccwebos-android' && github.ref == 'refs/heads/codex/lucky-b2-provision-runtime' && github.run_attempt == 1
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       APPROVED_HARNESS_COMMIT: ${{ inputs.reviewed_harness_commit }}
       APPROVED_FREEZE_SHA256: f2371983e682dc91227b82bceff360e8633566685dfdf168c47dc272f45677ad
-      APPROVED_HARNESS_MANIFEST_SHA256: befb89912f6e1e7cfb62d174cc25bb902316ee6f429dc1722612eca3833799ab
+      APPROVED_HARNESS_MANIFEST_SHA256: ccdf8c214a342d80ee84c0ca39b4ea5e8f8cd8cc183e7a63b983d229b530129c
+      APPROVED_ENVIRONMENT_SHA256: cc9f163a98f2defbac8aaba35cd4d932511d586da80e5f8fbb0dce76ede7b77a
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -45,73 +46,17 @@ jobs:
           from pathlib import Path
           root = Path(sys.argv[1])
           hashes = json.loads((root/'harness-sha256.json').read_text())['files']
-          expected = {'b2-runtime-api33.sh','b2-runtime-evidence.py','freeze.json','README.md','proposed-workflow.yml.disabled'}
+          expected = {'ENVIRONMENT-README.md', 'README.md', 'b2-runtime-api33.sh', 'b2-runtime-evidence.py', 'environment-approval.json', 'freeze.json', 'proposed-workflow.yml.disabled', 'provision-and-run.py'}
           assert set(hashes) == expected
           assert all(hashlib.sha256((root/p).read_bytes()).hexdigest() == h for p,h in hashes.items())
           PY
           printf '%s  %s\n' "$APPROVED_FREEZE_SHA256" "$PROPOSAL/freeze.json" | sha256sum -c -
           python3 "$PROPOSAL/b2-runtime-evidence.py" check-ready "$PROPOSAL/freeze.json"
-          mkdir -p .build-output/b2-runtime
-          git rev-parse HEAD > .build-output/b2-runtime/harness-commit.txt
-          cp "$PROPOSAL/harness-sha256.json" .build-output/b2-runtime/
-      - name: Record read-only cached tool image and KVM inventory
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .build-output/b2-runtime
-          python3 - <<'PY'
-          import hashlib, json, os, shutil
-          from pathlib import Path
-          sdk_value = os.environ.get('ANDROID_SDK_ROOT') or os.environ.get('ANDROID_HOME')
-          sdk = Path(sdk_value) if sdk_value else None
-          fixed = {
-              'adb': 'platform-tools/adb', 'emulator': 'emulator/emulator',
-              'avdmanager': 'cmdline-tools/latest/bin/avdmanager',
-              'aapt2': 'build-tools/36.0.0/aapt2',
-              'apksigner': 'build-tools/36.0.0/apksigner'}
-          tools = {}
-          for name, relative in fixed.items():
-              path = sdk / relative if sdk else None
-              tools[name] = {'path': str(path) if path else None,
-                  'is_file': bool(path and path.is_file()),
-                  'executable': bool(path and os.access(path, os.X_OK))}
-          for name in ('java', 'python3', 'gh', 'timeout', 'ss'):
-              found = shutil.which(name)
-              tools[name] = {'path': found, 'is_file': bool(found and Path(found).is_file()),
-                  'executable': bool(found and os.access(found, os.X_OK))}
-          image = sdk / 'system-images/android-33/default/x86_64' if sdk else None
-          image_metadata = {}
-          for name in ('source.properties', 'package.xml'):
-              path = image / name if image else None
-              readable = bool(path and path.is_file() and os.access(path, os.R_OK))
-              image_metadata[name] = {'path': str(path) if path else None,
-                  'readable': readable,
-                  'sha256': hashlib.sha256(path.read_bytes()).hexdigest() if readable else None}
-          kvm = Path('/dev/kvm')
-          kvm_record = {'path': str(kvm), 'exists': kvm.exists(),
-              'readable': os.access(kvm, os.R_OK), 'writable': os.access(kvm, os.W_OK)}
-          missing = [name for name, value in tools.items()
-              if not value['is_file'] or not value['executable']]
-          missing += [name for name, value in image_metadata.items() if not value['readable']]
-          if not all(kvm_record[key] for key in ('exists', 'readable', 'writable')):
-              missing.append('KVM')
-          record = {'schema': 1, 'kind': 'read-only cached runtime inventory',
-              'status': 'STOP_CACHED_PREREQUISITES_MISSING' if missing else 'AVAILABLE_METADATA_ONLY',
-              'sdk_path': str(sdk) if sdk else None,
-              'expected_image': 'system-images;android-33;default;x86_64',
-              'tools': tools, 'image_metadata': image_metadata, 'kvm': kvm_record,
-              'missing': missing, 'tool_executions': 0, 'downloads': 0,
-              'permission_repairs': 0, 'android_execution': 'NOT_RUN'}
-          Path('.build-output/b2-runtime/cached-inventory.json').write_text(
-              json.dumps(record, indent=2, sort_keys=True) + '\n')
-          if missing:
-              raise SystemExit('STOP cached prerequisites unavailable: ' + ','.join(missing))
-          PY
-      - name: Preflight cached tools; run exact frozen P7-P9 once; require teardown
+      - name: Prepare only approved official packages and temporary KVM; frozen P7-P9 once
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash runtime-proposals/b2/b2-runtime-api33.sh
+        run: python3 runtime-proposals/b2/provision-and-run.py
       - name: Retain bounded runtime-only evidence on success or failure
         if: always()
         shell: bash
@@ -132,10 +77,14 @@ jobs:
                   'owned_temporary_directory_removed':False},indent=2)+'\n')
           data = json.loads(result.read_text())
           data['job_status'] = os.environ['JOB_STATUS']
+          prep = root/'environment-preparation.json'
+          if not prep.exists() or json.loads(prep.read_text()).get('status') != 'PASS':
+              data['status'], data['overall_exit'] = 'FAILED', 1
           if data['job_status'] != 'success':
               data['status'], data['overall_exit'] = 'FAILED', 1
           result.write_text(json.dumps(data,indent=2)+'\n')
           files = [p for p in root.rglob('*') if p.is_file()]
+          assert not any(p.is_symlink() for p in root.rglob('*'))
           assert not any(p.suffix.lower() in ('.apk','.so','.aar','.zip') for p in files)
           assert sum(p.stat().st_size for p in files) < 28 * 1024 * 1024
           PY

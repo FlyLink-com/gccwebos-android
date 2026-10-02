@@ -188,7 +188,10 @@ def verify_manifest(xml: str, badging: str, xmltree: str, role: str) -> dict:
     sdk = root.find("uses-sdk")
     require(sdk is not None and sdk.get(ANDROID + "minSdkVersion") == "26" and
             sdk.get(ANDROID + "targetSdkVersion") == "36", role + ": compiled SDK levels differ")
-    require(re.search(r"^sdkVersion:'26'\s*$", badging, re.M) is not None and
+    # SDK-36 aapt2 names the minimum field minSdkVersion; older aapt2 uses
+    # sdkVersion. Accept either spelling with exactly one identical value.
+    minimum_fields = re.findall(r"^(?:minSdkVersion|sdkVersion):'([^']*)'\s*$", badging, re.M)
+    require(minimum_fields == ["26"] and
             re.search(r"^targetSdkVersion:'36'\s*$", badging, re.M) is not None, role + ": badging SDK levels differ")
     apps = root.findall("application")
     require(len(apps) == 1, role + ": expected one compiled application")

@@ -21,4 +21,3 @@
 -keep class com.gccwebos.android.ipcqa.b2.OwnerDeathQaService$* { *; }
 -keep class com.gccwebos.android.ipcqa.b2.WorkerDeathQaService { *; }
 -keep class com.gccwebos.android.ipcqa.b2.WorkerDeathQaService$* { *; }
-

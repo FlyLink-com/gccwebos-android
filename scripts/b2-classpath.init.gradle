@@ -42,7 +42,7 @@ gradle.projectsEvaluated {
                     proof.error = problem.message.take(2048)
                 }
             }
-            result.bootClasspath = lab.extensions.getByName('android').bootClasspath.collect { fileProof(it) }
+            result.bootClasspath = lab.extensions.getByName('androidComponents').sdkComponents.bootClasspath.get().collect { fileProof(it.asFile) }
             ['compileDebugJavaWithJavac','compileDebugAndroidTestJavaWithJavac'].each { name ->
                 def task = lab.tasks.getByName(name)
                 try { result.javaTasks[name] = [classpath:task.classpath.files.findAll { it.isFile() }.collect { fileProof(it) },

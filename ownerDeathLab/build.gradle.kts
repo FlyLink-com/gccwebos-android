@@ -38,7 +38,9 @@ android {
         testApplicationId = "com.gccwebos.android.ipcqa.b2.test"
         testInstrumentationRunner = "com.gccwebos.android.ipcqa.b2.OwnerDeathRunner"
     }
-    sourceSets.getByName("main").java.srcDir(generatedB1Sources)
+    // AGP 9.2 rejects a Provider in the legacy SourceSet API. The concrete
+    // directory is populated by the explicit preBuild -> Sync dependency below.
+    sourceSets.getByName("main").java.srcDir(generatedB1Sources.get().asFile)
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

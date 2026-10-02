@@ -529,7 +529,7 @@ class SubscriptionWalletUiTest {
             commerce.loadBalance()
         }
         compose.onNodeWithTag("catalog-loading").assertExists()
-        compose.onNodeWithTag("commerce-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(listOf(walletPath), paths)
             assertFalse(commerce.catalogLoaded)

@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -42,14 +43,20 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
     }
     DisposableEffect(details) { onDispose { details.dispose() } }
     BackHandler(enabled = details.visible, onBack = details::back)
+    val selectedRows = when (category) {
+        "orders" -> state.orderPage?.orders?.size
+        "plans" -> state.transitions?.size
+        "recharge" -> state.rechargeHistory?.size
+        else -> null
+    }
+    val listError = historyReadError(selectedRows, state.busy,
+        if (category == "recharge") state.rechargeHistoryError else state.purchaseHistoryError, state.error)
 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("订单", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f))
-        IconButton(onClick = state::load, enabled = !state.busy,
-            modifier = Modifier.size(48.dp).testTag("commerce-refresh")) {
-            Icon(painterResource(com.gccwebos.android.R.drawable.brand_refresh), "刷新订单", tint = Brand.Cyan)
-        }
+        if (showReadRetry(state.busy, state.canOperate(), listError != null, selectedRows == null))
+            BrandButton("重试", state::load, modifier = Modifier.width(88.dp).testTag("commerce-refresh"))
     }
     if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("orders-loading"), color = Brand.Cyan)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -63,8 +70,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                 label = { Text(label) }, modifier = Modifier.heightIn(min = 48.dp).testTag("orders-$key"))
         }
     }
-    Column(Modifier.fillMaxWidth().testTag("orders-state-separation"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    BrandCard(Modifier.testTag("orders-state-separation"), contentPadding = PaddingValues(12.dp)) {
         when (category) {
             "orders" -> {
                 val page = state.orderPage
@@ -115,7 +121,7 @@ private fun HistoryReadState(size: Int?, busy: Boolean, specificError: String?, 
     val error = historyReadError(size, busy, specificError, globalError)
     if (error != null) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("history-error"))
     if (size == null || size == 0) Surface(Modifier.fillMaxWidth().testTag("history-read-state"),
-        shape = Brand.Shape, color = Brand.Surface.copy(alpha = .92f), border = BorderStroke(1.dp, Brand.Border)) {
+        shape = Brand.Shape, color = Color.Transparent) {
         Row(Modifier.heightIn(min = 48.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(painterResource(com.gccwebos.android.R.drawable.brand_receipt), null, tint = Brand.Muted,
@@ -141,6 +147,7 @@ private fun <T> HistoryGroups(rows: List<T>, createdAt: (T) -> Instant, content:
     rows.forEachIndexed { index, row ->
         val timestamp = createdAt(row)
         val day = historyDay(timestamp)
+        if (index > 0) HorizontalDivider(color = Brand.RowDivider)
         if (index == 0 || day != historyDay(createdAt(rows[index - 1]))) {
             Text(historyDateHeading(timestamp), color = Brand.Muted, style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 6.dp, start = 4.dp).testTag("history-date-$day"))
@@ -154,15 +161,15 @@ private fun HistorySummary(tag: String, title: String, amount: String, type: Str
     states: List<Pair<String, String>>, expected: String?, ref: String, createdAt: Instant, icon: Int,
     isSelected: Boolean, enabled: Boolean, onDetail: () -> Unit) {
     Surface(Modifier.fillMaxWidth().testTag(tag).semantics { selected = isSelected },
-        shape = RoundedCornerShape(18.dp), color = Brand.Surface.copy(alpha = .92f),
-        border = BorderStroke(1.dp, if (isSelected) Brand.Cyan else Brand.Border)) {
+        shape = RoundedCornerShape(14.dp), color = Color.Transparent,
+        border = if (isSelected) BorderStroke(1.dp, Brand.Cyan) else null) {
         BoxWithConstraints {
             val stackedAmount = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.5f || amount.length > 13
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 .clickable(enabled = enabled, role = Role.Button, onClickLabel = "查看详情", onClick = onDetail)
-                .testTag("history-detail-$ref").padding(12.dp),
+                .testTag("history-detail-$ref").padding(vertical = 10.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(shape = RoundedCornerShape(10.dp), color = Brand.SurfaceRaised,
+                Surface(shape = RoundedCornerShape(10.dp), color = Brand.Cyan.copy(alpha = .10f),
                     modifier = Modifier.size(34.dp)) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(painterResource(icon), null, tint = Brand.Cyan, modifier = Modifier.size(22.dp))
@@ -224,7 +231,7 @@ private fun OrderDetailsDialog(state: OrderDetailController) {
         confirmButton = { TextButton(onClick = state::back,
             modifier = Modifier.heightIn(min = 48.dp).testTag("history-detail-back")) { Text("返回列表") } },
         dismissButton = {
-            if (state.error != null) TextButton(onClick = state::retry, enabled = !state.busy,
+            if (showReadRetry(state.busy, true, state.error != null, false)) TextButton(onClick = state::retry,
                 modifier = Modifier.heightIn(min = 48.dp).testTag("history-detail-retry")) { Text("重试查询") }
         })
 }

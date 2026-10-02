@@ -187,7 +187,7 @@ class CommerceCompactUiTest {
         }
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("plan-selection-notice").performScrollTo().assertTextEquals("商品已更新，请刷新后重新选择")
+        compose.onNodeWithTag("plan-selection-notice").performScrollTo().assertTextEquals("商品已更新，请重新选择")
         compose.runOnIdle { assertNull(commerce.quote); assertEquals(listOf("/api/portal/commerce/model"), calls) }
     }
 

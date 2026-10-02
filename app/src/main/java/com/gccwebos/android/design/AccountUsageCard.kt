@@ -33,10 +33,11 @@ internal fun AccountUsageCard(
     primaryTestTag: String = "vpn-connect",
     showPrimary: Boolean = true,
     onPrimaryAction: () -> Unit = {},
+    embedded: Boolean = false,
 ) {
     val refreshAllowed = authenticated && !loading && refreshEnabled
-    BrandCard(modifier.testTag("account-usage-card")) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+    val content: @Composable ColumnScope.() -> Unit = {
+        if (!embedded) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Text("账户当前套餐", Modifier.weight(1f).testTag("account-usage-title"),
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (authenticated) IconButton(
@@ -59,7 +60,7 @@ internal fun AccountUsageCard(
             UsageRemaining("暂未获取")
             if (showPrimary) UsagePrimaryAction(primaryLabel ?: "开通飞连vpn", primaryEnabled && !loading,
                 primaryHint, primaryTestTag, onPrimaryAction)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!embedded) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onLogin, modifier = Modifier.weight(1f).heightIn(min = 48.dp)
                     .testTag("account-usage-login")) { Text("登录") }
                 TextButton(onRegister, modifier = Modifier.weight(1f).heightIn(min = 48.dp)
@@ -100,7 +101,7 @@ internal fun AccountUsageCard(
                         modifier = Modifier.testTag("account-usage-service-expired"))
                     presentation.collectionText?.let { Text(it, color = Brand.Muted,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("account-usage-collection")) }
-                    presentation.updatedAtText?.let { UsageFact("采集", it, "account-usage-updated-at") }
+                    if (!embedded) presentation.updatedAtText?.let { UsageFact("采集", it, "account-usage-updated-at") }
                 }
             }
             if (showPrimary) when {
@@ -117,8 +118,18 @@ internal fun AccountUsageCard(
                 }
                 else -> Unit
             }
+            // When the host owns a live connection CTA, a failed read still has its own recovery.
+            // A successful read has no permanent manual refresh in the unified welcome surface.
+            if (embedded && !showPrimary && (error != null || presentation.state == AccountUsageState.Unknown ||
+                presentation.state == AccountUsageState.Reconciliation)) {
+                BrandButton("重试", { if (refreshAllowed) onRefresh() },
+                    Modifier.testTag("account-usage-retry"), enabled = refreshAllowed)
+            }
         }
     }
+    if (embedded) Column(modifier.fillMaxWidth().testTag("account-usage-card"),
+        verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+    else BrandCard(modifier.testTag("account-usage-card"), content = content)
 }
 
 @Composable

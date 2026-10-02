@@ -98,6 +98,7 @@ class MineReferralUiTest {
     @Test fun dynamicPolicyReadAndUserCopyDoNotGenerateLinksOrChangeWallet() {
         launchReferral({ """{"profile":{"eligible":true,"linkPath":"$path","policy":{"policyRef":"referral_ui_policy","version":3,"effectiveAt":"2026-09-30T00:00:00.000Z","rateBps":735,"rounding":"floor","attributionDays":47,"confirmationDays":9},"attributionDays":47}}""" })
         compose.onNodeWithTag("referral-policy-rate").assertTextEquals("当前奖励比例 7.35%")
+        compose.onNodeWithTag("referral-refresh").assertDoesNotExist()
         compose.onNodeWithTag("referral-available-reward").performScrollTo().assertTextEquals("已转可用奖励 5 Coins")
         compose.runOnIdle { assertTrue(copied.isEmpty()); assertEquals(listOf(ReferralJson.PROFILE, ReferralJson.PERFORMANCE), requests.map { it.first }) }
         compose.onNodeWithTag("referral-copy").performScrollTo().performClick()
@@ -107,7 +108,8 @@ class MineReferralUiTest {
         launchReferral({ """{"profile":{"eligible":true,"linkPath":null,"policy":null}}""" }, font = 2f)
         compose.onNodeWithTag("referral-policy-rate").assertDoesNotExist()
         compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("推荐归因期尚未确认，暂不能生成或复制链接。").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("归因期待确认").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("referral-refresh").performScrollTo().assertIsDisplayed().assertTextEquals("重试")
         compose.runOnIdle { assertTrue(copied.isEmpty()); assertEquals(2, requests.size); assertTrue(requests.all { it.second == null }) }
     }
 
@@ -159,6 +161,10 @@ class MineReferralUiTest {
         }
         compose.waitUntil(5_000) { !referral.busy && requests.count { it.first != ReferralJson.LINK } > readsBeforeResume }
         compose.onNodeWithTag("referral-available-reward").performScrollTo().assertExists()
+        compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
+        val readsBeforeRetry = requests.count { it.first != ReferralJson.LINK }
+        compose.onNodeWithTag("referral-refresh").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(5_000) { !referral.busy && requests.count { it.first != ReferralJson.LINK } >= readsBeforeRetry + 2 }
         compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
         compose.runOnIdle {
             assertSame(original, referral); assertSame(originalGuard, account.referralGenerationGuard)

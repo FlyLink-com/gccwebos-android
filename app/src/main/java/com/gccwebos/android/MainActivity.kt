@@ -95,7 +95,8 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery? = null,
     paymentOpenerOverride: ((String) -> Unit)? = null,
     connectionControlState: ConnectionControlState = ConnectionControlState(),
-    onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null) {
+    onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
+    glassMode: GlassMode? = null) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
@@ -136,28 +137,25 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
             (account.factorReference != null || account.busy)) account.cancelAuthentication()
         else selectedName = Destination.Connect.name
     }
-    GccTheme {
+    GccTheme(materialMode = glassMode) {
         Surface(Modifier.fillMaxSize(), color = Brand.Background) {
             // One continuous backdrop also remains visible behind the floating navigation bar.
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                 val loginPage = selected == Destination.Profile && !account.authenticated && !account.retainingCommerceSession
                 val backdropModifier = if (loginPage) Modifier.fillMaxSize() else Modifier.widthIn(max = 680.dp).fillMaxSize()
-                Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
-                    modifier = backdropModifier)
-                Box(backdropModifier.background(Brand.Background.copy(alpha = if (loginPage) .86f else .30f)))
+                BrandBackdrop(backdropModifier, loginPage = loginPage)
                 Scaffold(containerColor = Color.Transparent, bottomBar = {
                     Box(Modifier.fillMaxWidth().navigationBarsPadding()
                         .padding(start = 14.dp, end = 14.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
-                        Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth(),
-                            shape = RoundedCornerShape(25.dp), color = Color(0xFF142A46).copy(alpha = .92f),
-                            border = BorderStroke(1.dp, Color(0xFF83B1DF).copy(alpha = .50f)), shadowElevation = 8.dp) {
+                        GlassSurface(Modifier.widthIn(max = 760.dp).fillMaxWidth().testTag("glass-navigation"),
+                            shape = RoundedCornerShape(25.dp), kind = GlassSurfaceKind.Navigation) {
                             // A minimum, not a fixed height: wrapped or enlarged labels grow this row.
                             Row(Modifier.fillMaxWidth().selectableGroup().heightIn(min = 70.dp).padding(horizontal = 6.dp, vertical = 7.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 primaryDestinations.forEach { destination ->
                                     val title = stringResource(destination.title)
                                     val chosen = destination == selected
-                                    Column(Modifier.weight(1f).heightIn(min = 44.dp)
+                                    Column(Modifier.weight(1f).heightIn(min = 48.dp)
                                         .clip(RoundedCornerShape(18.dp))
                                         .background(if (chosen) Brand.Cyan.copy(alpha = .15f) else Color.Transparent)
                                         .testTag("nav-${destination.name}")

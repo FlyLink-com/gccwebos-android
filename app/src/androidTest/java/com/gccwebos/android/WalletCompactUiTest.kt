@@ -111,7 +111,7 @@ class WalletCompactUiTest {
         compose.onNodeWithTag("wallet-error").assertTextEquals("合成读取失败")
         compose.onNodeWithTag("wallet-loading").assertExists()
         compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
-        compose.onNodeWithTag("commerce-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
         compose.onNodeWithText("0 Coins").assertDoesNotExist()
         compose.runOnIdle {
@@ -167,7 +167,24 @@ class WalletCompactUiTest {
         compose.onNodeWithText("CNY 23.45 → 73 Coins").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("recharge-cancel").assertIsDisplayed().performClick()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
-        compose.onNodeWithTag("commerce-refresh").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        assertNoSideEffects()
+    }
+
+    @Test fun loadedWalletHidesRoutineRefreshButUnreadAndFailedReadKeepRecovery() {
+        launch {
+            wallet = confirmed; walletLoaded = true
+            rechargeOffers = listOf(offer); rechargeOffersLoaded = true
+        }
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.runOnIdle { state.walletError = "合成读取失败" }
+        compose.onNodeWithTag("commerce-refresh").performScrollTo().assertIsDisplayed().assertTextEquals("重试")
+        compose.runOnIdle { state.busy = true }
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.runOnIdle { state.busy = false; state.walletError = null; state.walletLoaded = false; state.wallet = null }
+        compose.onNodeWithTag("commerce-refresh").performScrollTo().assertIsDisplayed().assertTextEquals("重试")
+        compose.runOnIdle { owner.foregroundCheckPending = true }
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         assertNoSideEffects()
     }
 

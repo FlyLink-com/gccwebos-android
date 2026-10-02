@@ -177,60 +177,64 @@ internal fun ConnectionOverview(
     val controlEnabled = onPowerAction != null && !acceptedCommand && local.action != ConnectionPowerAction.None &&
         (local.action != ConnectionPowerAction.Connect || !account.clearing)
     Column(Modifier.fillMaxWidth().testTag("connection-overview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ConnectionWelcome()
-        Text(local.connectionText, style = MaterialTheme.typography.bodySmall,
-            color = if (control.phase == ConnectionPhase.Connected) Brand.Green else Brand.Muted,
-            modifier = Modifier.testTag("connection-status"))
-        AccountUsageCard(display, authenticated = account.authenticated,
-            onRefresh = account::refreshAccountUsage, onLogin = openAccount, onRegister = openRegistration,
-            loading = usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
-            error = usage.error, refreshEnabled = verifiedUsage,
-            primaryLabel = when {
-                !account.authenticated -> "开通飞连vpn"
-                display.state == AccountUsageState.NoActivePlan -> "开通飞连vpn"
-                display.state == AccountUsageState.Available -> "一键连接"
-                else -> "重试"
-            },
-            primaryEnabled = operable && (!account.authenticated || verifiedUsage && display.state == AccountUsageState.NoActivePlan),
-            onPrimaryAction = { if (!account.authenticated) showGuestChoice = true else if (verifiedUsage &&
-                display.state == AccountUsageState.NoActivePlan && usage.error == null) openPlans() },
-            showPrimary = !controlMode, primaryTestTag = "vpn-connect")
-        if (usage.busy) TextButton(account::cancelAccountUsageUpdate,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-usage-cancel")) { Text("取消更新") }
-        if (controlMode) BrandButton(
-            when (local.action) {
-                ConnectionPowerAction.Connect -> "一键连接"
-                ConnectionPowerAction.Cancel -> "取消连接"
-                ConnectionPowerAction.Disconnect -> "断开"
-                ConnectionPowerAction.None -> local.powerLabel
-            }, {
-                if (controlEnabled && !acceptedCommand) { acceptedCommand = true; onPowerAction?.invoke(local.action) }
-            }, enabled = controlEnabled,
-            modifier = Modifier.testTag("vpn-connect").semantics {
-                contentDescription = when (local.action) {
+        BrandCard(Modifier.testTag("connection-account-surface")) {
+            ConnectionWelcome()
+            Text(local.connectionText, style = MaterialTheme.typography.bodySmall,
+                color = if (control.phase == ConnectionPhase.Connected) Brand.Green else Brand.Muted,
+                modifier = Modifier.testTag("connection-status"))
+            AccountUsageCard(display, authenticated = account.authenticated,
+                onRefresh = account::refreshAccountUsage, onLogin = openAccount, onRegister = openRegistration,
+                loading = usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
+                error = usage.error, refreshEnabled = verifiedUsage,
+                primaryLabel = when {
+                    !account.authenticated -> "开通飞连vpn"
+                    display.state == AccountUsageState.NoActivePlan -> "开通飞连vpn"
+                    display.state == AccountUsageState.Available -> "一键连接"
+                    else -> "重试"
+                },
+                primaryEnabled = operable && (!account.authenticated || verifiedUsage && display.state == AccountUsageState.NoActivePlan),
+                onPrimaryAction = { if (!account.authenticated) showGuestChoice = true else if (verifiedUsage &&
+                    display.state == AccountUsageState.NoActivePlan && usage.error == null) openPlans() },
+                showPrimary = !controlMode, primaryTestTag = "vpn-connect", embedded = true)
+            if (usage.busy) TextButton(account::cancelAccountUsageUpdate,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-usage-cancel")) { Text("取消更新") }
+            if (controlMode) BrandButton(
+                when (local.action) {
                     ConnectionPowerAction.Connect -> "一键连接"
+                    ConnectionPowerAction.Cancel -> "取消连接"
                     ConnectionPowerAction.Disconnect -> "断开"
-                    else -> local.powerLabel
-                }
-                stateDescription = local.connectionText
-            })
-        TextButton(onClick = openNodes, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val summary: @Composable (Modifier) -> Unit = { modifier ->
-                    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("当前节点", color = Brand.Muted, style = MaterialTheme.typography.labelSmall)
-                        Text(if (account.nodeSelection.busy) "正在刷新" else selectedNode?.name ?: "未选择",
-                            color = Brand.Text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("connection-node-name"))
-                        selectedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
-                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
+                    ConnectionPowerAction.None -> local.powerLabel
+                }, {
+                    if (controlEnabled && !acceptedCommand) { acceptedCommand = true; onPowerAction?.invoke(local.action) }
+                }, enabled = controlEnabled,
+                modifier = Modifier.testTag("vpn-connect").semantics {
+                    contentDescription = when (local.action) {
+                        ConnectionPowerAction.Connect -> "一键连接"
+                        ConnectionPowerAction.Disconnect -> "断开"
+                        else -> local.powerLabel
                     }
-                }
-                if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) Column(Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    summary(Modifier.fillMaxWidth()); Text("选择节点 ›", modifier = Modifier.align(Alignment.End))
-                } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    summary(Modifier.weight(1f)); Text("选择节点 ›")
+                    stateDescription = local.connectionText
+                })
+        }
+        BrandCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) {
+            TextButton(onClick = openNodes, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val summary: @Composable (Modifier) -> Unit = { modifier ->
+                        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("当前节点", color = Brand.Muted, style = MaterialTheme.typography.labelSmall)
+                            Text(if (account.nodeSelection.busy) "正在刷新" else selectedNode?.name ?: "未选择",
+                                color = Brand.Text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("connection-node-name"))
+                            selectedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
+                                style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
+                        }
+                    }
+                    if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) Column(Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        summary(Modifier.fillMaxWidth()); Text("选择节点 ›", modifier = Modifier.align(Alignment.End))
+                    } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        summary(Modifier.weight(1f)); Text("选择节点 ›")
+                    }
                 }
             }
         }
@@ -243,7 +247,9 @@ internal fun ConnectionOverview(
             val action = when {
                 local.status == LocalSubscriptionStatus.EXPIRED -> Triple("查看套餐", "expired-subscription-renew", openPlans)
                 local.status == LocalSubscriptionStatus.INVALID_LINK -> Triple("登录恢复订阅", "open-account", openAccount)
-                snapshot.hasCapability -> Triple("刷新本地配置", "local-subscription-refresh", account::refreshSubscription)
+                snapshot.hasCapability && local.status in setOf(LocalSubscriptionStatus.RETRY_REQUIRED,
+                    LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR) ->
+                    Triple("重试", "local-subscription-refresh", account::refreshSubscription)
                 else -> null
             }
             action?.let { TextButton(it.third, enabled = operable,
@@ -268,12 +274,12 @@ private fun ConnectionWelcome() {
     val sourceHeight = (robot.height * .53f).toInt().coerceAtLeast(1)
     val greeting: @Composable (Modifier) -> Unit = { modifier ->
         Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("欢迎回来", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text("欢迎回来", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             SupportingText("飞连vpn·与你同行")
         }
     }
     val image: @Composable (Modifier) -> Unit = { modifier ->
-        Canvas(modifier.width(104.dp).aspectRatio(robot.width.toFloat() / sourceHeight)) {
+        Canvas(modifier.width(82.dp).aspectRatio(robot.width.toFloat() / sourceHeight)) {
             drawImage(robot, srcOffset = IntOffset.Zero, srcSize = IntSize(robot.width, sourceHeight),
                 dstSize = IntSize(size.width.toInt(), size.height.toInt()))
         }

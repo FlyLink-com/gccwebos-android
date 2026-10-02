@@ -125,7 +125,7 @@ class SelectedNodeActivityRecreationTest {
     private fun selectSecondAndNavigate(): ConnectionSelection {
         waitForReadyNodes()
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
         val selected = inspector.nodeSelectionSnapshot().choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
@@ -168,7 +168,7 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
         compose.onNodeWithTag("page-Lines").assertExists()
         compose.onNodeWithTag("nav-Lines").assertIsSelected()
-        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
     }
 

@@ -388,7 +388,7 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("account-usage-remaining").performScrollTo().assertTextEquals("3 GB")
         compose.onNodeWithTag("account-usage-cycle").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("account-usage-expiry").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("account-usage-refresh").performScrollTo().assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("account-usage-refresh").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("一键连接").assertIsNotEnabled()
         compose.onNodeWithTag("account-usage-primary-hint").assertTextEquals("连接功能暂未开放")
         compose.onNodeWithTag("connection-power").assertDoesNotExist()

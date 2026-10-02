@@ -292,7 +292,8 @@ class AppShellTest {
         }
         compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertEquals(1, nodeReads.get()) }
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
         compose.waitUntil(5000) { nodeReads.get() == 2 && !nodeAccount.nodeSelection.busy }
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("nav-Connect").performClick()
@@ -300,8 +301,8 @@ class AppShellTest {
         compose.runOnIdle { assertSame(second, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
         val refreshGate = CompletableDeferred<Unit>()
         try {
-            compose.runOnIdle { pendingNodeRead = refreshGate }
-            compose.onNodeWithTag("local-subscription-refresh").performScrollTo().performClick()
+            compose.onNodeWithTag("local-subscription-refresh").assertDoesNotExist()
+            compose.runOnIdle { pendingNodeRead = refreshGate; nodeAccount.refreshSubscription() }
             compose.waitUntil(5000) { nodeReads.get() == 3 && nodeAccount.nodeSelection.busy }
             compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("正在刷新")
             compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
@@ -318,7 +319,8 @@ class AppShellTest {
         val old = nodeAccount.nodeSelection.snapshot.choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
         compose.runOnIdle { nodeBytes = nodeBytes.toString(Charsets.UTF_8).replace("192.0.2.41", "192.0.2.42").toByteArray() }
-        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
         compose.waitUntil(5000) { nodeReads.get() == 2 && !nodeAccount.nodeSelection.busy }
         compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
         compose.onNodeWithTag("node-selection-message").assertTextEquals("配置已变化，请重新选择节点。")
@@ -340,7 +342,8 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
         compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
-        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
         compose.waitUntil(5000) { nodeAccount.nodeSelection.busy && nodeReads.get() == 2 }
         compose.onNodeWithTag("nodes-cancel").performScrollTo().performClick()
         compose.onNodeWithTag("nav-Connect").performClick()
@@ -348,11 +351,12 @@ class AppShellTest {
         compose.runOnIdle { pendingNodeRead!!.complete(Unit); pendingNodeRead = null }
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-refresh").assertTextEquals("重试").performScrollTo().performClick()
         compose.waitUntil(5000) { nodeReads.get() == 3 && !nodeAccount.nodeSelection.busy }
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
         compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
-        compose.onNodeWithTag("nodes-refresh").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
         compose.waitUntil(5000) { nodeAccount.nodeSelection.busy && nodeReads.get() == 4 }
         compose.runOnIdle { nodeAccount.authSessionGeneration++ }
         compose.onNodeWithTag("nav-Connect").performClick()

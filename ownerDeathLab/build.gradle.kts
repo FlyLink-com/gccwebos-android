@@ -62,4 +62,34 @@ androidComponents {
     beforeVariants(selector().withBuildType("release")) { it.enable = false }
 }
 
+// AGP app androidTest adds three keep-all rules even when R8 is enabled. Those
+// retain the empty generated test R class. Our exact test roots already preserve
+// every fixture member. Narrow only that generated rule list, before task input
+// snapshots; no class file, DEX, signed APK or inspection policy is edited.
+// This internal adapter is deliberately pinned and refuses changed AGP behavior.
+afterEvaluate {
+    check(androidComponents.pluginVersion.toString() == "9.2.0") {
+        "B2 test keep adapter requires the reviewed AGP 9.2.0"
+    }
+    tasks.named<com.android.build.gradle.internal.tasks.BaseR8Task>(
+        "minifyDebugAndroidTestWithR8",
+    ).configure {
+        val generatedKeepAll = setOf(
+            "-keep class * {*;}",
+            "-keep interface * {*;}",
+            "-keep enum * {*;}",
+        )
+        val before = proguardConfigurations.toList()
+        check("-keepattributes *" in before) { "B2 test attributes rule changed" }
+        check(generatedKeepAll.all { rule -> before.count { it == rule } == 1 }) {
+            "B2 test keep adapter: generated rules changed; refuse packaging"
+        }
+        proguardConfigurations.removeAll(generatedKeepAll)
+        check(proguardConfigurations == before.filterNot { it in generatedKeepAll }) {
+            "B2 test keep adapter changed an unrelated generated rule"
+        }
+        extensions.extraProperties.set("b2GeneratedRulesBefore", before)
+    }
+}
+
 // No application, AndroidX, native, VPN or network dependency is declared.

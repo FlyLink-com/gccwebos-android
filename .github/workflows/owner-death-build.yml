@@ -81,6 +81,10 @@ jobs:
           name: owner-death-build-${{ github.sha }}
           path: |
             ownerDeathLab/build/outputs/apk/
+            ownerDeathLab/build/outputs/mapping/
+            ownerDeathLab/build/intermediates/javac/
+            ownerDeathLab/build/intermediates/compile_app_classes_jar/
+            ownerDeathLab/build/intermediates/compile_r_class_jar/
             ownerDeathLab/build/reports/
             .build-output/owner-death-build/
           include-hidden-files: true

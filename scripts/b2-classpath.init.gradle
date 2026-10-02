@@ -9,6 +9,17 @@ gradle.projectsEvaluated {
     lab.tasks.register('inspectB2Classpaths') {
         doLast {
             def fileProof = { File file ->
+                if (!file.exists()) return [path:file.absolutePath, kind:'not_materialized']
+                if (file.isDirectory()) {
+                    def entries = []
+                    file.eachFileRecurse { member ->
+                        if (member.isFile()) entries.add([
+                            name:file.toPath().relativize(member.toPath()).toString().replace('\\','/'),
+                            bytes:member.length(),
+                            sha256:MessageDigest.getInstance('SHA-256').digest(member.bytes).encodeHex().toString()])
+                    }
+                    return [path:file.absolutePath, kind:'directory', entries:entries.sort { it.name }]
+                }
                 def md = MessageDigest.getInstance('SHA-256')
                 file.withInputStream { stream ->
                     byte[] buffer = new byte[65536]
@@ -21,11 +32,17 @@ gradle.projectsEvaluated {
                     try { names = zip.entries().toList().collect { it.name } }
                     finally { zip.close() }
                 }
-                [path:file.absolutePath, bytes:file.length(), sha256:md.digest().encodeHex().toString(),
+                [path:file.absolutePath, kind:'file', bytes:file.length(), sha256:md.digest().encodeHex().toString(),
                  androidClassEntries:names.count { it.startsWith('android/') && it.endsWith('.class') },
                  kotlinClassEntries:names.count { it.startsWith('kotlin/') && it.endsWith('.class') }]
             }
             def result = [sourceCommit:System.getenv('B2_DIAG_SOURCE'), configurations:[:], bootClasspath:[], javaTasks:[:]]
+            result.dependencyDeclarations = [:]
+            ['implementation','compileOnly','runtimeOnly','androidTestImplementation','androidTestCompileOnly','androidTestRuntimeOnly'].each { name ->
+                result.dependencyDeclarations[name] = lab.configurations.getByName(name).dependencies.collect {
+                    [type:it.class.name,group:it.group,name:it.name,version:it.version]
+                }
+            }
             ['debugCompileClasspath','debugRuntimeClasspath','debugAndroidTestCompileClasspath','debugAndroidTestRuntimeClasspath'].each { name ->
                 def config = lab.configurations.getByName(name)
                 def proof = [declaredDependencies:config.allDependencies.collect { [type:it.class.name,group:it.group,name:it.name,version:it.version] }]
@@ -45,7 +62,7 @@ gradle.projectsEvaluated {
             result.bootClasspath = lab.extensions.getByName('androidComponents').sdkComponents.bootClasspath.get().collect { fileProof(it.asFile) }
             ['compileDebugJavaWithJavac','compileDebugAndroidTestJavaWithJavac'].each { name ->
                 def task = lab.tasks.getByName(name)
-                try { result.javaTasks[name] = [classpath:task.classpath.files.findAll { it.isFile() }.collect { fileProof(it) },
+                try { result.javaTasks[name] = [classpath:task.classpath.files.collect { fileProof(it) },
                      bootstrapClasspath:task.options.bootstrapClasspath?.files?.collect { fileProof(it) },
                      sourceCompatibility:task.sourceCompatibility,targetCompatibility:task.targetCompatibility] }
                 catch (Exception problem) { result.javaTasks[name] = [error:problem.message.take(2048)] }
@@ -56,6 +73,9 @@ gradle.projectsEvaluated {
                 [name:it.name(), propertyName:it.propertyName, defaultValue:it.defaultValue]
             }
             result.debugMinified = lab.extensions.getByName('android').buildTypes.getByName('debug').minifyEnabled
+            result.agpVersion = lab.extensions.getByName('androidComponents').pluginVersion.toString()
+            result.testGeneratedProguardRulesBefore = lab.tasks.getByName('minifyDebugAndroidTestWithR8').extensions.extraProperties.get('b2GeneratedRulesBefore')
+            result.testGeneratedProguardRules = lab.tasks.getByName('minifyDebugAndroidTestWithR8').proguardConfigurations.toList()
             result.globalSyntheticsTasks = lab.tasks.findAll { it.name.toLowerCase().contains('globalsynthetics') }.collect { it.name }
             def directory = gradle.rootProject.file('.build-output/b2-classpath')
             directory.mkdirs()

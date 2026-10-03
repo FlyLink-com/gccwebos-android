@@ -346,7 +346,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending,
-                        authenticated = account.authenticated, connectionControl = powerControl, openAccount = openAccount)
+                        authenticated = account.authenticated, connectionControl = connectionControlState, openAccount = openAccount)
                 }
                 Destination.Plans -> {
                     Text("套餐", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)

@@ -164,6 +164,10 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         true
     }
     private fun capability(): Secret? {
+        // A profile write and a receipt write are separate atomic files. Even when the
+        // candidate receipt is present, an uncleared journal requires a fresh authenticated
+        // model/resource check and verified commit. URL equality alone is not completion.
+        if (delivery.readLegacyRecovery() != null) throw PortalFailure(PortalFailure.Reason.STORAGE)
         val cached = profiles.read()
         try { cached?.url?.let { validateCapability(it, cached.binding); return it } }
         finally { cached?.close() }
@@ -231,6 +235,66 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (next.status == LocalSubscriptionStatus.READY) observeContent(raw, binding, next.nodes, until)
         else invalidateSelections(next.status, until)
         state = next; next
+    }
+    /** Repository-only legacy transaction; ordinary capability checks are never relaxed. */
+    internal fun rememberRecoveredLegacy(raw: ByteArray, journal: LegacyRecoveryJournal, until: Instant?,
+        checkCurrent: () -> Unit): LocalSubscriptionSnapshot = synchronized(lock) {
+        require(journal.phase in setOf(LegacyRecoveryPhase.ACKNOWLEDGED, LegacyRecoveryPhase.PROFILE_COMMITTING))
+        val candidate = journal.candidate
+        require(!candidate.pendingAck && candidate.url != null && candidate.handoff != null)
+        validateCapability(candidate.url)
+        val binding = sessionBinding(candidate.url)
+        val next = describe(raw, until)
+        fun checkJournal(expected: LegacyRecoveryJournal) {
+            checkCurrent()
+            val actual = delivery.readLegacyRecovery()
+            if (actual == null || actual.phase != expected.phase ||
+                !sameDeliveryRecord(actual.original, expected.original) || !sameDeliveryRecord(actual.candidate, candidate) ||
+                (!sameDeliveryRecord(delivery.read(), expected.original) && !sameDeliveryRecord(delivery.read(), candidate)))
+                throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED, PortalFailure.RecoveryCause.JOURNAL_CONFLICT)
+        }
+        checkJournal(journal)
+        revision++
+        invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR, until)
+        val committing = LegacyRecoveryJournal(journal.original, candidate, LegacyRecoveryPhase.PROFILE_COMMITTING)
+        try {
+            delivery.saveLegacyRecovery(committing)
+            checkJournal(committing)
+            val cached = CachedSubscription(binding, raw, until, candidate.url)
+            try { profiles.save(cached) } finally { cached.close() }
+            // This readback is required even for an injected store; durable production storage
+            // also verifies its own atomic write. Keep the journal if either verification fails.
+            val received = profiles.read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+            try {
+                val bytes = received.copyBytes()
+                try {
+                    if (received.binding != binding || received.url?.value != candidate.url.value ||
+                        received.validUntil != until || received.observedStatus != null || !bytes.contentEquals(raw))
+                        throw PortalFailure(PortalFailure.Reason.STORAGE)
+                } finally { bytes.fill(0) }
+            } finally { received.close() }
+            checkJournal(committing)
+            // Compare against the preserved original, or the exact already-committed candidate
+            // after an interrupted cleanup. Never rebind an unrelated main receipt.
+            if (!sameDeliveryRecord(delivery.read(), candidate)) delivery.save(candidate)
+            if (!sameDeliveryRecord(delivery.read(), candidate)) throw PortalFailure(PortalFailure.Reason.STORAGE)
+            checkJournal(committing)
+            delivery.clearLegacyRecovery()
+            if (delivery.readLegacyRecovery() != null) throw PortalFailure(PortalFailure.Reason.STORAGE)
+            checkCurrent()
+            if (next.status == LocalSubscriptionStatus.READY) observeContent(raw, binding, next.nodes, until)
+            else invalidateSelections(next.status, until)
+            state = next
+            next
+        } catch (failure: Exception) {
+            invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR, until)
+            state = next.copy(status = LocalSubscriptionStatus.STORAGE_ERROR)
+            when (failure) {
+                is CancellationException -> throw failure
+                is PortalFailure -> throw failure
+                else -> throw PortalFailure(PortalFailure.Reason.STORAGE)
+            }
+        }
     }
     fun unlink() {
         var observer: (() -> Unit)? = null

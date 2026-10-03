@@ -30,6 +30,10 @@ class PortalRepositoryOverviewReadTest {
             return when(path) {
                 "/api/portal/password/session" -> WireResponse(200, """{"session":{"sessionRef":"$token","accountId":"$accountId","issuedAt":"2026-10-02T00:00:00.000Z","expiresAt":"2026-10-02T00:30:00.000Z"}}""")
                 "/api/portal/resources/current/overview" -> overview()
+                "/api/portal/commerce/model" -> {
+                    assertNull(body); assertNotNull(session)
+                    WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                }
                 "/api/portal/resources/current/setup" -> WireResponse(200, """{"delivery":{"handoffRef":"fixture_handoff","kind":"subscription_url","subscriptionUrl":"https://sub.invalid/sub/a/synthetic_only"}}""")
                 "/api/portal/resources/current/setup/ack" -> WireResponse(204, "")
                 else -> error("Unexpected fixture endpoint")

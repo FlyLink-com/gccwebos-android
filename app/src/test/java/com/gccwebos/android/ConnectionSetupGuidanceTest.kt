@@ -134,7 +134,7 @@ class ConnectionSetupGuidanceTest {
         assertSame(receipt, fixture.store.value)
         assertEquals(1, prepared); assertTrue(callbackOwnsBusy)
         assertEquals(1, fixture.wire.count(SETUP)); assertEquals(1, fixture.wire.count(ACK))
-        assertEquals(0, fixture.wire.count("/api/portal/commerce/model"))
+        assertEquals(2, fixture.wire.count("/api/portal/commerce/model"))
         assertNull(account.nodeSelection.snapshot.selected)
         assertFalse(dispatchSync(account))
     }
@@ -151,7 +151,7 @@ class ConnectionSetupGuidanceTest {
         assertEquals(ImportStatus.WAITING_DELIVERY, fixture.account.importStatus)
         assertNull(fixture.store.value); assertEquals(0, fixture.downloads)
         assertEquals(0, fixture.wire.count(SETUP)); assertEquals(0, fixture.wire.count(ACK))
-        assertEquals(3, fixture.wire.paths.size) // Login, original overview, explicit overview retry.
+        assertEquals(5, fixture.wire.paths.size) // Login, then overview/model for each explicit import.
         assertEquals(0, prepared)
     }
 
@@ -287,6 +287,10 @@ class ConnectionSetupGuidanceTest {
             return when (path) {
                 LOGIN -> WireResponse(200, """{"session":{"sessionRef":"$token","accountId":"$accountId","issuedAt":"2026-10-03T00:00:00.000Z","expiresAt":"2026-10-03T00:30:00.000Z"}}""")
                 OVERVIEW -> if (failOverview) WireResponse(503, "") else WireResponse(200, """{"resource":{"state":"available","resourceRef":"resource_${referenceCharacter.toString().repeat(64)}","plan":{"id":"synthetic_setup_plan","durationDays":30,"monthlyTrafficGb":1},"validUntil":"2026-11-03T00:00:00.000Z","setupAvailable":$setupAvailable,"usage":{"totalBytes":100,"usedBytes":25,"remainingBytes":75,"collectionStatus":"measured","updatedAt":"2026-10-03T00:00:00.000Z","cycleStartedAt":"2026-10-03T00:00:00.000Z","cycleEndsAt":"2026-11-02T00:00:00.000Z"}}}""")
+                "/api/portal/commerce/model" -> {
+                    assertNull(body); assertNotNull(session)
+                    WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                }
                 SETUP -> WireResponse(200, """{"delivery":{"handoffRef":"fixture_setup_receipt","kind":"subscription_url","subscriptionUrl":"https://sub.invalid/sub/a/setup-fixture"}}""")
                 ACK -> WireResponse(204, "")
                 else -> throw AssertionError("Unexpected setup-fixture endpoint: $path")

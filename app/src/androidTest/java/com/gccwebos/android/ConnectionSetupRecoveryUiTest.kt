@@ -203,6 +203,10 @@ class ConnectionSetupRecoveryUiTest {
                     overviews.incrementAndGet()
                     WireResponse(200, """{"resource":{"state":"available","resourceRef":"resource_${"b".repeat(64)}","plan":{"id":"synthetic_setup_plan","durationDays":30,"monthlyTrafficGb":1},"validUntil":"2026-11-03T00:00:00.000Z","setupAvailable":$setupAvailable,"usage":{"totalBytes":100,"usedBytes":25,"remainingBytes":75,"collectionStatus":"measured","updatedAt":"2026-10-03T00:00:00.000Z","cycleStartedAt":"2026-10-03T00:00:00.000Z","cycleEndsAt":"2026-11-02T00:00:00.000Z"}}}""")
                 }
+                "/api/portal/commerce/model" -> {
+                    assertNull(body); assertNotNull(session)
+                    WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                }
                 "/api/portal/resources/current/setup" -> {
                     setups.incrementAndGet()
                     WireResponse(200, """{"delivery":{"handoffRef":"fixture_setup_ui_receipt","kind":"subscription_url","subscriptionUrl":"https://sub.invalid/sub/a/setup-ui-fixture"}}""")

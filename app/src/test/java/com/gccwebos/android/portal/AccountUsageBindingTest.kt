@@ -22,6 +22,10 @@ class AccountUsageBindingTest {
             return when(path) {
                 "/api/portal/password/session" -> WireResponse(200, """{"session":{"sessionRef":"fixture_usage_token","accountId":"fixture_usage_account","issuedAt":"2026-10-02T00:00:00.000Z","expiresAt":"2026-10-02T00:30:00.000Z"}}""")
                 "/api/portal/resources/current/overview" -> overview()
+                "/api/portal/commerce/model" -> {
+                    assertNull(body); assertNotNull(session)
+                    WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                }
                 else -> throw AssertionError("Unexpected account fixture endpoint")
             }
         }

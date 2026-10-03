@@ -509,7 +509,13 @@ internal class AccountController(private val repository: PortalRepository, priva
                     PortalFailure.Reason.SESSION_EXPIRED -> { clearAccountUsage(); commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请刷新题目后重试" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
-                    PortalFailure.Reason.RECOVERY_REQUIRED -> "上次交付需要恢复，请稍后重试或联系支持；不会重复领取"
+                    PortalFailure.Reason.RECOVERY_REQUIRED -> when (failure.recoveryCause) {
+                        PortalFailure.RecoveryCause.RESOURCE_CHANGED -> "资源已变化，现有交付无法安全重绑，请联系支持"
+                        PortalFailure.RecoveryCause.SESSION_PENDING -> "上次交付未完成，当前会话无法确认，请联系支持"
+                        PortalFailure.RecoveryCause.MODEL_CHANGED -> "交付模型已变化，恢复已停止，请联系支持"
+                        PortalFailure.RecoveryCause.JOURNAL_CONFLICT -> "本地恢复记录已变化，请重新检查后重试"
+                        null -> "上次交付需要恢复，请联系支持；不会重复领取"
+                    }
                     PortalFailure.Reason.STORAGE -> "本地安全存储失败，交付状态需要恢复，请重试"
                     PortalFailure.Reason.RATE_LIMITED -> "请求过于频繁，请稍后重试"
                     PortalFailure.Reason.NETWORK -> "网络连接失败，请重试"

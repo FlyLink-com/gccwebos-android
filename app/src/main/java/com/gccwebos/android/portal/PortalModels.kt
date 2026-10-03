@@ -46,7 +46,9 @@ class DeliveryRecord(val accountId: String, val sessionBinding: String, val reso
                      val handoff: Secret? = null, val pendingAck: Boolean = false) {
     override fun toString() = "DeliveryRecord([REDACTED])"
 }
-class PortalFailure(val reason: Reason) : Exception(reason.name) {
+class PortalFailure(val reason: Reason, val recoveryCause: RecoveryCause? = null) : Exception(reason.name) {
+    /** No account, resource, session or delivery material is included in this UI-safe cause. */
+    enum class RecoveryCause { RESOURCE_CHANGED, SESSION_PENDING, MODEL_CHANGED, JOURNAL_CONFLICT }
     enum class Reason { NETWORK, PROTOCOL, LOGIN_FAILED, SESSION_EXPIRED, RECONCILIATION,
         UNAVAILABLE, RATE_LIMITED, STORAGE, RECOVERY_REQUIRED, SUBSCRIPTION_UNAVAILABLE, SUBSCRIPTION_REVOKED, SUBSCRIPTION_EXPIRED }
 }

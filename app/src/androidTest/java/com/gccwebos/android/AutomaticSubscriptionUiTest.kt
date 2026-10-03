@@ -30,6 +30,10 @@ class AutomaticSubscriptionUiTest {
                 return when (path) {
                     "/api/portal/password/session" -> WireResponse(200, """{"session":{"sessionRef":"synthetic","accountId":"fixture@example.invalid","issuedAt":"2026-09-30T00:00:00.000Z","expiresAt":"2026-09-30T00:30:00.000Z"}}""")
                     "/api/portal/resources/current/overview" -> WireResponse(200, if (none) """{"resource":{"state":"none"}}""" else """{"resource":{"state":"available","plan":{"id":"synthetic","durationDays":365,"monthlyTrafficGb":10},"validUntil":"2099-09-30T00:00:00.000Z","setupAvailable":true,"resourceRef":"resource_${"a".repeat(64)}","usage":{"totalBytes":1000,"usedBytes":null,"remainingBytes":null,"collectionStatus":"pending","updatedAt":null,"cycleStartedAt":"2026-09-30T00:00:00.000Z","cycleEndsAt":"2026-10-30T00:00:00.000Z"}}}""")
+                    "/api/portal/commerce/model" -> {
+                        assertNull(body); assertNotNull(session)
+                        WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                    }
                     "/api/portal/resources/current/setup" -> WireResponse(200, """{"delivery":{"handoffRef":"synthetic","kind":"subscription_url","subscriptionUrl":"https://sub.invalid/sub/a/synthetic"}}""")
                     "/api/portal/resources/current/setup/ack" -> WireResponse(204, "")
                     else -> throw AssertionError("Unexpected offline request")

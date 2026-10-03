@@ -40,11 +40,19 @@ class SubscriptionImportTest {
     }
     private class Wire : PortalTransport {
         val replies = ArrayDeque<WireResponse>()
+        val modelReplies = ArrayDeque<WireResponse>()
+        var requireQueuedModel = false
+        // Ordinary import fixtures are wallet-first; fresh probes enqueue their explicit model.
+        private val ordinaryModel = WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
         val calls = mutableListOf<Pair<String, String?>>()
         var requestHook: suspend (String) -> Unit = {}
         override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
             calls += path to body
             requestHook(path)
+            if (path == "/api/portal/commerce/model") {
+                assertNull(body); assertNotNull(session)
+                return if (requireQueuedModel) modelReplies.removeFirst() else ordinaryModel
+            }
             return replies.removeFirst()
         }
     }
@@ -296,6 +304,7 @@ class SubscriptionImportTest {
         resolver: ConnectionLineResolver = ConnectionLineResolver { _, requested ->
             ResolvedConnectionLine(requested ?: "synthetic-line-a", 0)
         }) : AutoCloseable {
+        init { h.wire.requireQueuedModel = true }
         val directory = Files.createTempDirectory("fresh-config-test").toFile()
         val file = File(directory, "prepared-connection.json")
         val events = mutableListOf<String>()
@@ -321,7 +330,7 @@ class SubscriptionImportTest {
         override fun close() { directory.deleteRecursively() }
         fun next(model: String = "wallet_first_unique_v1") {
             h.raw = yaml.toByteArray(); h.overview(available = model == "legacy")
-            h.wire.replies += WireResponse(200, """{"commerceModel":"$model"}""")
+            h.wire.modelReplies += WireResponse(200, """{"commerceModel":"$model"}""")
         }
     }
 
@@ -478,7 +487,7 @@ class SubscriptionImportTest {
             h.downloadHook = { waiting.complete(Unit); kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { release.await() } }
             val first = async { p.coordinator.connect() }; waiting.await()
             h.downloadHook = {}; h.overview(available = false)
-            h.wire.replies += WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+            h.wire.modelReplies += WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
             val second = async { p.coordinator.switchLine("synthetic-line-b") }; runCurrent()
             release.complete(Unit); assertEquals(ConnectionState.Disconnected, first.await())
             // The source deliberately returned the old (now wiped) array again: fail closed,
@@ -508,7 +517,7 @@ class SubscriptionImportTest {
                 if (sessionExpiry) p.next()
                 else {
                     h.overview(available = false, expiresAt = "2026-09-30T00:01:00.000Z")
-                    h.wire.replies += WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                    h.wire.modelReplies += WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
                 }
                 p.permission = { if (sessionExpiry) h.elapsed = 1800000 else h.now = start.plusSeconds(61); true }
                 assertTrue(p.coordinator.connect() !is ConnectionState.Connected)

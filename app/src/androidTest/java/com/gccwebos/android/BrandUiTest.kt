@@ -117,8 +117,10 @@ class BrandUiTest {
             val registration = remember { challengeFixture.registration(scope, account) }
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 if (width != null) Box(Modifier.width(width).fillMaxHeight()) {
-                    AppShell(account, autoLoadCommerce = false, registrationOverride = registration)
-                } else AppShell(account, autoLoadCommerce = false, registrationOverride = registration)
+                    AppShell(account, autoLoadCommerce = false, registrationOverride = registration,
+                        connectionControlState = ConnectionControlState(phase = ConnectionPhase.Unavailable))
+                } else AppShell(account, autoLoadCommerce = false, registrationOverride = registration,
+                    connectionControlState = ConnectionControlState(phase = ConnectionPhase.Unavailable))
             }
         }
         if (!signedIn) compose.onNodeWithTag("nav-Profile").performClick()
@@ -441,7 +443,8 @@ class BrandUiTest {
         compose.onNodeWithTag("subscription-node-0").assert(SemanticsMatcher("Node row has no production click action") {
             !it.config.contains(SemanticsActions.OnClick)
         })
-        compose.onNodeWithTag("nodes-unavailable").assertTextEquals("连接暂未开放")
+        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
         capture("compact-nodes")
     }
     @Test fun retryAndStorageRemainDistinctFromExpiryAndBusyRefreshIsDisabled() {
@@ -487,7 +490,9 @@ class BrandUiTest {
         compose.onNodeWithTag("subscription-node-1").assert(SemanticsMatcher("Unsupported row has no production click action") {
             !it.config.contains(SemanticsActions.OnClick)
         })
-        compose.onNodeWithTag("nodes-unavailable").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-connection-status").performScrollTo()
+            .assertTextEquals("连接暂不可用").assertIsDisplayed()
         capture("compact-nodes-narrow-font-200")
     }
     @Test fun totpCancelKeepsSubscriptionAndResetStillRequiresConfirmation() {

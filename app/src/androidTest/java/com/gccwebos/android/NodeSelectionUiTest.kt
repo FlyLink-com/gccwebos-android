@@ -42,6 +42,7 @@ class NodeSelectionUiTest {
     private var pending: CompletableDeferred<Unit>? = null
     private var resource by mutableStateOf<Resource?>(null)
     private var hasCapability by mutableStateOf(true)
+    private var connectionControl by mutableStateOf(ConnectionControlState())
     private fun launch() {
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -66,7 +67,8 @@ class NodeSelectionUiTest {
             LaunchedEffect(owner) { owner.refresh() } // Explicit synthetic fixture setup only.
             GccTheme {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    NodeSelectionPanel(owner, manager.snapshot().nodes, resource, hasCapability, false) {}
+                    NodeSelectionPanel(owner, manager.snapshot().nodes, resource, hasCapability, false,
+                        connectionControl = connectionControl) {}
                 }
             }
         }
@@ -81,7 +83,21 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
-        compose.onNodeWithTag("nodes-unavailable").assertTextEquals("连接暂未开放")
+        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
+    }
+
+    @Test fun nodeConnectionCaptionFollowsOnlyTheActualOwnerPhaseWithoutSelectingOrReadingAgain() {
+        connectionControl = ConnectionControlState(phase = ConnectionPhase.Disconnected, canConnect = true)
+        launch()
+        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        listOf(ConnectionPhase.Connecting to "连接中", ConnectionPhase.Connected to "已连接",
+            ConnectionPhase.Disconnecting to "断开中", ConnectionPhase.Failed to "未连接").forEach { (phase, text) ->
+            compose.runOnIdle { connectionControl = ConnectionControlState(phase = phase) }
+            compose.onNodeWithTag("nodes-connection-status").assertTextEquals(text)
+        }
+        compose.runOnIdle { assertNull(state.snapshot.selected); assertEquals(1, reads.get()) }
     }
 
     @Test fun busyRefreshDisablesSelectionAndCancelIsReachableWithoutAuthenticationActions() {

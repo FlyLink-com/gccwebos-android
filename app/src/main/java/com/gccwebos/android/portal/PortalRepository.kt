@@ -35,6 +35,13 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private val activationLock = Any()
     private var configurationGeneration = 0L
     @Volatile private var session: Session? = null
+    // Memory-only evidence of actual parsed reads, including the legacy import path.
+    private var overviewRevision = 0L
+    private var overviewIssuedSequence = 0L
+    private var overviewAcceptedSequence = 0L
+    private var overviewIdentity: AccountUsageResourceIdentity? = null
+    private class OverviewReadLease(val session: Session, val epoch: Long, val issuedSequence: Long,
+        val resourceRevision: Long)
     private var imported: AuthorizedConfig? = null
     private var importedUntil: Instant? = null
     private var importedGeneration: Long? = null
@@ -155,18 +162,71 @@ class PortalRepository(private val transport: PortalTransport, private val store
         PortalJson.security(response.body)
     } }
     suspend fun refresh(): Resource = mutex.withLock { guarded { refreshLocked() } }
-    private suspend fun refreshLocked(epoch: Long = generation.get()): Resource {
+    private suspend fun refreshLocked(epoch: Long = generation.get()): Resource = refreshOverviewLocked(epoch).resource
+    /** Existing import refresh semantics, now carrying the identity of that exact read. */
+    internal suspend fun refreshWithObservation(): BoundAccountOverview = mutex.withLock { guarded { refreshOverviewLocked() } }
+    private suspend fun refreshOverviewLocked(epoch: Long = generation.get()): BoundAccountOverview {
         // Failed or superseded refreshes must not leave an old profile eligible for use.
         synchronized(activationLock) { configurationGeneration++; invalidateImport() }
-        checkGeneration(epoch); val active = activeSession()
-        val response = transport.request("/api/portal/resources/current/overview", session = active.token)
-        expectCurrent(response, setOf(200), epoch); checkGeneration(epoch); activeSession()
-        return PortalJson.resource(response.body)
+        val lease = captureOverviewRead(expectedEpoch = epoch)
+        val response = transport.request("/api/portal/resources/current/overview", session = lease.session.token)
+        return acceptOverviewResponse(response, lease)
+    }
+
+    /** Only an overview GET. HTTP awaits outside the mutex so logout/new login can proceed. */
+    internal suspend fun readAccountOverview(expectedOwner: AccountUsageOwner,
+        expectedRepositoryEpoch: Long? = null): BoundAccountOverview = guarded {
+        val captured = mutex.withLock {
+            captureOverviewRead(expectedOwner, expectedRepositoryEpoch)
+        }
+        val response = transport.request("/api/portal/resources/current/overview", session = captured.session.token)
+        mutex.withLock { acceptOverviewResponse(response, captured) }
+    }
+
+    /** Atomic authentication context only: no HTTP, resource inference or access credentials. */
+    internal suspend fun captureAccountUsageAuthentication(expectedOwner: AccountUsageOwner): AccountUsageAuthentication = mutex.withLock { guarded {
+        synchronized(activationLock) {
+            val epoch = generation.get(); val active = activeSession()
+            if (AccountUsageOwner.fromSession(active) != expectedOwner) throw CancellationException("Overview owner changed")
+            AccountUsageAuthentication(expectedOwner, epoch)
+        }
+    } }
+
+    private fun captureOverviewRead(expectedOwner: AccountUsageOwner? = null, expectedEpoch: Long? = null): OverviewReadLease = synchronized(activationLock) {
+        val epoch = generation.get(); val active = activeSession()
+        if (expectedEpoch != null && expectedEpoch != epoch) throw CancellationException("Overview authentication changed")
+        if (expectedOwner != null && AccountUsageOwner.fromSession(active) != expectedOwner) throw CancellationException("Overview owner changed")
+        OverviewReadLease(active, epoch, ++overviewIssuedSequence, overviewRevision)
+    }
+
+    private fun checkOverviewOwner(captured: Session, epoch: Long, expected: AccountUsageOwner) = synchronized(activationLock) {
+        checkGeneration(epoch)
+        val current = activeSession()
+        if (AccountUsageOwner.fromSession(current) != expected || AccountUsageOwner.fromSession(captured) != expected)
+            throw CancellationException("Overview owner changed")
+    }
+
+    private fun acceptOverviewResponse(response: WireResponse, lease: OverviewReadLease): BoundAccountOverview = synchronized(activationLock) {
+        val owner = AccountUsageOwner.fromSession(lease.session)
+        checkOverviewOwner(lease.session, lease.epoch, owner)
+        // Both fences are captured at request start. Failures never advance the accepted fence.
+        if (lease.issuedSequence < overviewAcceptedSequence || lease.resourceRevision != overviewRevision)
+            throw CancellationException("Overview read superseded")
+        expectCurrent(response, setOf(200), lease.epoch)
+        val resource = PortalJson.resource(response.body)
+        checkOverviewOwner(lease.session, lease.epoch, owner)
+        val identity = AccountUsageResourceIdentity.of(resource)
+        if (overviewIdentity != identity) { overviewIdentity = identity; overviewRevision++ }
+        overviewAcceptedSequence = lease.issuedSequence
+        BoundAccountOverview(AccountUsageReadContext(owner, lease.epoch, overviewRevision, lease.issuedSequence), resource)
     }
 
     /** Called after sign-in and on explicit refresh. No production connection or VPN permission. */
     suspend fun refreshAndImport(onResource: (Resource) -> Unit = {},
         onDeliveryReceived: () -> Unit = {}): ImportSnapshot = importFresh(onResource, onDeliveryReceived)
+
+    internal suspend fun refreshAndImportObserved(onOverview: (BoundAccountOverview) -> Unit,
+        onDeliveryReceived: () -> Unit = {}): ImportSnapshot = importFresh(onDeliveryReceived = onDeliveryReceived, onOverview = onOverview)
 
     internal suspend fun prepareFreshConnection(requested: String?, resolver: ConnectionLineResolver,
         files: AtomicPreparedConfigStore): AuthorizedConfig? {
@@ -202,11 +262,14 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private suspend fun importFresh(onResource: (Resource) -> Unit = {}, onDeliveryReceived: () -> Unit = {},
         selection: ((Resource.Available) -> ResolvedConnectionLine?)? = null,
         onPrepared: ((Resource.Available, ResolvedConnectionLine, ByteArray, Long, Long) -> Unit)? = null,
+        onOverview: (BoundAccountOverview) -> Unit = {},
     ): ImportSnapshot = mutex.withLock {
         guarded {
             val epoch = generation.get()
-            val resource = refreshLocked(epoch)
+            val overview = refreshOverviewLocked(epoch)
+            val resource = overview.resource
             onResource(resource)
+            onOverview(overview)
             checkGeneration(epoch)
             val inactive = when {
                 resource == Resource.None -> ImportStatus.NO_RESOURCE

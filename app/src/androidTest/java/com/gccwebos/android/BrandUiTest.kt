@@ -406,7 +406,8 @@ class BrandUiTest {
     }
     @Test fun doubledFontKeepsNavigationAndFormActionsReachable() {
         launch(2f)
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("重试").assertIsNotEnabled()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
         capture("connect-font-200")
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-security").performScrollTo().performClick()
@@ -419,7 +420,8 @@ class BrandUiTest {
     }
     @Test fun smallerFontStillRendersFourAccessibleTabs() {
         launch(.85f)
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("重试").assertIsNotEnabled()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
         capture("connect-font-85")
         listOf("Connect", "Lines", "Plans", "Profile").forEach { page ->
             compose.onNodeWithTag("nav-$page").assertIsDisplayed()
@@ -428,12 +430,16 @@ class BrandUiTest {
     @Test fun compactConnectionOmitsWalletAndKeepsTruthfulDisabledNodes() {
         launch()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
-        compose.onNodeWithTag("connection-power").assertExists()
+        // This old rendering fixture has no accepted usage owner; it must remain unknown.
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("重试").assertIsNotEnabled()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
+        compose.onNodeWithTag("connection-welcome").assertExists()
+        compose.onNodeWithTag("account-usage-card").assertExists()
         compose.onNodeWithTag("subscription-waterdrop").assertDoesNotExist()
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         capture("compact-connect")
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("subscription-node-name-0").assertTextEquals("合成验收线路 Alpha")
@@ -478,7 +484,7 @@ class BrandUiTest {
             )
         })
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         capture("compact-connect-narrow-font-200")
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("subscription-node-name-0").performScrollTo().assertTextEquals(name)

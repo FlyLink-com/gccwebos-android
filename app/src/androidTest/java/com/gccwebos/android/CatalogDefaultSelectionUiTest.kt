@@ -1,0 +1,150 @@
+package com.gccwebos.android
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import com.gccwebos.android.commerce.*
+import com.gccwebos.android.design.GccTheme
+import com.gccwebos.android.portal.*
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+
+/** Local Compose fixtures: choosing a default never reads the network or requests a quote. */
+class CatalogDefaultSelectionUiTest {
+    @get:Rule val compose = createComposeRule()
+    private lateinit var commerce: CommerceController
+    private var requests = 0
+    private val monthly = Offer("actual_monthly_b", "actual_monthly_b_v1",
+        LocalizedText("合成目录月套餐", "Synthetic catalog month"), LocalizedText("", ""),
+        LocalizedNotices(emptyList(), emptyList()), 30, 10000, listOf("paid_coins"), 30, 117, 0)
+    private val cheaper = monthly.copy(offerRef = "actual_monthly_a", offerVersionRef = "actual_monthly_a_v1", baseCoinUnits = 20)
+    private val yearly = monthly.copy(offerRef = "actual_yearly", offerVersionRef = "actual_yearly_v1", durationDays = 365, baseCoinUnits = 200)
+
+    private fun launch(offers: List<Offer> = listOf(cheaper, monthly, yearly),
+        model: CommerceModel? = CommerceModel.LEGACY, authenticated: Boolean = true,
+        width: Int = 360, fontScale: Float = 1f) {
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val account = remember {
+                val transport = object : PortalTransport {
+                    override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                        requests++; throw AssertionError("No Portal request")
+                    }
+                    override suspend fun commerce(path: String, body: String?, session: Secret, key: String?): WireResponse {
+                        requests++; throw AssertionError("No commerce request")
+                    }
+                }
+                val delivery = object : DeliveryStore {
+                    override fun read(): DeliveryRecord? = null
+                    override fun save(record: DeliveryRecord) = throw AssertionError("No delivery write")
+                    override fun clear() = throw AssertionError("No delivery clear")
+                }
+                AccountController(PortalRepository(transport, delivery,
+                    OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
+                    subscription = SubscriptionSource { throw AssertionError("No subscription request") },
+                    sessions = MemorySessionStore(), profiles = MemoryLocalProfileStore()), scope).apply {
+                    this.authenticated = authenticated; authSessionGeneration = 1
+                }
+            }
+            val state = remember {
+                val recovery = object : CommerceRecovery {
+                    override fun read(binding: String, kind: String): PendingCommerce? = null
+                    override fun save(binding: String, value: PendingCommerce) = throw AssertionError("No order write")
+                    override fun clear(binding: String, kind: String) = throw AssertionError("No recovery clear")
+                }
+                CommerceController(account, scope, recovery).apply {
+                    catalogLoaded = true; commerceModel = model; this.offers = offers
+                }
+            }
+            commerce = state
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                GccTheme { Surface {
+                    Column(Modifier.width(width.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                        CommercePanel(account, CommerceMode.Plans, stateOverride = state, autoLoad = false)
+                    }
+                } }
+            }
+        }
+    }
+
+    @After fun defaultAndSelectionHaveNoCommerceSideEffects() {
+        assertEquals(0, requests)
+        assertNull(commerce.quote); assertNull(commerce.purchase); assertNull(commerce.recharge)
+        assertFalse(commerce.pendingPurchase); assertFalse(commerce.pendingRecharge)
+    }
+
+    @Test fun defaultUsesTheRealSnapshotAndUserSelectionSurvivesCatalogReordering() {
+        launch()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsSelected()
+        compose.runOnIdle { commerce.busy = true }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsSelected()
+        compose.runOnIdle { commerce.busy = false }
+        compose.runOnIdle { commerce.offers = listOf(yearly, monthly, cheaper) }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("plan-price-${monthly.offerRef}", useUnmergedTree = true).assertTextEquals("30 Coins")
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsEnabled()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${cheaper.offerRef}").performScrollTo().performClick().assertIsSelected()
+        compose.runOnIdle { commerce.offers = listOf(yearly, monthly, cheaper) }
+        compose.onNodeWithTag("plan-offer-${cheaper.offerRef}").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertIsNotSelected()
+    }
+
+    @Test fun changedDefaultVersionOrCancelledCatalogNeedsAnExplicitFreshSelection() {
+        launch()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsSelected()
+        compose.runOnIdle { commerce.offers = listOf(monthly.copy(offerVersionRef = "actual_monthly_b_v2")) }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsNotSelected()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { commerce.catalogLoaded = false }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertDoesNotExist()
+        compose.runOnIdle { commerce.catalogLoaded = true; commerce.offers = listOf(monthly) }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsNotSelected().performClick()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsEnabled()
+    }
+
+    @Test fun ambiguousCatalogKeepsTheSingleActionDisabledUntilUserSelects() {
+        val alternate = monthly.copy(offerRef = "actual_alternate", offerVersionRef = "actual_alternate_v1")
+        launch(offers = listOf(monthly, alternate))
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsNotSelected()
+        compose.onNodeWithTag("plan-offer-${alternate.offerRef}").assertIsNotSelected()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("plan-offer-${alternate.offerRef}").performScrollTo().performClick().assertIsSelected()
+    }
+
+    @Test fun unknownModelDoesNotDefault() {
+        launch(model = null)
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsNotSelected()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test fun signedOutCatalogKeepsTheRealLoginGate() {
+        launch(authenticated = false)
+        compose.onNodeWithTag("commerce-signed-out").assertIsDisplayed()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("plan-continue").assertDoesNotExist()
+    }
+
+    @Test fun narrowDoubledFontKeepsDefaultBenefitsAndActionReachable() {
+        launch(width = 320, fontScale = 2f)
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsDisplayed().assertIsSelected()
+        compose.onNodeWithTag("plan-benefits").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsDisplayed().assertIsEnabled()
+    }
+}

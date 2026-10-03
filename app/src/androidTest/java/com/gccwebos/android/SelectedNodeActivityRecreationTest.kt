@@ -125,7 +125,7 @@ class SelectedNodeActivityRecreationTest {
     private fun selectSecondAndNavigate(): ConnectionSelection {
         waitForReadyNodes()
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
         val selected = inspector.nodeSelectionSnapshot().choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
@@ -144,8 +144,10 @@ class SelectedNodeActivityRecreationTest {
     private fun assertSelectedConnection() {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("同名节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        // The service owner can prepare this valid capability; the fixture never clicks Connect.
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
 
@@ -168,7 +170,7 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
         compose.onNodeWithTag("page-Lines").assertExists()
         compose.onNodeWithTag("nav-Lines").assertIsSelected()
-        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
     }
 
@@ -235,8 +237,10 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
         screenshot("changed-cache-after-real-activity-recreation-unselected")
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()

@@ -1,8 +1,8 @@
 package com.gccwebos.android.commerce
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -10,8 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,7 +32,14 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     }
     val wallet = state.wallet
     val walletFailure = state.walletError ?: state.error?.takeIf { !state.walletLoaded && !state.busy }
+    val offersFailure = state.rechargeOffersError ?: state.error?.takeIf { !state.rechargeOffersLoaded && !state.busy }
     BalanceCard(Modifier.testTag("wallet-card")) {
+        if (mode == CommerceMode.Mine) Row(Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("余额", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (showReadRetry(state.busy, state.canOperate(), walletFailure != null, !state.walletLoaded))
+                BrandButton("重试", state::loadBalance, modifier = Modifier.width(88.dp).testTag("commerce-refresh"))
+        }
         WalletBalanceMetrics(wallet)
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("wallet-loading"), color = Brand.Cyan)
         walletFailure?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("wallet-error")) }
@@ -62,15 +68,12 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                     recharge(Modifier.weight(1f)); ledger(Modifier.weight(1f))
                 }
             }
-            TextButton(onClick = state::loadBalance, enabled = !state.busy,
-                modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp).testTag("commerce-refresh")) { Text("刷新") }
         }
     }
     if (mode != CommerceMode.Wallet) return
     flow.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recharge-flow-error")) }
     if (!state.pendingRecharge) {
         Text("选择充值额度", style = MaterialTheme.typography.titleMedium)
-        val offersFailure = state.rechargeOffersError ?: state.error?.takeIf { !state.rechargeOffersLoaded && !state.busy }
         when {
             offersFailure != null -> BrandCard(Modifier.testTag("recharge-offers-error")) { Text(offersFailure) }
             !state.rechargeOffersLoaded -> BrandCard(Modifier.testTag("recharge-offers-unread")) { Text(if (state.busy) "正在读取充值档位" else "充值档位尚未读取") }
@@ -86,13 +89,13 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             row.forEach { offer ->
                                 val chosen = selectedRechargeOffer == offer
-                                Surface(onClick = { selectedRechargeOffer = offer },
-                                    enabled = !state.busy && state.canOperate() && "alipay" in offer.paymentMethods,
-                                    modifier = Modifier.weight(1f).heightIn(min = 64.dp).testTag("recharge-select-${offer.offerRef}")
-                                        .semantics { selected = chosen }, shape = Brand.Shape,
-                                    color = Brand.Surface.copy(alpha = .82f),
-                                    border = BorderStroke(1.dp, if (chosen) Brand.Cyan else Brand.Border)) {
-                                    Column(Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                BrandCard(modifier = Modifier.weight(1f).heightIn(min = 64.dp)
+                                    .testTag("recharge-select-${offer.offerRef}")
+                                    .selectable(selected = chosen, role = Role.Button,
+                                        enabled = !state.busy && state.canOperate() && "alipay" in offer.paymentMethods,
+                                        onClick = { selectedRechargeOffer = offer }),
+                                    selected = chosen, contentPadding = PaddingValues(10.dp)) {
+                                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(formatCoins(offer.paidCoinUnits), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                         Text(formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent), style = MaterialTheme.typography.bodySmall,
@@ -133,8 +136,9 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
         if (order?.status in setOf("credited", "failed_no_charge", "expired")) TextButton(onClick = state::finishRecharge,
             enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp).testTag("recharge-finish")) { Text("核对完成，返回充值") }
     }
-    TextButton(onClick = state::loadWallet, enabled = !state.busy,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("commerce-refresh")) { Text("刷新余额与额度") }
+    if (showReadRetry(state.busy, state.canOperate(), walletFailure != null || offersFailure != null,
+            !state.walletLoaded || !state.rechargeOffersLoaded))
+        BrandButton("重试", state::loadWallet, modifier = Modifier.width(88.dp).testTag("commerce-refresh"))
     flow.selectedOffer?.let { offer ->
         AlertDialog(onDismissRequest = flow::cancelSelection, title = { Text("确认充值金额") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -154,8 +158,8 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                 Text("将打开：${order.nextAction?.let { java.net.URI(it.url).host } ?: "入口不可用"}")
                 Text("请核对实际金额；选项价格变化时，以此订单为准。暂不付款会保留订单。")
                 if (!state.canOpenPayment(order, now)) Text("订单已更新或入口已失效，请关闭并查询。")
-            } }, confirmButton = { TextButton(onClick = { flow.openPayment(Instant.now()) },
-                enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) { Text("支付宝支付") } },
+            } }, confirmButton = { AlipayButton("支付宝支付", { flow.openPayment(Instant.now()) },
+                enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },
             dismissButton = { TextButton(onClick = flow::dismissPayment, modifier = Modifier.testTag("payment-open-cancel")) { Text("暂不付款") } })
     }
     if (recoveryConfirmation) AlertDialog(onDismissRequest = { recoveryConfirmation = false }, title = { Text("恢复原创建请求？") },
@@ -167,10 +171,7 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
 
 @Composable
 private fun BalanceCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = Brand.Shape,
-        color = Brand.Surface.copy(alpha = .82f), border = BorderStroke(1.dp, Brand.Border)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
-    }
+    BrandCard(modifier, contentPadding = PaddingValues(12.dp), content = content)
 }
 
 /** Each figure is a separate authoritative field. Held and pending funds are never added to availability. */

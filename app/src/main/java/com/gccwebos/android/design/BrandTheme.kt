@@ -1,6 +1,5 @@
 package com.gccwebos.android.design
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,46 +12,63 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/** Adapted from gccwebos-mobile@091ee6e8 style.css and button-tokens.css. */
+/** Shared native tokens matched to the validated unified preview; business state stays outside. */
 internal object Brand {
     val Background = Color(0xFF071122)
-    val Surface = Color(0xFF0D1C38)
+    val Surface = Color(GlassMaterialPolicy.CardSolidArgb)
     val SurfaceRaised = Color(0xFF152C4D)
     val Border = Color(0xFF47618A)
-    val Text = Color(0xFFF5F8FF)
-    val Muted = Color(0xFFD0DDF1)
+    val Text = Color(0xFFF5F9FF)
+    val Muted = Color(0xFFD7E5F7)
     val Cyan = Color(0xFF39D7FF)
     val Blue = Color(0xFF2658FF)
     val Green = Color(0xFF45E3C0)
     val Amber = Color(0xFFFFCB73)
     // Cyan is decorative; the actionable button remains dark enough for white text.
-    val ActionStart = Color(0xFF007DA4)
-    val ActionMiddle = Color(0xFF235BED)
-    val ActionEnd = Color(0xFF6940E7)
+    val ActionStart = Color(0xFF176CAE)
+    val ActionMiddle = Color(0xFF3157E0)
+    val ActionEnd = Color(0xFF6550D2)
+    val Disabled = Color(GlassMaterialPolicy.DisabledArgb)
+    val DisabledText = Color(GlassMaterialPolicy.DisabledTextArgb)
+    val PaymentBlue = Color(GlassMaterialPolicy.PaymentArgb)
+    val PaymentDisabled = Color(GlassMaterialPolicy.PaymentDisabledArgb)
+    val PaymentDisabledText = Color(GlassMaterialPolicy.PaymentDisabledTextArgb)
+    val GlassBorder = Color(0xFFD3E8FF)
+    val RowDivider = GlassBorder.copy(alpha = .22f)
+    val RowHighlight = Color.White.copy(alpha = .035f)
+    val PriceAccent = Color(0xFFB8EEFF)
     val Shape = RoundedCornerShape(22.dp)
 }
 
 @Composable
-internal fun GccTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = Brand.Cyan, onPrimary = Brand.Background,
-            secondary = Brand.Green, onSecondary = Brand.Background,
-            background = Brand.Background, onBackground = Brand.Text,
-            surface = Brand.Surface, onSurface = Brand.Text,
-            surfaceVariant = Brand.SurfaceRaised, onSurfaceVariant = Brand.Muted,
-            outline = Brand.Border, error = Color(0xFFFFB4AB),
-        ),
-        content = content,
-    )
+internal fun GccTheme(materialMode: GlassMode? = null, content: @Composable () -> Unit) {
+    ProvideGlassMaterial(materialMode) {
+        MaterialTheme(
+            colorScheme = darkColorScheme(
+                primary = Brand.Cyan, onPrimary = Brand.Background,
+                secondary = Brand.Green, onSecondary = Brand.Background,
+                background = Brand.Background, onBackground = Brand.Text,
+                surface = Brand.Surface, onSurface = Brand.Text,
+                surfaceVariant = Brand.SurfaceRaised, onSurfaceVariant = Brand.Muted,
+                outline = Brand.Border, error = Color(0xFFFFB4AB),
+            ),
+            content = content,
+        )
+    }
 }
 
 @Composable
-internal fun BrandCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = Brand.Shape, color = Brand.Surface.copy(alpha = .82f),
-        border = BorderStroke(1.dp, Brand.Border)) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+internal fun BrandCard(modifier: Modifier = Modifier, selected: Boolean = false,
+                      contentPadding: PaddingValues = PaddingValues(16.dp), content: @Composable ColumnScope.() -> Unit) {
+    GlassSurface(modifier.fillMaxWidth(), selected = selected) {
+        Column(Modifier.padding(contentPadding), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
     }
+}
+
+/** Keep existing positional (modifier, content) wrappers compatible without editing authentication UI. */
+@Composable
+internal fun BrandCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
+    BrandCard(modifier = modifier, selected = false, contentPadding = PaddingValues(16.dp), content = content)
 }
 
 @Composable
@@ -60,14 +76,14 @@ internal fun BrandButton(text: String, onClick: () -> Unit, modifier: Modifier =
                          enabled: Boolean = true) {
     val shape = RoundedCornerShape(14.dp)
     Button(onClick, enabled = enabled,
-        modifier = modifier.fillMaxWidth().heightIn(min = 52.dp).clip(shape)
+        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape)
             .background(if (enabled) Brush.horizontalGradient(listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd))
-                else Brush.horizontalGradient(listOf(Brand.SurfaceRaised, Brand.SurfaceRaised))),
+                else Brush.horizontalGradient(listOf(Brand.Disabled, Brand.Disabled))),
         shape = shape,
         colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent,
             contentColor = Brand.Text, disabledContainerColor = Color.Transparent,
-            disabledContentColor = Brand.Muted),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp)) {
+            disabledContentColor = Brand.DisabledText),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)) {
         Text(text, fontWeight = FontWeight.SemiBold)
     }
 }

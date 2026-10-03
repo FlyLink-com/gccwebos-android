@@ -484,25 +484,29 @@ class MobileParityUiTest {
         }
     }
     @Test fun syntheticWalletAlipayCatalogAndOrderLayoutsRemainServerShaped() {
+        lateinit var state: CommerceController
+        val openedPayments = mutableListOf<String>()
+        val recovery = object : CommerceRecovery {
+            override fun read(binding: String, kind: String): PendingCommerce? = throw AssertionError("No recovery read in layout fixture")
+            override fun save(binding: String, value: PendingCommerce) = throw AssertionError("No order writes in layout fixture")
+            override fun clear(binding: String, kind: String) = throw AssertionError("No recovery clear in layout fixture")
+        }
         compose.setContent {
             val scope = rememberCoroutineScope()
             val account = remember { offlineUiAccount(scope).apply { purchaseReturnRef = "offer_synthetic" } }
             val commerce = remember {
-                val recovery = object : CommerceRecovery {
-                    override fun read(binding: String, kind: String): PendingCommerce? = null
-                    override fun save(binding: String, value: PendingCommerce) = Unit
-                    override fun clear(binding: String, kind: String) = Unit
-                }
                 CommerceController(account, scope, recovery).apply {
                     wallet = Wallet("active", 1, 1000, 150, 50, 1200, 0, 0)
-                    catalogLoaded = true
+                    commerceModel = CommerceModel.LEGACY; catalogLoaded = true
                     offers = listOf(Offer("offer_synthetic", "version_synthetic", LocalizedText("合成验收年卡", "Synthetic plan"), LocalizedText("仅离线界面验收", "Offline only"), LocalizedNotices(emptyList(), emptyList()), 100, 10000, listOf("paid_coins"), 365, 100, 0))
                     rechargeOffers = listOf(RechargeOffer("recharge_synthetic", 1, 100, 10000, "CNY", 2, listOf("alipay")))
                     rechargeOffersLoaded = true; walletLoaded = true
                     orderPage = OrderPage(emptyList()); rechargeHistory = emptyList(); transitions = emptyList()
                 }
             }
-            AppShell(account, autoLoadCommerce = false, commerceOverride = commerce)
+            state = commerce
+            AppShell(account, autoLoadCommerce = false, commerceOverride = commerce, commerceRecoveryOverride = recovery,
+                paymentOpenerOverride = { openedPayments += it })
         }
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextContains("1200 Coins")
@@ -511,13 +515,23 @@ class MobileParityUiTest {
         compose.onNodeWithTag("subscription-node-0").assertExists()
         capture("synthetic-parsed-nodes")
         compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("plan-title-offer_synthetic", useUnmergedTree = true).assertTextEquals("365天")
+        compose.onNodeWithTag("plan-price-offer_synthetic", useUnmergedTree = true).assertTextEquals("100 Coins")
         compose.onNodeWithTag("catalog-data-packs").performScrollTo().performClick()
-        compose.onNodeWithText("当前暂无可购买流量包").assertExists()
+        compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购流量包")
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
+        compose.onNodeWithTag("commerce-error").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-offer_synthetic").assertDoesNotExist()
+        compose.onNodeWithTag("plan-continue").assertDoesNotExist()
         capture("server-empty-data-packs")
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-history").performScrollTo().performClick()
         compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
-        compose.onNodeWithText("暂无充值记录").assertExists()
+        compose.onNodeWithTag("history-read-title").assertTextEquals("暂无充值记录")
+        compose.onNodeWithTag("orders-loading").assertDoesNotExist()
+        compose.onNodeWithTag("history-error").assertDoesNotExist()
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
         capture("server-empty-order-history")
         compose.onNodeWithTag("mine-back").performScrollTo().performClick()
         capture("synthetic-my-wallet-summary")
@@ -526,10 +540,25 @@ class MobileParityUiTest {
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-recharge").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-select-recharge_synthetic").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("recharge-selected-pay").assertTextEquals("支付宝支付").assertIsNotEnabled()
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+        compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
         capture("synthetic-alipay-recharge")
         compose.onNodeWithTag("recharge-select-recharge_synthetic").performClick()
-        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
+        compose.onNodeWithTag("recharge-selected-pay").assertIsEnabled().performScrollTo().performClick()
+        compose.onNodeWithText("CNY 100.00 → 100 Coins").assertExists()
+        compose.onNodeWithTag("recharge-confirm").assertTextEquals("确认金额并创建订单")
+        compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
         compose.onNodeWithTag("recharge-cancel").performClick()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+        compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(openedPayments.isEmpty())
+            assertNull(state.error); assertNull(state.purchase); assertNull(state.recharge)
+            assertTrue(!state.pendingPurchase && !state.pendingRecharge)
+            assertEquals(CommerceModel.LEGACY, state.commerceModel)
+            assertEquals(listOf("offer_synthetic"), state.offers.map { it.offerRef })
+        }
     }
 }

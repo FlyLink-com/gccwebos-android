@@ -16,6 +16,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.portal.*
+import com.gccwebos.android.vpn.SafeProxyConfig
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -38,6 +39,10 @@ class ConnectionSetupRecoveryUiTest {
     private var showOverview by mutableStateOf(true)
 
     private fun launch(fixture: Fixture) {
+        fixture.assertConfigurationShape()
+        // These injected memory stores do not own the previous fixture's process-wide
+        // selection registry. Fence it before the first Overview sync can inspect it.
+        fixture.repo.localSubscriptions.invalidateNodeSelection()
         compose.setContent {
             val scope = rememberCoroutineScope()
             account = remember { AccountController(fixture.repo, scope) }
@@ -95,6 +100,15 @@ class ConnectionSetupRecoveryUiTest {
     @Test fun unavailableDeliveryShowsWaitingAndExplicitRetryNeverCreatesAClaim() {
         val fixture = Fixture(setupAvailable = false)
         launch(fixture)
+        compose.runOnIdle {
+            assertEquals(ImportStatus.WAITING_DELIVERY, account.importStatus)
+            assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+            assertNull(account.error)
+            assertEquals(0, fixture.setups.get()); assertEquals(0, fixture.acks.get()); assertEquals(0, fixture.downloads.get())
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithTag("connection-setup-status").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("connection-setup-status")
             .assertTextEquals("订阅交付暂不可领取，请稍后重试或联系支持")
         compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
@@ -156,13 +170,30 @@ class ConnectionSetupRecoveryUiTest {
     @Test fun severalPreparedNodesRequireExplicitSelectionInsteadOfAPowerCommand() {
         val fixture = Fixture(setupAvailable = true, failFirstDownload = true, holdRetry = true, multipleNodes = true)
         launch(fixture)
-        compose.onNodeWithTag("vpn-connect").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+            assertFalse(account.localSubscription.hasProfile)
+            assertEquals("网络连接失败，请重试", account.error)
+            assertEquals(1, fixture.downloads.get())
+            assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
+        }
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
+            .performScrollTo().performClick()
         compose.waitUntil(10_000) { fixture.retryStarted.isCompleted }
         compose.runOnIdle { fixture.retryRelease.complete(Unit) }
-        compose.waitUntil(10_000) { !account.busy && account.localSubscription.hasProfile }
+        compose.waitUntil(10_000) { fixture.retryReturned.isCompleted && !account.busy }
         compose.runOnIdle {
+            // Await the operation's terminal state, then expose a real parser/storage
+            // failure directly instead of hiding it behind a hasProfile timeout.
+            assertNull("Preparation failed: ${account.error}", account.error)
+            assertEquals(ImportStatus.IMPORTED, account.importStatus)
+            assertEquals(LocalSubscriptionStatus.READY, account.localSubscription.status)
+            assertTrue(account.localSubscription.hasProfile); assertTrue(account.localSubscription.hasCapability)
+            assertEquals(2, account.localSubscription.nodes.size)
+            assertTrue(account.localSubscription.nodes.all { it.supported })
             assertEquals(2, account.nodeSelection.snapshot.choices.size)
             assertNull(account.nodeSelection.snapshot.selected)
+            assertEquals(2, fixture.downloads.get())
             assertEquals(0, powers.get()); assertEquals(1, navigations.get())
             assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
         }
@@ -228,24 +259,38 @@ class ConnectionSetupRecoveryUiTest {
                         retryRelease.await(); retryReturned.complete(Unit)
                     } else { retryRelease.await(); retryReturned.complete(Unit) }
                 }
-                val first = """
-                    proxies:
-                      - name: synthetic setup UI node
-                        type: ss
-                        server: 192.0.2.1
-                        port: 443
-                        cipher: aes-128-gcm
-                        password: synthetic-only
-                """.trimIndent()
-                val second = if (multipleNodes) "\n" + """
-                      - name: synthetic setup UI node two
-                        type: ss
-                        server: 192.0.2.2
-                        port: 443
-                        cipher: aes-128-gcm
-                        password: synthetic-only
-                """.trimIndent().prependIndent("  ") else ""
-                (first + second).toByteArray()
+                configuration()
             }, sessions = MemorySessionStore(), profiles = MemoryLocalProfileStore())
+
+        fun assertConfigurationShape() {
+            val raw = configuration()
+            try {
+                val nodes = SafeProxyConfig.inspect(raw)
+                assertEquals(if (multipleNodes) 2 else 1, nodes.size)
+                assertTrue(nodes.all { it.supported })
+                SafeProxyConfig.project(raw, 0).fill(0)
+            } finally { raw.fill(0) }
+        }
+
+        private fun configuration(): ByteArray {
+            val first = """
+                proxies:
+                  - name: synthetic setup UI node
+                    type: ss
+                    server: 192.0.2.1
+                    port: 443
+                    cipher: aes-128-gcm
+                    password: synthetic-only
+            """.trimIndent()
+            val second = if (multipleNodes) "\n" + """
+                  - name: synthetic setup UI node two
+                    type: ss
+                    server: 192.0.2.2
+                    port: 443
+                    cipher: aes-128-gcm
+                    password: synthetic-only
+            """.trimIndent().prependIndent("  ") else ""
+            return (first + second).toByteArray()
+        }
     }
 }

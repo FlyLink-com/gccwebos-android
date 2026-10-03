@@ -51,7 +51,8 @@ class SubscriptionWalletUiTest {
     private var verifiedOverviewFailure: PortalFailure.Reason? = null
 
     /** Server-validated synthetic native session; an editable email is never its account binding. */
-    private fun launchVerifiedOverviewShell(fontScale: Float = 1f) {
+    private fun launchVerifiedOverviewShell(fontScale: Float = 1f,
+        onPowerAction: ((ConnectionPowerAction) -> Unit)? = null) {
         compose.setContent {
             val scope = rememberCoroutineScope()
             val controller = remember {
@@ -92,7 +93,8 @@ class SubscriptionWalletUiTest {
             LaunchedEffect(controller) { controller.restoreAccount() }
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                AppShell(accountOverride = controller, autoLoadCommerce = false)
+                AppShell(accountOverride = controller, autoLoadCommerce = false,
+                    onConnectionPowerAction = onPowerAction)
             }
         }
         compose.waitUntil(5_000) { ::account.isInitialized && !account.busy && account.authenticated &&
@@ -378,10 +380,15 @@ class SubscriptionWalletUiTest {
     }
 
     @Test fun largeFontGuidanceAndResourcesKeepActionsReachable() {
-        launchVerifiedOverviewShell(fontScale = 2f)
+        val powerActions = mutableListOf<ConnectionPowerAction>()
+        launchVerifiedOverviewShell(fontScale = 2f, onPowerAction = { powerActions += it })
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("开通飞连vpn").assertIsEnabled()
         capture("none-inline-font-200")
+        compose.onNodeWithTag("vpn-connect").performClick()
+        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.runOnIdle { assertEquals(2, verifiedOverviewReads.get()); assertTrue(powerActions.isEmpty()) }
         compose.runOnIdle { verifiedOverviewBody = verifiedAvailableBody(days = 365); account.refreshAccountUsage() }
         compose.waitUntil(5_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.resource is Resource.Available }
         compose.onNodeWithTag("account-usage-plan").performScrollTo().assertTextEquals("365天套餐")
@@ -389,15 +396,27 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("account-usage-cycle").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("account-usage-expiry").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("account-usage-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("一键连接").assertIsNotEnabled()
-        compose.onNodeWithTag("account-usage-primary-hint").assertTextEquals("连接功能暂未开放")
+        // An available entitlement with MISSING local material exposes preparation guidance,
+        // not Connect admission. This overview-only fixture deliberately does not click Sync.
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("一键连接").assertIsEnabled()
+        compose.onNodeWithTag("account-usage-primary-hint").assertTextEquals("本机尚无配置")
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.onNodeWithTag("connection-power").assertDoesNotExist()
+        compose.onNodeWithTag("connection-prepare-cancel").assertDoesNotExist()
         capture("usage-available-font-200")
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithTag("page-Plans").assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsNotEnabled()
-        compose.runOnIdle { assertEquals(3, verifiedOverviewReads.get()) }
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsEnabled()
+        compose.runOnIdle {
+            assertEquals(3, verifiedOverviewReads.get())
+            assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+            assertFalse(account.localSubscription.hasProfile)
+            assertFalse(account.localSubscription.hasCapability)
+            assertTrue(powerActions.isEmpty())
+            assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(account.localSubscription,
+                Instant.now(), ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)).action)
+        }
     }
 
     private fun offers() = listOf(

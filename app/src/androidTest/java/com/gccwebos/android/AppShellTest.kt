@@ -388,10 +388,17 @@ class AppShellTest {
 
     @Test fun mineHistoryKeepsOrdersAndLedgerReadOnlyEvenWithARetainedQuote() {
         val recovery = object : CommerceRecovery {
-            override fun read(binding: String, kind: String): PendingCommerce? = error("No recovery read in UI-only fixture")
-            override fun save(binding: String, value: PendingCommerce) = error("No order writes")
-            override fun clear(binding: String, kind: String) = error("No recovery clear")
+            override fun read(binding: String, kind: String): PendingCommerce? = throw AssertionError("No recovery read in UI-only fixture")
+            override fun save(binding: String, value: PendingCommerce) = throw AssertionError("No order writes")
+            override fun clear(binding: String, kind: String) = throw AssertionError("No recovery clear")
         }
+        lateinit var commerce: CommerceController
+        val offer = Offer("offer_fixture_navigation", "version_fixture_navigation", LocalizedText("离线商品", "Offline"),
+            LocalizedText("离线", "Offline"), LocalizedNotices(emptyList(), emptyList()), 73, 7300,
+            listOf("paid_coins"), 47, 17, 0)
+        val retainedQuote = Quote("quote_fixture_navigation", offer, 73, 0, "available", 0,
+            emptyList(), QuoteBalances(CoinBalance(0, 100, 0, 0), CoinBalance(0, 27, 0, 0)),
+            Instant.now().plusSeconds(600), null)
         compose.setContent {
             val scope = rememberCoroutineScope()
             val owner = remember { offlineUiAccount(scope) }
@@ -399,26 +406,37 @@ class AppShellTest {
                 CommerceController(owner, scope, recovery, includeHistory = true).apply {
                     commerceModel = CommerceModel.LEGACY; catalogLoaded = true
                     orderPage = OrderPage(emptyList()); ledgerPage = WalletLedgerPage(emptyList(), null)
-                    val offer = Offer("offer_fixture_navigation", "version_fixture_navigation", LocalizedText("离线商品", "Offline"),
-                        LocalizedText("离线", "Offline"), LocalizedNotices(emptyList(), emptyList()), 73, 7300,
-                        listOf("paid_coins"), 47, 17, 0)
-                    quote = Quote("quote_fixture_navigation", offer, 73, 0, "available", 0,
-                        emptyList(), QuoteBalances(CoinBalance(0, 100, 0, 0), CoinBalance(0, 27, 0, 0)),
-                        Instant.now().plusSeconds(600), null)
+                    quote = retainedQuote
                 }
             }
-            AppShell(owner, autoLoadCommerce = false, commerceOverride = state, commerceRecoveryOverride = recovery)
+            commerce = state
+            AppShell(owner, autoLoadCommerce = false, commerceOverride = state, commerceRecoveryOverride = recovery,
+                paymentOpenerOverride = { throw AssertionError("History cannot open a payment") })
         }
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-history").performScrollTo().performClick()
         compose.onNodeWithTag("orders-orders").assertExists()
         compose.onNodeWithTag("orders-state-separation").assertExists()
+        compose.onNodeWithTag("history-read-title").assertTextEquals("暂无这类订单")
+        compose.onNodeWithTag("orders-loading").assertDoesNotExist()
+        compose.onNodeWithTag("history-error").assertDoesNotExist()
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
         compose.onNodeWithTag("mine-history-ledger").performScrollTo().performClick()
-        compose.onNodeWithText("暂无账单记录").assertExists()
+        compose.onNodeWithTag("ledger-empty").assertTextEquals("暂无账单")
+        compose.onNodeWithTag("ledger-unread").assertDoesNotExist()
+        compose.onNodeWithTag("ledger-loading").assertDoesNotExist()
+        compose.onNodeWithTag("ledger-error").assertDoesNotExist()
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+        compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
         compose.onNodeWithTag("mine-back").performScrollTo().performClick()
         compose.onNodeWithTag("mine-history").performScrollTo().assertExists()
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
+        compose.runOnIdle {
+            assertSame(retainedQuote, commerce.quote)
+            assertNull(commerce.error)
+            assertNull(commerce.purchase); assertNull(commerce.recharge)
+            assertTrue(!commerce.pendingPurchase && !commerce.pendingRecharge)
+        }
     }
 }

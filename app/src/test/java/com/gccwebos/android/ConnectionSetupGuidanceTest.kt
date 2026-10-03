@@ -110,7 +110,7 @@ class ConnectionSetupGuidanceTest {
         val account = fixture.account
         assertTrue(account.authenticated); assertFalse(account.busy)
         assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
-        assertTrue(account.localSubscription.hasCapability)
+        assertFalse(account.localSubscription.hasCapability)
         assertNotNull(account.error); assertNull(account.importStatus)
         val receipt = requireNotNull(fixture.store.value)
         assertFalse(receipt.pendingAck)

@@ -66,7 +66,7 @@ class ConnectionSetupRecoveryUiTest {
         launch(fixture)
         compose.runOnIdle {
             assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
-            assertTrue(account.localSubscription.hasCapability)
+            assertFalse(account.localSubscription.hasCapability)
             assertNotNull(account.error)
             fixture.setupAvailable = false
         }

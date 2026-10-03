@@ -159,7 +159,7 @@ class SelectedNodeActivityRecreationTest {
         }
         if (connectable) {
             compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
-            compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
+            compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接").assertIsEnabled()
         } else {
             compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
             compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()

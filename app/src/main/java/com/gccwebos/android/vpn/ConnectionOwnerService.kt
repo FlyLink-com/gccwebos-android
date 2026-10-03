@@ -13,6 +13,8 @@ import com.gccwebos.android.ConnectionPhase
 import com.gccwebos.android.ConnectionPowerAction
 import com.gccwebos.android.core.ConfigPreparation
 import com.gccwebos.android.core.ConnectionCoordinator
+import com.gccwebos.android.core.ConnectionOwnerAvailability
+import com.gccwebos.android.core.ConnectionOwnerHandoff
 import com.gccwebos.android.core.ConnectionState
 import com.gccwebos.android.core.ConnectionTimeouts
 import com.gccwebos.android.core.Failure
@@ -31,6 +33,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** The only subscription/coordinator owner. UI and engine bindings share this incarnation. */
@@ -39,12 +42,13 @@ internal class ConnectionOwnerService : Service() {
     private lateinit var repository: PortalRepository
     private lateinit var permission: ActivityVpnPermission
     private lateinit var tunnel: AndroidVpnTunnel
-    private lateinit var coordinator: ConnectionCoordinator
+    private lateinit var handoff: ConnectionOwnerHandoff
     private var expiryTask: Job? = null
     private val publication = Any()
     private var revision = 0L
     private var commandEpoch = 0L
     private var materialClearFailed = false
+    private var destroyed = false
     private val controls = MutableStateFlow(ConnectionControlState())
     private val binder = LocalBinder()
 
@@ -68,13 +72,15 @@ internal class ConnectionOwnerService : Service() {
             override suspend fun prepare(intent: SelectionIntent): ConfigPreparation {
                 val epoch = synchronized(publication) { commandEpoch }
                 val result = gateway.prepare(intent)
-                synchronized(publication) { if (result is ConfigPreparation.Ready && commandEpoch == epoch) {
+                synchronized(publication) { if (!destroyed && result is ConfigPreparation.Ready && commandEpoch == epoch) {
                     expiryTask?.cancel()
                     result.config.validUntil?.let { until ->
                         expiryTask = scope.launch {
                             // Recheck wall clock so forward jumps and delayed wakeups cannot renew authority.
                             while (Instant.now() < until) delay(1_000)
-                            synchronized(publication) { if (commandEpoch == epoch) coordinator.stop() }
+                            synchronized(publication) { if (!destroyed && commandEpoch == epoch) {
+                                (handoff.state.value as? ConnectionOwnerAvailability.Ready)?.owner?.stop()
+                            } }
                         }
                     }
                 } }
@@ -93,33 +99,48 @@ internal class ConnectionOwnerService : Service() {
                 } finally { onClear() }
             }
         }
-        coordinator = ConnectionCoordinator(ownedGateway, permission,
-            tunnel, tunnel, scope, ConnectionTimeouts(cleanupMillis = 6_500))
+        handoff = ConnectionOwnerHandoff(scope,
+            awaitClaim = { factory -> repository.localSubscriptions.awaitConnectionOwner(factory) },
+            factory = { ConnectionCoordinator(ownedGateway, permission,
+                tunnel, tunnel, scope, ConnectionTimeouts(cleanupMillis = 6_500)) })
         scope.launch {
-            coordinator.state.collect { state ->
-                synchronized(publication) {
-                    if (coordinator.state.value != state) return@collect
-                    if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=owner-" + when (state) {
-                        is ConnectionState.Failed -> "failed-${state.reason}"
-                        is ConnectionState.Working -> "working-${state.step}"
-                        else -> state.javaClass.simpleName
-                    })
-                    controls.value = if (BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30)
-                        connectionControls(if (materialClearFailed) ConnectionState.Failed(Failure.CLEANUP_FAILED) else state, ++revision)
-                        else ConnectionControlState(revision = ++revision)
-                    if (state == ConnectionState.Disconnected || state is ConnectionState.Failed || state is ConnectionState.Blocked) {
-                        expiryTask?.cancel(); expiryTask = null
-                        stopSelf()
+            handoff.state.collectLatest { available ->
+                if (available !is ConnectionOwnerAvailability.Ready) {
+                    synchronized(publication) {
+                        if (!destroyed) controls.value = ConnectionControlState(revision = ++revision)
+                    }
+                    return@collectLatest
+                }
+                val coordinator = available.owner
+                coordinator.state.collect { state ->
+                    synchronized(publication) {
+                        if (destroyed || scope.coroutineContext[Job]?.isActive != true ||
+                            handoff.state.value != available || coordinator.state.value != state) return@collect
+                        if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=owner-" + when (state) {
+                            is ConnectionState.Failed -> "failed-${state.reason}"
+                            is ConnectionState.Working -> "working-${state.step}"
+                            else -> state.javaClass.simpleName
+                        })
+                        controls.value = if (BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30)
+                            connectionControls(if (materialClearFailed) ConnectionState.Failed(Failure.CLEANUP_FAILED) else state, ++revision)
+                            else ConnectionControlState(revision = ++revision)
+                        if (state == ConnectionState.Disconnected || state is ConnectionState.Failed || state is ConnectionState.Blocked) {
+                            expiryTask?.cancel(); expiryTask = null
+                            stopSelf()
+                        }
                     }
                 }
             }
         }
+        handoff.start()
     }
 
     private fun submit(action: ConnectionPowerAction) {
         synchronized(publication) {
             // A rejection is also an acknowledgement: pending UI slots must always resolve.
             controls.value = controls.value.copy(revision = ++revision)
+            if (destroyed || scope.coroutineContext[Job]?.isActive != true) return
+            val coordinator = (handoff.state.value as? ConnectionOwnerAvailability.Ready)?.owner ?: return
             when (action) {
                 ConnectionPowerAction.Connect -> {
                     if (!controls.value.canConnect) return
@@ -145,8 +166,21 @@ internal class ConnectionOwnerService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
     override fun onDestroy() {
-        expiryTask?.cancel()
-        scope.launch { try { coordinator.close() } finally { scope.coroutineContext[Job]?.cancel() } }
+        val retirement = synchronized(publication) {
+            destroyed = true
+            commandEpoch++
+            expiryTask?.cancel(); expiryTask = null
+            controls.value = ConnectionControlState(revision = ++revision)
+            handoff.retire() // Synchronously fences old commands; lease is retained through cleanup.
+        }
+        scope.launch {
+            try { retirement.await() }
+            catch (_: Exception) {
+                // Already unavailable/closed. Never turn a cleanup exception into process death.
+                if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=owner-cleanup-unavailable")
+            }
+            finally { scope.coroutineContext[Job]?.cancel() }
+        }
         super.onDestroy()
     }
     companion object { const val ACTION_HOLD = "com.gccwebos.android.vpn.OWNER_HOLD" }

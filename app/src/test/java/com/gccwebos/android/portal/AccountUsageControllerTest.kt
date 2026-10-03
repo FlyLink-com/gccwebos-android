@@ -2,6 +2,7 @@ package com.gccwebos.android.portal
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -50,6 +51,155 @@ class AccountUsageControllerTest {
         try { fixture.controller.bind(firstOwner, null, uiAuthEpoch); fail("partial context accepted") }
         catch (_: IllegalArgumentException) { }
         assertNull(fixture.state.resource)
+    }
+
+    @Test fun currentAcceptedObservationTracksInternalReferenceAcrossEqualPublications() = runTest {
+        val fixture = Fixture(this); fixture.bind()
+        val first = bound(available(), 1, 0)
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(first, uiAuthEpoch))
+        assertTrue(fixture.controller.observeExternal(first, uiAuthEpoch))
+        val published = fixture.state
+        val second = bound(available(), 2, 0)
+        assertNotSame(first.resource, second.resource); assertEquals(first.resource, second.resource)
+        assertTrue(fixture.controller.observeExternal(second, uiAuthEpoch))
+        // StateFlow conflation keeps the old public object, not the controller's accepted reference.
+        assertSame(published, fixture.state); assertSame(first.resource, fixture.state.resource)
+        assertTrue(fixture.controller.isCurrentAcceptedObservation(second, uiAuthEpoch))
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(first, uiAuthEpoch))
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(second.copy(resource = available()), uiAuthEpoch))
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(
+            second.copy(context = second.context.copy(readSequence = 3)), uiAuthEpoch))
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(
+            second.copy(context = second.context.copy(resourceRevision = 1)), uiAuthEpoch))
+        assertSame(published, fixture.state); assertEquals(0, fixture.calls)
+    }
+
+    @Test fun currentAcceptedObservationRejectsAnOlderReadOfTheSameResourceInstance() = runTest {
+        val fixture = Fixture(this); fixture.bind(); val sample = available()
+        val first = bound(sample, 1, 1); val second = bound(sample, 2, 1)
+        assertTrue(fixture.controller.observeExternal(first, uiAuthEpoch))
+        assertTrue(fixture.controller.isCurrentAcceptedObservation(first, uiAuthEpoch))
+        assertTrue(fixture.controller.observeExternal(second, uiAuthEpoch))
+        val published = fixture.state
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(first, uiAuthEpoch))
+        assertTrue(fixture.controller.isCurrentAcceptedObservation(second, uiAuthEpoch))
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(bound(sample, 3, 1), uiAuthEpoch))
+        assertSame(published, fixture.state); assertEquals(0, fixture.calls)
+    }
+
+    @Test fun currentAcceptedObservationRequiresOriginalUiEpochAndExactOwnerSessionRepository() = runTest {
+        val fixture = Fixture(this); fixture.bind(); val accepted = bound(available())
+        assertTrue(fixture.controller.observeExternal(accepted, uiAuthEpoch))
+        val changedSession = owner("fixture_account_a", "fixture_token_replaced")
+        for (wrongOwner in listOf(secondOwner, changedSession)) {
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(
+                accepted.copy(context = accepted.context.copy(owner = wrongOwner)), uiAuthEpoch))
+        }
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(
+            accepted.copy(context = accepted.context.copy(repositoryEpoch = repositoryEpoch + 1)), uiAuthEpoch))
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch + 1))
+        // A same-owner verified rebind may retain the sample, but cannot authorize the old UI request.
+        fixture.bind(uiEpoch = uiAuthEpoch + 1)
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch))
+        assertTrue(fixture.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch + 1))
+        assertEquals(0, fixture.calls)
+        for ((nextOwner, nextEpoch) in listOf(secondOwner to repositoryEpoch,
+            changedSession to repositoryEpoch, firstOwner to repositoryEpoch + 1)) {
+            val changed = Fixture(this); changed.bind()
+            assertTrue(changed.controller.observeExternal(accepted, uiAuthEpoch))
+            changed.bind(nextOwner, nextEpoch, uiAuthEpoch + 1)
+            assertFalse(changed.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch))
+            assertFalse(changed.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch + 1))
+            val current = bound(available(), 1, 0, nextOwner, nextEpoch)
+            assertTrue(changed.controller.observeExternal(current, uiAuthEpoch + 1))
+            assertTrue(changed.controller.isCurrentAcceptedObservation(current, uiAuthEpoch + 1))
+            assertFalse(changed.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch + 1))
+            assertEquals(0, changed.calls)
+        }
+    }
+
+    @Test fun currentAcceptedObservationRejectsVerificationClosureAndInactiveScope() = runTest {
+        val fixture = Fixture(this); fixture.bind(); val accepted = bound(available())
+        assertTrue(fixture.controller.observeExternal(accepted, uiAuthEpoch))
+        fixture.controller.suspendForVerification()
+        val verifying = fixture.state
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch))
+        assertSame(verifying, fixture.state)
+        fixture.bind(uiEpoch = uiAuthEpoch + 1)
+        assertTrue(fixture.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch + 1))
+        fixture.controller.close(); val closed = fixture.state
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch + 1))
+        fixture.bind(uiEpoch = uiAuthEpoch + 1)
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch + 1))
+        assertSame(closed, fixture.state); assertEquals(0, fixture.calls)
+        val scopeJob = Job()
+        val inactive = Fixture(CoroutineScope(backgroundScope.coroutineContext + scopeJob))
+        try {
+            inactive.bind(); assertTrue(inactive.controller.observeExternal(accepted, uiAuthEpoch))
+            assertTrue(inactive.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch))
+            val published = inactive.state
+            scopeJob.cancel()
+            assertFalse(inactive.controller.isCurrentAcceptedObservation(accepted, uiAuthEpoch))
+            assertSame(published, inactive.state); assertEquals(0, inactive.calls)
+        } finally { scopeJob.cancel(); inactive.controller.close() }
+    }
+
+    @Test fun currentAcceptedObservationRequiresAnAcceptedPositiveReadAndNonnegativeRevision() = runTest {
+        val fixture = Fixture(this); val sample = available()
+        val current = bound(sample, 1, 0)
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(current, uiAuthEpoch))
+        fixture.bind()
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(current, uiAuthEpoch))
+        for (invalid in listOf(bound(sample, 0, 0), bound(sample, -1, 0), bound(sample, 1, -1))) {
+            assertFalse(fixture.controller.observeExternal(invalid, uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(invalid, uiAuthEpoch))
+        }
+        assertTrue(fixture.controller.observeExternal(current, uiAuthEpoch))
+        assertTrue(fixture.controller.isCurrentAcceptedObservation(current, uiAuthEpoch))
+        for (invalid in listOf(bound(sample, 0, 0), bound(sample, -1, 0), bound(sample, 1, -1))) {
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(invalid, uiAuthEpoch))
+        }
+        fixture.controller.bind(null, null, uiAuthEpoch)
+        assertFalse(fixture.controller.isCurrentAcceptedObservation(current, uiAuthEpoch))
+        assertNull(fixture.state.resource); assertEquals(0, fixture.calls)
+    }
+
+    @Test fun currentAcceptedObservationFencesSingletonNoneAndReconciliationByReadSequence() = runTest {
+        for ((sample, replacement) in listOf(Resource.None to Resource.Reconciliation,
+            Resource.Reconciliation to Resource.None)) {
+            val fixture = Fixture(this); fixture.bind()
+            val first = bound(sample, 1, 0); val second = bound(sample, 2, 0)
+            assertTrue(fixture.controller.observeExternal(first, uiAuthEpoch))
+            assertTrue(fixture.controller.isCurrentAcceptedObservation(first, uiAuthEpoch))
+            assertTrue(fixture.controller.observeExternal(second, uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(first, uiAuthEpoch))
+            assertTrue(fixture.controller.isCurrentAcceptedObservation(second, uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(bound(sample, 3, 0), uiAuthEpoch))
+            val replaced = bound(replacement, 3, 1)
+            assertTrue(fixture.controller.observeExternal(replaced, uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(second, uiAuthEpoch))
+            assertTrue(fixture.controller.isCurrentAcceptedObservation(replaced, uiAuthEpoch))
+            assertEquals(0, fixture.calls)
+        }
+    }
+
+    @Test fun currentAcceptedObservationRejectsOldReadsAfterResourceOrCycleReturns() = runTest {
+        for (replacement in listOf(available('b'),
+            available(status = "pending", start = cycleEnd, end = cycleEnd.plusSeconds(86400)))) {
+            val fixture = Fixture(this); fixture.bind(); val sample = available()
+            val original = bound(sample, 1, 1)
+            assertTrue(fixture.controller.observeExternal(original, uiAuthEpoch))
+            assertTrue(fixture.controller.observeExternal(bound(replacement, 2, 2), uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(original, uiAuthEpoch))
+            val returned = bound(sample, 3, 3)
+            assertTrue(fixture.controller.observeExternal(returned, uiAuthEpoch))
+            assertTrue(fixture.controller.isCurrentAcceptedObservation(returned, uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(original, uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(bound(sample, 1, 3), uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(bound(sample, 3, 1), uiAuthEpoch))
+            assertFalse(fixture.controller.isCurrentAcceptedObservation(returned.copy(resource = available()), uiAuthEpoch))
+            assertEquals(0, fixture.calls)
+        }
     }
 
     @Test fun updateUsesBoundOwnerEpochAndBusyPreventsRepeatedDispatch() = runTest {

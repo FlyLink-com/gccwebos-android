@@ -85,6 +85,16 @@ internal class AccountUsageController(
         true
     }
 
+    /** Check the accepted read itself; StateFlow may retain an older, structurally equal value. */
+    fun isCurrentAcceptedObservation(bound: BoundAccountOverview, expectedUiAuthEpoch: Long): Boolean = synchronized(lock) {
+        val context = bound.context
+        readyLocked() && expectedUiAuthEpoch == uiAuthEpoch && context.owner == owner &&
+            context.repositoryEpoch == repositoryEpoch && context.readSequence > 0 &&
+            context.readSequence == acceptedReadSequence && context.resourceRevision >= 0 &&
+            context.resourceRevision == resourceRevision && resource === bound.resource &&
+            resourceIdentity != null && resourceIdentity == AccountUsageResourceIdentity.of(bound.resource)
+    }
+
     /** Explicit, non-reentrant read. No automatic retry, setup, import, order or connection action. */
     fun update() {
         val launchTask = synchronized(lock) {

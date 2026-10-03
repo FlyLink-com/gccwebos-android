@@ -398,7 +398,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                 val preparedOverview = acceptedOverview ?: return@run
                 val currentUsage = accountUsage.state.value
                 if (preparedOverview.resource !is Resource.Available || resource !== preparedOverview.resource ||
-                    currentUsage.resource !== preparedOverview.resource || !currentUsage.authenticated ||
+                    !accountUsage.isCurrentAcceptedObservation(preparedOverview, expectedAuth) || !currentUsage.authenticated ||
                     currentUsage.verifying || currentUsage.error != null) return@run
                 if (operation != expectedOperation || !authenticated || authSessionGeneration != expectedAuth ||
                     acceptedAccountId != expectedAccount || acceptedSessionBinding != expectedSession ||

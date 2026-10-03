@@ -139,6 +139,51 @@ class ConnectionSetupGuidanceTest {
         assertFalse(dispatchSync(account))
     }
 
+    @Test fun equalRepeatedOverviewCompletesPreparationWithoutRepeatingClaimOrAck() = runTest {
+        val fixture = Fixture(backgroundScope, failFirstDownload = true, holdRetry = true)
+        fixture.login(); runCurrent()
+        val account = fixture.account
+        val firstResource = requireNotNull(account.accountUsage.state.value.resource)
+        val receipt = requireNotNull(fixture.store.value)
+        assertTrue(account.authenticated); assertFalse(account.busy)
+        assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+        assertFalse(receipt.pendingAck)
+        assertEquals(1, fixture.wire.count(SETUP)); assertEquals(1, fixture.wire.count(ACK))
+        // Keep every overview field, including setupAvailable, identical. Changing it
+        // would make the StateFlow value unequal and conceal the accepted-reference bug.
+        var prepared = 0
+        var callbackOwnsBusy = false
+        var callbackOwnsRequest = false
+        var request: Long? = null
+        request = account.prepareForConnection {
+            prepared++
+            callbackOwnsBusy = account.busy
+            callbackOwnsRequest = request?.let(account::isConnectionPreparationPending) == true
+        }
+        val ownedRequest = requireNotNull(request)
+        runCurrent()
+        assertTrue(fixture.retryStarted.isCompleted); assertTrue(account.busy)
+        assertTrue(account.isConnectionPreparationPending(ownedRequest))
+        val acceptedResource = requireNotNull(account.resource)
+        assertNotSame(firstResource, acceptedResource)
+        assertEquals(firstResource, acceptedResource)
+        assertSame(firstResource, account.accountUsage.state.value.resource)
+        assertEquals(0, prepared)
+        fixture.retryRelease.complete(Unit); runCurrent()
+        assertFalse(account.busy); assertNull(account.error)
+        assertFalse(account.isConnectionPreparationPending(ownedRequest))
+        assertEquals(ImportStatus.IMPORTED, account.importStatus)
+        assertEquals(LocalSubscriptionStatus.READY, account.localSubscription.status)
+        assertTrue(account.localSubscription.hasProfile); assertTrue(account.localSubscription.hasCapability)
+        assertSame(receipt, fixture.store.value)
+        assertEquals(2, fixture.downloads)
+        assertEquals(1, fixture.wire.count(SETUP)); assertEquals(1, fixture.wire.count(ACK))
+        assertEquals(2, fixture.wire.count(OVERVIEW))
+        assertEquals(2, fixture.wire.count("/api/portal/commerce/model"))
+        assertEquals(1, prepared)
+        assertTrue(callbackOwnsBusy); assertTrue(callbackOwnsRequest)
+    }
+
     @Test fun setupUnavailableWithoutReceiptStaysWaitingAndNeverInventsAClaim() = runTest {
         val fixture = Fixture(backgroundScope, setupAvailable = false)
         fixture.login(); runCurrent()

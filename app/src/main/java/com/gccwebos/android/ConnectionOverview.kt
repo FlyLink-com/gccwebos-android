@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
+import com.gccwebos.android.portal.Resource
+import com.gccwebos.android.portal.ImportStatus
 import com.gccwebos.android.portal.LocalSubscriptionSnapshot
 import com.gccwebos.android.portal.LocalSubscriptionStatus
 import java.time.Instant
@@ -134,6 +136,73 @@ internal fun showsConnectionCommand(presentation: ConnectionOverviewPresentation
     control.phase in setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting) ||
         control.commandPending || presentation.action != ConnectionPowerAction.None
 
+/** Account preparation is a separate explicit action, never a VPN command or local readiness. */
+internal enum class ConnectionSetupAction { None, AccountChoice, Plans, SyncSubscription }
+internal data class ConnectionSetupGuidance(
+    val action: ConnectionSetupAction,
+    val label: String,
+    val enabled: Boolean,
+    val hint: String? = null,
+)
+
+internal fun connectionSetupGuidance(
+    authenticated: Boolean,
+    verifiedUsage: Boolean,
+    resource: Resource?,
+    snapshot: LocalSubscriptionSnapshot,
+    now: Instant,
+    operable: Boolean,
+    busy: Boolean = false,
+    refreshFailed: Boolean = false,
+): ConnectionSetupGuidance {
+    if (!authenticated) return ConnectionSetupGuidance(ConnectionSetupAction.AccountChoice, "开通飞连vpn", operable && !busy)
+    if (busy) return ConnectionSetupGuidance(ConnectionSetupAction.None, "准备中", false)
+    if (!verifiedUsage || refreshFailed) return ConnectionSetupGuidance(ConnectionSetupAction.None, "重试", false)
+    if (resource == Resource.None) return ConnectionSetupGuidance(ConnectionSetupAction.Plans, "开通飞连vpn", operable)
+    if (resource !is Resource.Available) return ConnectionSetupGuidance(ConnectionSetupAction.None, "重试", false)
+    if (resource.validUntil <= now) return ConnectionSetupGuidance(ConnectionSetupAction.Plans, "查看套餐", operable, "订阅已到期")
+    if (resource.usage.status in setOf("measured", "measured_zero") && resource.usage.remainingBytes == 0L)
+        return ConnectionSetupGuidance(ConnectionSetupAction.Plans, "查看套餐", operable, "本期流量已用尽")
+    if (snapshot.status == LocalSubscriptionStatus.MISSING)
+        return ConnectionSetupGuidance(ConnectionSetupAction.SyncSubscription, "一键连接", operable, "本机尚无配置")
+    return ConnectionSetupGuidance(ConnectionSetupAction.None, "一键连接", false)
+}
+
+/** One explicit intent. Re-evaluate the current authenticated/busy context before calling this. */
+internal fun dispatchConnectionSetup(
+    guidance: ConnectionSetupGuidance,
+    onAccountChoice: () -> Unit,
+    onPlans: () -> Unit,
+    onSync: () -> Unit,
+): Boolean {
+    if (!guidance.enabled) return false
+    when (guidance.action) {
+        ConnectionSetupAction.AccountChoice -> onAccountChoice()
+        ConnectionSetupAction.Plans -> onPlans()
+        ConnectionSetupAction.SyncSubscription -> onSync()
+        ConnectionSetupAction.None -> return false
+    }
+    return true
+}
+
+internal fun connectionSetupMessage(status: ImportStatus?, error: String?, busy: Boolean): String? = when {
+    busy -> "正在准备配置"
+    error != null -> error
+    status == ImportStatus.WAITING_DELIVERY -> "订阅交付暂不可领取，请稍后重试或联系支持"
+    status == ImportStatus.RECONCILIATION -> "套餐正在核对"
+    status == ImportStatus.UNSUPPORTED_CONFIGURATION -> "配置暂不支持"
+    status == ImportStatus.EXPIRED -> "订阅已到期"
+    status == ImportStatus.QUOTA_EXHAUSTED -> "本期流量已用尽"
+    else -> null
+}
+
+/** A completion cannot cross page disposal or the account generation which requested it. */
+internal class ConnectionSetupUiLease(private val authGeneration: Long) {
+    private var mounted = true
+    fun close() { mounted = false }
+    fun isCurrent(generation: Long): Boolean = mounted && authGeneration == generation
+}
+
 /** Welcome and account overview are independent of local configuration and engine admission. */
 @Composable
 internal fun ConnectionOverview(
@@ -149,6 +218,16 @@ internal fun ConnectionOverview(
     val snapshot = account.localSubscription
     val usage by account.accountUsage.state.collectAsState()
     val clock by rememberUpdatedState(nowSource)
+    val latestControl by rememberUpdatedState(control)
+    val latestPowerAction by rememberUpdatedState(onPowerAction)
+    val latestOpenNodes by rememberUpdatedState(openNodes)
+    val preparationLease = remember(account, account.authSessionGeneration) { ConnectionSetupUiLease(account.authSessionGeneration) }
+    var preparationRequest by remember(account, account.authSessionGeneration) { mutableStateOf<Long?>(null) }
+    DisposableEffect(preparationLease) { onDispose {
+        preparationLease.close()
+        preparationRequest?.let(account::cancelConnectionPreparation)
+    } }
+    var preparationHint by remember(account, account.authSessionGeneration) { mutableStateOf<String?>(null) }
     val now by produceState(clock(), snapshot.validUntil) {
         value = clock()
         while (snapshot.validUntil != null) { delay(1_000); value = clock() }
@@ -172,9 +251,11 @@ internal fun ConnectionOverview(
             nodeSnapshot.status == LocalSubscriptionStatus.READY && nodeSnapshot.validUntil?.let { until -> until > now } != false
     }
     val local = connectionOverviewPresentation(snapshot, now, control)
-    val operable = !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing
+    val operable = !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing && !usage.busy
     val verifiedUsage = account.authenticated && usage.authenticated && !usage.verifying
     val display = accountUsagePresentation(if (verifiedUsage) usage.resource else null, usageNow, usage.notUpdated)
+    val setup = connectionSetupGuidance(account.authenticated, verifiedUsage, usage.resource, snapshot, usageNow,
+        operable, account.busy, refreshFailed = usage.error != null)
     var showGuestChoice by remember(account.authSessionGeneration) { mutableStateOf(false) }
     var acceptedCommand by remember(control, account) { mutableStateOf(false) }
     // Keep service control authoritative without interpreting an idle preparation capability as local readiness.
@@ -192,20 +273,69 @@ internal fun ConnectionOverview(
                     modifier = Modifier.testTag("connection-failure"))
             AccountUsageCard(display, authenticated = account.authenticated,
                 onRefresh = account::refreshAccountUsage, onLogin = openAccount, onRegister = openRegistration,
-                loading = usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
-                error = usage.error, refreshEnabled = verifiedUsage,
-                primaryLabel = when {
-                    !account.authenticated -> "开通飞连vpn"
-                    display.state == AccountUsageState.NoActivePlan -> "开通飞连vpn"
-                    display.state == AccountUsageState.Available -> "一键连接"
-                    else -> "重试"
-                },
-                primaryEnabled = operable && (!account.authenticated || verifiedUsage && display.state == AccountUsageState.NoActivePlan),
-                primaryHint = if (control.phase != ConnectionPhase.Unavailable && account.authenticated &&
+                loading = account.busy || usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
+                error = usage.error, refreshEnabled = verifiedUsage && operable,
+                primaryLabel = setup.label,
+                primaryEnabled = setup.enabled,
+                primaryHint = setup.hint ?: if (control.phase != ConnectionPhase.Unavailable && account.authenticated &&
                     display.state == AccountUsageState.Available) local.title.ifBlank { local.powerLabel } else null,
-                onPrimaryAction = { if (!account.authenticated) showGuestChoice = true else if (verifiedUsage &&
-                    display.state == AccountUsageState.NoActivePlan && usage.error == null) openPlans() },
+                onPrimaryAction = {
+                    val currentUsage = account.accountUsage.state.value
+                    val currentVerified = account.authenticated && currentUsage.authenticated && !currentUsage.verifying
+                    val currentOperable = !account.busy && !account.restoring && !account.foregroundCheckPending &&
+                        !account.clearing && !currentUsage.busy
+                    val currentTime = clock()
+                    val currentLocal = connectionOverviewPresentation(account.localSubscription, currentTime, latestControl)
+                    if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl))
+                        dispatchConnectionSetup(connectionSetupGuidance(account.authenticated, currentVerified,
+                            currentUsage.resource, account.localSubscription, currentTime, currentOperable, account.busy,
+                            refreshFailed = currentUsage.error != null),
+                            { showGuestChoice = true }, openPlans, {
+                                preparationHint = null
+                                preparationRequest = account.prepareForConnection {
+                                    preparationRequest = null
+                                    // This is the same explicit request's completion; account.busy is still owned by it.
+                                    if (preparationLease.isCurrent(account.authSessionGeneration) && !account.restoring &&
+                                        !account.foregroundCheckPending && !account.clearing && !acceptedCommand) {
+                                        val completedUsage = account.accountUsage.state.value
+                                        val completedResource = completedUsage.resource as? Resource.Available
+                                        val completedTime = clock()
+                                        val entitlementCurrent = account.authenticated && completedUsage.authenticated &&
+                                            !completedUsage.verifying && completedUsage.error == null && completedResource != null &&
+                                            completedResource.validUntil > completedTime &&
+                                            !(completedResource.usage.status in setOf("measured", "measured_zero") &&
+                                                completedResource.usage.remainingBytes == 0L)
+                                        val completedLocal = connectionOverviewPresentation(account.localSubscription, completedTime, latestControl)
+                                        if (entitlementCurrent && completedLocal.action == ConnectionPowerAction.Connect &&
+                                            latestPowerAction != null) {
+                                            account.nodeSelection.sync()
+                                            val choices = account.nodeSelection.snapshot
+                                            val selectedCurrent = choices.choices.any { it.selection === choices.selected }
+                                            when {
+                                                account.nodeSelection.busy || choices.status != LocalSubscriptionStatus.READY ||
+                                                    choices.choices.isEmpty() -> preparationHint = "请重试读取配置"
+                                                !selectedCurrent && choices.choices.size > 1 -> latestOpenNodes()
+                                                else -> { acceptedCommand = true; latestPowerAction?.invoke(ConnectionPowerAction.Connect) }
+                                            }
+                                        } else preparationHint = completedLocal.title.ifBlank { "连接暂不可用" }
+                                    }
+                                }
+                            })
+                },
                 showPrimary = !controlMode, primaryTestTag = "vpn-connect", embedded = true)
+            if (account.authenticated && verifiedUsage && snapshot.status == LocalSubscriptionStatus.MISSING)
+                connectionSetupMessage(account.importStatus, account.error, account.busy)?.let { message ->
+                    Text(message, color = if (account.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-setup-status"))
+                }
+            preparationHint?.let { message ->
+                Text(message, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("connection-preparation-next"))
+            }
+            if (preparationRequest?.let(account::isConnectionPreparationPending) == true) TextButton({
+                preparationRequest?.let(account::cancelConnectionPreparation)
+                preparationRequest = null
+            }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("connection-prepare-cancel")) { Text("取消准备") }
             if (usage.busy) TextButton(account::cancelAccountUsageUpdate,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-usage-cancel")) { Text("取消更新") }
             if (controlMode) BrandButton(

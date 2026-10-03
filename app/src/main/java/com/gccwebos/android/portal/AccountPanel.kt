@@ -127,6 +127,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     private var task: Job? = null
     private var expiryTask: Job? = null
     private var operation = 0L
+    private var connectionPreparationOperation: Long? = null
     private var loginFormGeneration = 0L
     private var loginFormLease: Long? = null
     private var automaticQuestionLease: Long? = null
@@ -371,6 +372,51 @@ internal class AccountController(private val repository: PortalRepository, priva
             localSubscription = repository.localSubscriptions.refresh(); nodes = localSubscription.nodes
         }
     }
+    /** One explicit connection intent may prepare existing entitlement before the UI dispatches.
+     * This callback belongs only to this operation/auth generation; it does not start a VPN.
+     * busy remains true during callback, so callers must validate the request rather than waive
+     * the general busy guard for another action.
+     */
+    fun prepareForConnection(onPrepared: () -> Unit): Long? {
+        if (!authenticated || busy || restoring || foregroundCheckPending || clearing) return null
+        val expectedAuth = authSessionGeneration
+        val expectedAccount = acceptedAccountId
+        val expectedSession = acceptedSessionBinding
+        val expectedOperation = operation + 1
+        connectionPreparationOperation = expectedOperation
+        run {
+            try {
+                var acceptedOverview: BoundAccountOverview? = null
+                loadResource { acceptedOverview = it }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val preparedOverview = acceptedOverview ?: return@run
+                val currentUsage = accountUsage.state.value
+                if (preparedOverview.resource !is Resource.Available || resource !== preparedOverview.resource ||
+                    currentUsage.resource !== preparedOverview.resource || !currentUsage.authenticated ||
+                    currentUsage.verifying || currentUsage.error != null) return@run
+                if (operation != expectedOperation || !authenticated || authSessionGeneration != expectedAuth ||
+                    acceptedAccountId != expectedAccount || acceptedSessionBinding != expectedSession ||
+                    restoring || foregroundCheckPending || clearing) return@run
+                val current = localSubscription
+                if (current.status == LocalSubscriptionStatus.READY && current.hasProfile && current.hasCapability &&
+                    current.validUntil != null) onPrepared()
+            } finally {
+                if (connectionPreparationOperation == expectedOperation) connectionPreparationOperation = null
+            }
+        }
+        return expectedOperation.takeIf { connectionPreparationOperation == it }
+    }
+    fun isConnectionPreparationPending(request: Long): Boolean =
+        connectionPreparationOperation == request && operation == request && busy
+    /** Cancel only this preparation request, keeping the session and durable delivery intact. */
+    fun cancelConnectionPreparation(request: Long) {
+        if (connectionPreparationOperation != request || operation != request) return
+        connectionPreparationOperation = null
+        operation++
+        task?.cancel(); task = null
+        busy = false; error = "准备已取消"
+        if (foregroundCheckPending && authenticated) revalidateAccount()
+    }
     fun restoreLocal() = run { localSubscription = repository.localSubscriptions.restore(); nodes = localSubscription.nodes }
 
     suspend fun commerce(path: String, body: String? = null, key: String? = null, expectedSession: String? = null) = repository.commerce(path, body, key, expectedSession)
@@ -379,7 +425,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
     fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
-    private suspend fun loadResource() {
+    private suspend fun loadResource(onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
         val expectedUsage = usageAuthentication
         val expectedAuthEpoch = authSessionGeneration
         fun publish(overview: BoundAccountOverview) {
@@ -389,7 +435,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                 throw CancellationException("Resource observation owner changed")
             // Auth matching alone is insufficient: the original read must also win the
             // resource/cycle publication fence before the legacy resource field changes.
-            acceptAccountOverviewObservation(overview, expectedUsage, expectedAuthEpoch)
+            if (acceptAccountOverviewObservation(overview, expectedUsage, expectedAuthEpoch)) onAcceptedOverview(overview)
         }
         importStatus = null; deliveryReceived = false; resource = null
         try {

@@ -365,10 +365,39 @@ class LegacySubscriptionRecoveryTest {
     @Test fun localUnlinkDuringDownloadCannotResurrectClearedProfileReceiptOrJournal() = runTest {
         val h = Harness(); h.old(); h.login()
         h.downloadHook = { h.repo.localSubscriptions.unlink() }
-        failure(PortalFailure.Reason.RECOVERY_REQUIRED) { h.repo.refreshAndImport() }
+        cancelled { h.repo.refreshAndImport() }
         assertNull(h.store.value); assertNull(h.store.journal); assertNull(h.profiles.memory.read())
         assertFalse(h.events.contains("profile-save")); assertFalse(h.events.contains("main-save"))
         assertNull(h.repo.copyImportedConfig()); assertTrue(h.lastBytes!!.all { it == 0.toByte() })
+    }
+
+    @Test fun unlinkWhileOverviewWaitsCancelsLateResponseBeforeModelOrRecoveryWrites() = runTest {
+        val h = Harness(); h.old(); h.login()
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.wire.hook = { if (it.endsWith("/overview")) { started.complete(Unit); release.await() } }
+        val importing = async { h.repo.refreshAndImport() }; started.await()
+        h.repo.localSubscriptions.unlink(); release.complete(Unit)
+        cancelled { importing.await() }
+        assertNull(h.store.value); assertNull(h.store.journal); assertNull(h.profiles.memory.read())
+        assertEquals(0, h.setupCalls().size); assertEquals(0, h.ackCalls().size); assertEquals(0, h.downloads)
+        assertFalse(h.events.contains("model-read")); assertFalse(h.events.any { it.startsWith("journal-") })
+        assertFalse(h.events.contains("profile-save")); assertFalse(h.events.contains("main-save"))
+        assertNull(h.repo.copyImportedConfig())
+    }
+
+    @Test fun unlinkWhileModelWaitsCancelsLateResponseBeforeAnyRecoverySideEffect() = runTest {
+        val h = Harness(); h.old(); h.login()
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        h.wire.hook = { if (it.endsWith("/model")) { started.complete(Unit); release.await() } }
+        val importing = async { h.repo.refreshAndImport() }; started.await()
+        h.repo.localSubscriptions.unlink(); release.complete(Unit)
+        cancelled { importing.await() }
+        assertNull(h.store.value); assertNull(h.store.journal); assertNull(h.profiles.memory.read())
+        assertEquals(0, h.setupCalls().size); assertEquals(0, h.ackCalls().size); assertEquals(0, h.downloads)
+        assertEquals(1, h.wire.calls.count { it.path.endsWith("/model") })
+        assertFalse(h.events.any { it.startsWith("journal-") })
+        assertFalse(h.events.contains("profile-save")); assertFalse(h.events.contains("main-save"))
+        assertNull(h.repo.copyImportedConfig())
     }
 
     @Test fun newSessionDoesNotAckStageFromPreviousSessionAndRevealsCurrentHandoff() = runTest {

@@ -266,6 +266,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
     ): ImportSnapshot = mutex.withLock {
         guarded {
             val epoch = generation.get()
+            val clearVersion = localSubscriptions.captureClearVersion()
             val overview = refreshOverviewLocked(epoch)
             val resource = overview.resource
             onResource(resource)
@@ -284,7 +285,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
             val selected = if (selection != null) selection(resource)
                 ?: return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION)
                 else ResolvedConnectionLine(resource.reference + ":offline-preview-index-0", 0)
-            val recovery = if (onPrepared == null) acquireForImportLocked(resource, overview, epoch) else null
+            val recovery = if (onPrepared == null) acquireForImportLocked(resource, overview, epoch, clearVersion) else null
             val record = (if (onPrepared != null) acquireFreshLocked(resource, epoch) else recovery?.record)
                 ?: return@guarded ImportSnapshot(resource, ImportStatus.WAITING_DELIVERY)
             checkGeneration(epoch); activeSession()
@@ -301,16 +302,16 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 val projected = try { SafeProxyConfig.project(raw, selected.index) }
                     catch (_: UnsafeProxyConfiguration) { return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, nodes) }
                 try {
-                    checkGeneration(epoch); activeSession(); currentCoroutineContext().ensureActive()
+                    val context = currentCoroutineContext()
+                    checkGeneration(epoch); activeSession(); context.ensureActive()
                     synchronized(activationLock) {
                         checkGeneration(epoch)
                         if (onPrepared != null) onPrepared(resource, selected, projected, epoch, configurationGeneration)
                         else {
-                            checkImportObservation(overview, epoch)
+                            checkImportObservation(overview, epoch, clearVersion)
                             if (recovery?.journal != null) {
-                                val context = currentCoroutineContext()
                                 localSubscriptions.rememberRecoveredLegacy(raw, recovery.journal, resource.validUntil) {
-                                    context.ensureActive(); checkImportObservation(overview, epoch)
+                                    context.ensureActive(); checkImportObservation(overview, epoch, clearVersion)
                                 }
                             } else localSubscriptions.remember(raw, requireNotNull(record.url), resource.validUntil)
                             imported = AuthorizedConfig(selected.lineId, projected)
@@ -379,8 +380,9 @@ class PortalRepository(private val transport: PortalTransport, private val store
     }
     private class ImportDelivery(val record: DeliveryRecord, val journal: LegacyRecoveryJournal? = null)
 
-    private fun checkImportObservation(overview: BoundAccountOverview, epoch: Long) = synchronized(activationLock) {
+    private fun checkImportObservation(overview: BoundAccountOverview, epoch: Long, clearVersion: Long) = synchronized(activationLock) {
         checkGeneration(epoch)
+        localSubscriptions.withClearVersion(clearVersion) { Unit }
         val current = activeSession()
         if (overview.context.owner != AccountUsageOwner.fromSession(current) ||
             overview.context.repositoryEpoch != epoch || overview.context.resourceRevision != overviewRevision ||
@@ -392,24 +394,24 @@ class PortalRepository(private val transport: PortalTransport, private val store
 
     /** A verified legacy reveal is repeatable; wallet-first receipts remain one-time and session-bound. */
     private suspend fun acquireForImportLocked(resource: Resource.Available, overview: BoundAccountOverview,
-        epoch: Long): ImportDelivery? {
-        checkImportObservation(overview, epoch)
+        epoch: Long, clearVersion: Long): ImportDelivery? {
+        checkImportObservation(overview, epoch, clearVersion)
         val active = activeSession()
         val response = transport.commerce("/api/portal/commerce/model", null, active.token, null)
         expectCurrent(response, setOf(200), epoch)
-        currentCoroutineContext().ensureActive(); checkImportObservation(overview, epoch)
+        currentCoroutineContext().ensureActive(); checkImportObservation(overview, epoch, clearVersion)
         return when (CommerceJson.model(response.body)) {
             CommerceModel.WALLET_FIRST -> {
                 if (store.readLegacyRecovery() != null)
                     throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED, PortalFailure.RecoveryCause.MODEL_CHANGED)
                 acquireLocked(resource, epoch)?.let { ImportDelivery(it) }
             }
-            CommerceModel.LEGACY -> acquireLegacyImportLocked(resource, overview, epoch, active)
+            CommerceModel.LEGACY -> acquireLegacyImportLocked(resource, overview, epoch, active, clearVersion)
         }
     }
 
     private suspend fun acquireLegacyImportLocked(resource: Resource.Available, overview: BoundAccountOverview,
-        epoch: Long, active: Session): ImportDelivery? {
+        epoch: Long, active: Session, clearVersion: Long): ImportDelivery? {
         var journal = store.readLegacyRecovery()
         val binding = sessionBinding(active.token)
         val main = store.read()
@@ -425,12 +427,14 @@ class PortalRepository(private val transport: PortalTransport, private val store
             journal = LegacyRecoveryJournal(main, DeliveryRecord(active.accountId, binding, resource.reference,
                 UUID.randomUUID().toString()), LegacyRecoveryPhase.ATTEMPT)
             synchronized(activationLock) {
-                checkImportObservation(overview, epoch); store.saveLegacyRecovery(journal)
+                localSubscriptions.withClearVersion(clearVersion) {
+                    checkImportObservation(overview, epoch, clearVersion); store.saveLegacyRecovery(journal)
+                }
             }
         }
         var staged = requireNotNull(journal)
         fun checkStage() {
-            checkImportObservation(overview, epoch)
+            checkImportObservation(overview, epoch, clearVersion)
             val current = store.readLegacyRecovery()
             if (current == null || !sameDeliveryRecord(current.original, staged.original) ||
                 !sameDeliveryRecord(current.candidate, staged.candidate) || current.phase != staged.phase)
@@ -443,9 +447,11 @@ class PortalRepository(private val transport: PortalTransport, private val store
             currentCoroutineContext().ensureActive()
             val received = PortalJson.delivery(reveal.body, staged.candidate, policy)
             synchronized(activationLock) {
-                checkStage()
-                staged = LegacyRecoveryJournal(staged.original, received, LegacyRecoveryPhase.REVEALED)
-                store.saveLegacyRecovery(staged)
+                localSubscriptions.withClearVersion(clearVersion) {
+                    checkStage()
+                    staged = LegacyRecoveryJournal(staged.original, received, LegacyRecoveryPhase.REVEALED)
+                    store.saveLegacyRecovery(staged)
+                }
             }
         }
         if (staged.candidate.pendingAck) {
@@ -455,12 +461,14 @@ class PortalRepository(private val transport: PortalTransport, private val store
             expectCurrent(ack, setOf(204), epoch)
             currentCoroutineContext().ensureActive()
             synchronized(activationLock) {
-                checkStage()
-                val candidate = staged.candidate
-                staged = LegacyRecoveryJournal(staged.original, DeliveryRecord(candidate.accountId,
-                    candidate.sessionBinding, candidate.resource, candidate.operationKey, candidate.url, candidate.handoff,
-                    false), LegacyRecoveryPhase.ACKNOWLEDGED)
-                store.saveLegacyRecovery(staged)
+                localSubscriptions.withClearVersion(clearVersion) {
+                    checkStage()
+                    val candidate = staged.candidate
+                    staged = LegacyRecoveryJournal(staged.original, DeliveryRecord(candidate.accountId,
+                        candidate.sessionBinding, candidate.resource, candidate.operationKey, candidate.url, candidate.handoff,
+                        false), LegacyRecoveryPhase.ACKNOWLEDGED)
+                    store.saveLegacyRecovery(staged)
+                }
             }
         }
         synchronized(activationLock) { checkStage() }

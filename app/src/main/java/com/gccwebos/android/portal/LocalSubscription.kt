@@ -116,6 +116,11 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         get() = authority.epoch
         set(value) { authority.epoch = value }
     fun invalidatePending() = synchronized(lock) { revision++; Unit }
+    internal fun captureClearVersion(): Long = synchronized(lock) { authority.clearVersion }
+    internal fun <T> withClearVersion(version: Long, action: () -> T): T = synchronized(lock) {
+        if (authority.clearVersion != version) throw CancellationException("Local subscription cleared")
+        action()
+    }
     fun observeClear(observer: () -> Unit): Closeable = authority.observeClear(observer)
     internal suspend fun <T> awaitConnectionOwner(factory: () -> T): T = authority.awaitConnectionOwner(factory)
     private var stateClearVersion = authority.clearVersion

@@ -46,6 +46,7 @@ class NodeSelectionUiTest {
     private var pending: CompletableDeferred<Unit>? = null
     private var resource by mutableStateOf<Resource?>(null)
     private var hasCapability by mutableStateOf(true)
+    private var connectionControl by mutableStateOf(ConnectionControlState())
     private fun launch(initialRead: Boolean = true, width: Int = 360, fontScale: Float = 1f) {
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -73,7 +74,8 @@ class NodeSelectionUiTest {
                 GccTheme(materialMode = GlassMode.Solid) {
                     Column(Modifier.width(width.dp).fillMaxHeight().testTag("nodes-fixture-host")
                         .verticalScroll(rememberScrollState())) {
-                        NodeSelectionPanel(owner, manager.snapshot().nodes, resource, hasCapability, false) {}
+                        NodeSelectionPanel(owner, manager.snapshot().nodes, resource, hasCapability, false,
+                            connectionControl = connectionControl) {}
                     }
                 }
             }
@@ -90,7 +92,7 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-unavailable").assertTextEquals("连接暂未开放")
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
     }
 
     @Test fun busyRefreshDisablesSelectionAndCancelIsReachableWithoutAuthenticationActions() {
@@ -165,6 +167,20 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-unavailable").assertTextEquals("连接暂未开放")
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
+    }
+
+    @Test fun nodeCaptionTracksActualOwnerWithoutStartingAConnectionOrReloading() {
+        connectionControl = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)
+        launch()
+        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Connecting, canCancel = true) }
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接中")
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true) }
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("已连接")
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Failed, canConnect = true) }
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("未连接")
+        compose.runOnIdle { assertEquals(1, reads.get()); assertNull(state.snapshot.selected) }
     }
 }

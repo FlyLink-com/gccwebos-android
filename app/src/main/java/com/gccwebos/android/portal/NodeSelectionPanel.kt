@@ -10,15 +10,28 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.gccwebos.android.ConnectionControlState
+import com.gccwebos.android.ConnectionPhase
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.BrandButton
 import com.gccwebos.android.design.GlassSurface
 import com.gccwebos.android.vpn.SafeProxyConfig
 import kotlinx.coroutines.delay
 
+/** Display only: node selection cannot infer or start a connection. */
+internal fun nodeConnectionStatus(control: ConnectionControlState): String? = when (control.phase) {
+    ConnectionPhase.Disconnected -> null
+    ConnectionPhase.Unavailable -> "连接暂不可用"
+    ConnectionPhase.Connecting -> "连接中"
+    ConnectionPhase.Connected -> "已连接"
+    ConnectionPhase.Disconnecting -> "断开中"
+    ConnectionPhase.Failed -> "未连接"
+}
+
 @Composable
 internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<SafeProxyConfig.NodeSummary>,
     resource: Resource?, hasCapability: Boolean, accountBusy: Boolean, authenticated: Boolean = false,
+    connectionControl: ConnectionControlState = ConnectionControlState(),
     openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.sync() }
     LaunchedEffect(state.snapshot.validUntil) {
@@ -85,5 +98,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
             }
         }
     }
-    Text("连接暂未开放", color = Brand.Muted, modifier = Modifier.testTag("nodes-unavailable"))
+    nodeConnectionStatus(connectionControl)?.let { status ->
+        Text(status, color = Brand.Muted, modifier = Modifier.testTag("nodes-connection-status"))
+    }
 }

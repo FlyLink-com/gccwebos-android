@@ -18,6 +18,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.withLock
 
 class CachedSubscription(val binding: String, bytes: ByteArray, val validUntil: Instant?, val url: Secret? = null,
@@ -69,10 +70,36 @@ class LocalSubscriptionAuthority {
     internal var selectionUntil: Instant? = null
     internal var selectionRequiresRefresh = false
     internal var clearObserver: (() -> Unit)? = null
+    private var ownerReleased = CompletableDeferred<Unit>().apply { complete(Unit) }
     internal fun observeClear(observer: () -> Unit): Closeable = synchronized(lock) {
         check(clearObserver == null) { "A local connection owner already exists" }
         clearObserver = observer
-        Closeable { synchronized(lock) { if (clearObserver === observer) clearObserver = null } }
+        val release = CompletableDeferred<Unit>()
+        ownerReleased = release
+        Closeable {
+            val released = synchronized(lock) {
+                if (clearObserver === observer && ownerReleased === release) {
+                    clearObserver = null
+                    release
+                } else null
+            }
+            released?.complete(Unit) // A waiter never owns/cancels this identity-scoped signal.
+        }
+    }
+    /** Check and factory registration share the authority lock; competing waiters cannot adopt
+     * the same vacancy. The factory must only construct/register, never take UI locks or do IO.
+     * Only the matching lease's real cleanup completion wakes waiters. */
+    internal suspend fun <T> awaitConnectionOwner(factory: () -> T): T {
+        while (true) {
+            val context = currentCoroutineContext()
+            context.ensureActive()
+            val released = synchronized(lock) {
+                context.ensureActive()
+                if (clearObserver == null) return factory()
+                ownerReleased
+            }
+            released.await()
+        }
     }
     companion object { internal val process = LocalSubscriptionAuthority() }
 }
@@ -90,6 +117,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         set(value) { authority.epoch = value }
     fun invalidatePending() = synchronized(lock) { revision++; Unit }
     fun observeClear(observer: () -> Unit): Closeable = authority.observeClear(observer)
+    internal suspend fun <T> awaitConnectionOwner(factory: () -> T): T = authority.awaitConnectionOwner(factory)
     private var stateClearVersion = authority.clearVersion
     private var observed = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
     private var state: LocalSubscriptionSnapshot

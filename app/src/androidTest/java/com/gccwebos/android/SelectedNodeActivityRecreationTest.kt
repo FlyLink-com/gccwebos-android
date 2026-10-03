@@ -1,6 +1,9 @@
 package com.gccwebos.android
 
 import android.graphics.Bitmap
+import android.os.Build
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
@@ -144,9 +147,7 @@ class SelectedNodeActivityRecreationTest {
     private fun assertSelectedConnection() {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("同名节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
-        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
-        // The service owner can prepare this valid capability; the fixture never clicks Connect.
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
+        assertIdleConnectionControl()
         compose.onNodeWithTag("connection-power").assertDoesNotExist()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
@@ -172,6 +173,26 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nav-Lines").assertIsSelected()
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
+    }
+
+    private fun assertIdleConnectionControl() {
+        // The actual package flag defines availability, never the fixture's valid cache.
+        val connectable = BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30
+        val label = if (connectable) "一键连接" else "开通飞连vpn"
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("vpn-connect").fetchSemanticsNodes().singleOrNull()?.let { node ->
+                SemanticsProperties.Disabled !in node.config &&
+                    node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == label } == true
+            } == true
+        }
+        if (connectable) {
+            compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        } else {
+            compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
+            // The glass signed-out CTA opens the account choice, not a VPN command.
+        }
+        compose.onNodeWithTag("vpn-connect").assertTextEquals(label).assertIsEnabled()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
 
     private fun screenshot(name: String) {
@@ -237,8 +258,7 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
+        assertIdleConnectionControl()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.onNodeWithTag("connection-power").assertDoesNotExist()
         screenshot("changed-cache-after-real-activity-recreation-unselected")

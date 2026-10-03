@@ -378,6 +378,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
     suspend fun acquire(resource: Resource.Available): Unit = mutex.withLock {
         guarded { acquireLocked(resource); Unit }
     }
+    /** A partial profile write must not make the account UI bypass authenticated recovery. */
+    internal fun hasPendingLegacyRecovery(): Boolean = synchronized(activationLock) {
+        store.readLegacyRecovery() != null
+    }
     private class ImportDelivery(val record: DeliveryRecord, val journal: LegacyRecoveryJournal? = null)
 
     private fun checkImportObservation(overview: BoundAccountOverview, epoch: Long, clearVersion: Long) = synchronized(activationLock) {

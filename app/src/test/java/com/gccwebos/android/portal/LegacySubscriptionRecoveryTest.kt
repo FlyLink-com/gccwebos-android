@@ -165,6 +165,12 @@ class LegacySubscriptionRecoveryTest {
             repo.login(owner, "synthetic-password", HumanChallenge("challenge_fixture", "1 + 2"), "3")
             expectedOriginal = store.value
         }
+        fun loginController(controller: AccountController) {
+            wire.loginReplies += WireResponse(200, """{"session":{"sessionRef":"new_fixture_session","accountId":"$account","issuedAt":"2026-09-30T00:00:00.000Z","expiresAt":"2026-09-30T00:30:00.000Z"}}""")
+            controller.account = account; controller.password = "synthetic-password"
+            controller.challenge = HumanChallenge("challenge_fixture", "1 + 2"); controller.answer = "3"
+            controller.login()
+        }
         fun old(pending: Boolean = true, ref: String = resource, token: String = "old_fixture_session"): DeliveryRecord {
             val result = DeliveryRecord(account, sessionBinding(Secret(token)), ref, "old_fixture_operation",
                 Secret("https://sub.invalid/sub/a/old_fixture"), Secret("old_fixture_handoff"), pending)
@@ -504,5 +510,46 @@ class LegacySubscriptionRecoveryTest {
         assertNull(h.store.value); assertNull(h.store.journal); assertNull(h.repo.copyImportedConfig())
         assertFalse(h.events.contains("profile-save")); assertFalse(h.events.contains("main-save"))
         assertTrue(h.lastBytes!!.all { it == 0.toByte() })
+    }
+
+    @Test fun controllerExplicitSubscriptionRefreshRecoversCommittingJournalEvenWithSavedProfile() = runTest {
+        val h = Harness(); val old = h.old(); h.store.failMainSave = true
+        val controller = AccountController(h.repo, backgroundScope)
+        h.loginController(controller); runCurrent()
+        assertTrue(controller.authenticated); assertFalse(controller.busy); assertNotNull(controller.error)
+        assertTrue(controller.localSubscription.hasProfile)
+        assertEquals(LocalSubscriptionStatus.STORAGE_ERROR, controller.localSubscription.status)
+        assertEquals(LegacyRecoveryPhase.PROFILE_COMMITTING, h.store.journal!!.phase)
+        assertSame(old, h.store.value)
+        h.profiles.memory.read()!!.close()
+        assertEquals(1, h.downloads)
+        h.store.failMainSave = false
+        controller.refreshSubscription(); runCurrent()
+        assertFalse(controller.busy); assertNull(controller.error)
+        assertEquals(LocalSubscriptionStatus.READY, controller.localSubscription.status)
+        assertEquals(ImportStatus.IMPORTED, controller.importStatus); h.assertImported()
+        assertEquals(2, h.wire.calls.count { it.path.endsWith("/model") })
+        assertEquals(2, h.wire.calls.count { it.path.endsWith("/overview") })
+        assertEquals(2, h.downloads); assertEquals(1, h.setupCalls().size); assertEquals(1, h.ackCalls().size)
+    }
+
+    @Test fun controllerSavedProfileCannotBypassUnknownOrChangedModelDuringPendingRecovery() = runTest {
+        for (model in listOf("unverified_future_model", "wallet_first_unique_v1")) {
+            val h = Harness(); val old = h.old(); h.store.failMainSave = true
+            val controller = AccountController(h.repo, backgroundScope)
+            h.loginController(controller); runCurrent()
+            assertTrue(controller.localSubscription.hasProfile)
+            assertEquals(LocalSubscriptionStatus.STORAGE_ERROR, controller.localSubscription.status)
+            val journal = h.store.journal
+            h.store.failMainSave = false
+            h.wire.model = WireResponse(200, """{"commerceModel":"$model"}""")
+            controller.refreshSubscription(); runCurrent()
+            assertTrue(controller.authenticated); assertFalse(controller.busy); assertNotNull(controller.error)
+            assertNotEquals(LocalSubscriptionStatus.READY, controller.localSubscription.status)
+            assertNull(controller.importStatus); assertNull(h.repo.copyImportedConfig())
+            assertSame(old, h.store.value); assertSame(journal, h.store.journal)
+            assertEquals(2, h.wire.calls.count { it.path.endsWith("/model") })
+            assertEquals(1, h.downloads); assertEquals(1, h.setupCalls().size); assertEquals(1, h.ackCalls().size)
+        }
     }
 }

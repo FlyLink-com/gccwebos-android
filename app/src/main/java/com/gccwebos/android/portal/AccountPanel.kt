@@ -210,7 +210,13 @@ internal class AccountController(private val repository: PortalRepository, priva
         }
     }
     fun readSecurity() = run { security = null; security = repository.security() }
-    fun refreshSubscription() = nodeSelection.refresh()
+    fun refreshSubscription() {
+        if (busy || restoring || foregroundCheckPending || clearing) return
+        val recoveryPending = try { authenticated && repository.hasPendingLegacyRecovery() }
+        catch (failure: PortalFailure) { run { throw failure }; return }
+        if (recoveryPending) run { loadResource() }
+        else nodeSelection.refresh()
+    }
     /** Attaching the form must not race AppShell's initial saved-session restoration. */
     fun enterLoginForm(): Long {
         cancelLoginQuestionWork()
@@ -439,7 +445,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         }
         importStatus = null; deliveryReceived = false; resource = null
         try {
-            if (localSubscription.hasProfile) {
+            if (localSubscription.hasProfile && !repository.hasPendingLegacyRecovery()) {
                 // Wallet login never silently replaces a separately saved local VPN capability.
                 publish(repository.refreshWithObservation())
             } else {

@@ -104,6 +104,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     var resource by mutableStateOf<Resource?>(null)
     var deliveryReceived by mutableStateOf(false)
     var importStatus by mutableStateOf<ImportStatus?>(null)
+    var importRejection by mutableStateOf<com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason?>(null)
     var nodes by mutableStateOf<List<com.gccwebos.android.vpn.SafeProxyConfig.NodeSummary>>(emptyList())
     var restoring by mutableStateOf(false)
     var restorationPending by mutableStateOf(false)
@@ -170,7 +171,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         if (busy) return
         clearAccountUsage()
         expiryTask?.cancel()
-        authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null
+        authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null; importRejection = null
         restoring = true; restorationPending = true
         run {
             try {
@@ -365,7 +366,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                 account = displayEmail.orEmpty()
                 referralGenerationGuard = ReferralGenerationGuard()
                 commerceSessionIdentity = null
-                authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
+                authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
                 emailHint = null; secondFactorEmail = null
                 restoring = false; restorationPending = false; foregroundCheckPending = false
                 error = "登录已到期，请重新登录"
@@ -429,7 +430,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
-    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource(onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
         val expectedUsage = usageAuthentication
@@ -443,7 +444,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             // resource/cycle publication fence before the legacy resource field changes.
             if (acceptAccountOverviewObservation(overview, expectedUsage, expectedAuthEpoch)) onAcceptedOverview(overview)
         }
-        importStatus = null; deliveryReceived = false; resource = null
+        importStatus = null; importRejection = null; deliveryReceived = false; resource = null
         try {
             if (localSubscription.hasProfile && !repository.hasPendingLegacyRecovery()) {
                 // Wallet login never silently replaces a separately saved local VPN capability.
@@ -455,6 +456,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                 // onOverview already published the ordered resource. Do not overwrite it
                 // again after setup/download with a possibly superseded snapshot.
                 importStatus = snapshot.status
+                importRejection = snapshot.rejection
                 nodes = snapshot.nodes
             }
         } finally {
@@ -480,7 +482,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
         referralGenerationGuard = ReferralGenerationGuard()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
-        authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
+        authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -512,7 +514,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                     emailHint = null; secondFactorEmail = null
                 }
                 error = when(failure.reason) {
-                    PortalFailure.Reason.SESSION_EXPIRED -> { clearAccountUsage(); commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
+                    PortalFailure.Reason.SESSION_EXPIRED -> { clearAccountUsage(); commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; "登录已到期，请重新登录" }
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请刷新题目后重试" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
                     PortalFailure.Reason.RECOVERY_REQUIRED -> when (failure.recoveryCause) {
@@ -591,6 +593,8 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
         if (state.authenticated) {
             ResourceCard(state, showOperationState = false)
             state.importStatus?.let { status -> SupportingText(subscriptionImportMessage(status)) }
+            if (state.importStatus == ImportStatus.UNSUPPORTED_CONFIGURATION)
+                state.importRejection?.let { SupportingText(subscriptionRejectionMessage(it)) }
             if (state.deliveryReceived && state.importStatus == null) SupportingText(
                 if (state.busy) "订阅已安全保存，正在下载并校验配置"
                 else "订阅已安全保存；自动导入尚未完成，可刷新重试")
@@ -770,7 +774,19 @@ internal fun subscriptionImportMessage(status: ImportStatus): String = when (sta
     ImportStatus.QUOTA_EXHAUSTED -> "当前流量已用尽，暂不导入"
     ImportStatus.WAITING_DELIVERY -> "等待服务器交付；若曾清除本地订阅，请联系支持恢复"
     ImportStatus.UNSUPPORTED_CONFIGURATION -> "订阅已安全保存，但配置暂不兼容当前内核；不会尝试连接"
-    ImportStatus.IMPORTED -> "订阅已通过离线兼容性校验，首条线路已导入预览；生产 VPN 尚未开放，暂不能连接"
+    ImportStatus.IMPORTED -> "订阅已导入，可在节点页选择后连接"
+}
+
+/** Fixed categories only; never expose a configuration value or parser exception. */
+internal fun subscriptionRejectionMessage(reason: com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason): String = when (reason) {
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.InputSyntax -> "订阅配置格式暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.TopLevelOptions -> "配置包含暂不支持的全局选项"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Protocol -> "配置包含暂不支持的协议"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptions -> "配置包含暂不支持的节点选项"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Endpoint -> "节点地址格式暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Port -> "节点端口格式不正确"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.ProtocolOptions -> "节点协议参数暂不兼容"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Selection -> "所选节点不可用，请重新选择"
 }
 
 @Composable

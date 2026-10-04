@@ -298,9 +298,13 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 // server recommendation. Production has no gateway/service consuming this profile.
                 // Every node is validated even though only index 0 is retained for this preview.
                 val nodes = try { SafeProxyConfig.inspect(raw) }
-                    catch (_: UnsafeProxyConfiguration) { return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION) }
+                    catch (failure: UnsafeProxyConfiguration) {
+                        return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, rejection = failure.reason)
+                    }
                 val projected = try { SafeProxyConfig.project(raw, selected.index) }
-                    catch (_: UnsafeProxyConfiguration) { return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, nodes) }
+                    catch (failure: UnsafeProxyConfiguration) {
+                        return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, nodes, failure.reason)
+                    }
                 try {
                     val context = currentCoroutineContext()
                     checkGeneration(epoch); activeSession(); context.ensureActive()

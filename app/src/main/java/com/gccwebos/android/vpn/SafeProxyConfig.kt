@@ -14,13 +14,15 @@ import org.snakeyaml.engine.v2.events.NodeEvent
 import org.snakeyaml.engine.v2.events.ScalarEvent
 import org.snakeyaml.engine.v2.schema.JsonSchema
 
-class UnsafeProxyConfiguration : IllegalArgumentException("Unsupported or unsafe proxy configuration")
+class UnsafeProxyConfiguration(val reason: SafeProxyConfig.RejectionReason = SafeProxyConfig.RejectionReason.InputSyntax) :
+    IllegalArgumentException("Unsupported or unsafe proxy configuration")
 
 /** Versioned offline schema projection, never arbitrary YAML or options passed to the engine.
  * Display names/indexes are neither authorization nor stable line identifiers. This validates
  * configuration shape only; it does not establish protocol interoperability or enable VPN.
  */
 object SafeProxyConfig {
+    enum class RejectionReason { InputSyntax, TopLevelOptions, Protocol, NodeOptions, Endpoint, Port, ProtocolOptions, Selection }
     const val MAX_BYTES = 64 * 1024
     const val SCHEMA_VERSION = 1
     private val settings = LoadSettings.builder().setAllowDuplicateKeys(false)
@@ -37,22 +39,26 @@ object SafeProxyConfig {
     data class NodeSummary(val index: Int, val name: String, val protocol: String, val supported: Boolean)
     fun inspect(yaml: ByteArray): List<NodeSummary> = try {
         input(yaml).mapIndexed { index, p ->
-            val name = string(p, "name")
-            require(name.isNotBlank() && name.toByteArray().size <= 128 && name.none { it.isISOControl() })
-            val protocol = string(p, "type")
-            require(protocol.matches(Regex("[a-z0-9-]{1,24}")))
+            val name = string(p, "name", RejectionReason.NodeOptions)
+            classified(RejectionReason.NodeOptions) {
+                require(name.isNotBlank() && name.toByteArray().size <= 128 && name.none { it.isISOControl() })
+            }
+            val protocol = string(p, "type", RejectionReason.Protocol)
+            classified(RejectionReason.Protocol) { require(protocol.matches(Regex("[a-z0-9-]{1,24}"))) }
             NodeSummary(index, name, protocol, try { node(p); true } catch (_: Exception) { false })
         }
-    } catch (_: Exception) { throw UnsafeProxyConfiguration() }
+    } catch (failure: UnsafeProxyConfiguration) { throw failure }
+      catch (_: Exception) { throw UnsafeProxyConfiguration() }
     fun project(yaml: ByteArray, selectedIndex: Int): ByteArray = try {
         val proxies = input(yaml)
-        require(selectedIndex in proxies.indices)
+        classified(RejectionReason.Selection) { require(selectedIndex in proxies.indices) }
         // Validate ALL nodes. An unsupported mixed node must never disappear silently.
         val safe = proxies.map(::node)
         JSONObject().put("schemaVersion", SCHEMA_VERSION).put("proxies", JSONArray().put(safe[selectedIndex]))
             .put("rules", JSONArray().put("MATCH,GCC_SELECTED_PROXY"))
             .toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
-    } catch (_: Exception) { throw UnsafeProxyConfiguration() }
+    } catch (failure: UnsafeProxyConfiguration) { throw failure }
+      catch (_: Exception) { throw UnsafeProxyConfiguration() }
     private fun input(yaml: ByteArray): List<Map<*, *>> {
         require(yaml.size in 1..MAX_BYTES)
         val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
@@ -77,13 +83,15 @@ object SafeProxyConfig {
             }
         }
         val root = Load(settings).loadFromString(text) as? Map<*, *> ?: throw UnsafeProxyConfiguration()
-        keys(root, rootKeys)
-        for (key in listOf("unified-delay", "tcp-concurrent")) if (key in root) require(root[key] is Boolean)
-        if ("global-client-fingerprint" in root) require(root["global-client-fingerprint"] in fingerprints)
-        if ("profile" in root) {
-            val profile = root["profile"] as? Map<*, *> ?: throw UnsafeProxyConfiguration()
-            keys(profile, setOf("store-selected", "store-fake-ip"))
-            require(profile.values.all { it is Boolean })
+        classified(RejectionReason.TopLevelOptions) {
+            keys(root, rootKeys, RejectionReason.TopLevelOptions)
+            for (key in listOf("unified-delay", "tcp-concurrent")) if (key in root) require(root[key] is Boolean)
+            if ("global-client-fingerprint" in root) require(root["global-client-fingerprint"] in fingerprints)
+            if ("profile" in root) {
+                val profile = root["profile"] as? Map<*, *> ?: throw UnsafeProxyConfiguration(RejectionReason.TopLevelOptions)
+                keys(profile, setOf("store-selected", "store-fake-ip"), RejectionReason.TopLevelOptions)
+                require(profile.values.all { it is Boolean })
+            }
         }
         val proxies = root["proxies"] as? List<*> ?: throw UnsafeProxyConfiguration()
         require(proxies.size in 1..128)
@@ -91,19 +99,20 @@ object SafeProxyConfig {
         return proxies.map { it as? Map<*, *> ?: throw UnsafeProxyConfiguration() }
     }
 
-    private fun node(p: Map<*, *>): JSONObject {
-        val type = string(p, "type")
+    private fun node(p: Map<*, *>): JSONObject = classified(RejectionReason.ProtocolOptions) {
+        val type = string(p, "type", RejectionReason.Protocol)
         val specific = when (type) {
             "ss" -> setOf("cipher", "password", "udp")
             "vless" -> setOf("uuid", "udp", "tls", "network", "servername", "client-fingerprint", "flow", "packet-encoding", "reality-opts") + tlsKeys
             "hysteria2" -> setOf("password", "sni", "alpn", "up", "down", "obfs", "obfs-password") + tlsKeys
             "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode") + tlsKeys
-            else -> throw UnsafeProxyConfiguration()
+            else -> throw UnsafeProxyConfiguration(RejectionReason.Protocol)
         }
         keys(p, baseKeys + specific)
-        val name = string(p, "name"); require(name.isNotBlank() && name.toByteArray().size <= 128 && '\u0000' !in name)
-        val server = string(p, "server"); ipv4(server)
-        val port = p["port"]; require(port is Int && port in 1..65535)
+        val name = string(p, "name", RejectionReason.NodeOptions)
+        classified(RejectionReason.NodeOptions) { require(name.isNotBlank() && name.toByteArray().size <= 128 && '\u0000' !in name) }
+        val server = string(p, "server", RejectionReason.Endpoint); ipv4(server)
+        val port = p["port"]; classified(RejectionReason.Port) { require(port is Int && port in 1..65535) }
         val out = JSONObject().put("name", "GCC_SELECTED_PROXY").put("type", type).put("server", server).put("port", port)
         when (type) {
             "ss" -> {
@@ -124,7 +133,7 @@ object SafeProxyConfig {
                 }
                 if ("reality-opts" in p) {
                     require("client-fingerprint" in p)
-                    val r = p["reality-opts"] as? Map<*, *> ?: throw UnsafeProxyConfiguration()
+                    val r = p["reality-opts"] as? Map<*, *> ?: throw UnsafeProxyConfiguration(RejectionReason.ProtocolOptions)
                     require(r.keys == setOf("public-key", "short-id"))
                     val key = string(r, "public-key")
                     require(key.matches(Regex("[A-Za-z0-9_-]{43}")))
@@ -154,7 +163,7 @@ object SafeProxyConfig {
                 }
             }
         }
-        return out
+        out
     }
     // YAML Unicode escapes must not turn an unpaired UTF-16 surrogate into '?' at UTF-8 encoding.
     private fun validUnicode(value: String): Boolean {
@@ -167,10 +176,15 @@ object SafeProxyConfig {
         }
         return true
     }
-    private fun keys(map: Map<*, *>, allowed: Set<String>) = require(map.keys.all { it is String && it in allowed })
-    private fun string(map: Map<*, *>, key: String) = map[key] as? String ?: throw UnsafeProxyConfiguration()
+    private inline fun <T> classified(reason: RejectionReason, block: () -> T): T = try { block() }
+        catch (failure: UnsafeProxyConfiguration) { throw failure }
+        catch (_: Exception) { throw UnsafeProxyConfiguration(reason) }
+    private fun keys(map: Map<*, *>, allowed: Set<String>, reason: RejectionReason = RejectionReason.NodeOptions) =
+        classified(reason) { require(map.keys.all { it is String && it in allowed }) }
+    private fun string(map: Map<*, *>, key: String, reason: RejectionReason = RejectionReason.ProtocolOptions) =
+        map[key] as? String ?: throw UnsafeProxyConfiguration(reason)
     private fun boolean(map: Map<*, *>, key: String, default: Boolean): Boolean =
-        if (key !in map) default else map[key] as? Boolean ?: throw UnsafeProxyConfiguration()
+        if (key !in map) default else map[key] as? Boolean ?: throw UnsafeProxyConfiguration(RejectionReason.ProtocolOptions)
     private fun secret(map: Map<*, *>, key: String) = string(map, key).also {
         require(it.toByteArray(Charsets.UTF_8).size in 1..1024 && '\u0000' !in it)
     }
@@ -180,7 +194,7 @@ object SafeProxyConfig {
     private fun dnsName(map: Map<*, *>, key: String) = string(map, key).also { name ->
         require(name.length in 1..253 && name.split('.').all { it.length in 1..63 && it.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?")) })
     }
-    private fun ipv4(server: String) {
+    private fun ipv4(server: String) = classified(RejectionReason.Endpoint) {
         val octets = server.split('.')
         require(octets.size == 4 && octets.all { it.matches(Regex("0|[1-9][0-9]{0,2}")) && it.toInt() in 0..255 })
         require(server != "0.0.0.0" && octets[0].toInt() !in 224..239)
@@ -191,7 +205,7 @@ object SafeProxyConfig {
     }
     private fun alpn(p: Map<*, *>, out: JSONObject) {
         if ("alpn" !in p) return
-        val list = p["alpn"] as? List<*> ?: throw UnsafeProxyConfiguration()
+        val list = p["alpn"] as? List<*> ?: throw UnsafeProxyConfiguration(RejectionReason.ProtocolOptions)
         require(list.size in 1..4 && list.toSet().size == list.size && list.all { it is String && it.length in 1..32 && it.all { ch -> ch.code in 33..126 } })
         out.put("alpn", JSONArray(list))
     }

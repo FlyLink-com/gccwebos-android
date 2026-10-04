@@ -205,6 +205,7 @@ class LegacySubscriptionRecoveryTest {
         val h = Harness(expectedUrl = nextUrl + ".yaml"); h.login()
         val result = h.repo.refreshAndImport()
         assertEquals(ImportStatus.IMPORTED, result.status)
+        assertNull(result.rejection)
         assertEquals(1, result.nodes.size)
         assertEquals(1, h.downloads)
         assertEquals(1, h.setupCalls().size)
@@ -299,6 +300,36 @@ class LegacySubscriptionRecoveryTest {
         assertSame(old, h.store.value); assertNull(h.profiles.memory.read()); assertNotNull(h.store.journal)
         assertFalse(h.events.contains("main-save")); assertTrue(h.lastBytes!!.all { it == 0.toByte() })
         assertNull(h.repo.copyImportedConfig())
+    }
+
+    @Test fun rejectedRootOptionsPublishOnlyFixedReasonWithoutProfileOrImportedAuthority() = runTest {
+        val h = Harness(); val old = h.old(); h.login(); h.content = "unknown-root: true\n" + yaml
+        val result = h.repo.refreshAndImport()
+        assertEquals(ImportStatus.UNSUPPORTED_CONFIGURATION, result.status)
+        assertEquals(com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.TopLevelOptions, result.rejection)
+        assertTrue(result.nodes.isEmpty())
+        assertSame(old, h.store.value); assertNull(h.profiles.memory.read())
+        assertNull(h.repo.copyImportedConfig()); assertTrue(h.lastBytes!!.all { it == 0.toByte() })
+    }
+
+    @Test fun rejectedMixedNodePreservesSummariesButPublishesNoProfileOrImportedAuthority() = runTest {
+        val h = Harness(); val old = h.old(); h.login()
+        h.content = yaml + "\n" + """
+              - name: Synthetic incompatible node
+                type: hysteria2
+                server: 192.0.2.32
+                port: 443
+                password: synthetic-only
+                sni: node.invalid
+                udp: true
+        """.trimIndent().prependIndent("  ")
+        val result = h.repo.refreshAndImport()
+        assertEquals(ImportStatus.UNSUPPORTED_CONFIGURATION, result.status)
+        assertEquals(com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptions, result.rejection)
+        assertEquals(2, result.nodes.size)
+        assertTrue(result.nodes[0].supported); assertFalse(result.nodes[1].supported)
+        assertSame(old, h.store.value); assertNull(h.profiles.memory.read())
+        assertNull(h.repo.copyImportedConfig()); assertTrue(h.lastBytes!!.all { it == 0.toByte() })
     }
 
     @Test fun profileSaveFailureKeepsOriginalAndCommittingJournalForExplicitRecovery() = runTest {

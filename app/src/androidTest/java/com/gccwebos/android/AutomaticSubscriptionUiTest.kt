@@ -110,6 +110,48 @@ proxies:
         password: synthetic-only
         sni: fixture.example.invalid
     """)
+    @Test fun loginDownloadsAndImportsTuicDefaultOptionsWithoutClaimingConnection() {
+        importedProtocol("tuic", """
+            uuid: 22222222-2222-4222-8222-222222222222
+            password: synthetic-only
+            sni: fixture.example.invalid
+            request-timeout: 8000
+            heartbeat-interval: 10000
+            max-udp-relay-packet-size: 1252
+            max-open-streams: 100
+            disable-sni: false
+            reduce-rtt: false
+            fast-open: false
+        """)
+        compose.runOnIdle {
+            assertEquals(ImportStatus.IMPORTED, account.importStatus)
+            assertNull(account.importRejection)
+            assertEquals(1, account.nodes.size)
+            assertTrue(account.nodes.single().supported)
+        }
+    }
+    @Test fun nonDefaultTuicHeartbeatKeepsTheDownloadedReceiptAndBlocksImport() {
+        launch(source = """proxies:
+  - name: synthetic
+    type: tuic
+    server: 192.0.2.10
+    port: 443
+    uuid: 22222222-2222-4222-8222-222222222222
+    password: synthetic-only
+    sni: fixture.example.invalid
+    heartbeat-interval: 10001
+""")
+        compose.onNodeWithText(subscriptionImportMessage(ImportStatus.UNSUPPORTED_CONFIGURATION)).assertExists()
+        compose.onNodeWithText("节点心跳间隔选项暂不受支持").assertExists()
+        compose.onNodeWithText("已连接", substring = false).assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(1, downloads)
+            assertTrue(account.deliveryReceived)
+            assertNull(account.error)
+            assertEquals(com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionHeartbeatInterval,
+                account.importRejection)
+        }
+    }
     @Test fun noPlanLoginShowsAuthoritativeEmptyStateWithoutClaiming() {
         launch(none = true)
         compose.onNodeWithText(subscriptionImportMessage(ImportStatus.NO_RESOURCE)).assertExists()

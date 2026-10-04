@@ -60,6 +60,13 @@ printf 'no\n' | timeout 60 "$AVDMANAGER" --verbose create avd --force \
 timeout 30 "$AVDMANAGER" list avd 2>&1 | tee "$OUT/avd-manager-list.log"
 test -s "$ANDROID_AVD_HOME/gccwebos-m0.ini"
 test -s "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini"
+# Reduce software-rendered pixels to one quarter while retaining the nominal
+# Pixel7 dp dimensions. Insets, rasterization and screenshots may still differ;
+# all actual API36 UI/ANR gates and the narrow/tablet profiles remain required.
+python3 scripts/test_m0_display.py
+cp "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini" "$OUT/avd-config-before.ini"
+python3 scripts/m0_display.py configure "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini"
+cp "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini" "$OUT/avd-config.ini"
 timeout 30 "$EMULATOR" -list-avds 2>&1 | tee "$OUT/avd-emulator-list.log"
 grep -Fxq gccwebos-m0 "$OUT/avd-emulator-list.log"
 df -h "$ANDROID_AVD_HOME" | tee "$OUT/disk-space.log"
@@ -99,6 +106,15 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Offline adb commands must not wait indefinitely, including inside cleanup.
 adb() { timeout 45 "$ADB" -s emulator-5554 "$@"; }
+verify_display() {
+  local label="$1"
+  adb shell wm size > "$OUT/$label-size.log"
+  adb shell wm density > "$OUT/$label-density.log"
+  adb shell getprop ro.build.version.sdk > "$OUT/$label-api.log"
+  adb shell settings get system font_scale > "$OUT/$label-font-scale.log"
+  python3 scripts/m0_display.py verify "$OUT/$label-size.log" "$OUT/$label-density.log" \
+    "$OUT/$label-api.log" "$OUT/$label-font-scale.log"
+}
 sleep 1
 kill -0 "$EMU_PID" || { cat "$OUT/emulator.log"; exit 1; }
 log 'Waiting for emulator transport'
@@ -120,6 +136,7 @@ done
 # No ANR dialog is dismissed and no app/foreground/instrumentation gate is bypassed.
 log 'Preserving initial API36 boot diagnostics before one bounded warm boot'
 sleep 60
+verify_display first-boot
 adb shell cat /proc/sys/kernel/random/boot_id > "$OUT/first-boot-id.log"
 FIRST_BOOT_ID=$(tr -d '\r\n' < "$OUT/first-boot-id.log")
 test -n "$FIRST_BOOT_ID"
@@ -127,6 +144,7 @@ adb logcat -b main -b system -b events -b crash -d > "$OUT/first-boot-logcat.log
 adb shell dumpsys activity lastanr > "$OUT/first-boot-last-anr.log"
 adb shell dumpsys window > "$OUT/first-boot-window.log"
 adb exec-out screencap -p > "$OUT/first-boot.png"
+python3 scripts/m0_display.py verify-png "$OUT/first-boot.png"
 log 'Rebooting only the owned disposable AVD once; application is not installed yet'
 adb reboot
 timeout 180 "$ADB" -s emulator-5554 wait-for-device
@@ -145,10 +163,12 @@ while (( SECONDS < deadline )); do
 done
 [ "$warm_booted" = true ] || { log 'FAIL: single warm boot did not complete'; exit 1; }
 sleep 30
+verify_display post-warmboot
 adb logcat -b main -b system -b events -b crash -d > "$OUT/post-warmboot-logcat.log"
 adb shell dumpsys activity lastanr > "$OUT/post-warmboot-last-anr.log"
 adb shell dumpsys window > "$OUT/post-warmboot-window.log"
 adb exec-out screencap -p > "$OUT/post-warmboot.png"
+python3 scripts/m0_display.py verify-png "$OUT/post-warmboot.png"
 if grep -Eq 'am_anr[[:space:]]*:|ANR in ' "$OUT/post-warmboot-logcat.log"; then
   log 'FAIL: ANR after the single warm boot; no further retry'
   exit 1

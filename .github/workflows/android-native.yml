@@ -60,7 +60,7 @@ jobs:
             exit 0
           fi
           test "$eligible" = 0
-          if ! gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11301226820 \
+          if ! gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11304430266 \
             > "$RUNNER_TEMP/native-reuse-metadata.json" 2> "$RUNNER_TEMP/native-reuse-error.log"; then
             if grep -q 'HTTP 404' "$RUNNER_TEMP/native-reuse-error.log"; then
               echo 'Pinned cache artifact unavailable; fresh source build required'
@@ -75,7 +75,7 @@ jobs:
             echo 'reused=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11301226820/zip \
+          gh api repos/gccwebos-com/gccwebos-android/actions/artifacts/11304430266/zip \
             > "$RUNNER_TEMP/native-reuse.zip"
           python3 scripts/materialize-native-libraries.py "$RUNNER_TEMP/native-reuse.zip" "$RUNNER_TEMP/native-reuse-metadata.json"
           echo 'reused=true' >> "$GITHUB_OUTPUT"

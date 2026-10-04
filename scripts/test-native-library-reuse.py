@@ -12,7 +12,7 @@ spec.loader.exec_module(reuse)
 
 class ReuseTests(unittest.TestCase):
     def metadata(self):
-        return {'id': reuse.ARTIFACT_ID, 'expired': False, 'size_in_bytes': 211787753,
+        return {'id': reuse.ARTIFACT_ID, 'expired': False, 'size_in_bytes': 211809425,
                 'digest': 'sha256:' + reuse.ZIP_SHA,
                 'workflow_run': {'id': reuse.RUN_ID, 'head_sha': reuse.SOURCE, 'repository_id': 1393547812}}
     def test_expected_metadata_passes(self):

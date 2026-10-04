@@ -90,8 +90,8 @@ if (providers.gradleProperty("connectionCandidate").orNull == "true") {
     tasks.register("verifyConnectionCandidateLibraries") {
         doLast {
             val expected = mapOf(
-                "arm64-v8a" to "0f9adb1e0b26e5add0d50419bf3b853853ec6dd01d9e620fd871e0c272e3cd25",
-                "x86_64" to "738a803bb322d8b5a13bccb2ee9766d454c0f7e3f25ccba07adce3239daebe70")
+                "arm64-v8a" to "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+                "x86_64" to "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8")
             expected.forEach { (abi, digest) ->
                 val file = rootProject.file("native/build/jniLibs/$abi/libgccmihomo.so")
                 check(file.isFile) { "Materialize verified native libraries before building a connection candidate" }

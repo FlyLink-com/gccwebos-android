@@ -80,10 +80,10 @@ No client/device limit or automatic backend reset is introduced.
 
 ## Cost-bounded source-identical JNI reuse
 
-Source-identical iterations may reuse the two native libraries from immutable artifact11301226820,
-source e498a1a55e7499d031d172265ee05673ef4201b3, run37193652121. Its archive SHA256 is
-23f310b79a337988e500008f1362ec0552d82260ef2e1cb3c66d84b929d14138 and size is 211787753 bytes.
-This fresh source passed host success/deny packet tests, both ABI builds, 811 JVM tests,
+Source-identical iterations may reuse the two native libraries from immutable artifact11304430266,
+source 88fc9749978e3aa639323e8d9bbc2cb8e6f50f87, run37201117463. Its archive SHA256 is
+24ddb8608c645860f4e6abbc3105974021d594f7465d8d000ac063a117080c90 and size is 211809425 bytes.
+This fresh request-timeout compatibility source passed host success/deny packet tests, both ABI builds, 821 JVM tests,
 185 API33 device tests including JNI, and one real-TUN traffic/lifecycle test. These are
 synthetic CI results; OPPO normal-account interoperability remains a separate gate. The archive digest, repository/run identity,
 entire native Git tree, Kotlin projector/JNI contract sources, and both raw library hashes must
@@ -91,6 +91,11 @@ match before extraction. Only explicit library/header/notice entries are copied;
 used. Every current app/test APK is rebuilt and its packaging, signatures, release exclusion,
 JNI execution and actual TUN tests still run. The receipt separately names native source and
 application source. Historical failures remain separate from this source's successful run.
+
+The source-88fc API36 UI workflow separately failed after its 720-second suite budget: 136 passes,
+one native-bridge assumption skip in the UI-only package, and 48 incomplete cases out of 185.
+The final started case had at most 7.199 seconds before timeout cleanup, so this does not establish
+an individual test hang. The failed API36 gate and real-account OPPO interoperability remain separate.
 
 Changed native/projector inputs or an expired/missing artifact trigger the full original native
 build/test path; corrupt or contradictory provenance fails closed. Prior host packet-path proof

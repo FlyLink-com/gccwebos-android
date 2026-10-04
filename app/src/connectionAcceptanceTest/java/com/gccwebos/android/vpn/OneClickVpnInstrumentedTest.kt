@@ -113,7 +113,8 @@ class OneClickVpnInstrumentedTest {
         assertTrue("Requires an idle candidate; never replace another VPN", vpnNetworks().isEmpty())
         assertFalse("Requires an idle candidate engine", engineProcessExists())
         assertFalse("Requires an idle candidate owner", ownerServiceExists())
-        listOf("portal-session.bin", "portal-profile.bin", "portal-delivery.bin", "local-profile.bin").forEach { name ->
+        listOf("portal-session.bin", "portal-profile.bin", "portal-delivery.bin", "local-profile.bin",
+            "portal-legacy-recovery.bin").forEach { name ->
             listOf("", ".new", ".bak").forEach { suffix ->
                 assertFalse("Requires a fresh candidate without private stores",
                     File(context.noBackupFilesDir, name + suffix).exists())

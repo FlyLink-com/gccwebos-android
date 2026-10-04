@@ -66,7 +66,7 @@ be distributed as a consumer feature. Platform references: [VpnService](https://
 
 ## Evidence and remaining gates
 
-`real-tun-runtime-api33.sh` runs the ordinary 40-case JNI/UI suite separately, then explicitly
+`real-tun-runtime-api33.sh` runs the ordinary JNI/UI suite separately, then explicitly
 selects the real-TUN test with its opt-in argument. A missing, skipped or failed test is a hard
 failure. `verify_real_tun_acceptance.py` also requires the matching packet/lifecycle JSON proof.
 Screenshots, instrumentation output, source/APK hashes, routes and sanitized counters are
@@ -80,12 +80,13 @@ No client/device limit or automatic backend reset is introduced.
 
 ## Cost-bounded source-identical JNI reuse
 
-Source-identical iterations may reuse the two native libraries from immutable artifact11304430266,
-source 88fc9749978e3aa639323e8d9bbc2cb8e6f50f87, run37201117463. Its archive SHA256 is
-24ddb8608c645860f4e6abbc3105974021d594f7465d8d000ac063a117080c90 and size is 211809425 bytes.
-This fresh request-timeout compatibility source passed host success/deny packet tests, both ABI builds, 821 JVM tests,
-185 API33 device tests including JNI, and one real-TUN traffic/lifecycle test. These are
-synthetic CI results; OPPO normal-account interoperability remains a separate gate. The archive digest, repository/run identity,
+Source-identical iterations may reuse the two native libraries from immutable artifact11306235582,
+source 98ffd6bae926e3d5f7c2a60b2b21af1278874436, run37206973354. Its archive SHA256 is
+070f3bde1da1812c69b895991db807447fada99e96b63c7222333d5cfa435568 and size is 209736015 bytes.
+Independent archive verification passed all 56 Kotlin projections, host success/deny packet tests,
+both native ABIs, 841 JVM tests with zero failures/errors/skips, all 185 API33 device tests including
+JNI, and one real-TUN traffic/lifecycle test. These are synthetic CI results; actual-account
+import and endpoint interoperability remain separate gates, tracked in the [import diagnosis](subscription-import-diagnosis.md). The archive digest, repository/run identity,
 entire native Git tree, Kotlin projector/JNI contract sources, and both raw library hashes must
 match before extraction. Only explicit library/header/notice entries are copied; no old APK is
 used. Every current app/test APK is rebuilt and its packaging, signatures, release exclusion,

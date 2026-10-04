@@ -22,7 +22,7 @@ class UnsafeProxyConfiguration(val reason: SafeProxyConfig.RejectionReason = Saf
  * configuration shape only; it does not establish protocol interoperability or enable VPN.
  */
 object SafeProxyConfig {
-    enum class RejectionReason { InputSyntax, TopLevelOptions, Protocol, NodeOptions, Endpoint, Port, ProtocolOptions, Selection }
+    enum class RejectionReason { InputSyntax, TopLevelOptions, Protocol, NodeOptions, Endpoint, EndpointHostname, Port, ProtocolOptions, Selection }
     const val MAX_BYTES = 64 * 1024
     const val SCHEMA_VERSION = 1
     private val settings = LoadSettings.builder().setAllowDuplicateKeys(false)
@@ -194,7 +194,16 @@ object SafeProxyConfig {
     private fun dnsName(map: Map<*, *>, key: String) = string(map, key).also { name ->
         require(name.length in 1..253 && name.split('.').all { it.length in 1..63 && it.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?")) })
     }
-    private fun ipv4(server: String) = classified(RejectionReason.Endpoint) {
+    /** Categorizes rejected endpoint syntax without resolving or admitting it. */
+    private fun endpointHostname(server: String): Boolean {
+        if (server.length !in 1..253 || server.none { it in 'A'..'Z' || it in 'a'..'z' }) return false
+        if (Regex("(?:0[xX][0-9a-fA-F]+|[0-9]+)(?:\\.(?:0[xX][0-9a-fA-F]+|[0-9]+)){0,3}").matches(server)) return false
+        return server.split('.').all {
+            it.length in 1..63 && it.matches(Regex("[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"))
+        }
+    }
+    private fun ipv4(server: String) = classified(
+        if (endpointHostname(server)) RejectionReason.EndpointHostname else RejectionReason.Endpoint) {
         val octets = server.split('.')
         require(octets.size == 4 && octets.all { it.matches(Regex("0|[1-9][0-9]{0,2}")) && it.toInt() in 0..255 })
         require(server != "0.0.0.0" && octets[0].toInt() !in 224..239)

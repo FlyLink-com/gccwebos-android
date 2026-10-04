@@ -36,8 +36,59 @@ class SafeProxyRejectionReasonTest {
             servername: fixture.example.invalid
     """.trimIndent()
 
-    @Test fun dnsEndpointHasFixedEndpointReason() {
-        rejects("Endpoint", hy2.replace("192.0.2.10", "fixture.example.invalid"))
+    @Test fun hostnameEndpointHasFixedReasonWithoutBecomingSupported() {
+        val input = endpoint("fixture.example.invalid")
+        rejects("EndpointHostname", input)
+        assertFalse(SafeProxyConfig.inspect(input.toByteArray()).single().supported)
+    }
+
+    @Test fun strictAsciiHostnameShapeIncludesSingleLabelAndLengthBoundary() {
+        val maximum = "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(63) + "." + "d".repeat(61)
+        assertEquals(253, maximum.length)
+        for (value in listOf("synthetic", "node1", "1a.2b.invalid", maximum)) {
+            rejects("EndpointHostname", endpoint(value))
+        }
+    }
+
+    @Test fun numericIpFormsAndIpv6RemainGenericEndpointRejections() {
+        for (value in listOf("0.0.0.0", "224.0.0.1", "01.2.3.4", "999.2.3.4", "2130706433",
+            "0177.0.0.1", "0x7f000001", "0X7F000001", "0x7f.1", "0x7f.0.1", "0x7f.0.0.1",
+            "2001:db8::1", "[2001:db8::1]")) {
+            rejects("Endpoint", endpoint(value))
+        }
+    }
+
+    @Test fun missingOrNonStringEndpointKeepsGenericReason() {
+        for (replacement in listOf("server: 7", "server: null", "server: []")) {
+            rejects("Endpoint", hy2.replace("server: 192.0.2.10", replacement))
+        }
+        rejects("Endpoint", hy2.replace("    server: 192.0.2.10\n", ""))
+    }
+
+    @Test fun malformedHostnameShapesRemainGenericEndpointRejections() {
+        val maximum = "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(63) + "." + "d".repeat(61)
+        for (value in listOf("", "123.invalid_name", "-synthetic.invalid", "synthetic-.invalid",
+            "synthetic.invalid.", ".synthetic.invalid", "synthetic..invalid", "a".repeat(64) + ".invalid",
+            maximum + "a", "synthetic\u00e9.invalid", "synthetic.invalid:443", "synthetic.invalid/path",
+            "https://synthetic.invalid", "user@synthetic.invalid", "synthetic\t.invalid", "synthetic\n.invalid")) {
+            rejects("Endpoint", endpoint(value))
+        }
+    }
+
+    @Test fun hostnameInUnselectedNodeStillRejectsTheWholeProjection() {
+        val input = ss + "\n" + endpoint("fixture.example.invalid").substringAfter("proxies:\n")
+        val metadata = SafeProxyConfig.inspect(input.toByteArray())
+        assertEquals(2, metadata.size)
+        assertTrue(metadata[0].supported)
+        assertFalse(metadata[1].supported)
+        rejects("EndpointHostname", input)
+    }
+
+    @Test fun hostnameDiagnosticNeverCarriesEndpointMaterialOrCause() {
+        val marker = "synthetic-sensitive-marker.invalid"
+        val failure = rejects("EndpointHostname", endpoint(marker))
+        assertFalse(failure.toString().contains(marker))
+        assertFalse(failure.message.orEmpty().contains(marker))
     }
 
     @Test fun extraHysteria2NodeKeyHasFixedNodeOptionsReason() {
@@ -109,6 +160,7 @@ class SafeProxyRejectionReasonTest {
         assertTrue(SafeProxyConfig.inspect(ss.toByteArray()).single().supported)
     }
 
+    private fun endpoint(value: String) = hy2.replace("192.0.2.10", JSONObject.quote(value))
     private fun rejects(reason: String, input: String): UnsafeProxyConfiguration = rejects(reason, input.toByteArray())
     private fun rejects(reason: String, input: ByteArray): UnsafeProxyConfiguration =
         assertThrows(UnsafeProxyConfiguration::class.java) { SafeProxyConfig.project(input, 0) }

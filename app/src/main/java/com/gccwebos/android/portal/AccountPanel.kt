@@ -784,6 +784,7 @@ internal fun subscriptionRejectionMessage(reason: com.gccwebos.android.vpn.SafeP
     com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Protocol -> "配置包含暂不支持的协议"
     com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptions -> "配置包含暂不支持的节点选项"
     com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Endpoint -> "节点地址格式暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.EndpointHostname -> "节点使用域名地址，当前尚未支持"
     com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Port -> "节点端口格式不正确"
     com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.ProtocolOptions -> "节点协议参数暂不兼容"
     com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Selection -> "所选节点不可用，请重新选择"

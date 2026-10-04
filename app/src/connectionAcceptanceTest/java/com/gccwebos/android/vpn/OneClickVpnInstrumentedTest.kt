@@ -106,7 +106,8 @@ class OneClickVpnInstrumentedTest {
             BuildConfig.VPN_ENGINE_PACKAGED && BuildConfig.CONNECTION_SYNTHETIC_ACCEPTANCE)
         assertTrue("Requires an explicitly owned synthetic candidate package", context.packageName in setOf(
             "com.gccwebos.android.candidate.acceptance.address20261004v2",
-            "com.gccwebos.android.candidate.acceptance.bbr20261004"))
+            "com.gccwebos.android.candidate.acceptance.bbr20261004",
+            "com.gccwebos.android.candidate.acceptance.bbr20261004v2"))
         assertFalse("This test exercises the production service", BuildConfig.NATIVE_VPN_LAB)
         assertTrue("Requires an idle candidate; never replace another VPN", vpnNetworks().isEmpty())
         assertFalse("Requires an idle candidate engine", engineProcessExists())

@@ -42,6 +42,7 @@ type inputProxy struct {
 	ObfsPassword         *string       `json:"obfs-password,omitempty"`
 	CongestionController *string       `json:"congestion-controller,omitempty"`
 	UDPRelayMode         *string       `json:"udp-relay-mode,omitempty"`
+	BBRProfile           *string       `json:"bbr-profile,omitempty"`
 }
 
 type inputReality struct {
@@ -60,8 +61,8 @@ var errConfig = errors.New("CONFIG_REJECTED")
 var protocolFields = map[string]string{
 	"ss":        "name type server port cipher password udp",
 	"vless":     "name type server port uuid udp tls network servername client-fingerprint flow packet-encoding reality-opts skip-cert-verify",
-	"hysteria2": "name type server port password sni skip-cert-verify alpn up down obfs obfs-password",
-	"tuic":      "name type server port uuid password sni skip-cert-verify alpn congestion-controller udp-relay-mode",
+	"hysteria2": "name type server port password sni skip-cert-verify alpn up down obfs obfs-password bbr-profile",
+	"tuic":      "name type server port uuid password sni skip-cert-verify alpn congestion-controller udp-relay-mode bbr-profile",
 }
 
 func parseInput(data []byte) (inputConfig, error) {
@@ -242,10 +243,11 @@ func safeProxyMap(p inputProxy) (map[string]any, error) {
 		putOptional(out, "flow", p.Flow)
 		putOptional(out, "packet-encoding", p.PacketEncoding)
 	case "hysteria2", "tuic":
-		if !validSecret(p.Password) || !validServerName(p.SNI) || !verificationEnabled(p.SkipCertVerify) || !validALPN(p.ALPN) {
+		if !validSecret(p.Password) || !validServerName(p.SNI) || !verificationEnabled(p.SkipCertVerify) || !validALPN(p.ALPN) || (p.BBRProfile != nil && !containsWord("conservative standard aggressive", *p.BBRProfile)) {
 			return nil, errConfig
 		}
 		out["password"], out["sni"], out["skip-cert-verify"] = *p.Password, *p.SNI, false
+		putOptional(out, "bbr-profile", p.BBRProfile)
 		if p.ALPN != nil {
 			out["alpn"] = append([]string{}, p.ALPN...)
 		}

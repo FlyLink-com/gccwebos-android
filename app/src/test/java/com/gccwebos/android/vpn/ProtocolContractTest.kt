@@ -8,7 +8,10 @@ import org.junit.Test
 
 /** Completely synthetic renderer -> Kotlin DTO -> shared Go/core golden contract. */
 class ProtocolContractTest {
-    private val positive = listOf("ss-minimal", "vless-reality", "hysteria2-minimal", "tuic-v5-minimal", "mixed", "vless-tls", "hysteria2-bounded-options", "tuic-v5-bounded-options", "ss-aes192")
+    private val positive = listOf("ss-minimal", "vless-reality", "hysteria2-minimal", "tuic-v5-minimal", "mixed", "vless-tls", "hysteria2-bounded-options", "tuic-v5-bounded-options", "ss-aes192",
+        "hysteria2-bbr-conservative", "hysteria2-bbr-standard", "hysteria2-bbr-aggressive",
+        "tuic-v5-bbr-conservative", "tuic-v5-bbr-standard", "tuic-v5-bbr-aggressive",
+        "tuic-v5-cubic-bbr-profile", "tuic-v5-default-bbr-profile")
     private fun resource(path: String): ByteArray = requireNotNull(javaClass.getResourceAsStream("/protocol-contract/$path")) { "Missing synthetic contract fixture" }.use { it.readBytes() }
     private fun yaml(name: String) = String(resource("renderer/$name.clash.yaml"), Charsets.UTF_8)
     private fun project(text: String, index: Int = 0) = JSONObject(String(SafeProxyConfig.project(text.toByteArray(), index)))

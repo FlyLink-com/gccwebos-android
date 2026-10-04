@@ -24,7 +24,7 @@ class EncryptedSessionStore(context: Context) : SessionStore {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    override fun read(): SavedSession? = storage {
+    override fun read(): SavedSession? = storage(StoreTarget.Session, StoreOperation.Read) {
         val bytes = try { file.openRead().use { input ->
             require(input.channel.size() <= 65536)
             val output = java.io.ByteArrayOutputStream()
@@ -56,7 +56,7 @@ class EncryptedSessionStore(context: Context) : SessionStore {
                 number("remaining"), java.time.Instant.parse(text("savedAt")), number("elapsed"))
         } finally { plain.fill(0) }
     }
-    override fun save(record: SavedSession) = storage {
+    override fun save(record: SavedSession) = storage(StoreTarget.Session, StoreOperation.Save) {
         val plain = JSONObject().put("version", 1).put("token", record.token.value).put("account", record.accountId)
             .put("expires", record.expiresAt.toString()).put("remaining", record.remainingMillis)
             .put("savedAt", record.savedAt.toString()).put("elapsed", record.savedElapsed)
@@ -79,7 +79,7 @@ class EncryptedSessionStore(context: Context) : SessionStore {
                 received.savedAt == record.savedAt && received.savedElapsed == record.savedElapsed)
         } finally { plain.fill(0) }
     }
-    override fun clear() = storage {
+    override fun clear() = storage(StoreTarget.Session, StoreOperation.Clear) {
         file.delete()
         syncDirectory()
         require(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists() && !File(file.baseFile.path + ".new").exists())
@@ -93,6 +93,9 @@ class EncryptedSessionStore(context: Context) : SessionStore {
             android.system.Os.fsync(fd)
         } finally { android.system.Os.close(fd) }
     }
-    private inline fun <T> storage(block: () -> T): T = try { block() }
-        catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
+    private inline fun <T> storage(target: StoreTarget, operation: StoreOperation, block: () -> T): T = try { block() }
+        catch (failure: Exception) {
+            AndroidStorageDiagnostics.report(target, operation, failure)
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        }
 }

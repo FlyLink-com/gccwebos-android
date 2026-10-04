@@ -344,7 +344,15 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                         if (revision == epoch) {
                             check(sameCapability(binding))
                             val blocked = authority.selectionStatus?.takeIf { it != LocalSubscriptionStatus.READY }
-                            state = describe(raw, cached.validUntil).let { parsed ->
+                            // A readable cached artifact can still be incompatible with this build.
+                            // Keep its durable capability/profile; parsing rejection is not a store failure.
+                            val parsed = try { describe(raw, cached.validUntil) }
+                                catch (_: UnsafeProxyConfiguration) {
+                                    val nodes = try { SafeProxyConfig.inspect(raw) } catch (_: Exception) { emptyList() }
+                                    LocalSubscriptionSnapshot(LocalSubscriptionStatus.UNSUPPORTED,
+                                        hasProfile = true, hasCapability = true, nodes = nodes, validUntil = cached.validUntil)
+                                }
+                            state = parsed.let { parsed ->
                                 (blocked ?: cached.observedStatus)?.let { parsed.copy(status = it) } ?: parsed
                             }
                             if (state.status == LocalSubscriptionStatus.READY && !authority.selectionRequiresRefresh)

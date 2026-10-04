@@ -29,7 +29,7 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    override fun read(): DeliveryRecord? = storage {
+    override fun read(): DeliveryRecord? = storage(StoreTarget.Delivery, StoreOperation.Read) {
         val bytes = try { file.openRead().use { input ->
             require(input.channel.size() <= 65536)
             val output = java.io.ByteArrayOutputStream()
@@ -57,7 +57,7 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
                 if(value.isNull("handoff")) null else Secret(value.getString("handoff")), value.getBoolean("pending"))
         } finally { plain.fill(0) }
     }
-    override fun save(record: DeliveryRecord) = storage {
+    override fun save(record: DeliveryRecord) = storage(StoreTarget.Delivery, StoreOperation.Save) {
         val plain = JSONObject().put("account", record.accountId).put("sessionBinding", record.sessionBinding)
             .put("resource", record.resource).put("key", record.operationKey)
             .put("url", record.url?.value ?: JSONObject.NULL).put("handoff", record.handoff?.value ?: JSONObject.NULL)
@@ -80,7 +80,7 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
                 received.pendingAck == record.pendingAck)
         } finally { plain.fill(0) }
     }
-    override fun readLegacyRecovery(): LegacyRecoveryJournal? = storage {
+    override fun readLegacyRecovery(): LegacyRecoveryJournal? = storage(StoreTarget.Delivery, StoreOperation.ReadRecovery) {
         val bytes = try { recoveryFile.openRead().use { input ->
             require(input.channel.size() <= 65536)
             val output = java.io.ByteArrayOutputStream()
@@ -113,7 +113,7 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
         }
         finally { plain.fill(0) }
     }
-    override fun saveLegacyRecovery(journal: LegacyRecoveryJournal) = storage {
+    override fun saveLegacyRecovery(journal: LegacyRecoveryJournal) = storage(StoreTarget.Delivery, StoreOperation.SaveRecovery) {
         validateRecovery(journal)
         val plain = JSONObject().put("version", 1).put("model", "LEGACY")
             .put("original", journal.original?.let(::encodeRecord) ?: JSONObject.NULL)
@@ -134,13 +134,13 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
                 sameDeliveryRecord(received.candidate, journal.candidate))
         } finally { plain.fill(0) }
     }
-    override fun clearLegacyRecovery() = storage {
+    override fun clearLegacyRecovery() = storage(StoreTarget.Delivery, StoreOperation.ClearRecovery) {
         deleteStoredFile(recoveryFile)
         syncDirectory()
         requireDeleted(recoveryFile)
         Unit
     }
-    override fun clear() = storage {
+    override fun clear() = storage(StoreTarget.Delivery, StoreOperation.Clear) {
         // Attempt both removals even if one fails, then verify the complete unlink.
         var failure: Exception? = null
         try { deleteStoredFile(file) } catch (error: Exception) { failure = error }
@@ -208,6 +208,9 @@ class EncryptedDeliveryStore(context: Context) : DeliveryStore {
             android.system.Os.fsync(fd)
         } finally { android.system.Os.close(fd) }
     }
-    private inline fun <T> storage(block: () -> T): T = try { block() }
-        catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
+    private inline fun <T> storage(target: StoreTarget, operation: StoreOperation, block: () -> T): T = try { block() }
+        catch (failure: Exception) {
+            AndroidStorageDiagnostics.report(target, operation, failure)
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        }
 }

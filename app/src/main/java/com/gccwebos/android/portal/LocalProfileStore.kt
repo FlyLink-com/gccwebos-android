@@ -24,7 +24,7 @@ class EncryptedLocalProfileStore(context: Context) : LocalProfileStore {
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    override fun read(): CachedSubscription? = storage {
+    override fun read(): CachedSubscription? = storage(StoreTarget.Profile, StoreOperation.Read) {
         val bytes = try { file.openRead().use { input ->
             require(input.channel.size() <= 131072)
             val output = java.io.ByteArrayOutputStream()
@@ -61,7 +61,7 @@ class EncryptedLocalProfileStore(context: Context) : LocalProfileStore {
             } finally { bytes.fill(0) }
         } finally { plain.fill(0) }
     }
-    override fun save(record: CachedSubscription) = storage {
+    override fun save(record: CachedSubscription) = storage(StoreTarget.Profile, StoreOperation.Save) {
         val raw = record.copyBytes()
         val plain = try {
             require(raw.size in 1..com.gccwebos.android.vpn.SafeProxyConfig.MAX_BYTES)
@@ -90,7 +90,7 @@ class EncryptedLocalProfileStore(context: Context) : LocalProfileStore {
             } finally { received.close() }
         } finally { plain.fill(0) }
     }
-    override fun clear() = storage {
+    override fun clear() = storage(StoreTarget.Profile, StoreOperation.Clear) {
         file.delete()
         syncDirectory()
         require(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists() && !File(file.baseFile.path + ".new").exists())
@@ -104,6 +104,9 @@ class EncryptedLocalProfileStore(context: Context) : LocalProfileStore {
             android.system.Os.fsync(fd)
         } finally { android.system.Os.close(fd) }
     }
-    private inline fun <T> storage(block: () -> T): T = try { block() }
-        catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
+    private inline fun <T> storage(target: StoreTarget, operation: StoreOperation, block: () -> T): T = try { block() }
+        catch (failure: Exception) {
+            AndroidStorageDiagnostics.report(target, operation, failure)
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        }
 }

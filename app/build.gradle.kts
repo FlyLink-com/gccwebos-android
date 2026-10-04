@@ -33,7 +33,14 @@ android {
             val synthetic = providers.gradleProperty("connectionSyntheticAcceptance").orNull == "true"
             require(!synthetic || candidate) { "Synthetic connection acceptance requires a separate candidate package" }
             buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", synthetic.toString())
-            applicationIdSuffix = if (candidate) ".candidate" else ".debug"
+            val storageSynthetic = providers.gradleProperty("storageSyntheticAcceptance").orNull == "true"
+            require(!storageSynthetic || candidate) { "Synthetic storage acceptance requires a separate candidate package" }
+            buildConfigField("boolean", "STORAGE_SYNTHETIC_ACCEPTANCE", storageSynthetic.toString())
+            applicationIdSuffix = when {
+                storageSynthetic -> ".candidate.acceptance.session20261004"
+                candidate -> ".candidate"
+                else -> ".debug"
+            }
             versionNameSuffix = if (candidate) "-connection-candidate" else "-debug"
             if (candidate) manifestPlaceholders["connectionAppLabel"] = "飞连 VPN 测试"
             val nativeLab = providers.gradleProperty("nativeVpnLab").orNull == "true"
@@ -46,6 +53,7 @@ android {
         release {
             buildConfigField("boolean", "CONNECTION_ENDPOINT_HOSTNAME", "false")
             buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", "false")
+            buildConfigField("boolean", "STORAGE_SYNTHETIC_ACCEPTANCE", "false")
             buildConfigField("boolean", "NATIVE_VPN_LAB", "false")
             buildConfigField("boolean", "NATIVE_TUN_ACCEPTANCE", "false")
             isMinifyEnabled = false
@@ -71,6 +79,9 @@ android {
     }
     if (providers.gradleProperty("connectionSyntheticAcceptance").orNull == "true") {
         sourceSets.getByName("androidTest").kotlin.directories.addAll(listOf("src/connectionAcceptanceTest/java", "src/acceptanceFixtures/java"))
+    }
+    if (providers.gradleProperty("storageSyntheticAcceptance").orNull == "true") {
+        sourceSets.getByName("androidTest").kotlin.directories.add("src/storageAcceptanceTest/java")
     }
 }
 

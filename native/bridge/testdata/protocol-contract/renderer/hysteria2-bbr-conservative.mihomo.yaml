@@ -1,0 +1,41 @@
+mixed-port: 7897
+allow-lan: false
+mode: rule
+log-level: warning
+unified-delay: true
+tcp-concurrent: true
+global-client-fingerprint: chrome
+profile:
+  store-selected: true
+proxies:
+  - name: "Synthetic HY2 BBR conservative"
+    type: hysteria2
+    server: "192.0.2.10"
+    port: 443
+    password: "synthetic-only"
+    sni: "fixture.example.invalid"
+    skip-cert-verify: false
+    alpn:
+      - "h3"
+    bbr-profile: "conservative"
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic HY2 BBR conservative"
+  - name: FALLBACK
+    type: fallback
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic HY2 BBR conservative"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - AUTO
+      - FALLBACK
+      - "Synthetic HY2 BBR conservative"
+rules:
+  - MATCH,GLOBAL

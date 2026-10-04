@@ -16,6 +16,12 @@ const fixtures = {
   'tuic-token-ambiguous': {...common,name:'Synthetic legacy TUIC',protocol:'tuic',uuid:'22222222-2222-4222-8222-222222222222',password:'synthetic-only',token:'synthetic-legacy-token',disableSni:true},
   'ss-hostname': {...common,name:'Synthetic hostname',host:'node.example.invalid',protocol:'ss',method:'aes-128-gcm',password:'synthetic-only'},
 };
+for (const profile of ['conservative', 'standard', 'aggressive']) {
+  fixtures[`hysteria2-bbr-${profile}`] = {...fixtures['hysteria2-minimal'],name:`Synthetic HY2 BBR ${profile}`,bbrProfile:profile};
+  fixtures[`tuic-v5-bbr-${profile}`] = {...fixtures['tuic-v5-minimal'],name:`Synthetic TUIC BBR ${profile}`,congestionController:'bbr',bbrProfile:profile};
+}
+fixtures['tuic-v5-cubic-bbr-profile'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC cubic BBR profile',congestionController:'cubic',bbrProfile:'aggressive'};
+fixtures['tuic-v5-default-bbr-profile'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC default BBR profile',bbrProfile:'standard'};
 fs.mkdirSync(new URL('../renderer/',import.meta.url),{recursive:true});
 for(const [name,server] of Object.entries(fixtures)) {
   const input={servers:[server]};

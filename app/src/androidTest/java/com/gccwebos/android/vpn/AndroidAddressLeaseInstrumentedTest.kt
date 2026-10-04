@@ -34,7 +34,8 @@ class AndroidAddressLeaseInstrumentedTest {
     private fun ownedContext(): Context {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         check(context.packageName == "com.gccwebos.android.debug" ||
-            context.packageName == "com.gccwebos.android.candidate.acceptance.address20261004v2") {
+            context.packageName in setOf("com.gccwebos.android.candidate.acceptance.address20261004v2",
+                "com.gccwebos.android.candidate.acceptance.bbr20261004")) {
             "ADDRESS_TEST_PACKAGE_REJECTED"
         }
         check(Build.VERSION.SDK_INT >= 30) { "ADDRESS_TEST_API_REJECTED" }

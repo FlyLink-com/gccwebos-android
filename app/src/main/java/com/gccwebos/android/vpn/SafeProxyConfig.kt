@@ -22,7 +22,14 @@ class UnsafeProxyConfiguration(val reason: SafeProxyConfig.RejectionReason = Saf
  * configuration shape only; it does not establish protocol interoperability or enable VPN.
  */
 object SafeProxyConfig {
-    enum class RejectionReason { InputSyntax, TopLevelOptions, Protocol, NodeOptions, Endpoint, EndpointHostname, Port, ProtocolOptions, Selection }
+    enum class RejectionReason {
+        InputSyntax, TopLevelOptions, Protocol, NodeOptions,
+        NodeOptionUdp, NodeOptionTfo, NodeOptionIpVersion, NodeOptionPorts, NodeOptionFingerprint,
+        NodeOptionHopInterval, NodeOptionBbrProfile, NodeOptionToken, NodeOptionDisableSni,
+        NodeOptionReduceRtt, NodeOptionRequestTimeout, NodeOptionHeartbeatInterval,
+        NodeOptionMaxUdpRelayPacketSize, NodeOptionFastOpen, NodeOptionMaxOpenStreams,
+        Endpoint, EndpointHostname, Port, ProtocolOptions, Selection
+    }
     const val MAX_BYTES = 64 * 1024
     const val SCHEMA_VERSION = 1
     private val settings = LoadSettings.builder().setAllowDuplicateKeys(false)
@@ -30,7 +37,25 @@ object SafeProxyConfig {
         .setCodePointLimit(MAX_BYTES).setUseMarks(false).setSchema(JsonSchema()).build()
     private val rootKeys = setOf("proxies", "proxy-groups", "rules", "mode", "dns", "port", "socks-port", "mixed-port", "allow-lan", "log-level", "ipv6", "unified-delay", "tcp-concurrent", "global-client-fingerprint", "profile")
     private val baseKeys = setOf("name", "type", "server", "port")
+    // Fixed public categories, ordered independently of input order. Values are never inspected.
+    private val nodeOptionReasons = linkedMapOf(
+        "token" to RejectionReason.NodeOptionToken,
+        "disable-sni" to RejectionReason.NodeOptionDisableSni,
+        "fingerprint" to RejectionReason.NodeOptionFingerprint,
+        "ports" to RejectionReason.NodeOptionPorts,
+        "hop-interval" to RejectionReason.NodeOptionHopInterval,
+        "udp" to RejectionReason.NodeOptionUdp,
+        "tfo" to RejectionReason.NodeOptionTfo,
+        "ip-version" to RejectionReason.NodeOptionIpVersion,
+        "bbr-profile" to RejectionReason.NodeOptionBbrProfile,
+        "reduce-rtt" to RejectionReason.NodeOptionReduceRtt,
+        "request-timeout" to RejectionReason.NodeOptionRequestTimeout,
+        "heartbeat-interval" to RejectionReason.NodeOptionHeartbeatInterval,
+        "max-udp-relay-packet-size" to RejectionReason.NodeOptionMaxUdpRelayPacketSize,
+        "fast-open" to RejectionReason.NodeOptionFastOpen,
+        "max-open-streams" to RejectionReason.NodeOptionMaxOpenStreams)
     private val tlsKeys = setOf("skip-cert-verify")
+    private val bbrProfiles = setOf("conservative", "standard", "aggressive")
     private val ciphers = setOf("aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305")
     private val fingerprints = setOf("chrome", "firefox", "safari", "ios", "edge")
     private val uuidPattern = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -139,8 +164,8 @@ object SafeProxyConfig {
         val specific = when (type) {
             "ss" -> setOf("cipher", "password", "udp")
             "vless" -> setOf("uuid", "udp", "tls", "network", "servername", "client-fingerprint", "flow", "packet-encoding", "reality-opts") + tlsKeys
-            "hysteria2" -> setOf("password", "sni", "alpn", "up", "down", "obfs", "obfs-password") + tlsKeys
-            "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode") + tlsKeys
+            "hysteria2" -> setOf("password", "sni", "alpn", "up", "down", "obfs", "obfs-password", "bbr-profile") + tlsKeys
+            "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode", "bbr-profile") + tlsKeys
             else -> throw UnsafeProxyConfiguration(RejectionReason.Protocol)
         }
         keys(p, baseKeys + specific)
@@ -183,6 +208,11 @@ object SafeProxyConfig {
             "hysteria2", "tuic" -> {
                 out.put("password", secret(p, "password")).put("sni", dnsName(p, "sni"))
                 tls(p, out); alpn(p, out)
+                if ("bbr-profile" in p) {
+                    val profile = string(p, "bbr-profile")
+                    require(profile in bbrProfiles)
+                    out.put("bbr-profile", profile)
+                }
                 if (type == "hysteria2") {
                     for (key in listOf("up", "down")) if (key in p) {
                         val bandwidth = string(p, key)
@@ -216,7 +246,14 @@ object SafeProxyConfig {
         catch (failure: UnsafeProxyConfiguration) { throw failure }
         catch (_: Exception) { throw UnsafeProxyConfiguration(reason) }
     private fun keys(map: Map<*, *>, allowed: Set<String>, reason: RejectionReason = RejectionReason.NodeOptions) =
-        classified(reason) { require(map.keys.all { it is String && it in allowed }) }
+        classified(if (reason == RejectionReason.NodeOptions) nodeOptionReason(map, allowed) else reason) {
+            require(map.keys.all { it is String && it in allowed })
+        }
+    private fun nodeOptionReason(map: Map<*, *>, allowed: Set<String>): RejectionReason {
+        val extras = map.keys.filter { it !in allowed }
+        if (extras.isEmpty() || extras.any { it !is String || it !in nodeOptionReasons }) return RejectionReason.NodeOptions
+        return nodeOptionReasons.entries.first { it.key in extras }.value
+    }
     private fun string(map: Map<*, *>, key: String, reason: RejectionReason = RejectionReason.ProtocolOptions) =
         map[key] as? String ?: throw UnsafeProxyConfiguration(reason)
     private fun boolean(map: Map<*, *>, key: String, default: Boolean): Boolean =

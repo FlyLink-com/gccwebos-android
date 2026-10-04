@@ -92,7 +92,7 @@ class SafeProxyRejectionReasonTest {
     }
 
     @Test fun extraHysteria2NodeKeyHasFixedNodeOptionsReason() {
-        rejects("NodeOptions", hy2 + "\n    hop-interval: 10")
+        rejects("NodeOptionHopInterval", hy2 + "\n    hop-interval: 10")
     }
 
     @Test fun unknownRootKeyAndInvalidRootOptionsRemainDistinctFromSyntax() {

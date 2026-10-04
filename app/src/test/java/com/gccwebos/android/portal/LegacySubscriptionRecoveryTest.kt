@@ -365,7 +365,7 @@ class LegacySubscriptionRecoveryTest {
         """.trimIndent().prependIndent("  ")
         val result = h.repo.refreshAndImport()
         assertEquals(ImportStatus.UNSUPPORTED_CONFIGURATION, result.status)
-        assertEquals(com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptions, result.rejection)
+        assertEquals(com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionUdp, result.rejection)
         assertEquals(2, result.nodes.size)
         assertTrue(result.nodes[0].supported); assertFalse(result.nodes[1].supported)
         assertSame(old, h.store.value); assertNull(h.profiles.memory.read())

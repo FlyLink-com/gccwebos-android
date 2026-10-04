@@ -1,0 +1,16 @@
+{
+  "servers": [
+    {
+      "host": "192.0.2.10",
+      "port": 443,
+      "name": "Synthetic TUIC BBR conservative",
+      "protocol": "tuic",
+      "uuid": "22222222-2222-4222-8222-222222222222",
+      "password": "synthetic-only",
+      "sni": "fixture.example.invalid",
+      "skipCertVerify": false,
+      "congestionController": "bbr",
+      "bbrProfile": "conservative"
+    }
+  ]
+}

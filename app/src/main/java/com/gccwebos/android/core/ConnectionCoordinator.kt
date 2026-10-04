@@ -50,8 +50,11 @@ data class AccessDecision(val block: BusinessBlock? = null)
  */
 class AuthorizedConfig(val lineId: String, material: ByteArray,
     val validUntil: Instant? = null,
+    val transportLease: ConnectionTransportLease? = null,
     private val activationGuard: (((() -> Boolean)) -> Boolean)? = null) : Closeable {
     private val bytes = material.copyOf()
+    // This identity belongs only to prepared engine bytes. It never identifies a raw subscription.
+    private val preparedDigest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
     private var closed = false
 
     init { require(lineId.isNotBlank()) { "A non-empty authorized line is required" } }
@@ -62,18 +65,25 @@ class AuthorizedConfig(val lineId: String, material: ByteArray,
         return bytes.copyOf()
     }
 
+    @Synchronized
+    internal fun hasPreparedIdentity(candidate: ByteArray): Boolean = !closed &&
+        java.security.MessageDigest.isEqual(preparedDigest,
+            java.security.MessageDigest.getInstance("SHA-256").digest(candidate))
+
     val requiresAtomicActivation: Boolean get() = activationGuard != null
 
     /** Fresh production-shaped material can only cross a synchronous, fenced handoff. */
     fun activate(action: () -> Boolean): Boolean {
         synchronized(this) { check(!closed) { "Configuration is closed" } }
+        if (transportLease?.isCurrent() == false) throw PreparationRejected(PreparationFailure.STALE)
         return activationGuard?.invoke(action) ?: action()
     }
 
-    @Synchronized
     override fun close() {
-        bytes.fill(0)
-        closed = true
+        val release = synchronized(this) {
+            if (closed) false else { bytes.fill(0); preparedDigest.fill(0); closed = true; true }
+        }
+        if (release) transportLease?.close()
     }
 
     override fun toString(): String = "AuthorizedConfig(material=<redacted>)"
@@ -400,7 +410,7 @@ class ConnectionCoordinator(
                 val started = step(Step.TUNNEL) {
                     ownsNewTunnel = true
                     tunnelMayBeRunning = true // start may partially allocate, even when it fails.
-                    if (tunnel is TunnelPreparation && !tunnel.prepareTransport()) {
+                    if (tunnel is TunnelPreparation && !tunnel.prepareTransport(authorized)) {
                         throw Abort(ConnectionState.Failed(Failure.TUNNEL_FAILED))
                     }
                     checkpoint(ticket)

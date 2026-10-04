@@ -48,6 +48,8 @@ class ProductionVpnService : VpnService(), SocketProtector {
     @Volatile private var ticket: ProductionVpnAdmission.Ticket? = null
     @Volatile private var session: NativeVpnSession? = null
     private var networkObserver: ConnectivityManager.NetworkCallback? = null
+    private var pinnedObserver: AndroidPhysicalNetworkMonitor? = null
+    private var transportPin: VpnTransportPin? = null
     private var idleWatchdog: ScheduledFuture<*>? = null
     private var startWatchdog: ScheduledFuture<*>? = null
     private var ownerBinder: IBinder? = null
@@ -67,7 +69,11 @@ class ProductionVpnService : VpnService(), SocketProtector {
 
     override fun onBind(intent: Intent?): IBinder? = when (intent?.action) {
         SERVICE_INTERFACE -> super.onBind(intent)
-        VpnControl.ACTION_BIND -> if (prepareTransport()) control else null
+        VpnControl.ACTION_BIND -> if (isolatedProcess) {
+            if (!prepareTransport(intent)) failTransport()
+            // Even rejected transport binds publish the exact Binder for STOP/death cleanup.
+            control
+        } else null
         else -> null
     }
 
@@ -82,15 +88,38 @@ class ProductionVpnService : VpnService(), SocketProtector {
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
     }
 
-    private fun prepareTransport(): Boolean {
-        if (!isolatedProcess || stopping.get() || prepare(this) != null) { trace("transport-precondition-rejected"); return false }
-        if (ready) return true
+    private fun prepareTransport(intent: Intent): Boolean {
+        if (!isolatedProcess || stopping.get() || failed.get() || prepare(this) != null) { trace("transport-precondition-rejected"); return false }
         try {
+            val hasHandle = intent.hasExtra(VpnControl.EXTRA_NETWORK_HANDLE)
+            val hasDeadline = intent.hasExtra(VpnControl.EXTRA_LEASE_DEADLINE)
+            if (hasHandle != hasDeadline) return false
+            val pin = if (hasHandle) VpnTransportPin(intent.getLongExtra(VpnControl.EXTRA_NETWORK_HANDLE, 0),
+                intent.getLongExtra(VpnControl.EXTRA_LEASE_DEADLINE, 0)) else VpnTransportPin(0, 0)
+            if ((hasHandle && !pin.leased) || !pin.permitsStart(android.os.SystemClock.elapsedRealtime())) return false
+            if (!hasHandle && BuildConfig.CONNECTION_ENDPOINT_HOSTNAME && !BuildConfig.CONNECTION_SYNTHETIC_ACCEPTANCE) return false
+            if (ready) return transportPin?.let {
+                it.networkHandle == pin.networkHandle && it.validUntilElapsedMillis == pin.validUntilElapsedMillis
+            } == true
             val connectivity = getSystemService(ConnectivityManager::class.java)
-            val selected = connectivity.activeNetwork?.takeIf { physical(connectivity, it) }
-                ?: connectivity.allNetworks.firstOrNull { physical(connectivity, it) }
-                ?: run { trace("transport-no-physical-network"); return false }
+            val selected = if (pin.leased) {
+                if (Build.VERSION.SDK_INT < 30) return false
+                Network.fromNetworkHandle(pin.networkHandle).takeIf {
+                    physical(connectivity, it) && AndroidPhysicalNetworkMonitor.selectionCurrent(connectivity, it)
+                }
+            } else {
+                connectivity.activeNetwork?.takeIf { physical(connectivity, it) }
+                    ?: connectivity.allNetworks.firstOrNull { physical(connectivity, it) }
+                    ?: run { trace("transport-no-physical-network"); return false }
+            }
+            if (selected == null) return false
             underlying = selected
+            transportPin = pin
+            if (pin.leased) {
+                val observer = AndroidPhysicalNetworkMonitor(connectivity, selected) { failTransport() }
+                pinnedObserver = observer
+                if (!observer.start() || !observer.readbackCurrent()) return false
+            } else {
             val observer = object : ConnectivityManager.NetworkCallback() {
                 override fun onLost(network: Network) { if (network == selected) stopSession() }
                 override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
@@ -102,11 +131,25 @@ class ProductionVpnService : VpnService(), SocketProtector {
             connectivity.registerNetworkCallback(NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), observer)
+            }
             foreground()
-            ready = !stopping.get()
+            ready = !stopping.get() && !failed.get()
             trace("transport-ready")
             return ready
-        } catch (failure: Exception) { trace("transport-failed-${failure.javaClass.simpleName}"); stopSession(true); return false }
+        } catch (failure: Exception) { trace("transport-failed-${failure.javaClass.simpleName}"); return false }
+    }
+
+    private fun failTransport() = synchronized(admissionLock) {
+        if (ticket != null) { stopSession(true); return }
+        ready = false
+        failed.set(true)
+        state.set(VpnControl.FAILED)
+        pinnedObserver?.close()
+        pinnedObserver = null
+        networkObserver?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
+        networkObserver = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        // Preserve the unpublished exact Binder until STOP or the existing idle watchdog.
     }
 
     private val control = object : Binder() {
@@ -133,8 +176,12 @@ class ProductionVpnService : VpnService(), SocketProtector {
                                 data.setDataPosition(arrayPosition)
                                 config = ByteArray(size)
                                 data.readByteArray(requireNotNull(config))
-                                data.dataAvail() == 0 && copyStart(owner, generation, expiry,
-                                    admissionDeadline, requireNotNull(config))
+                                val extra = data.dataAvail()
+                                val hasPin = extra == 16
+                                val handle = if (hasPin) data.readLong() else 0L
+                                val deadline = if (hasPin) data.readLong() else 0L
+                                (extra == 0 || hasPin) && data.dataAvail() == 0 && copyStart(owner, generation, expiry,
+                                    admissionDeadline, requireNotNull(config), hasPin, handle, deadline)
                             }
                         }
                     } catch (failure: Exception) { trace("copy-parse-failed-${failure.javaClass.simpleName}"); false } finally { config?.fill(0) }
@@ -156,9 +203,11 @@ class ProductionVpnService : VpnService(), SocketProtector {
     }
 
     private fun copyStart(owner: IBinder, generation: Long, expiry: Long,
-        admissionDeadline: Long, config: ByteArray): Boolean =
+        admissionDeadline: Long, config: ByteArray, hasPin: Boolean, handle: Long, deadline: Long): Boolean =
         synchronized(admissionLock) {
-            if (!ready || stopping.get() || ticket != null || !owner.isBinderAlive) { trace("copy-state-rejected"); return false }
+            if (!ready || failed.get() || stopping.get() || ticket != null || !owner.isBinderAlive) { trace("copy-state-rejected"); return false }
+            if (transportPin?.permitsCopy(hasPin, handle, deadline, android.os.SystemClock.elapsedRealtime()) != true ||
+                !networkCurrent()) { stopSession(); return false }
             if (!ProductionVpnAdmission.validAdmissionDeadline(admissionDeadline,
                     android.os.SystemClock.elapsedRealtime())) {
                 stopSession(); return false
@@ -204,13 +253,24 @@ class ProductionVpnService : VpnService(), SocketProtector {
     private fun active(current: ProductionVpnAdmission.Ticket): Boolean = !stopping.get() &&
         admission.active(current, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
 
+    private fun networkCurrent(): Boolean = underlying?.let {
+        if (transportPin?.leased == true) pinnedObserver?.readbackCurrent() == true
+        else physical(getSystemService(ConnectivityManager::class.java), it)
+    } == true
+    private fun startNetworkCurrent(): Boolean = networkCurrent() &&
+        transportPin?.permitsStart(android.os.SystemClock.elapsedRealtime()) == true
+
     private fun startEngine(current: ProductionVpnAdmission.Ticket) {
+        val observer = pinnedObserver
+        if (observer != null && !observer.awaitInitialBest(minOf(current.admissionDeadlineElapsedMillis,
+                transportPin?.validUntilElapsedMillis ?: 0))) { stopSession(); return }
         val config = admission.take(current, System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
             ?: run { trace("engine-material-rejected"); stopSession(); return }
         try {
-            if (!active(current) || !MihomoNative.load()) { trace("engine-library-rejected"); stopSession(true); return }
+            if (!active(current) || !startNetworkCurrent() || !MihomoNative.load()) { trace("engine-library-rejected"); stopSession(true); return }
             val next = NativeVpnSession(object : NativeEngine {
                 override fun start(config: ByteArray, tunFd: Int) {
+                    check(active(current) && startNetworkCurrent())
                     val home = java.io.File(noBackupFilesDir, "native-vpn").apply { mkdirs() }
                     check(home.isDirectory)
                     val error = MihomoNative.nativeStart(String(config, Charsets.UTF_8), home.absolutePath,
@@ -219,7 +279,7 @@ class ProductionVpnService : VpnService(), SocketProtector {
                 }
                 override fun stop() { MihomoNative.nativeStop() }
             }, {
-                check(active(current))
+                check(active(current) && startNetworkCurrent())
                 val network = requireNotNull(underlying)
                 check(physical(getSystemService(ConnectivityManager::class.java), network))
                 val builder = Builder().setSession("GCC VPN").setMtu(1500)
@@ -258,10 +318,10 @@ class ProductionVpnService : VpnService(), SocketProtector {
         if (fd < 0 || !active(current)) { stopSession(); return false }
         val network = underlying ?: return false
         return try {
-            if (!physical(getSystemService(ConnectivityManager::class.java), network) || !protect(fd)) return false
+            if (!networkCurrent() || !protect(fd)) { stopSession(); return false }
             ParcelFileDescriptor.fromFd(fd).use { network.bindSocket(it.fileDescriptor) }
-            active(current).also { if (!it) stopSession() }
-        } catch (_: Exception) { false }
+            (active(current) && networkCurrent()).also { if (!it) stopSession() }
+        } catch (_: Exception) { stopSession(); false }
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -283,6 +343,8 @@ class ProductionVpnService : VpnService(), SocketProtector {
             runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(observer) }
         }
         networkObserver = null
+        pinnedObserver?.close()
+        pinnedObserver = null
         commands.execute {
             try { session?.stop() } finally {
                 main.post {

@@ -28,6 +28,8 @@ android {
     buildTypes {
         debug {
             val candidate = providers.gradleProperty("connectionCandidate").orNull == "true"
+            val endpointHostname = candidate && providers.gradleProperty("connectionEndpointHostname").orNull != "false"
+            buildConfigField("boolean", "CONNECTION_ENDPOINT_HOSTNAME", endpointHostname.toString())
             val synthetic = providers.gradleProperty("connectionSyntheticAcceptance").orNull == "true"
             require(!synthetic || candidate) { "Synthetic connection acceptance requires a separate candidate package" }
             buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", synthetic.toString())
@@ -42,6 +44,7 @@ android {
             manifestPlaceholders["nativeVpnLabEnabled"] = nativeLab.toString()
         }
         release {
+            buildConfigField("boolean", "CONNECTION_ENDPOINT_HOSTNAME", "false")
             buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", "false")
             buildConfigField("boolean", "NATIVE_VPN_LAB", "false")
             buildConfigField("boolean", "NATIVE_TUN_ACCEPTANCE", "false")

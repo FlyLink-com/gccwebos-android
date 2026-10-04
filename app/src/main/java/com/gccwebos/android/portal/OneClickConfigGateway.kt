@@ -7,19 +7,20 @@ import java.io.Closeable
 
 /** Local capability admission; single-choice convenience never authorizes cached material. */
 class OneClickConfigGateway(private val manager: LocalSubscriptionManager,
-    private val files: PreparedConfigStore) : LocalConfigGateway {
+    private val files: PreparedConfigStore,
+    private val addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer) : LocalConfigGateway {
     override suspend fun prepare(intent: SelectionIntent): ConfigPreparation {
-        if (intent is SelectionIntent.Selected) return manager.prepare(intent, files)
+        if (intent is SelectionIntent.Selected) return manager.prepare(intent, files, addressPreparer)
         val before = manager.nodeSelectionSnapshot()
-        before.selected?.let { return manager.prepare(SelectionIntent.Selected(it), files) }
-        val fresh = manager.prepare(SelectionIntent.Choose, files)
+        before.selected?.let { return manager.prepare(SelectionIntent.Selected(it), files, addressPreparer) }
+        val fresh = manager.prepare(SelectionIntent.Choose, files, addressPreparer)
         if (fresh !is ConfigPreparation.SelectionRequired) return fresh
         val sole = fresh.choices.singleOrNull() ?: return fresh
         // A changed registry needs the user's selection, including a changed single-node artifact.
         if (before.choices.isNotEmpty() && before.choices.none { it.selection === sole.selection }) return fresh
-        if (!manager.selectNode(sole.selection)) return manager.prepare(SelectionIntent.Choose, files)
+        if (!manager.selectNode(sole.selection)) return manager.prepare(SelectionIntent.Choose, files, addressPreparer)
         // Selection is UI intent only. The second fresh read still owns admission and can reject it.
-        return manager.prepare(SelectionIntent.Selected(sole.selection), files)
+        return manager.prepare(SelectionIntent.Selected(sole.selection), files, addressPreparer)
     }
     override fun invalidatePending() = manager.invalidatePending()
     override fun clearPreparedMaterial() = files.clear()

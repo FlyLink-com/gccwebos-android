@@ -22,6 +22,7 @@ import com.gccwebos.android.core.LocalConfigGateway
 import com.gccwebos.android.core.SelectionIntent
 import com.gccwebos.android.portal.AtomicPreparedConfigStore
 import com.gccwebos.android.portal.OneClickConfigGateway
+import com.gccwebos.android.portal.LiteralConfigAddressPreparer
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.PortalFailure
 import java.io.File
@@ -67,7 +68,9 @@ internal class ConnectionOwnerService : Service() {
         check(directory.isDirectory || directory.mkdirs())
         val files = AtomicPreparedConfigStore(directory)
         tunnel = AndroidVpnTunnel(applicationContext, binder, connectionNetworkProbe(), files::clear)
-        val gateway = OneClickConfigGateway(repository.localSubscriptions, files)
+        val addresses = if (BuildConfig.CONNECTION_ENDPOINT_HOSTNAME) AndroidConfigAddressPreparer(applicationContext)
+            else LiteralConfigAddressPreparer
+        val gateway = OneClickConfigGateway(repository.localSubscriptions, files, addresses)
         val ownedGateway = object : LocalConfigGateway {
             override suspend fun prepare(intent: SelectionIntent): ConfigPreparation {
                 val epoch = synchronized(publication) { commandEpoch }

@@ -131,7 +131,8 @@ class LegacySubscriptionRecoveryTest {
         }
     }
 
-    private inner class Harness(val store: Store = Store(mutableListOf()), private val expectedUrl: String = nextUrl) {
+    private inner class Harness(val store: Store = Store(mutableListOf()), private val expectedUrl: String = nextUrl,
+        allowHostnamePreparation: Boolean = false) {
         val events = store.events
         val wire = Wire(events, store).apply { url = expectedUrl }
         var expectedOriginal: DeliveryRecord? = store.value
@@ -159,7 +160,7 @@ class LegacySubscriptionRecoveryTest {
             downloadHook()
             downloadFailure?.let { throw PortalFailure(it) }
             content.toByteArray().also { lastBytes = it }
-        }, profiles = profiles)
+        }, profiles = profiles, allowHostnamePreparation = allowHostnamePreparation)
         suspend fun login(token: String = "new_fixture_session", owner: String = account) {
             wire.loginReplies += WireResponse(200, """{"session":{"sessionRef":"$token","accountId":"$owner","issuedAt":"2026-09-30T00:00:00.000Z","expiresAt":"2026-09-30T00:30:00.000Z"}}""")
             repo.login(owner, "synthetic-password", HumanChallenge("challenge_fixture", "1 + 2"), "3")
@@ -199,6 +200,45 @@ class LegacySubscriptionRecoveryTest {
     private fun assertBefore(events: List<String>, first: String, second: String) {
         assertTrue("Missing $first", events.indexOf(first) >= 0)
         assertTrue("$first must precede $second", events.indexOf(first) < events.indexOf(second))
+    }
+
+    @Test fun hostnameImportPreservesOriginalProfileAndNeverCreatesCachedEngineAuthority() = runTest {
+        val h = Harness(allowHostnamePreparation = true)
+        h.content = yaml.replace("192.0.2.31", "synthetic-endpoint.invalid")
+        h.login()
+        val result = h.repo.refreshAndImport()
+        assertEquals(ImportStatus.IMPORTED, result.status)
+        assertTrue(result.nodes.single().supported)
+        h.assertImported()
+        assertNull(h.repo.copyImportedConfig())
+        val cached = requireNotNull(h.profiles.read())
+        try {
+            val bytes = cached.copyBytes()
+            try { assertTrue("Original synthetic artifact must be preserved", bytes.contentEquals(h.content.toByteArray())) }
+            finally { bytes.fill(0) }
+        } finally { cached.close() }
+    }
+
+    @Test fun disablingHostnamePreparationRetainsStrictEndpointRejection() = runTest {
+        val h = Harness()
+        h.content = yaml.replace("192.0.2.31", "synthetic-endpoint.invalid")
+        h.login()
+        val result = h.repo.refreshAndImport()
+        assertEquals(ImportStatus.UNSUPPORTED_CONFIGURATION, result.status)
+        assertEquals(com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.EndpointHostname, result.rejection)
+        assertFalse(h.events.contains("profile-save"))
+        assertNull(h.repo.copyImportedConfig())
+    }
+
+    @Test fun hostnameImportStillRejectsOtherUnsupportedNodeOptions() = runTest {
+        val h = Harness(allowHostnamePreparation = true)
+        h.content = yaml.replace("192.0.2.31", "synthetic-endpoint.invalid") + "\n    unknown-option: true"
+        h.login()
+        val result = h.repo.refreshAndImport()
+        assertEquals(ImportStatus.UNSUPPORTED_CONFIGURATION, result.status)
+        assertEquals(com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptions, result.rejection)
+        assertFalse(h.events.contains("profile-save"))
+        assertNull(h.repo.copyImportedConfig())
     }
 
     @Test fun backendYamlCapabilityCompletesImportWithoutResidualRecoveryJournal() = runTest {

@@ -18,7 +18,7 @@ SRC=(
   "$BASE"/commerce/{CommerceJson,CommerceModels,CommerceRepository}.kt
   "$BASE"/core/{ConnectionCoordinator,LocalConnectionContract}.kt
   "$BASE"/design/{ResourceGuidance,ResourcePresentation}.kt
-  "$BASE"/portal/{DeliveryPersistence,FreshConnectionConfig,LocalSubscription,PortalJson,PortalModels,PortalRepository,PortalTransport,ReferralModels,RegistrationGateway,RegistrationModels,SessionPersistence,SubscriptionImport}.kt
+  "$BASE"/portal/{AccountUsageModels,ConfigAddressPreparer,DeliveryPersistence,FreshConnectionConfig,LegacyRecoveryJournal,LocalSubscription,PortalJson,PortalModels,PortalRepository,PortalTransport,ReferralModels,RegistrationGateway,RegistrationModels,SessionPersistence,SubscriptionImport}.kt
   "$BASE"/update/{ReleaseManifest,UpdateController,UpdateRepository}.kt
   "$BASE"/vpn/{LabPermissionAttempt,MihomoNative,NativeVpnSession,SafeProxyConfig}.kt
 )

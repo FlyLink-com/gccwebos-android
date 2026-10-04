@@ -28,8 +28,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private val now: () -> Instant = Instant::now,
     private val subscription: SubscriptionSource = SubscriptionTransport(policy),
     private val sessions: SessionStore = MemorySessionStore(),
-    profiles: LocalProfileStore = MemoryLocalProfileStore()) {
-    val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now)
+    profiles: LocalProfileStore = MemoryLocalProfileStore(),
+    private val allowHostnamePreparation: Boolean = false) {
+    val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now,
+        allowHostnamePreparation = allowHostnamePreparation)
     private val mutex = Mutex()
     private val generation = AtomicLong()
     private val activationLock = Any()
@@ -297,20 +299,25 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 // Offline compatibility preview only: list order is not a stable line ID or
                 // server recommendation. Production has no gateway/service consuming this profile.
                 // Every node is validated even though only index 0 is retained for this preview.
-                val nodes = try { SafeProxyConfig.inspect(raw) }
+                val nodes = try {
+                    if (allowHostnamePreparation && onPrepared == null) SafeProxyConfig.validateForPreparation(raw)
+                    else SafeProxyConfig.inspect(raw)
+                }
                     catch (failure: UnsafeProxyConfiguration) {
                         return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, rejection = failure.reason)
                     }
                 val projected = try { SafeProxyConfig.project(raw, selected.index) }
                     catch (failure: UnsafeProxyConfiguration) {
-                        return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, nodes, failure.reason)
+                        if (allowHostnamePreparation && onPrepared == null &&
+                            failure.reason == SafeProxyConfig.RejectionReason.EndpointHostname) null
+                        else return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, nodes, failure.reason)
                     }
                 try {
                     val context = currentCoroutineContext()
                     checkGeneration(epoch); activeSession(); context.ensureActive()
                     synchronized(activationLock) {
                         checkGeneration(epoch)
-                        if (onPrepared != null) onPrepared(resource, selected, projected, epoch, configurationGeneration)
+                        if (onPrepared != null) onPrepared(resource, selected, requireNotNull(projected), epoch, configurationGeneration)
                         else {
                             checkImportObservation(overview, epoch, clearVersion)
                             if (recovery?.journal != null) {
@@ -318,12 +325,15 @@ class PortalRepository(private val transport: PortalTransport, private val store
                                     context.ensureActive(); checkImportObservation(overview, epoch, clearVersion)
                                 }
                             } else localSubscriptions.remember(raw, requireNotNull(record.url), resource.validUntil)
-                            imported = AuthorizedConfig(selected.lineId, projected)
+                            invalidateImport()
+                            // Hostname profiles remain original artifacts. Resolution belongs only
+                            // to the fresh physical-network connection attempt, never this preview.
+                            imported = projected?.let { AuthorizedConfig(selected.lineId, it) }
                             importedUntil = resource.validUntil
                             importedGeneration = epoch
                         }
                     }
-                } finally { projected.fill(0) }
+                } finally { projected?.fill(0) }
                 ImportSnapshot(resource, ImportStatus.IMPORTED, nodes)
             } finally { raw.fill(0) }
         }

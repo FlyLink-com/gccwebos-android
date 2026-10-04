@@ -2,6 +2,7 @@ package com.gccwebos.android.portal
 
 import android.content.Context
 import android.os.SystemClock
+import com.gccwebos.android.BuildConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -69,7 +70,9 @@ import kotlinx.coroutines.flow.first
 /** Source-confirmed origins; constructing a client does not contact production. */
 internal fun productionRepository(context: Context): PortalRepository {
     val policy = OriginPolicy("https://portal.gccwebos.com", setOf("https://sub.gccwebos.com"))
-    return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime, sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context))
+    return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime,
+        sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context),
+        allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME)
 }
 
 /** Process-local ownership only; identity contains no account label or bearer data. */

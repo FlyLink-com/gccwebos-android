@@ -37,15 +37,24 @@ object SafeProxyConfig {
 
     /** Display-only metadata; names/indexes are never stable authorization or connection IDs. */
     data class NodeSummary(val index: Int, val name: String, val protocol: String, val supported: Boolean)
+    /** Complete static validation; a hostname still needs a separately authorized physical-network resolution. */
+    fun validateForPreparation(yaml: ByteArray): List<NodeSummary> = classified(RejectionReason.InputSyntax) {
+        preparation(yaml).summaries
+    }
+    /** Returns the original endpoint only after every node has passed preparation validation. */
+    fun selectedEndpoint(yaml: ByteArray, selectedIndex: Int): String = classified(RejectionReason.InputSyntax) {
+        string(selected(preparation(yaml).proxies, selectedIndex), "server", RejectionReason.Endpoint)
+    }
+    /** Only the selected endpoint is replaced; this validates the address, not its resolution or lease. */
+    fun projectResolved(yaml: ByteArray, selectedIndex: Int, ipv4: String): ByteArray = classified(RejectionReason.InputSyntax) {
+        val proxy = selected(preparation(yaml).proxies, selectedIndex)
+        this.ipv4(ipv4)
+        projection(node(proxy, allowHostname = true).put("server", ipv4))
+    }
     fun inspect(yaml: ByteArray): List<NodeSummary> = try {
         input(yaml).mapIndexed { index, p ->
-            val name = string(p, "name", RejectionReason.NodeOptions)
-            classified(RejectionReason.NodeOptions) {
-                require(name.isNotBlank() && name.toByteArray().size <= 128 && name.none { it.isISOControl() })
-            }
-            val protocol = string(p, "type", RejectionReason.Protocol)
-            classified(RejectionReason.Protocol) { require(protocol.matches(Regex("[a-z0-9-]{1,24}"))) }
-            NodeSummary(index, name, protocol, try { node(p); true } catch (_: Exception) { false })
+            val metadata = summary(index, p)
+            metadata.copy(supported = try { node(p); true } catch (_: Exception) { false })
         }
     } catch (failure: UnsafeProxyConfiguration) { throw failure }
       catch (_: Exception) { throw UnsafeProxyConfiguration() }
@@ -54,11 +63,36 @@ object SafeProxyConfig {
         classified(RejectionReason.Selection) { require(selectedIndex in proxies.indices) }
         // Validate ALL nodes. An unsupported mixed node must never disappear silently.
         val safe = proxies.map(::node)
-        JSONObject().put("schemaVersion", SCHEMA_VERSION).put("proxies", JSONArray().put(safe[selectedIndex]))
-            .put("rules", JSONArray().put("MATCH,GCC_SELECTED_PROXY"))
-            .toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
+        projection(safe[selectedIndex])
     } catch (failure: UnsafeProxyConfiguration) { throw failure }
       catch (_: Exception) { throw UnsafeProxyConfiguration() }
+    private class Preparation(val proxies: List<Map<*, *>>, val summaries: List<NodeSummary>)
+    private fun preparation(yaml: ByteArray): Preparation {
+        val proxies = input(yaml)
+        val summaries = proxies.mapIndexed { index, proxy ->
+            val metadata = summary(index, proxy)
+            node(proxy, allowHostname = true) // Every node is validated; no display-only fallback.
+            metadata
+        }
+        return Preparation(proxies, summaries)
+    }
+    private fun selected(proxies: List<Map<*, *>>, index: Int): Map<*, *> = classified(RejectionReason.Selection) {
+        require(index in proxies.indices)
+        proxies[index]
+    }
+    private fun summary(index: Int, p: Map<*, *>): NodeSummary {
+        val name = string(p, "name", RejectionReason.NodeOptions)
+        classified(RejectionReason.NodeOptions) {
+            require(name.isNotBlank() && name.toByteArray().size <= 128 && name.none { it.isISOControl() })
+        }
+        val protocol = string(p, "type", RejectionReason.Protocol)
+        classified(RejectionReason.Protocol) { require(protocol.matches(Regex("[a-z0-9-]{1,24}"))) }
+        return NodeSummary(index, name, protocol, true)
+    }
+    private fun projection(proxy: JSONObject): ByteArray =
+        JSONObject().put("schemaVersion", SCHEMA_VERSION).put("proxies", JSONArray().put(proxy))
+            .put("rules", JSONArray().put("MATCH,GCC_SELECTED_PROXY"))
+            .toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
     private fun input(yaml: ByteArray): List<Map<*, *>> {
         require(yaml.size in 1..MAX_BYTES)
         val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
@@ -99,7 +133,8 @@ object SafeProxyConfig {
         return proxies.map { it as? Map<*, *> ?: throw UnsafeProxyConfiguration() }
     }
 
-    private fun node(p: Map<*, *>): JSONObject = classified(RejectionReason.ProtocolOptions) {
+    private fun node(p: Map<*, *>): JSONObject = node(p, allowHostname = false)
+    private fun node(p: Map<*, *>, allowHostname: Boolean): JSONObject = classified(RejectionReason.ProtocolOptions) {
         val type = string(p, "type", RejectionReason.Protocol)
         val specific = when (type) {
             "ss" -> setOf("cipher", "password", "udp")
@@ -111,7 +146,8 @@ object SafeProxyConfig {
         keys(p, baseKeys + specific)
         val name = string(p, "name", RejectionReason.NodeOptions)
         classified(RejectionReason.NodeOptions) { require(name.isNotBlank() && name.toByteArray().size <= 128 && '\u0000' !in name) }
-        val server = string(p, "server", RejectionReason.Endpoint); ipv4(server)
+        val server = string(p, "server", RejectionReason.Endpoint)
+        if (!allowHostname || !endpointHostname(server)) ipv4(server)
         val port = p["port"]; classified(RejectionReason.Port) { require(port is Int && port in 1..65535) }
         val out = JSONObject().put("name", "GCC_SELECTED_PROXY").put("type", type).put("server", server).put("port", port)
         when (type) {

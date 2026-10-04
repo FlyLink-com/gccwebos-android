@@ -109,7 +109,8 @@ class LocalSubscriptionAuthority {
  */
 class LocalSubscriptionManager(private val delivery: DeliveryStore, private val profiles: LocalProfileStore,
     private val source: SubscriptionSource, private val policy: OriginPolicy, private val now: () -> Instant,
-    private val authority: LocalSubscriptionAuthority = LocalSubscriptionAuthority.process) {
+    private val authority: LocalSubscriptionAuthority = LocalSubscriptionAuthority.process,
+    private val allowHostnamePreparation: Boolean = false) {
     private val mutex get() = authority.mutex
     private val lock get() = authority.lock
     private var revision: Long
@@ -165,6 +166,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     fun selectNode(selection: ConnectionSelection): Boolean = synchronized(lock) {
         val current = nodeSelectionSnapshot()
         if (current.status != LocalSubscriptionStatus.READY || current.choices.none { it.selection === selection }) return@synchronized false
+        if (authority.selected !== selection) revision++
         authority.selected = selection
         true
     }
@@ -219,9 +221,11 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (until != null && until <= now()) throw PreparationRejected(PreparationFailure.EXPIRED)
     }
     private fun describe(raw: ByteArray, until: Instant?): LocalSubscriptionSnapshot {
-        val nodes = SafeProxyConfig.inspect(raw)
-        val projected = SafeProxyConfig.project(raw, 0)
-        projected.fill(0)
+        val nodes = if (allowHostnamePreparation) SafeProxyConfig.validateForPreparation(raw) else {
+            val inspected = SafeProxyConfig.inspect(raw)
+            SafeProxyConfig.project(raw, 0).fill(0)
+            inspected
+        }
         return LocalSubscriptionSnapshot(if (until != null && until <= now()) LocalSubscriptionStatus.EXPIRED else LocalSubscriptionStatus.READY,
             true, true, nodes, until)
     }
@@ -392,35 +396,32 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         } catch (failure: Throwable) { prepared?.close(); throw failure }
     }
     /** No cached activation, no implicit first entry, and no cross-revision name matching. */
-    suspend fun prepare(intent: SelectionIntent, files: PreparedConfigStore): ConfigPreparation {
+    suspend fun prepare(intent: SelectionIntent, files: PreparedConfigStore,
+        addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer): ConfigPreparation {
         var result: ConfigPreparation? = null
         var material: AuthorizedConfig? = null
+        var rawCopy: ByteArray? = null
+        var address: PreparedAddressConfig? = null
+        var leaseTransferred = false
+        var binding = ""
+        var epoch = -1L
+        var index = -1
+        var until: Instant? = null
+        var selectionAtPreparation: ConnectionSelection? = null
         try {
             mutex.withLock {
-                val snapshot = refreshLocked { fresh, raw, binding, epoch ->
+                val snapshot = refreshLocked { fresh, raw, freshBinding, freshEpoch ->
                     if (fresh.status != LocalSubscriptionStatus.READY) return@refreshLocked
                     val selected = (intent as? SelectionIntent.Selected)?.selection
-                    val index = authority.choices.indexOfFirst { it.selection === selected }
+                    index = authority.choices.indexOfFirst { it.selection === selected }
                     if (index < 0) {
                         result = ConfigPreparation.SelectionRequired(authority.choices.toList()); return@refreshLocked
                     }
-                    val bytes = SafeProxyConfig.project(raw, index)
-                    try {
-                        var consumed = false
-                        material = AuthorizedConfig("local-selection", bytes, fresh.validUntil) { action -> synchronized(lock) {
-                            check(!consumed); consumed = true
-                            requireCurrent(epoch, binding, fresh.validUntil)
-                            val copy = requireNotNull(material).copyMaterial()
-                            try { files.replace(copy) } catch (_: Exception) {
-                                throw PreparationRejected(PreparationFailure.STORAGE)
-                            } finally { copy.fill(0) }
-                            requireCurrent(epoch, binding, fresh.validUntil)
-                            action()
-                        } }
-                        result = ConfigPreparation.Ready(requireNotNull(material))
-                    } finally { bytes.fill(0) }
+                    binding = freshBinding; epoch = freshEpoch; until = fresh.validUntil
+                    selectionAtPreparation = authority.selected
+                    rawCopy = raw.copyOf()
                 }
-                if (result == null) result = ConfigPreparation.Unavailable(when (snapshot.status) {
+                if (result == null && rawCopy == null) result = ConfigPreparation.Unavailable(when (snapshot.status) {
                     LocalSubscriptionStatus.MISSING -> PreparationFailure.MISSING
                     LocalSubscriptionStatus.EXPIRED -> PreparationFailure.EXPIRED
                     LocalSubscriptionStatus.INVALID_LINK -> PreparationFailure.INVALID_LINK
@@ -429,9 +430,47 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     else -> PreparationFailure.NETWORK
                 })
             }
+            // Network waits hold neither the subscription monitor nor its operation mutex.
+            // A refresh, unlink, changed selection or cancellation can revoke this epoch immediately.
+            rawCopy?.let { raw ->
+                address = addressPreparer.prepare(raw, index)
+                currentCoroutineContext().ensureActive()
+                val prepared = requireNotNull(address)
+                fun current() {
+                    requireCurrent(epoch, binding, until)
+                    if (authority.selected !== selectionAtPreparation || prepared.lease?.isCurrent() == false)
+                        throw PreparationRejected(PreparationFailure.STALE)
+                }
+                synchronized(lock) { current() }
+                var consumed = false
+                material = AuthorizedConfig("local-selection", prepared.bytes, until, prepared.lease) { action -> synchronized(lock) {
+                    if (consumed) throw PreparationRejected(PreparationFailure.STALE)
+                    consumed = true
+                    current()
+                    val copy = requireNotNull(material).copyMaterial()
+                    try {
+                        if (!requireNotNull(material).hasPreparedIdentity(copy)) throw PreparationRejected(PreparationFailure.STALE)
+                        files.replace(copy)
+                    } catch (failure: PreparationRejected) { throw failure } catch (_: Exception) {
+                        throw PreparationRejected(PreparationFailure.STORAGE)
+                    } finally { copy.fill(0) }
+                    try { current() } catch (failure: Throwable) {
+                        try { files.clear() } catch (_: Exception) { throw PreparationRejected(PreparationFailure.STORAGE) }
+                        throw failure
+                    }
+                    action()
+                } }
+                leaseTransferred = true
+                result = ConfigPreparation.Ready(requireNotNull(material))
+            }
             currentCoroutineContext().ensureActive()
             return requireNotNull(result)
         } catch (failure: Throwable) { material?.close(); throw failure }
+        finally {
+            rawCopy?.fill(0)
+            address?.bytes?.fill(0)
+            if (!leaseTransferred) address?.lease?.close()
+        }
     }
     private suspend fun refreshLocked(
         prepared: ((LocalSubscriptionSnapshot, ByteArray, String, Long) -> Unit)?): LocalSubscriptionSnapshot {

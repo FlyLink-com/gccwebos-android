@@ -153,6 +153,8 @@ class ConnectionCoordinator(
     private var sequence = 0L
     private var current: Ticket? = null
     private var closed = false
+    private var retirement: Ticket? = null
+    @Volatile private var retirementAdmissionFailed = false
     private var lastRequestedLine: String? = null
     private var lastSelection: SelectionIntent = SelectionIntent.Choose
     // Only accessed while holding lifecycle. True is deliberately retained on cleanup failure.
@@ -168,8 +170,13 @@ class ConnectionCoordinator(
         require(local != null || (account != null && entitlement != null && config != null))
         require(local == null || tunnel is LifecycleTunnel)
         owner.invokeOnCompletion {
-            local?.invalidatePending()
-            if (!tunnelMayBeRunning && !preparedMaterialMayExist) clearObservation?.close()
+            try { local?.invalidatePending() }
+            catch (_: Exception) {
+                // Completion must not interrupt cancel/join and skip the actual cleanup below.
+                retirementAdmissionFailed = true
+                mutableState.value = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+            }
+            if (!retirementAdmissionFailed && !tunnelMayBeRunning && !preparedMaterialMayExist) clearObservation?.close()
         }
     }
 
@@ -228,19 +235,25 @@ class ConnectionCoordinator(
 
     suspend fun disconnect(): ConnectionState = await(submit(null, Operation.CONNECT, disconnect = true))
 
-    /** Call from the lifecycle owner. Safe to repeat. No new commands are admitted afterwards. */
-    suspend fun close(): ConnectionState {
-        val ticket = synchronized(commandLock) {
-            if (closed || !owner.isActive) {
-                closed = true
-                null
-            } else {
-                // submit's monitor is re-entrant. Reserve the final stop before closing admission.
-                val next = submit(null, Operation.CONNECT, disconnect = true)
-                closed = true
-                next
-            }
+    /** Reserve the existing final stop synchronously before an Android lifecycle callback returns.
+     * This closes command admission immediately; it does not release the cleanup/authority lease. */
+    fun beginClose() = synchronized(commandLock) {
+        if (!closed) {
+            try {
+                if (owner.isActive) retirement = submit(null, Operation.CONNECT, disconnect = true)
+            } catch (_: Exception) {
+                retirementAdmissionFailed = true
+                owner.cancel() // Fence any old worker even when final-stop submission failed.
+                mutableState.value = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+            } finally { closed = true }
         }
+        Unit
+    }
+
+    /** Call from the lifecycle owner. Safe to repeat; every caller awaits the same final stop. */
+    suspend fun close(): ConnectionState {
+        beginClose()
+        val ticket = synchronized(commandLock) { retirement }
         return withContext(NonCancellable) {
             if (ticket != null) ticket.result.await()
             owner.cancel()
@@ -255,7 +268,8 @@ class ConnectionCoordinator(
                         else ConnectionState.Failed(Failure.CLEANUP_FAILED)
                 }
             }
-            if (!tunnelMayBeRunning && !preparedMaterialMayExist) clearObservation?.close()
+            if (retirementAdmissionFailed) mutableState.value = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+            if (!retirementAdmissionFailed && !tunnelMayBeRunning && !preparedMaterialMayExist) clearObservation?.close()
             state.value
         }
     }

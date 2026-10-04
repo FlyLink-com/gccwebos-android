@@ -1,0 +1,834 @@
+{
+  "risk": "B",
+  "applicationSourceCommit": "5df313a9b581e3f1c195acb53c0d6513167f59e9",
+  "jvmBatchesNotAdditive": {
+    "initialUiAndGateway": {
+      "suites": 17,
+      "tests": 206,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "commerceAndSessionRegression": {
+      "suites": 10,
+      "tests": 88,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "finalAccountAndBoundary": {
+      "suites": 15,
+      "tests": 239,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suiteNames": [
+        "com.gccwebos.android.core.ConnectionCoordinatorTest",
+        "com.gccwebos.android.design.AccountUsageClockTest",
+        "com.gccwebos.android.design.AccountUsagePresentationTest",
+        "com.gccwebos.android.design.GlassMaterialPolicyTest",
+        "com.gccwebos.android.design.ResourcePresentationTest",
+        "com.gccwebos.android.portal.AccountChallengeLifecycleTest",
+        "com.gccwebos.android.portal.AccountDisplayEmailTest",
+        "com.gccwebos.android.portal.AccountLoginAttemptTest",
+        "com.gccwebos.android.portal.AccountStartupRestoreTest",
+        "com.gccwebos.android.portal.AccountUsageBindingTest",
+        "com.gccwebos.android.portal.AccountUsageControllerTest",
+        "com.gccwebos.android.portal.AddressPreparationFenceTest",
+        "com.gccwebos.android.portal.LocalConnectionLifecycleTest",
+        "com.gccwebos.android.portal.NodeSelectionControllerTest",
+        "com.gccwebos.android.portal.OneClickConfigGatewayTest"
+      ]
+    },
+    "finalGatewayEpoch": {
+      "suites": 5,
+      "tests": 128,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suiteNames": [
+        "com.gccwebos.android.core.ConnectionCoordinatorTest",
+        "com.gccwebos.android.portal.AddressPreparationFenceTest",
+        "com.gccwebos.android.portal.LocalConnectionLifecycleTest",
+        "com.gccwebos.android.portal.NodeSelectionControllerTest",
+        "com.gccwebos.android.portal.OneClickConfigGatewayTest"
+      ]
+    }
+  },
+  "windowsOnlyFailure": {
+    "test": "LocalSubscriptionTest#everyPreparationDownloadsAgainAndWorksWithoutPortalToken",
+    "reason": "Windows file system does not support initial posix:permissions attributes",
+    "production0600ContractUnchanged": true,
+    "recordedBatch": {
+      "tests": 236,
+      "passed": 235,
+      "failed": 1
+    }
+  },
+  "uiFinalOutcomesAcrossBatches": {
+    "uniqueTests": 138,
+    "latestPassed": 138,
+    "unresolved": {},
+    "batches": [
+      "compact-green-second",
+      "ui-business-regression",
+      "compact-final-rerun",
+      "final-ui-acceptance"
+    ],
+    "testResults": {
+      "com.gccwebos.android.AccountBackNavigationUiTest#backDuringForegroundValidationNavigatesAndKeepsTheAcceptedSession": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.AccountBackNavigationUiTest#backStillCancelsAnExplicitSecondFactorChallenge": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.AccountBackNavigationUiTest#backStillCancelsAnExplicitNewLoginWithoutPublishingItsLateResponse": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.AccountBackNavigationUiTest#backDuringSavedStartupNavigatesWithoutClearingAndFreshOwnerStillRestores": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.MineBackNavigationUiTest#freshLoginBackStillCancelsOnlyTheLoginOperation": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.MineBackNavigationUiTest#totpBackStillCancelsItsPendingAuthentication": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.MineBackNavigationUiTest#pendingRestoreFlagAloneCannotBeTreatedAsNewLoginOnBack": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.MineBackNavigationUiTest#securityReadBackReturnsToMineWithoutClearingTheSavedSession": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.MineBackNavigationUiTest#foregroundVerificationBackKeepsThePendingSavedSessionAndCanFinish": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#busyRefreshDisablesSelectionAndCancelIsReachableWithoutAuthenticationActions": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#nodeCaptionTracksActualOwnerWithoutStartingAConnectionOrReloading": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#unsupportedMixedArtifactAndExpiryExposeNoSelectableRows": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#selectionSummaryTracksTheOriginalChoiceWithoutSearchFiltersOrAnotherRead": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#duplicateChoicesStartUnselectedAndClickUsesTheCorrectOpaqueObjectWithoutReading": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#firstReadRetryHidesDuringReadAndCancellationRestoresOnlyReadRecovery": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#acceptedSelectionReturnsToConnectOnlyAfterControllerAcceptedIt": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.NodeSelectionUiTest#doubledFontNarrowGlassChoicesKeepOpaqueIdentityAndDoNotReloadOnSelection": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#changedDefaultVersionOrCancelledCatalogNeedsAnExplicitFreshSelection": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#ambiguousCatalogKeepsTheSingleActionDisabledUntilUserSelects": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#reenteringPlansDefaultsToRealMonthlyOfferAndDropsReturnShortcut": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#offersShareOneGroupAndWaitingNeverShowsASpinnerOrEnablesPurchase": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#signedOutCatalogKeepsTheRealLoginGate": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#unknownModelDoesNotDefault": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#refreshKeepsDisplayOnlyAndDropsItWhenItsAccountGenerationChanges": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#narrowDoubledFontKeepsDefaultBenefitsAndActionReachable": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.CatalogDefaultSelectionUiTest#defaultUsesTheRealSnapshotAndUserSelectionSurvivesCatalogReordering": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#unknownDistributionWindowHasNoDefaultRateAndKeepsGenerateDisabledAtLargeFont": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#oldSessionIsNeutralAndUnknownBalanceCannotBecomeResourceDerivedZero": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#sameSessionForegroundConfirmationKeepsUnknownGenerationAndNeverReplaysPost": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#dynamicPolicyReadAndUserCopyDoNotGenerateLinksOrChangeWallet": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#aboutEntryBelongsToFunctionsAndNavigationDoesNotChangeAccountOrRequestData": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#pendingRestoringAndSignedOutWithholdPreviouslyReadReferralDataAndActions": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#mineSectionsShareOneSurfaceAndDoNotOfferAPurchaseReturnShortcut": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.MineReferralUiTest#largeFontMenusKeepMinimumTouchAndTelegramUsesOnlyTheExactChannelOnClick": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#failedDownloadShowsSyncAndBusyRetryCannotDuplicateTheAcknowledgedClaim": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#unavailableDeliveryShowsWaitingAndExplicitRetryNeverCreatesAClaim": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#normalWidthKeepsTheNodeEntryInTheInitialViewportWithoutStartingAConnection": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#aNewLiveOwnerStateBlocksThePreparedRequestsOldIdleConnectCallback": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#explicitPreparationContinuesThroughOnePowerCommandForSeveralLegalNodes": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#explicitCancelKeepsLoginAndReceiptWithoutAPowerCommandFromTheLateDownload": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#readyExplicitClickKeepsExistingChoiceAndCannotDispatchTwiceWhileAwaitingOwner": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionSetupRecoveryUiTest#leavingTheOverviewCancelsOnlyItsPreparationAndCannotDispatchFromALateResult": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.ConnectionUsageCardUiTest#pendingUsageNeverInventsZeroProgressOrDates": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.ConnectionUsageCardUiTest#compactDatesKeepFullBoundariesAccessibleAndTrafficTextIntact": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.ConnectionUsageCardUiTest#refreshFailureKeepsSnapshotButRoutesPrimaryToRetryAndRespectsBusy": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.ConnectionUsageCardUiTest#ordinaryReadIsQuietAndCannotEnableAnUnverifiedPrimaryAction": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.ConnectionUsageCardUiTest#longAmountAndFullTimeActionsRemainReachableAtTwoTimesFontScale": {
+        "result": 0,
+        "batch": "compact-green-second"
+      },
+      "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2At320DpDoubledFontKeepsNavigationAndActionsReachable": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2FourPageHierarchyAt320DpUsesOnlySyntheticState": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2FourPageHierarchyAt390DpUsesOnlySyntheticState": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#frozenAndClosedKeepServerAmountsAndShortStatus": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#mineShowsOnlyServerSpendableBalanceAndKeepsLargeRechargeAndLedgerTargets": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#singleCtaHasNoDefaultAndChangedDirectoryOrAccountDiscardsLocalChoice": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#sixAuthoritativeFieldsUseThreeColumnsAndDoNotAddHeldOrPendingToAvailability": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#unknownFailureAndBusyNeverBecomeConfirmedZero": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#backgroundReadRetainsSameOwnerDisplayButCannotAuthorizeRecharge": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#loadedWalletHidesRoutineRefreshButUnreadAndFailedReadKeepRecovery": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.WalletCompactUiTest#narrowDoubledFontReflowsAndKeepsAmountConfirmationAndCancelReachable": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#lateQuoteAfterAccountGenerationChangesCannotExposeConfirmation": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#sameRefVersionOrDeliveryReplacementRequiresAnExplicitNewSelection": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#catalogInvalidationDoesNotReselectTheOldSnapshotWhenCatalogReturns": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#selectionUsesOneQuoteActionAndKeepsServerAmountAllocationAndCancel": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#ledgerReservationShowsItsDeltaFieldAndLocalDetailPreservesZeroTotal": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#changedQuoteSnapshotClearsConfirmationAndRequiresSelectionAgain": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#narrowDoubledFontKeepsSelectionBenefitsAndSingleActionReachable": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceCompactUiTest#dataPackRequiresExplicitSelectionAndHasNoRetainedPurchaseShortcut": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#unconfirmedPurchaseHidesNewQuoteActions": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#paymentReviewCanOpenAndCancelWithoutAnExternalPaymentIntent": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#catalogAutoLoadWaitsOnceForRestorationAndBusyWithoutLoop": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#accountGenerationSwitchClosesOldOrderCancellationDialog": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#verifiedNoneKeepsInlineOpeningAcrossRefreshAndNavigationWithoutAutomaticModal": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#periodAndCategoryChangesKeepNonstandardOffersAndRejectOldSelectionsAndLateQuotes": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#verifiedNoneInlineOpeningRoutesToPlansAndWalletStaysAnExplicitNavigation": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#catalogStatesKeepServerDurationCoinsAndTrafficOnCardsAndInDetails": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#quoteDialogCanBeCancelledRepeatedlyWithoutPurchase": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#walletUnknownAndErrorNeverBecomeZeroAndConfirmedBalanceIsExact": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#verifiedOverviewFailureShowsReadOnlyRetryWithoutPretendingToOpenAPlan": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#serverOffersKeepExactDurationPriceAndTrafficWithinMonthAndYearFiltersAtLargeFont": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#signedOutLegacyNoneNeverBecomesConfirmedPlanAndLoginRequiresExplicitChoice": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#resourceComponentRetainsDurationCountdownAndTruthfulUnknownStaleAndExpiredTraffic": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#rechargeDialogCancelsWithoutCreatingAnOrderAtLargeFont": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#pendingAndVerifiedRechargeCannotCreateAnotherOrderOrRepeatPayment": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#largeFontGuidanceAndResourcesKeepActionsReachable": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#plansShowServerCatalogWithoutRepeatingResourceAndKeepLocalExpirySeparate": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#paymentGuardRejectsExpiredChangedOrderAndReplacedAccountSession": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#expiredQuoteCannotPurchaseAndLargeFontCancelIsReachable": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.SubscriptionWalletUiTest#insufficientDeferredQuoteKeepsConfirmationDisabledAndCancelsLocally": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#accountPausePreservesUnknownRecoveryWithoutReplayingCreate": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#replacementAccountCannotInheritTheOldDeferredRead": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#transientResourceFailureStillLoadsTheAuthenticatedWalletOnce": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#cancelledLoginDiscardsALateResourceResponseAndDeferredWalletRead": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#totpLoginDefersMineUntilResourceSuccess": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#resourceSessionExpiryNeverStartsDeferredCommerce": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#accountWorkInterruptsAnExistingReadAndReloadsOnceAfterItFinishes": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#passwordLoginDefersMineUntilResourceSuccess": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#passwordLoginDefersPlansUntilResourceSuccess": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#totpLoginDefersPlansUntilResourceSuccess": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#totpLoginDefersWalletUntilResourceSuccess": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#commerceFailureAfterEligibilityReturnsDoesNotStartARetryLoop": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.CommerceEligibilityUiTest#passwordLoginDefersWalletUntilResourceSuccess": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#cancelledForegroundPollCannotPublishLateRechargeResponse": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#foregroundIdleSessionExpiryClosesPrivateAccountButKeepsConnection": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#cancelledForegroundPollCannotRestoreALatePaymentAction": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#expiredLocalSubscriptionGuidesPurchaseWithoutInventingWalletAuthentication": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#savedSessionKeepsConnectionVisibleButPrivateAccountWaitsForValidation": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#logoutAdmissionSurvivesImmediateControllerScopeCancellation": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#authenticatorRoundTripRetainsTicketAndCanCompleteLogin": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#localProfileSurvivesPortalLogoutAndKeepsCommerceGated": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#localProfileRestoresAccountAutomaticallyAndBrowserReturnRevalidatesIt": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#foregroundWhileBusyGatesCommerceAndValidatesAfterReadCompletes": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#revokedSavedSessionReturnsToLoginAndClearsToken": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#restoreNetworkFailureKeepsConnectionAndCanRetryAccountWithoutPassword": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#walletAccountSwitchFailurePreservesSeparateLocalSubscription": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MobileParityUiTest#syntheticWalletAlipayCatalogAndOrderLayoutsRemainServerShaped": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.OrderHistoryCompactUiTest#narrowDoubledFontKeepsLongAmountInsideWholeTargetAndReturnReachable": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.OrderHistoryCompactUiTest#groupedWholeRowsKeepCursorSelectionAndScrollAfterDetailReturn": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.OrderHistoryCompactUiTest#rechargeAmountUsesCurrencyExponentAndVerifiedPaymentDoesNotMeanCredit": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.OrderHistoryCompactUiTest#loadingDisablesWholeRowAndLocalBackRejectsLateDetail": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.OrderHistoryCompactUiTest#blockedDetailAssertionFailureReleasesReaderAndCompositionDisposalRejectsLateValue": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#cancelledAndAccountChangedLateReadsCannotReviveConnectionNodeSummary": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#readyConfigurationNeverShowsConnectedOrEnablesUnwiredProductionPower": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#controllerPowerCannotReplayOnNavigationAndAccountWorkDoesNotBlockCancelOrDisconnect": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#selectedOpaqueNodeReturnsToConnectionAndSurvivesTabsAndSameContentFreshRead": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#repeatedPlansTabAndReturnRequestTheDefaultWithoutStartingCheckout": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#changedContentClearsConnectionSummaryAndNeedsExplicitNewOpaqueSelection": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#signedOutLaunchShowsFourOrderedTabsAndExplicitOpeningIntentWithoutEngineClaims": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#mineHistoryKeepsOrdersAndLedgerReadOnlyEvenWithARetainedQuote": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#onlyKnownExpiryShowsRenewalWhileRetryAndStorageKeepDistinctStates": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#missingNodeGuideRoutesToMyAndPrivateGateSurvivesComposeRestoration": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#anonymousPlansNeverExposePrivateCatalogOrBalanceAndNodesHaveIndependentTab": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#profileLoginAndRegistrationRemainLocalAndReturnToConnection": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#signedOutRecreationRetainsConnectionWithoutAuthenticationRequests": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellTest#guestOpeningRequiresExplicitLoginOrRegistrationChoiceAndReturnsToConnection": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.SelectedNodeActivityRecreationTest#changedSameNameCachedContentClearsSelectionDuringRealActivityRecreationAndRejectsOldOpaque": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.SelectedNodeActivityRecreationTest#selectedSameNameSecondNodeSurvivesRealActivityRecreationWithTheSameOpaqueIdentity": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellActivityRecreationTest#signedOutRealActivityRecreationRestoresNodeTabAndReturnsToConnection": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.AppShellActivityRecreationTest#signedOutRealActivityRecreationKeepsDefaultConnectionAndDisabledProductionPower": {
+        "result": 0,
+        "batch": "ui-business-regression"
+      },
+      "com.gccwebos.android.MineBackNavigationUiTest#resourceRefreshKeepsConfirmedContentWithoutSpinnerAndBackKeepsSession": {
+        "result": 0,
+        "batch": "final-ui-acceptance"
+      }
+    }
+  },
+  "finalUiBatchBeforeFinalGatewayOnlyEpochChange": {
+    "classes": [
+      "PreviewV2LayoutUiTest",
+      "MineBackNavigationUiTest",
+      "AccountBackNavigationUiTest",
+      "ConnectionSetupRecoveryUiTest",
+      "SubscriptionWalletUiTest",
+      "WalletCompactUiTest"
+    ],
+    "excludedStandardPackageIdentityTest": [
+      "SubscriptionWalletUiTest#launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage"
+    ],
+    "expected": 50,
+    "started": 50,
+    "passed": 50,
+    "negativeCodes": [],
+    "ok": [
+      50
+    ],
+    "success": true,
+    "seconds": [
+      "422.056"
+    ]
+  },
+  "backPredicateCounterfactualRed": {
+    "classes": [
+      "AccountBackNavigationUiTest"
+    ],
+    "excludedStandardPackageIdentityTest": [],
+    "expected": 4,
+    "started": 4,
+    "passed": 2,
+    "negativeCodes": [
+      -2,
+      -2
+    ],
+    "ok": [],
+    "success": false,
+    "seconds": [
+      "45.157"
+    ]
+  },
+  "build": {
+    "debug": true,
+    "androidTest": true,
+    "unsignedRelease": true,
+    "lint": {
+      "Warning": 27,
+      "Hint": 4
+    },
+    "sourceChecks": true,
+    "nativeReuseIdentity": true,
+    "bothAbi16KiBAndReleaseExclusion": true
+  },
+  "fixtureIdentity": {
+    "package": "com.gccwebos.android.candidate.acceptance.layout20261004b",
+    "freshPackageAbsenceVerified": true,
+    "hiddenLauncher": true,
+    "installed": {
+      "com.gccwebos.android.candidate.acceptance.layout20261004b": "198e65b58a9bf699a8f1465df72a46be69869bc97465073b420fadac55516e2a",
+      "com.gccwebos.android.candidate.acceptance.layout20261004b.test": "879476bc8dbda3b0698d5d9a4278e8332f7c0213d995197d472f77fd62a055e7"
+    },
+    "privatePathsAbsentBeforeTests": true,
+    "installerCompletionRecoveredAfterHostTimeout": true
+  },
+  "fixtureCleanup": {
+    "onlyOwnedFixtureRemoved": true,
+    "privatePathsAbsent": true
+  },
+  "normalCandidate": {
+    "case": "normal-logged",
+    "applicationSourceCommit": "5df313a9b581e3f1c195acb53c0d6513167f59e9",
+    "nativeSourceCommit": "98ffd6bae926e3d5f7c2a60b2b21af1278874436",
+    "nativeArtifactId": 11306235582,
+    "nativeRunId": 37206973354,
+    "nativeArchiveSha256": "070f3bde1da1812c69b895991db807447fada99e96b63c7222333d5cfa435568",
+    "package": "com.gccwebos.android.candidate.acceptance.bbr20261004v2",
+    "versionCode": 6,
+    "apkSha256": "378643bc575c182d17020854ced9dfa1f835597384c7449fc9598f0639a5e646",
+    "signerSha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+    "flags": {
+      "DEBUG": true,
+      "VPN_ENGINE_PACKAGED": true,
+      "CONNECTION_ENDPOINT_HOSTNAME": true,
+      "CONNECTION_SYNTHETIC_ACCEPTANCE": false,
+      "STORAGE_SYNTHETIC_ACCEPTANCE": false,
+      "NATIVE_VPN_LAB": false,
+      "NATIVE_TUN_ACCEPTANCE": false
+    },
+    "rawNativeSha256": {
+      "arm64-v8a": "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+      "x86_64": "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8"
+    },
+    "packagedNativeSha256": {
+      "arm64-v8a": "30a35588e2605bb5343fcb43300b2ef53217646858e848a60e2aa892fcfdda47",
+      "x86_64": "98e668e0343fc9a11b37c72d4a9ee36dbb1aeecb4eee52634c4379f3db649020"
+    },
+    "alignedLoadSegments": {
+      "arm64-v8a": 3,
+      "x86_64": 3
+    },
+    "zip16KiBAlignment": true,
+    "requiredNotices": true,
+    "productionServicesPresent": true,
+    "debugLabComponentsDisabledAndNotExported": true
+  },
+  "normalInstall": {
+    "installedIdentityVerified": true,
+    "samePackageSameSignerUpdate": true,
+    "predefinedPrivatePathMetadataUnchanged": true,
+    "privatePathCountChecked": 15,
+    "privateContentsRead": false,
+    "dataCleared": false,
+    "launched": true
+  },
+  "syntheticScreens": [
+    {
+      "name": "320dp-font100-confirmation.png",
+      "sha256": "083d86f4604c7e88ed65223daa766f58b0adc4512f8d0facba770785ad163086"
+    },
+    {
+      "name": "320dp-font100-connect.png",
+      "sha256": "30fb6ae29a66949b614c050bcf81f19f5309fc37e531d1adfc8b216b7bfde5bb"
+    },
+    {
+      "name": "320dp-font100-mine-functions.png",
+      "sha256": "9736e62ac475ca24a3c65e494b1febea85a384d121c9e054db90aa2bb11b296f"
+    },
+    {
+      "name": "320dp-font100-mine.png",
+      "sha256": "f930785beb1aa9665261324f395c0a3334383f23f35be02c1ca2ffb44a23386c"
+    },
+    {
+      "name": "320dp-font100-nodes.png",
+      "sha256": "29be7b79917aea3ee74bd345398ac0566d9d25eb5e3116c42455694553431719"
+    },
+    {
+      "name": "320dp-font100-plans-yearly.png",
+      "sha256": "b2a384e4ca51b349da16c0bb95d00b32891cc6e4144005b156649bd74834d486"
+    },
+    {
+      "name": "320dp-font100-plans.png",
+      "sha256": "d730d5deca9965758229ee2ff4905e11377a08d5383de6f757f792fcd5409fb2"
+    },
+    {
+      "name": "320dp-font200-confirmation.png",
+      "sha256": "a242fed19d7cb0c4cc6893425a8d36db49c606f8d6a93c97302ca612177d5e4e"
+    },
+    {
+      "name": "320dp-font200-connect.png",
+      "sha256": "85072918dca85c43cda0f0a0555eafcca025690296d059309a6d43d37083fc60"
+    },
+    {
+      "name": "320dp-font200-mine-functions.png",
+      "sha256": "221b4c022b61cb68d694fd7990b21d451ef4216ea3b64f6a2e6d5ee03f528f46"
+    },
+    {
+      "name": "320dp-font200-nodes.png",
+      "sha256": "78e4ffb84107d5c605570cff5f4b43c0e62c3634f716d5208d2ee5a80c6e71f1"
+    },
+    {
+      "name": "320dp-font200-plans.png",
+      "sha256": "be2de39bfb51e95d29471f0be2e9da816f077071a1be3cba7862b449a65ffd52"
+    },
+    {
+      "name": "390dp-font100-confirmation.png",
+      "sha256": "5ad76ecf3010cc5d632017a49ad2d88d8b8e328bfd770338e0cec456e765a64b"
+    },
+    {
+      "name": "390dp-font100-connect.png",
+      "sha256": "55434e0cacb018538f18df13cc5eb68b9facf8a15a3ac76688d6b393a6183b8d"
+    },
+    {
+      "name": "390dp-font100-mine-functions.png",
+      "sha256": "f2a86c2ff2c9b223efe7e3e4e99605ee4b0796b3c4807c1a7304ff6a6aad215e"
+    },
+    {
+      "name": "390dp-font100-mine.png",
+      "sha256": "d167c4393ffd945b36cb6e81dce1cb50714713a7dbfad5fa912591ce886f7141"
+    },
+    {
+      "name": "390dp-font100-nodes.png",
+      "sha256": "7545743e45a44a5cc7a79ad8afb190b2a7ee4362a4bae42e86cd34bd13c8f56d"
+    },
+    {
+      "name": "390dp-font100-plans-yearly.png",
+      "sha256": "ae3d36383caa861f16695db8814e66413502d1992cce70de448c506d2141cdc6"
+    },
+    {
+      "name": "390dp-font100-plans.png",
+      "sha256": "e39fbb4edd91730398cfe8bd31f3df91cac76d51ead1355c65358be350311465"
+    }
+  ],
+  "limits": [
+    "No real account purchase or payment",
+    "No real endpoint traffic acceptance in this UI run",
+    "No claim of real account process death recovery",
+    "Native session maximum remains 30 minutes",
+    "B2 P7 unresolved; P8/P9 not run",
+    "Latest PR head hosted CI is separate"
+  ]
+}

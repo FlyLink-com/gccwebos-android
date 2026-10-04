@@ -55,6 +55,9 @@ object SafeProxyConfig {
         "fast-open" to RejectionReason.NodeOptionFastOpen,
         "max-open-streams" to RejectionReason.NodeOptionMaxOpenStreams)
     private val tlsKeys = setOf("skip-cert-verify")
+    private val tuicDefaultFalseKeys = setOf("disable-sni", "reduce-rtt", "fast-open")
+    private val tuicDefaultIntegers = mapOf("heartbeat-interval" to 10000,
+        "max-udp-relay-packet-size" to 1252, "max-open-streams" to 100)
     private val bbrProfiles = setOf("conservative", "standard", "aggressive")
     private val ciphers = setOf("aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305")
     private val fingerprints = setOf("chrome", "firefox", "safari", "ios", "edge")
@@ -165,7 +168,7 @@ object SafeProxyConfig {
             "ss" -> setOf("cipher", "password", "udp")
             "vless" -> setOf("uuid", "udp", "tls", "network", "servername", "client-fingerprint", "flow", "packet-encoding", "reality-opts") + tlsKeys
             "hysteria2" -> setOf("password", "sni", "alpn", "up", "down", "obfs", "obfs-password", "bbr-profile") + tlsKeys
-            "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode", "bbr-profile", "request-timeout") + tlsKeys
+            "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode", "bbr-profile", "request-timeout") + tlsKeys + tuicDefaultFalseKeys + tuicDefaultIntegers.keys
             else -> throw UnsafeProxyConfiguration(RejectionReason.Protocol)
         }
         keys(p, baseKeys + specific)
@@ -224,6 +227,7 @@ object SafeProxyConfig {
                     if ("obfs" in p) { require(p["obfs"] == "salamander"); out.put("obfs", "salamander").put("obfs-password", secret(p, "obfs-password")) }
                 } else {
                     out.put("uuid", uuid(p))
+                    validateTuicDefaults(p)
                     // Bounded compatibility in milliseconds only; the pinned TUIC v5 core does not consume this field.
                     if ("request-timeout" in p) {
                         val timeout = p["request-timeout"]
@@ -236,6 +240,20 @@ object SafeProxyConfig {
             }
         }
         out
+    }
+    /** Only pinned default-equivalent values; omit all six from the native DTO. */
+    private fun validateTuicDefaults(p: Map<*, *>) {
+        for (key in nodeOptionReasons.keys) {
+            if (key !in p) continue
+            if (key in tuicDefaultFalseKeys) classified(nodeOptionReasons.getValue(key)) {
+                require(p[key] is Boolean && p[key] == false)
+            } else tuicDefaultIntegers[key]?.let { expected ->
+                classified(nodeOptionReasons.getValue(key)) {
+                    val value = p[key]
+                    require(value is Int && (value == 0 || value == expected))
+                }
+            }
+        }
     }
     // YAML Unicode escapes must not turn an unpaired UTF-16 surrogate into '?' at UTF-8 encoding.
     private fun validUnicode(value: String): Boolean {

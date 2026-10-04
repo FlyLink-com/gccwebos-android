@@ -137,8 +137,8 @@ class SafeProxyRequestTimeoutTest {
         rejectAll(source + "\n    token: synthetic-only", "NodeOptionToken")
         rejectAll(source.replace("    uuid: 22222222-2222-4222-8222-222222222222\n", ""))
         rejectAll(source + "\n    skip-cert-verify: true")
-        rejectAll(source + "\n    disable-sni: false", "NodeOptionDisableSni")
-        rejectAll(source + "\n    heartbeat-interval: 10000", "NodeOptionHeartbeatInterval")
+        rejectAll(source + "\n    disable-sni: true", "NodeOptionDisableSni")
+        rejectAll(source + "\n    heartbeat-interval: 10001", "NodeOptionHeartbeatInterval")
         rejectAll(source + "\n    synthetic-unknown-option: true", "NodeOptions")
     }
 }

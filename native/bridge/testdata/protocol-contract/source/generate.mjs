@@ -26,6 +26,12 @@ fixtures['tuic-v5-default-bbr-profile'] = {...fixtures['tuic-v5-minimal'],name:'
 for (const timeout of [0, 1, 8000, 30000]) {
   fixtures[`tuic-v5-request-timeout-${timeout}`] = {...fixtures['tuic-v5-minimal'],name:`Synthetic TUIC request timeout ${timeout}`,requestTimeout:timeout};
 }
+// These six explicit values equal the pinned core's omitted defaults. Kotlin
+// validates them before omission; the native DTO never accepts these keys.
+const tuicDefaultFlags = {disableSni:false,reduceRtt:false,fastOpen:false};
+fixtures['tuic-v5-default-tuple'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC default tuple',...tuicDefaultFlags,heartbeatInterval:10000,maxUdpRelayPacketSize:1252,maxOpenStreams:100};
+fixtures['tuic-v5-zero-tuple'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC zero tuple',...tuicDefaultFlags,heartbeatInterval:0,maxUdpRelayPacketSize:0,maxOpenStreams:0};
+fixtures['tuic-v5-mixed-default-tuple'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC mixed default tuple',...tuicDefaultFlags,heartbeatInterval:0,maxUdpRelayPacketSize:1252,maxOpenStreams:0};
 fs.mkdirSync(new URL('../renderer/',import.meta.url),{recursive:true});
 for(const [name,server] of Object.entries(fixtures)) {
   const input={servers:[server]};

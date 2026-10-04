@@ -12,7 +12,8 @@ class ProtocolContractTest {
         "hysteria2-bbr-conservative", "hysteria2-bbr-standard", "hysteria2-bbr-aggressive",
         "tuic-v5-bbr-conservative", "tuic-v5-bbr-standard", "tuic-v5-bbr-aggressive",
         "tuic-v5-cubic-bbr-profile", "tuic-v5-default-bbr-profile",
-        "tuic-v5-request-timeout-0", "tuic-v5-request-timeout-1", "tuic-v5-request-timeout-8000", "tuic-v5-request-timeout-30000")
+        "tuic-v5-request-timeout-0", "tuic-v5-request-timeout-1", "tuic-v5-request-timeout-8000", "tuic-v5-request-timeout-30000",
+        "tuic-v5-options", "tuic-v5-default-tuple", "tuic-v5-zero-tuple", "tuic-v5-mixed-default-tuple")
     private fun resource(path: String): ByteArray = requireNotNull(javaClass.getResourceAsStream("/protocol-contract/$path")) { "Missing synthetic contract fixture" }.use { it.readBytes() }
     private fun yaml(name: String) = String(resource("renderer/$name.clash.yaml"), Charsets.UTF_8)
     private fun project(text: String, index: Int = 0) = JSONObject(String(SafeProxyConfig.project(text.toByteArray(), index)))
@@ -50,8 +51,31 @@ class ProtocolContractTest {
         reject(input.replace("type: tuic", "type: vmess"), 0)
         reject(input.replace("type: ss", "type: vmess"), 3)
     }
+    @Test fun tuicDefaultRendererOptionsNormalizeToUnchangedDto() {
+        val keys = listOf("disable-sni", "reduce-rtt", "heartbeat-interval", "max-udp-relay-packet-size", "fast-open", "max-open-streams")
+        val defaultLines = Regex("(?m)^    (?:${keys.joinToString("|")}): [^\\r\\n]*\\r?\\n")
+        for (name in listOf("tuic-v5-options", "tuic-v5-default-tuple", "tuic-v5-zero-tuple", "tuic-v5-mixed-default-tuple")) {
+            for (format in listOf("clash", "mihomo")) {
+                val input = String(resource("renderer/$name.$format.yaml"), Charsets.UTF_8)
+                assertEquals("Every synthetic tuple must exercise all six fields", 6, defaultLines.findAll(input).count())
+                val actual = SafeProxyConfig.project(input.toByteArray(), 0)
+                val omitted = SafeProxyConfig.project(input.replace(defaultLines, "").toByteArray(), 0)
+                assertArrayEquals("Default normalization changed the versioned DTO", omitted, actual)
+                val proxy = JSONObject(String(actual)).getJSONArray("proxies").getJSONObject(0)
+                for (key in keys) assertFalse("Client-only default escaped into the native DTO", proxy.has(key))
+                if (name == "tuic-v5-options") {
+                    // Already admitted request-timeout must retain its own optional-field semantics.
+                    assertEquals(8000, proxy.getInt("request-timeout"))
+                    assertEquals("native", proxy.getString("udp-relay-mode"))
+                    assertEquals("bbr", proxy.getString("congestion-controller"))
+                    assertEquals("standard", proxy.getString("bbr-profile"))
+                }
+                actual.fill(0); omitted.fill(0)
+            }
+        }
+    }
     @Test fun unsupportedRendererShapesAreNotFilteredOrCoerced() {
-        for (name in listOf("vless-defaults", "hysteria2-options", "tuic-v5-options", "tuic-token-ambiguous", "ss-hostname")) {
+        for (name in listOf("vless-defaults", "hysteria2-options", "tuic-token-ambiguous", "ss-hostname")) {
             for (format in listOf("clash", "mihomo")) reject(String(resource("renderer/$name.$format.yaml")))
         }
         reject(yaml("provider-only"))

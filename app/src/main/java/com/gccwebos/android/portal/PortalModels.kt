@@ -80,7 +80,8 @@ class OriginPolicy(apiOrigin: String, subscriptionOrigins: Set<String>) {
         val uri = URI(url)
         require(uri.scheme == "https" && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null)
         require(origin("https://${uri.rawAuthority}") in subscriptions)
-        require(Regex("/sub/a/[A-Za-z0-9_-]+").matches(uri.rawPath))
+        // The backend issues .yaml artifact paths; retain legacy bare capabilities unchanged.
+        require(Regex("/sub/a/[A-Za-z0-9_-]+(?:\\.yaml)?").matches(uri.rawPath))
         return uri.toASCIIString()
     }
     private fun origin(value: String): URI {

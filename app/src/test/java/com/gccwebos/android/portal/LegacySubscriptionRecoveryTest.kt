@@ -131,9 +131,9 @@ class LegacySubscriptionRecoveryTest {
         }
     }
 
-    private inner class Harness(val store: Store = Store(mutableListOf())) {
+    private inner class Harness(val store: Store = Store(mutableListOf()), private val expectedUrl: String = nextUrl) {
         val events = store.events
-        val wire = Wire(events, store)
+        val wire = Wire(events, store).apply { url = expectedUrl }
         var expectedOriginal: DeliveryRecord? = store.value
         var checkLegacyOrdering = true
         val profiles = Profiles(events) {
@@ -155,7 +155,7 @@ class LegacySubscriptionRecoveryTest {
                 assertTrue(store.journal!!.phase in setOf(LegacyRecoveryPhase.ACKNOWLEDGED, LegacyRecoveryPhase.PROFILE_COMMITTING))
                 assertFalse(store.journal!!.candidate.pendingAck)
             }
-            assertEquals(nextUrl, requested.value)
+            assertTrue("Synthetic download capability changed", expectedUrl == requested.value)
             downloadHook()
             downloadFailure?.let { throw PortalFailure(it) }
             content.toByteArray().also { lastBytes = it }
@@ -182,7 +182,7 @@ class LegacySubscriptionRecoveryTest {
         fun assertImported() {
             assertEquals(LocalSubscriptionStatus.READY, repo.localSubscriptions.snapshot().status)
             assertFalse(store.value!!.pendingAck)
-            assertEquals(nextUrl, store.value!!.url!!.value)
+            assertTrue("Synthetic saved capability changed", expectedUrl == store.value!!.url!!.value)
             assertNull(store.journal)
             assertTrue(lastBytes!!.all { it == 0.toByte() })
         }
@@ -199,6 +199,38 @@ class LegacySubscriptionRecoveryTest {
     private fun assertBefore(events: List<String>, first: String, second: String) {
         assertTrue("Missing $first", events.indexOf(first) >= 0)
         assertTrue("$first must precede $second", events.indexOf(first) < events.indexOf(second))
+    }
+
+    @Test fun backendYamlCapabilityCompletesImportWithoutResidualRecoveryJournal() = runTest {
+        val h = Harness(expectedUrl = nextUrl + ".yaml"); h.login()
+        val result = h.repo.refreshAndImport()
+        assertEquals(ImportStatus.IMPORTED, result.status)
+        assertEquals(1, result.nodes.size)
+        assertEquals(1, h.downloads)
+        assertEquals(1, h.setupCalls().size)
+        assertEquals(1, h.ackCalls().size)
+        h.assertImported()
+        assertBefore(h.events, "journal-ATTEMPT", "reveal")
+        assertBefore(h.events, "journal-REVEALED", "ack")
+        assertBefore(h.events, "journal-ACKNOWLEDGED", "download")
+        assertBefore(h.events, "profile-save", "journal-clear")
+    }
+
+    @Test fun acknowledgedBackendYamlCapabilityRestoresCachedNodesWithoutPortalOrDownload() = runTest {
+        val h = Harness(expectedUrl = nextUrl + ".yaml"); h.login()
+        assertEquals(ImportStatus.IMPORTED, h.repo.refreshAndImport().status)
+        h.assertImported()
+        val callsBefore = h.wire.calls.size
+        val manager = LocalSubscriptionManager(h.store, h.profiles,
+            SubscriptionSource { error("Cached restore must not download") },
+            policy, { start }, LocalSubscriptionAuthority())
+        val restored = manager.restore()
+        assertEquals(LocalSubscriptionStatus.READY, restored.status)
+        assertEquals(1, restored.nodes.size)
+        assertEquals(1, manager.nodeSelectionSnapshot().choices.size)
+        assertEquals(callsBefore, h.wire.calls.size)
+        assertEquals(1, h.downloads)
+        assertNull(h.store.journal)
     }
 
     @Test fun newLegacyImportCommitsOnlyAfterDurableStageCurrentAckAndProfile() = runTest {

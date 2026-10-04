@@ -1,0 +1,188 @@
+{
+  "applicationSourceCommit": "eb2777799c5bdeeb9ef27494da85bcab30d406fc",
+  "risk": "B",
+  "jvm": {
+    "suites": 11,
+    "tests": 101,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "build": {
+    "debug": true,
+    "androidTest": true,
+    "unsignedRelease": true,
+    "lintErrors": 0,
+    "lintWarnings": 27,
+    "lintHints": 3
+  },
+  "uiRegressionBeforeIdenticalAssetDeduplication": {
+    "classes": [
+      "PreviewV2LayoutUiTest",
+      "ConnectionUsageCardUiTest",
+      "NodeSelectionUiTest",
+      "WalletCompactUiTest",
+      "MineReferralUiTest",
+      "CommerceCompactUiTest",
+      "CatalogDefaultSelectionUiTest",
+      "SubscriptionWalletUiTest",
+      "UnifiedWelcomeGlassUiTest"
+    ],
+    "excludedStandardPackageIdentityTest": [
+      "SubscriptionWalletUiTest#launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage"
+    ],
+    "expected": 70,
+    "started": 70,
+    "passed": 70,
+    "negativeCodes": [],
+    "ok": [
+      70
+    ],
+    "success": true,
+    "seconds": [
+      "123.972"
+    ]
+  },
+  "finalFourPageRecheck": {
+    "classes": [
+      "PreviewV2LayoutUiTest"
+    ],
+    "excludedStandardPackageIdentityTest": [],
+    "expected": 3,
+    "started": 3,
+    "passed": 3,
+    "negativeCodes": [],
+    "ok": [
+      3
+    ],
+    "success": true,
+    "seconds": [
+      "31.82"
+    ]
+  },
+  "fixtureIdentity": {
+    "package": "com.gccwebos.android.candidate.acceptance.layout20261004",
+    "freshPackageAbsenceVerified": true,
+    "hiddenLauncher": true,
+    "installed": {
+      "com.gccwebos.android.candidate.acceptance.layout20261004": "8735128822a791e4e6c282f956540a26b5b1620c5d2f4d92986302308d23b91a",
+      "com.gccwebos.android.candidate.acceptance.layout20261004.test": "b99b7dc843fa624aa9f592960493a66b084aba11032205c7a2e901d1d67f6b7d"
+    },
+    "privatePathsAbsentBeforeTests": true
+  },
+  "fixtureCleanup": {
+    "onlyOwnedFixtureRemoved": true,
+    "privatePathsAbsent": true
+  },
+  "normalCandidate": {
+    "case": "normal-logged",
+    "applicationSourceCommit": "eb2777799c5bdeeb9ef27494da85bcab30d406fc",
+    "nativeSourceCommit": "98ffd6bae926e3d5f7c2a60b2b21af1278874436",
+    "nativeArtifactId": 11306235582,
+    "nativeRunId": 37206973354,
+    "nativeArchiveSha256": "070f3bde1da1812c69b895991db807447fada99e96b63c7222333d5cfa435568",
+    "package": "com.gccwebos.android.candidate.acceptance.bbr20261004v2",
+    "versionCode": 6,
+    "apkSha256": "46c16e322f2bdb8d681d76814e3384eef0baa8bfbac1d81755be25f5b711abc0",
+    "signerSha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+    "flags": {
+      "DEBUG": true,
+      "VPN_ENGINE_PACKAGED": true,
+      "CONNECTION_ENDPOINT_HOSTNAME": true,
+      "CONNECTION_SYNTHETIC_ACCEPTANCE": false,
+      "STORAGE_SYNTHETIC_ACCEPTANCE": false,
+      "NATIVE_VPN_LAB": false,
+      "NATIVE_TUN_ACCEPTANCE": false
+    },
+    "rawNativeSha256": {
+      "arm64-v8a": "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+      "x86_64": "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8"
+    },
+    "packagedNativeSha256": {
+      "arm64-v8a": "30a35588e2605bb5343fcb43300b2ef53217646858e848a60e2aa892fcfdda47",
+      "x86_64": "98e668e0343fc9a11b37c72d4a9ee36dbb1aeecb4eee52634c4379f3db649020"
+    },
+    "alignedLoadSegments": {
+      "arm64-v8a": 3,
+      "x86_64": 3
+    },
+    "zip16KiBAlignment": true,
+    "requiredNotices": true,
+    "productionServicesPresent": true,
+    "debugLabComponentsDisabledAndNotExported": true
+  },
+  "installed": {
+    "installedArtifactMatches": true,
+    "apkSha256": "46c16e322f2bdb8d681d76814e3384eef0baa8bfbac1d81755be25f5b711abc0"
+  },
+  "privatePathMetadataPreserved": true,
+  "privateFileContentsRead": false,
+  "realAccountTrafficTested": false,
+  "emulatorStarted": false,
+  "screenshots": [
+    {
+      "file": "320dp-font100-connect.png",
+      "sha256": "c82ddb4d2a20f2cafba50571812fe6b7e888dc29a4e504697ca7581030df226e"
+    },
+    {
+      "file": "320dp-font100-mine-functions.png",
+      "sha256": "87a3d0ac87912131212837151d09f7645a4f36402f4617a4efc81234a6d00cac"
+    },
+    {
+      "file": "320dp-font100-mine.png",
+      "sha256": "ad5075f55139b59ce8b946154ea326c500ee19465af60df1e6761847d7d8f9e6"
+    },
+    {
+      "file": "320dp-font100-nodes.png",
+      "sha256": "5eb599ed5ba32d34eb41cf4fea92f38d4f928c21343b81b14b71846658e2b760"
+    },
+    {
+      "file": "320dp-font100-plans-yearly.png",
+      "sha256": "9c992796adc0026487da45ba00e5c5c18a434e73111249a1fdf696e0e0a4ed53"
+    },
+    {
+      "file": "320dp-font100-plans.png",
+      "sha256": "127af519b3870a5802304064c74f128a40e89b78716ab0b87cd00eda46c6d322"
+    },
+    {
+      "file": "320dp-font200-connect.png",
+      "sha256": "d29f7a12e885f59a4a115254dc77c1f49dae1442a0738c5584381b44566e5122"
+    },
+    {
+      "file": "320dp-font200-mine-functions.png",
+      "sha256": "ec20b3f2e20978e5e5f323ec48222396d25b824bb83ab7a562321e834e175350"
+    },
+    {
+      "file": "320dp-font200-nodes.png",
+      "sha256": "c23661fa9ce2c3233ae2582bd57eab09eb30dd195aaba3a1b4ecd651ca113071"
+    },
+    {
+      "file": "320dp-font200-plans.png",
+      "sha256": "afb1c024db8b7d4c667ecfca7a1b5fab39164771070a7bcf054f72b233eb2304"
+    },
+    {
+      "file": "390dp-font100-connect.png",
+      "sha256": "d26b1dd710df5a1c093beb164d604a361d77332d0f384f5038164cd9215f03db"
+    },
+    {
+      "file": "390dp-font100-mine-functions.png",
+      "sha256": "d8baf2a831f935973b64642a917b3ae489cc40f21e39ec788a498e5a09bf06ad"
+    },
+    {
+      "file": "390dp-font100-mine.png",
+      "sha256": "03bed4edec8aee8190a3144c1962cd60712aa42996c808a77985bdc4fba98f84"
+    },
+    {
+      "file": "390dp-font100-nodes.png",
+      "sha256": "f4a4cd7103fffe86c05b95c70a4f2e36d7550ac43b3ccce1642a0dda4b140de5"
+    },
+    {
+      "file": "390dp-font100-plans-yearly.png",
+      "sha256": "2335b745eaad011a8aaf838f2b32d700b1a92a6648d2f06fc547579c848da72a"
+    },
+    {
+      "file": "390dp-font100-plans.png",
+      "sha256": "39cf1c4145e5bf60e5449d41eda68f3680bd6372e39fdc7cac7205afd275ca56"
+    }
+  ]
+}

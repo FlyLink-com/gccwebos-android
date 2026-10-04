@@ -1,0 +1,481 @@
+{
+  "risk": "B",
+  "applicationSourceCommit": "7d8a53d4ca71ad860b2b0237063c310936b204ea",
+  "unitBatch": [
+    {
+      "name": "com.gccwebos.android.design.NodeRegionTest",
+      "tests": "10",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.portal.AccountDisplayEmailTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.portal.AccountLoginAttemptTest",
+      "tests": "7",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.portal.AccountStartupRestoreTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.portal.NodeLatencyControllerTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.portal.NodeProbeTargetsTest",
+      "tests": "11",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.portal.NodeSelectionControllerTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.portal.OneClickConfigGatewayTest",
+      "tests": "22",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.gccwebos.android.vpn.IcmpEchoPacketTest",
+      "tests": "3",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "uniqueFinalDeviceCases": 38,
+  "deviceCaseResults": {
+    "com.gccwebos.android.AndroidNodePingUiTest#repeatedRealEchoClosesEveryOwnedSocketAndPhysicalLease": {
+      "code": 0,
+      "batch": "new-feature-runtime.log"
+    },
+    "com.gccwebos.android.AndroidNodePingUiTest#bindingFailureCannotFallBackToDefaultRouteAndClosesResources": {
+      "code": 0,
+      "batch": "new-feature-runtime.log"
+    },
+    "com.gccwebos.android.AndroidNodePingUiTest#physicalNetworkRevokedAfterBindingFailsClosedAndReleasesResources": {
+      "code": 0,
+      "batch": "new-feature-runtime.log"
+    },
+    "com.gccwebos.android.AndroidNodePingUiTest#cancellationAfterSocketBindingClosesSocketAndLeaseWithoutPublishingResult": {
+      "code": 0,
+      "batch": "new-feature-runtime.log"
+    },
+    "com.gccwebos.android.AndroidNodePingUiTest#realApplicationSocketReceivesLoopbackEchoThroughPhysicalNetwork": {
+      "code": 0,
+      "batch": "new-feature-runtime.log"
+    },
+    "com.gccwebos.android.OfficialWebsiteCardUiTest#narrowLargeTextKeepsTheDomainReadableAndWholeCardReachable": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.OfficialWebsiteCardUiTest#renderAndRecompositionOpenNothingUntilTheFixedWebsiteIsClicked": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.OfficialWebsiteCardUiTest#eachExplicitClickUsesTheLatestOpenerWithoutAddingAnotherTouchTarget": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.OfficialWebsiteCardUiTest#zeroMotionDurationLeavesTheDecorativeFrameStatic": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.OfficialWebsiteCardUiTest#missingBrowserGivesStaticFeedbackAndOnlyAnotherClickRetries": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#readOnlyInspectedNodesShowRegionWithoutMeasuringOrExposingChoice": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#labelsRecognizeExplicitRegionAndLeaveUnknownNeutralWithUnknownLatency": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#elapsedResultsHideThenRemeasureWithoutReloadingOrChangingSelection": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#backgroundSuspensionRejectsRecompositionUntilForegroundReturns": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#automaticMeasurementRetainsSelectionAndCompletedReadingsAcrossPageReturn": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#narrowDoubledFontKeepsRegionLatencyAndRemeasureActionInsideTheViewport": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#accountBusyCancelsPendingMeasurementsWithoutTurningPingIntoSelectionAuthorization": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.NodeRegionLatencyUiTest#noReplyRemainsSelectableAndExplicitRemeasureDoesNotReloadConfig": {
+      "code": 0,
+      "batch": "final-new-ui-runtime.log"
+    },
+    "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2At320DpDoubledFontKeepsNavigationAndActionsReachable": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2FourPageHierarchyAt320DpUsesOnlySyntheticState": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2FourPageHierarchyAt390DpUsesOnlySyntheticState": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#busyRefreshDisablesSelectionAndCancelIsReachableWithoutAuthenticationActions": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#nodeCaptionTracksActualOwnerWithoutStartingAConnectionOrReloading": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#unsupportedMixedArtifactAndExpiryExposeNoSelectableRows": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#selectionSummaryTracksTheOriginalChoiceWithoutSearchFiltersOrAnotherRead": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#duplicateChoicesStartUnselectedAndClickUsesTheCorrectOpaqueObjectWithoutReading": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#firstReadRetryHidesDuringReadAndCancellationRestoresOnlyReadRecovery": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#acceptedSelectionReturnsToConnectOnlyAfterControllerAcceptedIt": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.NodeSelectionUiTest#doubledFontNarrowGlassChoicesKeepOpaqueIdentityAndDoNotReloadOnSelection": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.OrderHistoryUiTest#legacyDetailsReturnKeepsListCursorCategoryAndSelectedRow": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.OrderHistoryUiTest#narrowDoubledFontDetailKeepsLocalReturnReachable": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.OrderHistoryUiTest#deferredAndRechargeKeepScheduleCurrencyAndVerifiedPaymentIndependent": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.OrderHistoryUiTest#unreadLoadingErrorAndAuthoritativeEmptyDoNotFallbackToLegacy": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.OrderHistoryUiTest#detailErrorRetriesOnlySameReadAndReturnNeverDeletesPendingRecord": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.AccountBackNavigationUiTest#backDuringForegroundValidationNavigatesAndKeepsTheAcceptedSession": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.AccountBackNavigationUiTest#backStillCancelsAnExplicitSecondFactorChallenge": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.AccountBackNavigationUiTest#backStillCancelsAnExplicitNewLoginWithoutPublishingItsLateResponse": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    },
+    "com.gccwebos.android.AccountBackNavigationUiTest#backDuringSavedStartupNavigatesWithoutClearingAndFreshOwnerStillRestores": {
+      "code": 0,
+      "batch": "regression-runtime.log"
+    }
+  },
+  "deviceBatches": [
+    {
+      "classes": [
+        "AndroidNodePingUiTest",
+        "OfficialWebsiteCardUiTest",
+        "NodeRegionLatencyUiTest"
+      ],
+      "excludedStandardPackageIdentityTest": [],
+      "expected": 18,
+      "started": 18,
+      "passed": 17,
+      "negativeCodes": [
+        -2
+      ],
+      "ok": [],
+      "success": false,
+      "seconds": [
+        "18.74"
+      ]
+    },
+    {
+      "classes": [
+        "PreviewV2LayoutUiTest",
+        "NodeSelectionUiTest",
+        "OrderHistoryUiTest",
+        "AccountBackNavigationUiTest"
+      ],
+      "excludedStandardPackageIdentityTest": [],
+      "expected": 20,
+      "started": 20,
+      "passed": 20,
+      "negativeCodes": [],
+      "ok": [
+        20
+      ],
+      "success": true,
+      "seconds": [
+        "50.812"
+      ]
+    },
+    {
+      "classes": [
+        "OfficialWebsiteCardUiTest",
+        "NodeRegionLatencyUiTest"
+      ],
+      "excludedStandardPackageIdentityTest": [],
+      "expected": 13,
+      "started": 13,
+      "passed": 13,
+      "negativeCodes": [],
+      "ok": [
+        13
+      ],
+      "success": true,
+      "seconds": [
+        "104.493"
+      ]
+    }
+  ],
+  "normalArtifact": {
+    "case": "normal-logged",
+    "applicationSourceCommit": "7d8a53d4ca71ad860b2b0237063c310936b204ea",
+    "nativeSourceCommit": "98ffd6bae926e3d5f7c2a60b2b21af1278874436",
+    "nativeArtifactId": 11306235582,
+    "nativeRunId": 37206973354,
+    "nativeArchiveSha256": "070f3bde1da1812c69b895991db807447fada99e96b63c7222333d5cfa435568",
+    "package": "com.gccwebos.android.candidate.acceptance.bbr20261004v2",
+    "versionCode": 6,
+    "apkSha256": "3d9fdcc7bffc38839bd50e24fbbce3d002face0964f9438092dd58cd4905a98f",
+    "signerSha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+    "flags": {
+      "DEBUG": true,
+      "VPN_ENGINE_PACKAGED": true,
+      "CONNECTION_ENDPOINT_HOSTNAME": true,
+      "CONNECTION_SYNTHETIC_ACCEPTANCE": false,
+      "STORAGE_SYNTHETIC_ACCEPTANCE": false,
+      "NATIVE_VPN_LAB": false,
+      "NATIVE_TUN_ACCEPTANCE": false
+    },
+    "rawNativeSha256": {
+      "arm64-v8a": "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+      "x86_64": "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8"
+    },
+    "packagedNativeSha256": {
+      "arm64-v8a": "30a35588e2605bb5343fcb43300b2ef53217646858e848a60e2aa892fcfdda47",
+      "x86_64": "98e668e0343fc9a11b37c72d4a9ee36dbb1aeecb4eee52634c4379f3db649020"
+    },
+    "alignedLoadSegments": {
+      "arm64-v8a": 3,
+      "x86_64": 3
+    },
+    "zip16KiBAlignment": true,
+    "requiredNotices": true,
+    "productionServicesPresent": true,
+    "debugLabComponentsDisabledAndNotExported": true
+  },
+  "fixtureInstall": {
+    "package": "com.gccwebos.android.candidate.acceptance.nodedisplay20261004",
+    "freshPackageAbsenceVerified": true,
+    "hiddenLauncher": true,
+    "installed": {
+      "com.gccwebos.android.candidate.acceptance.nodedisplay20261004": "a97edd137421824c33ab06e62ee7ce9dbe7ce868c161bd782b65c2b520cec48e",
+      "com.gccwebos.android.candidate.acceptance.nodedisplay20261004.test": "bdd9ef67685e183b6b86dbc7e3b318cf064792660900b6fa0dafb05975bfe1a4"
+    },
+    "privatePathsAbsentBeforeTests": true
+  },
+  "builds": [
+    "normal debug",
+    "isolated debug and AndroidTest",
+    "unsigned release"
+  ],
+  "lint": {
+    "Warning": 30,
+    "Hint": 4
+  },
+  "screenshots": [
+    {
+      "name": "320dp-font100-confirmation.png",
+      "sha256": "331e75911da72b69543e9e629684d187142dc367c9005452b8762b560f20bdf0",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font100-connect.png",
+      "sha256": "30fb6ae29a66949b614c050bcf81f19f5309fc37e531d1adfc8b216b7bfde5bb",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font100-mine-functions.png",
+      "sha256": "9736e62ac475ca24a3c65e494b1febea85a384d121c9e054db90aa2bb11b296f",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font100-mine.png",
+      "sha256": "59aa6d15e46db56c44add244d2459e6142659301a71fc89156888d49137967ba",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font100-nodes.png",
+      "sha256": "8b7945e5bdc8c1289e39ab1ce3abcbfd73800a737cea6e714463bb7b684dd3cb",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font100-plans-yearly.png",
+      "sha256": "ede2fee5c82b7e198ac828cf2a6651136c55a735392da197350dd67178a10fab",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font100-plans.png",
+      "sha256": "02d1f3cab9974564db9be2cdc0d8e2fd24503e5f66f8bd7a2f6b7a13133d7aa4",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font200-confirmation.png",
+      "sha256": "70d3da496ed17a8691a1d03cceed7c893249c6ce7f455cb980141fc8abeb90c4",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font200-connect.png",
+      "sha256": "85072918dca85c43cda0f0a0555eafcca025690296d059309a6d43d37083fc60",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font200-mine-functions.png",
+      "sha256": "221b4c022b61cb68d694fd7990b21d451ef4216ea3b64f6a2e6d5ee03f528f46",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font200-nodes.png",
+      "sha256": "2f52402781dc09a868d5561b181cd65a79681b6adef547b838d9203c9d696184",
+      "synthetic": true
+    },
+    {
+      "name": "320dp-font200-plans.png",
+      "sha256": "e6c08ba1d2d114870849c6ca9a47c12b07ede9b0f1669996fab32040e54fe18c",
+      "synthetic": true
+    },
+    {
+      "name": "390dp-font100-confirmation.png",
+      "sha256": "331e75911da72b69543e9e629684d187142dc367c9005452b8762b560f20bdf0",
+      "synthetic": true
+    },
+    {
+      "name": "390dp-font100-connect.png",
+      "sha256": "49445a221c46fad3e1cb2185efb7715fa912bf8b910248afa5b28d2dd6c967db",
+      "synthetic": true
+    },
+    {
+      "name": "390dp-font100-mine-functions.png",
+      "sha256": "f2a86c2ff2c9b223efe7e3e4e99605ee4b0796b3c4807c1a7304ff6a6aad215e",
+      "synthetic": true
+    },
+    {
+      "name": "390dp-font100-mine.png",
+      "sha256": "db909a960bb6ca4f31ef9bf96f1abb48bb0289792f3669c524c9e97c0fc0ac35",
+      "synthetic": true
+    },
+    {
+      "name": "390dp-font100-nodes.png",
+      "sha256": "407579afbf26869b50c9690ad264f79bb19940fcb413246b4d4ea69143728034",
+      "synthetic": true
+    },
+    {
+      "name": "390dp-font100-plans-yearly.png",
+      "sha256": "f283d9f4207a36382c62751a364a00ab69e2258536a56328e5195a7f1dcfbebf",
+      "synthetic": true
+    },
+    {
+      "name": "390dp-font100-plans.png",
+      "sha256": "50a24466dd7e4b78c723c73593fc881b1feb0ba27a53748d7a760345769616cc",
+      "synthetic": true
+    },
+    {
+      "name": "node-region-320-font100.png",
+      "sha256": "8c67a4cee1ecaba106f61fd1776d8492f50c071dfbbe08a1b06afaf4043b4787",
+      "synthetic": true
+    },
+    {
+      "name": "node-region-320-font200.png",
+      "sha256": "64762035dae36f2a91a972698be455ff71e98eda9d983647414f639534545902",
+      "synthetic": true
+    },
+    {
+      "name": "official-website-240dp-font2.png",
+      "sha256": "59b05b5d43ad3c64ddbb059a11357732c83b79216717c9ecfd7b353d17ed574e",
+      "synthetic": true
+    }
+  ],
+  "scopeLimits": [
+    "Ping host RTT is not proxy forwarding latency",
+    "Region inferred only from explicit node label",
+    "API 26-29 do not use API30 physical-network probe",
+    "No real account or subscription endpoint traffic acceptance",
+    "B2 P7 unresolved and P8/P9 not run; B1 separate",
+    "Hosted previous-head full suite timeout distinct from local selected regression"
+  ],
+  "earlierHostedCi": {
+    "head": "bd5ff024bcf4f829497b9a85056bf5830b13da76",
+    "runId": 37224246307,
+    "outcome": "failed outdated OrderHistoryUiTest assertion and 720s suite timeout",
+    "localAssertionFixVerified": true
+  },
+  "installedVerification": {
+    "installedArtifactMatches": true,
+    "apkSha256": "3d9fdcc7bffc38839bd50e24fbbce3d002face0964f9438092dd58cd4905a98f"
+  },
+  "upgradePreservation": {
+    "samePredefinedPrivatePathMetadataBeforeAndAfterUpgrade": true,
+    "checkedPaths": 15,
+    "contentNotRead": true
+  },
+  "fixtureCleanup": {
+    "onlyOwnedFixtureRemoved": true,
+    "privatePathsAbsent": true
+  },
+  "normalLaunch": {
+    "candidateLaunched": true
+  }
+}

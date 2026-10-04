@@ -80,13 +80,17 @@ No client/device limit or automatic backend reset is introduced.
 
 ## Cost-bounded source-identical JNI reuse
 
-Harness-only iterations may reuse the two native libraries from immutable artifact11114730030,
-source b3bb94fe73aa39e03fd25e4b7fc7ef4ba5ab7987. The archive digest, repository/run identity,
+Source-identical iterations may reuse the two native libraries from immutable artifact11301226820,
+source e498a1a55e7499d031d172265ee05673ef4201b3, run37193652121. Its archive SHA256 is
+23f310b79a337988e500008f1362ec0552d82260ef2e1cb3c66d84b929d14138 and size is 211787753 bytes.
+This fresh source passed host success/deny packet tests, both ABI builds, 811 JVM tests,
+185 API33 device tests including JNI, and one real-TUN traffic/lifecycle test. These are
+synthetic CI results; OPPO normal-account interoperability remains a separate gate. The archive digest, repository/run identity,
 entire native Git tree, Kotlin projector/JNI contract sources, and both raw library hashes must
 match before extraction. Only explicit library/header/notice entries are copied; no old APK is
 used. Every current app/test APK is rebuilt and its packaging, signatures, release exclusion,
 JNI execution and actual TUN tests still run. The receipt separately names native source and
-application source. Prior runtime failure is retained and never relabeled successful.
+application source. Historical failures remain separate from this source's successful run.
 
 Changed native/projector inputs or an expired/missing artifact trigger the full original native
 build/test path; corrupt or contradictory provenance fails closed. Prior host packet-path proof

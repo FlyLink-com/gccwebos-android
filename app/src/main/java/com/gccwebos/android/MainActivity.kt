@@ -355,8 +355,11 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
                   autoRefreshPages: Boolean) {
     val latestControl by rememberUpdatedState(connectionControlState)
-    LaunchedEffect(account, destination, navigationRequest, autoRefreshPages) {
-        if (!autoRefreshPages || navigationRequest == 0) return@LaunchedEffect
+    // Verified authentication revokes old opaque node handles. A mounted Nodes page must
+    // rebuild them with a fresh read; other pages do not gain another navigation refresh.
+    val nodesOwnerGeneration = account.authSessionGeneration.takeIf { destination == Destination.Lines }
+    LaunchedEffect(account, destination, navigationRequest, autoRefreshPages, nodesOwnerGeneration) {
+        if (!autoRefreshPages || (navigationRequest == 0 && destination != Destination.Lines)) return@LaunchedEffect
         snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing }.first { it }
         if (destination == Destination.Profile && !account.authenticated && !startRegistration) {
             account.restoreAccount()

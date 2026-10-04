@@ -49,6 +49,8 @@ class NodeSelectionUiTest {
     private var hasCapability by mutableStateOf(true)
     private var connectionControl by mutableStateOf(ConnectionControlState())
     private var inspectedNodes by mutableStateOf<List<SafeProxyConfig.NodeSummary>>(emptyList())
+    private var selectionAllowed = true
+    private val navigationCalls = AtomicInteger()
     private fun launch(initialRead: Boolean = true, width: Int = 360, fontScale: Float = 1f) {
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -68,7 +70,7 @@ class NodeSelectionUiTest {
                 }
                 manager = LocalSubscriptionManager(receipt, MemoryLocalProfileStore(), source,
                     OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { time }, LocalSubscriptionAuthority())
-                NodeSelectionController(manager, scope, { 0L }, onSnapshot = { inspectedNodes = it.nodes })
+                NodeSelectionController(manager, scope, { 0L }, allowed = { selectionAllowed }, onSnapshot = { inspectedNodes = it.nodes })
                     .also { state = it }
             }
             LaunchedEffect(owner) { if (initialRead) owner.refresh() } // Explicit synthetic fixture setup only.
@@ -78,12 +80,29 @@ class NodeSelectionUiTest {
                     Column(Modifier.width(width.dp).fillMaxHeight().testTag("nodes-fixture-host")
                         .verticalScroll(rememberScrollState())) {
                         NodeSelectionPanel(owner, inspectedNodes, resource, hasCapability, false,
-                            connectionControl = connectionControl) {}
+                            connectionControl = connectionControl, onSelected = { navigationCalls.incrementAndGet() }) {}
                     }
                 }
             }
         }
         compose.waitUntil(5000) { ::state.isInitialized && !state.busy && (!initialRead || reads.get() > 0) }
+    }
+
+    @Test fun acceptedSelectionReturnsToConnectOnlyAfterControllerAcceptedIt() {
+        launch()
+        val second = state.snapshot.choices[1].selection
+        compose.onNodeWithTag("node-choice-1").performClick()
+        compose.runOnIdle {
+            assertSame(second, state.snapshot.selected)
+            assertEquals(1, navigationCalls.get())
+            assertEquals(1, reads.get())
+            selectionAllowed = false
+        }
+        compose.onNodeWithTag("node-choice-1").performClick()
+        compose.runOnIdle {
+            assertEquals(1, navigationCalls.get())
+            assertEquals(1, reads.get())
+        }
     }
 
     @Test fun duplicateChoicesStartUnselectedAndClickUsesTheCorrectOpaqueObjectWithoutReading() {

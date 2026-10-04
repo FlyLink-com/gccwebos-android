@@ -131,7 +131,10 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
         val selected = inspector.nodeSelectionSnapshot().choices[1].selection
-        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         repeat(2) {
             compose.onNodeWithTag("nav-Connect").performClick()
@@ -142,6 +145,13 @@ class SelectedNodeActivityRecreationTest {
         }
         compose.runOnIdle { assertSame(selected, inspector.nodeSelectionSnapshot().selected) }
         return selected
+    }
+
+    private fun assertNodeSelectionReturnedToConnection() {
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("nav-Connect").assertIsSelected()
+        compose.onNodeWithTag("page-Lines").assertDoesNotExist()
+        assertSelectedConnection()
     }
 
     private fun assertSelectedConnection() {
@@ -263,7 +273,10 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("connection-power").assertDoesNotExist()
         screenshot("changed-cache-after-real-activity-recreation-unselected")
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle {
             assertSame(inspector.nodeSelectionSnapshot().choices[1].selection, inspector.nodeSelectionSnapshot().selected)

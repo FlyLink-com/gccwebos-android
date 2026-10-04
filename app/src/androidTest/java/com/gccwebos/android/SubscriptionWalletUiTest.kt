@@ -179,6 +179,7 @@ class SubscriptionWalletUiTest {
 
     private fun launchCommerce(mode: CommerceMode, fontScale: Float = 1f,
         setup: CommerceController.() -> Unit = {}) {
+        var stagedQuote: Quote? = null
         compose.setContent {
             val scope = rememberCoroutineScope()
             val owner = remember { accountFixture(scope) }
@@ -203,6 +204,7 @@ class SubscriptionWalletUiTest {
                         catalogLoaded = true
                         offers = listOf(value.offer)
                         if (commerceModel == null) commerceModel = CommerceModel.LEGACY
+                        if (mode == CommerceMode.Plans) { stagedQuote = value; quote = null }
                     }
                 }
             }
@@ -217,6 +219,13 @@ class SubscriptionWalletUiTest {
                     }
                 }
             }
+        }
+        compose.waitForIdle()
+        // Production visits discard old quotes. Admit the fixture only after an explicit
+        // current-catalog selection, as a synthetic response to that selected offer.
+        stagedQuote?.let { value ->
+            compose.onNodeWithTag("plan-offer-${value.offer.offerRef}").performScrollTo().performClick()
+            compose.runOnIdle { commerce.quote = value }
         }
     }
 
@@ -627,7 +636,7 @@ class SubscriptionWalletUiTest {
             account.restoring = false
             commerce.loadBalance()
         }
-        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(listOf(walletPath), paths)
@@ -635,7 +644,7 @@ class SubscriptionWalletUiTest {
             initialBalance.complete(Unit)
         }
         compose.waitUntil(5_000) { walletReads.get() == 2 }
-        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(listOf(walletPath, walletPath), paths)
             assertFalse(commerce.catalogLoaded)
@@ -647,7 +656,7 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购套餐")
         // Completing another explicit balance read must not restart the loaded catalog.
         compose.runOnIdle { commerce.loadBalance() }
-        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
         compose.runOnIdle {
             assertTrue(commerce.catalogLoaded)
             assertEquals(3, walletReads.get())

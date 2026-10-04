@@ -167,13 +167,14 @@ class CommerceCompactUiTest {
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
     }
 
-    @Test fun retainedDataPackSelectsItsCategoryBeforeTheSingleQuoteAction() {
+    @Test fun dataPackRequiresExplicitSelectionAndHasNoRetainedPurchaseShortcut() {
         val pack = fixture.copy(offerRef = "compact_data", offerVersionRef = "compact_data_v1", category = "data_pack",
             durationDays = null, monthlyTrafficGb = null, discountBasisPoints = null, trafficGb = 23)
         launch { offers = listOf(fixture, pack) }
         compose.runOnIdle { account.purchaseReturnRef = pack.offerRef }
-        compose.onNodeWithTag("purchase-return-requote").performScrollTo().performClick()
-        compose.onNodeWithTag("plan-offer-${pack.offerRef}").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("purchase-return-requote").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-data-packs").performScrollTo().performClick()
+        compose.onNodeWithTag("plan-offer-${pack.offerRef}").performScrollTo().assertIsNotSelected().performClick().assertIsSelected()
         compose.onNodeWithTag("plan-offer-${fixture.offerRef}").assertDoesNotExist()
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsEnabled()
         compose.runOnIdle { assertEquals(listOf("/api/portal/commerce/model"), calls) }

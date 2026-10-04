@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -22,6 +23,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -270,7 +272,11 @@ internal fun GlassSurface(modifier: Modifier = Modifier, shape: Shape = Brand.Sh
             Color(if (frosted) GlassMaterialPolicy.CardEndArgb else GlassMaterialPolicy.CardSolidArgb)
                 .copy(alpha = if (frosted) GlassMaterialPolicy.CardEndAlpha else 1f)))
     }
-    Surface(modifier.onGloballyPositioned { bounds = it.boundsInWindow() }, shape = shape, color = Color.Transparent,
+    Surface(modifier.onGloballyPositioned {
+        // A scrolling card can extend past the viewport. Its clipped visible bounds would
+        // misalign the sampled backdrop and leave a sharp transparent edge inside a tall card.
+        bounds = Rect(it.positionInWindow(), Size(it.size.width.toFloat(), it.size.height.toFloat()))
+    }, shape = shape, color = Color.Transparent,
         border = BorderStroke(if (selected) 2.dp else 1.dp, Brand.GlassBorder.copy(alpha = if (selected) .72f else if (frosted) .44f else .38f)),
         shadowElevation = 8.dp) {
         Box(Modifier.drawWithCache {

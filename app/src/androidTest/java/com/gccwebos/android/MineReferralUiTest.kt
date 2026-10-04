@@ -74,6 +74,15 @@ class MineReferralUiTest {
         }
         compose.waitUntil(5_000) { referral.profile != null && referral.performance != null }
     }
+    @Test fun mineSectionsShareOneSurfaceAndDoNotOfferAPurchaseReturnShortcut() {
+        launchMine()
+        listOf("mine-welcome", "wallet-card", "mine-menu", "mine-referral", "mine-functions").forEach { tag ->
+            compose.onNodeWithTag(tag).assert(hasAnyAncestor(hasTestTag("mine-surface")))
+        }
+        compose.runOnIdle { account.purchaseReturnRef = "synthetic_retained_offer" }
+        compose.onNodeWithTag("mine-return-purchase").assertDoesNotExist()
+    }
+
     @Test fun oldSessionIsNeutralAndUnknownBalanceCannotBecomeResourceDerivedZero() {
         launchMine()
         compose.onNodeWithTag("mine-account-identity").assertTextEquals("账户")

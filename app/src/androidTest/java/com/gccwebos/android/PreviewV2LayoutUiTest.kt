@@ -54,7 +54,7 @@ class PreviewV2LayoutUiTest {
         ref, "${ref}_v1", LocalizedText("合成 ${days} 天套餐", "Synthetic $days day plan"),
         LocalizedText("仅供离线界面验收", "Offline UI fixture only"),
         LocalizedNotices(listOf("合成商品，不进行购买"), listOf("Synthetic offer; no purchase")),
-        coins, coins * 100, listOf("paid", "bonus", "reward"), days, traffic, null,
+        coins, coins * 100, listOf("paid_coins", "bonus_coins", "reward_coins"), days, traffic, null,
     )
 
     private fun accountFixture(scope: CoroutineScope): AccountController {
@@ -68,7 +68,7 @@ class PreviewV2LayoutUiTest {
         }
         val overviewResponse = """{"resource":{"state":"available",
             "resourceRef":"resource_${"c".repeat(64)}",
-            "plan":{"id":"synthetic_preview_v2_plan","durationDays":365,"monthlyTrafficGb":50},
+            "plan":{"id":"monthly_30d_50gb","durationDays":30,"monthlyTrafficGb":50},
             "validUntil":"2099-09-30T00:00:00.000Z","setupAvailable":false,
             "usage":{"totalBytes":53687091200,"usedBytes":10737418240,"remainingBytes":42949672960,
             "collectionStatus":"measured","updatedAt":"${wireTime.format(now.minusSeconds(900))}",
@@ -77,7 +77,7 @@ class PreviewV2LayoutUiTest {
         // Fail at fixture construction if the production wire parser rejects our synthetic data.
         val parsed = PortalJson.resource(overviewResponse)
         assertTrue(parsed is Resource.Available)
-        assertEquals(365L, (parsed as Resource.Available).durationDays)
+        assertEquals(30L, (parsed as Resource.Available).durationDays)
         val transport = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
                 if (path != "/api/portal/resources/current/overview") forbidden()
@@ -142,7 +142,7 @@ class PreviewV2LayoutUiTest {
                 CommerceController(owner, scope, recovery).apply {
                     wallet = Wallet("active", 1, 17, 9, 5, 31, 7, 11)
                     walletLoaded = true
-                    offers = listOf(offer("synthetic_preview_month", 30, 39, 50),
+                    offers = listOf(offer("synthetic_preview_month", 30, 30, 50),
                         offer("synthetic_preview_year", 365, 299, 80),
                         offer("synthetic_preview_other", 47, 73, 17))
                     catalogLoaded = true
@@ -197,14 +197,29 @@ class PreviewV2LayoutUiTest {
         if (::account.isInitialized) assertEquals(2, overviewReads.get())
     }
 
-    private fun capture(name: String) {
+    private fun capture(name: String, dialog: Boolean = false) {
         compose.waitForIdle()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = File(requireNotNull(context.getExternalFilesDir(null)), "ui-evidence/preview-v2")
         check(directory.isDirectory || directory.mkdirs())
         File(directory, "$name.png").outputStream().use { stream ->
-            assertTrue(compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream))
+            val node = if (dialog) compose.onNode(isDialog()) else compose.onRoot()
+            assertTrue(node.captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, stream))
         }
+    }
+
+    private fun captureConfirmation(name: String, offerRef: String) {
+        compose.runOnIdle {
+            val offer = commerce.offers.single { it.offerRef == offerRef }
+            commerce.quote = Quote("synthetic_preview_quote", offer, offer.baseCoinUnits, 0, "available", 0,
+                listOf(CoinAllocation("paid_coins", offer.baseCoinUnits)),
+                QuoteBalances(CoinBalance(0, 500, 0, 0), CoinBalance(0, 500 - offer.baseCoinUnits, 0, offer.baseCoinUnits)),
+                Instant.now().plusSeconds(120), null)
+        }
+        compose.onNodeWithTag("purchase-confirm").assertIsDisplayed().assertIsEnabled()
+        capture(name, dialog = true)
+        compose.onNodeWithTag("purchase-cancel").assertIsDisplayed().performClick()
+        assertNoActions()
     }
 
     private fun reachable(tag: String): SemanticsNodeInteraction {
@@ -231,15 +246,24 @@ class PreviewV2LayoutUiTest {
         open("Lines")
         compose.onNodeWithTag("nodes-selection-summary").assertExists()
         capture("$prefix-nodes")
-        reachable("node-choice-1").performClick().assertIsSelected()
+        reachable("node-choice-1").performClick()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("合成节点 Beta")
+        open("Lines")
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("nodes-selected-name").assertTextEquals("合成节点 Beta")
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         assertNoActions()
 
         open("Plans")
+        compose.onNodeWithText("选择你的套餐").assertDoesNotExist()
+        compose.onNodeWithText("先看流量和有效期，再决定怎么用").assertDoesNotExist()
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
         compose.onNodeWithTag("plan-purchase-dock").assertExists()
+        compose.onNodeWithTag("plan-offer-synthetic_preview_month").assertIsSelected()
+        compose.onNodeWithTag("plan-continue").assertTextEquals("购买")
         capture("$prefix-plans")
+        captureConfirmation("$prefix-confirmation", "synthetic_preview_month")
         reachable("catalog-yearly").performClick()
         reachable("plan-offer-synthetic_preview_year").performClick().assertIsSelected()
         compose.onNodeWithTag("plan-title-synthetic_preview_year", useUnmergedTree = true).assertTextEquals("365天")
@@ -253,9 +277,11 @@ class PreviewV2LayoutUiTest {
         open("Profile")
         compose.onNodeWithTag("plan-purchase-dock").assertDoesNotExist()
         compose.onNodeWithTag("mine-welcome").assertExists()
+        compose.onNodeWithTag("mine-welcome-title").assertTextEquals("Go 订阅")
+        compose.onNodeWithTag("mine-welcome").assert(hasAnyAncestor(hasTestTag("mine-surface")))
         compose.onNodeWithTag("mine-account-identity").assertTextEquals("账户")
-        compose.onNodeWithTag("mine-current-plan").assertTextEquals("365天套餐")
-        compose.onNodeWithTag("mine-plan-expiry").assertTextContains("2099-09-", substring = true)
+        compose.onNodeWithTag("mine-current-plan").assertTextEquals("30天套餐")
+        compose.onNodeWithTag("mine-plan-expiry").assertTextContains("2099.09.", substring = true)
         compose.onNodeWithTag("wallet-balance").assertTextEquals("31 Coins")
         compose.onNodeWithTag("wallet-paid").assertDoesNotExist()
         capture("$prefix-mine")
@@ -288,7 +314,10 @@ class PreviewV2LayoutUiTest {
         }
         capture("320dp-font200-connect")
         open("Lines")
-        reachable("node-choice-1").performClick().assertIsSelected()
+        reachable("node-choice-1").performClick()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        open("Lines")
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
         capture("320dp-font200-nodes")
         open("Plans")
         reachable("catalog-yearly").performClick()
@@ -296,6 +325,7 @@ class PreviewV2LayoutUiTest {
         val purchase = reachable("plan-continue").assertIsEnabled()
         assertTrue(purchase.fetchSemanticsNode().boundsInRoot.height / densityScale >= 48f)
         capture("320dp-font200-plans")
+        captureConfirmation("320dp-font200-confirmation", "synthetic_preview_year")
         open("Profile")
         compose.onNodeWithTag("plan-purchase-dock").assertDoesNotExist()
         listOf("mine-recharge", "mine-ledger", "mine-more").forEach { tag ->

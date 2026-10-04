@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.portal.*
@@ -38,7 +39,7 @@ class ConnectionSetupRecoveryUiTest {
     private val navigations = AtomicInteger()
     private var showOverview by mutableStateOf(true)
 
-    private fun launch(fixture: Fixture) {
+    private fun launch(fixture: Fixture, viewportHeight: Dp? = null) {
         fixture.assertConfigurationShape()
         // These injected memory stores do not own the previous fixture's process-wide
         // selection registry. Fence it before the first Overview sync can inspect it.
@@ -47,8 +48,11 @@ class ConnectionSetupRecoveryUiTest {
             val scope = rememberCoroutineScope()
             account = remember { AccountController(fixture.repo, scope) }
             GccTheme { Surface {
-                Column(Modifier.width(360.dp).fillMaxHeight().verticalScroll(rememberScrollState())
-                    .padding(12.dp).testTag("setup-recovery-fixture-host")) {
+                Column(Modifier.width(360.dp)
+                    .then(if (viewportHeight == null) Modifier.fillMaxHeight() else Modifier.height(viewportHeight))
+                    .testTag("setup-recovery-fixture-host")
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp)) {
                     if (showOverview) ConnectionOverview(account, openAccount = { navigations.incrementAndGet() },
                         openPlans = { navigations.incrementAndGet() }, openNodes = { navigations.incrementAndGet() },
                         control = fixture.control,
@@ -167,7 +171,7 @@ class ConnectionSetupRecoveryUiTest {
         }
     }
 
-    @Test fun severalPreparedNodesRequireExplicitSelectionInsteadOfAPowerCommand() {
+    @Test fun explicitPreparationContinuesThroughOnePowerCommandForSeveralLegalNodes() {
         val fixture = Fixture(setupAvailable = true, failFirstDownload = true, holdRetry = true, multipleNodes = true)
         launch(fixture)
         compose.runOnIdle {
@@ -194,10 +198,41 @@ class ConnectionSetupRecoveryUiTest {
             assertEquals(2, account.nodeSelection.snapshot.choices.size)
             assertNull(account.nodeSelection.snapshot.selected)
             assertEquals(2, fixture.downloads.get())
-            assertEquals(0, powers.get()); assertEquals(1, navigations.get())
+            // The owner/gateway owns random selection and fresh admission; UI must only dispatch once.
+            assertEquals(1, powers.get()); assertEquals(0, navigations.get())
             assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
         }
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+    }
+
+    @Test fun readyExplicitClickKeepsExistingChoiceAndCannotDispatchTwiceWhileAwaitingOwner() {
+        val fixture = Fixture(setupAvailable = true, multipleNodes = true)
+        launch(fixture)
+        val selected = compose.runOnIdle {
+            account.nodeSelection.sync()
+            account.nodeSelection.snapshot.choices[1].selection.also(account.nodeSelection::select)
+        }
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click() }
+        compose.runOnIdle {
+            assertSame(selected, account.nodeSelection.snapshot.selected)
+            assertEquals(1, powers.get()); assertEquals(0, navigations.get())
+            assertEquals(1, fixture.downloads.get()); assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
+        }
+    }
+
+    @Test fun normalWidthKeepsTheNodeEntryInTheInitialViewportWithoutStartingAConnection() {
+        val fixture = Fixture(setupAvailable = true, multipleNodes = true)
+        launch(fixture, viewportHeight = 640.dp)
+        compose.onNodeWithTag("setup-recovery-fixture-host").assertWidthIsEqualTo(360.dp).assertHeightIsEqualTo(640.dp)
+        compose.onNodeWithTag("connection-nodes").assertIsDisplayed()
+        val viewport = compose.onNodeWithTag("setup-recovery-fixture-host").getUnclippedBoundsInRoot()
+        val nodes = compose.onNodeWithTag("connection-nodes").getUnclippedBoundsInRoot()
+        assertTrue("Node entry must fit without scrolling", nodes.top >= viewport.top && nodes.bottom <= viewport.bottom)
+        compose.runOnIdle {
+            assertEquals(0, powers.get()); assertEquals(0, navigations.get())
+            assertNull(account.nodeSelection.snapshot.selected)
+        }
     }
 
     @Test fun aNewLiveOwnerStateBlocksThePreparedRequestsOldIdleConnectCallback() {

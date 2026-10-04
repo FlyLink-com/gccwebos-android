@@ -109,7 +109,7 @@ class WalletCompactUiTest {
         tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
         compose.runOnIdle { state.walletError = "合成读取失败"; state.busy = true }
         compose.onNodeWithTag("wallet-error").assertTextEquals("合成读取失败")
-        compose.onNodeWithTag("wallet-loading").assertExists()
+        compose.onNodeWithTag("wallet-loading").assertDoesNotExist()
         compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
@@ -130,6 +130,27 @@ class WalletCompactUiTest {
         compose.runOnIdle { state.wallet = confirmed.copy(status = "closed") }
         assertConfirmedFields()
         compose.onNodeWithTag("wallet-status").assertTextEquals("钱包已关闭")
+        assertNoSideEffects()
+    }
+
+    @Test fun backgroundReadRetainsSameOwnerDisplayButCannotAuthorizeRecharge() {
+        launch { wallet = confirmed; walletLoaded = true; rechargeOffers = listOf(offer); rechargeOffersLoaded = true }
+        assertConfirmedFields()
+        compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
+        compose.runOnIdle {
+            state.wallet = null; state.walletLoaded = false
+            state.rechargeOffers = emptyList(); state.rechargeOffersLoaded = false; state.busy = true
+        }
+        assertConfirmedFields()
+        compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
+        compose.onNodeWithTag("wallet-loading").assertDoesNotExist()
+        compose.runOnIdle { state.busy = false; state.walletError = "合成刷新失败" }
+        assertConfirmedFields()
+        compose.onNodeWithTag("wallet-error").assertTextEquals("合成刷新失败")
+        compose.runOnIdle { owner.authSessionGeneration++ }
+        tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
+        compose.onNodeWithTag("recharge-select-${offer.offerRef}").assertDoesNotExist()
         assertNoSideEffects()
     }
 
@@ -209,7 +230,8 @@ class WalletCompactUiTest {
         compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
         compose.onNodeWithText("CNY 25.67 → 73 Coins").assertExists()
         compose.runOnIdle { owner.authSessionGeneration++ }
-        compose.onNodeWithTag("recharge-select-${offer.offerRef}").assertIsNotSelected().assertIsNotEnabled()
+        compose.runOnIdle { assertFalse(state.currentSession()); assertEquals(listOf(changed), state.rechargeOffers) }
+        compose.onNodeWithTag("recharge-select-${offer.offerRef}").assertDoesNotExist()
         compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
         assertNoSideEffects()

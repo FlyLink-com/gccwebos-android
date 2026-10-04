@@ -123,8 +123,9 @@ class MainActivity : ComponentActivity() {
                     Surface(Modifier.fillMaxSize(), color = Brand.Background) {
                         Column(Modifier.fillMaxSize().testTag(if (bindingFailure) "connection-owner-unavailable" else "connection-owner-initializing"),
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            if (!bindingFailure) CircularProgressIndicator(color = Brand.Cyan)
-                            Text(if (bindingFailure) "连接服务暂不可用" else "正在初始化连接服务",
+                            if (!bindingFailure) Image(painterResource(R.drawable.brand_robot_avatar), null,
+                                modifier = Modifier.size(52.dp))
+                            Text(if (bindingFailure) "连接服务暂不可用" else "飞连vpn",
                                 modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
@@ -181,6 +182,11 @@ internal class AccountForegroundObserver(private val account: AccountController)
     }
 }
 
+/** Back cancels new sign-in work; saved-session verification and authenticated reads only navigate. */
+internal fun shouldCancelLoginOnBack(account: AccountController): Boolean =
+    !account.authenticated && !account.restoring && !account.foregroundCheckPending &&
+        !account.restorationPending && (account.factorReference != null || account.busy)
+
 @Composable
 internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommerce: Boolean = true,
     commerceOverride: com.gccwebos.android.commerce.CommerceController? = null,
@@ -230,11 +236,11 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
+    var plansVisit by remember { mutableStateOf(0) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
     val catalogDock = remember { CatalogDockState() }
     BackHandler(enabled = selected != Destination.Connect) {
-        if (selected == Destination.Profile && !account.authenticated &&
-            (account.factorReference != null || account.busy)) account.cancelAuthentication()
+        if (selected == Destination.Profile && shouldCancelLoginOnBack(account)) account.cancelAuthentication()
         else selectedName = Destination.Connect.name
     }
     GccTheme(materialMode = glassMode) {
@@ -247,8 +253,8 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                 CompositionLocalProvider(LocalCatalogPurchaseDock provides catalogDock) {
                 Scaffold(containerColor = Color.Transparent, bottomBar = {
                     Column(Modifier.fillMaxWidth().navigationBarsPadding()
-                        .padding(start = 14.dp, end = 14.dp, bottom = 10.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        .padding(start = 12.dp, end = 12.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (selected == Destination.Plans) catalogDock.summary?.let { summary ->
                             Column(Modifier.widthIn(max = 680.dp).fillMaxWidth().heightIn(max = 240.dp)
                                 .verticalScroll(rememberScrollState())) {
@@ -256,24 +262,28 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                             }
                         }
                         GlassSurface(Modifier.widthIn(max = 760.dp).fillMaxWidth().testTag("glass-navigation"),
-                            shape = RoundedCornerShape(24.dp), kind = GlassSurfaceKind.Navigation) {
+                            shape = RoundedCornerShape(20.dp), kind = GlassSurfaceKind.Navigation) {
                             // A minimum, not a fixed height: wrapped or enlarged labels grow this row.
-                            Row(Modifier.fillMaxWidth().selectableGroup().heightIn(min = 70.dp).padding(horizontal = 6.dp, vertical = 7.dp),
+                            Row(Modifier.fillMaxWidth().selectableGroup().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 primaryDestinations.forEach { destination ->
                                     val title = stringResource(destination.title)
                                     val chosen = destination == selected
                                     Column(Modifier.weight(1f).heightIn(min = 48.dp)
-                                        .clip(RoundedCornerShape(18.dp))
+                                        .clip(RoundedCornerShape(16.dp))
                                         .background(if (chosen) Brand.Cyan.copy(alpha = .15f) else Color.Transparent)
                                         .testTag("nav-${destination.name}")
-                                        .selectable(selected = chosen, onClick = { if (destination == Destination.Profile) startRegistration = false; selectedName = destination.name }, role = Role.Tab)
-                                        .padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        .selectable(selected = chosen, onClick = {
+                                            if (destination == Destination.Profile) startRegistration = false
+                                            if (destination == Destination.Plans) plansVisit++
+                                            selectedName = destination.name
+                                        }, role = Role.Tab)
+                                        .padding(2.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                         Icon(painterResource(destination.icon), contentDescription = null,
-                                            tint = if (chosen) Brand.Cyan else Brand.Muted, modifier = Modifier.size(23.dp))
+                                            tint = if (chosen) Brand.Cyan else Brand.Muted, modifier = Modifier.size(20.dp))
                                         Text(title, color = if (chosen) Brand.Cyan else Brand.Muted,
-                                            style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+                                            style = MaterialTheme.typography.labelMedium, fontSize = 11.sp, textAlign = TextAlign.Center)
                                     }
                                 }
                             }
@@ -283,11 +293,14 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                     // Scaffold measures the entire bar, its gap and system inset for content clearance.
                     key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
                         commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
-                        openAccount = { startRegistration = false; selectedName = Destination.Profile.name }, openPlans = { selectedName = Destination.Plans.name },
+                        openAccount = { startRegistration = false; selectedName = Destination.Profile.name },
+                        openPlans = { plansVisit++; selectedName = Destination.Plans.name },
+                        openConnect = { selectedName = Destination.Connect.name },
                         openNodes = { selectedName = Destination.Lines.name },
                         openRegistration = { startRegistration = true; selectedName = Destination.Profile.name },
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
-                        loginStartupReady = loginStartupReady, registrationOverride = registrationOverride) }
+                        loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
+                        plansVisit = plansVisit) }
                 }
                 }
 
@@ -302,12 +315,11 @@ private fun LoginScreen(account: AccountController, registrationOpener: ((String
                          padding: PaddingValues, startRegistration: Boolean) {
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = 520.dp).fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp).testTag("login-screen"),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            .padding(horizontal = 16.dp, vertical = 12.dp).testTag("login-screen"),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
             BrandHeader()
             if (account.restoring || account.foregroundCheckPending) Column(Modifier.testTag("session-checking"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator(color = Brand.Cyan)
                 Text("正在验证已保存登录", style = MaterialTheme.typography.titleLarge)
                 SupportingText("验证后显示账户资源。")
                 TextButton(onClick = account::cancelAuthentication) { Text("取消并返回登录") }
@@ -330,10 +342,10 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   autoLoadCommerce: Boolean, commerceOverride: com.gccwebos.android.commerce.CommerceController?,
                   commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery?, paymentOpenerOverride: ((String) -> Unit)?,
                   connectionControlState: ConnectionControlState, onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)?,
-                  openAccount: () -> Unit, openPlans: () -> Unit, openNodes: () -> Unit,
+                  openAccount: () -> Unit, openPlans: () -> Unit, openConnect: () -> Unit, openNodes: () -> Unit,
                   openRegistration: () -> Unit, startRegistration: Boolean,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
-                  registrationOverride: RegistrationController?) {
+                  registrationOverride: RegistrationController?, plansVisit: Int) {
     if (destination == Destination.Profile) {
         LaunchedEffect(account) { if (!account.authenticated && account.localSubscription.hasProfile) account.restoreAccount() }
         if (!account.authenticated && !account.retainingCommerceSession) {
@@ -345,9 +357,9 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
         // Readable line lengths on tablets; no fixed-height account forms or data cards.
         Column(Modifier.widthIn(max = 680.dp).fillMaxSize()
-            .verticalScroll(rememberScrollState()).padding(horizontal = 19.dp, vertical = if (compact) 16.dp else 20.dp)
+            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = if (compact) 12.dp else 16.dp)
             .testTag("page-${destination.name}"),
-            verticalArrangement = Arrangement.spacedBy(if (compact) 15.dp else 18.dp)) {
+            verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp)) {
             BrandHeader()
             when (destination) {
                 Destination.Connect -> {
@@ -358,10 +370,10 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending,
-                        authenticated = account.authenticated, connectionControl = connectionControlState, openAccount = openAccount)
+                        authenticated = account.authenticated, connectionControl = connectionControlState,
+                        onSelected = openConnect, openAccount = openAccount)
                 }
                 Destination.Plans -> {
-                    PageTitle("选择你的套餐", "先看流量和有效期，再决定怎么用")
                     if (!account.authenticated && !account.retainingCommerceSession) {
                         BrandCard(Modifier.testTag("commerce-signed-out")) {
                             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
@@ -376,7 +388,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                             }
                         }
                     } else {
-                        CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce, onRecharge = openAccount)
+                        CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce,
+                            onRecharge = openAccount, defaultSelectionRequest = plansVisit)
                     }
                 }
                 Destination.Orders -> {
@@ -396,14 +409,14 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
 
 @Composable
 private fun BrandHeader() {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Image(painterResource(R.drawable.brand_robot_avatar), contentDescription = null,
-            modifier = Modifier.size(42.dp), contentScale = ContentScale.Fit)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("飞连vpn", style = MaterialTheme.typography.titleLarge, fontSize = 25.sp,
+            modifier = Modifier.size(34.dp), contentScale = ContentScale.Fit)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text("飞连vpn", style = MaterialTheme.typography.titleLarge, fontSize = 21.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag("brand-name"))
-            Box(Modifier.width(112.dp).height(3.dp).background(Brush.horizontalGradient(
+            Box(Modifier.width(94.dp).height(2.dp).background(Brush.horizontalGradient(
                 listOf(androidx.compose.ui.graphics.Color(0xFFFF27DF), Brand.Blue, Brand.Cyan))))
         }
     }
@@ -432,24 +445,21 @@ private fun CompactNodeList(nodes: List<com.gccwebos.android.vpn.SafeProxyConfig
 }
 
 @Composable
-private fun PageTitle(title: String, detail: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        SupportingText(detail)
-    }
-}
-
-@Composable
-internal fun ResourceCard(state: AccountController, showOperationState: Boolean = true) {
-    val countdownEnabled = state.authenticated && !state.busy && state.error == null && state.resource is Resource.Available
-    val now by produceState(initialValue = Instant.now(), countdownEnabled, state.resource) {
+internal fun ResourceCard(state: AccountController, showOperationState: Boolean = true, showReadProgress: Boolean = true) {
+    val usage by state.accountUsage.state.collectAsState()
+    val verified = state.authenticated && !state.restoring && !state.foregroundCheckPending && !state.clearing &&
+        !usage.verifying
+    val resource = if (showReadProgress) state.resource else if (verified)
+        state.resource ?: usage.resource.takeIf { usage.authenticated } else null
+    val countdownEnabled = verified && !state.busy && state.error == null && resource is Resource.Available
+    val now by produceState(initialValue = Instant.now(), countdownEnabled, resource) {
         value = Instant.now()
         while (countdownEnabled) {
             delay(1_000)
             value = Instant.now()
         }
     }
-    val display = resourcePresentation(state.authenticated, state.resource, state.busy, state.error, now)
+    val display = resourcePresentation(state.authenticated, resource, state.busy && showReadProgress, state.error, now)
     BrandCard(Modifier.testTag("resource-card")) {
         Eyebrow("当前资源")
         Text(display.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
@@ -468,7 +478,6 @@ internal fun ResourceCard(state: AccountController, showOperationState: Boolean 
                 Text(value, style = MaterialTheme.typography.bodyLarge)
             }
         }
-        if (showOperationState && state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
         if (showOperationState) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error,
             modifier = Modifier.testTag("resource-error").semantics { liveRegion = LiveRegionMode.Polite }) }
     }

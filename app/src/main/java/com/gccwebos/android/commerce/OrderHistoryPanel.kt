@@ -58,7 +58,6 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
         if (showReadRetry(state.busy, state.canOperate(), listError != null, selectedRows == null))
             BrandButton("重试", state::load, modifier = Modifier.width(88.dp).testTag("commerce-refresh"))
     }
-    if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("orders-loading"), color = Brand.Cyan)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val purchaseCategory = when (state.commerceModel) {
             CommerceModel.LEGACY -> "orders" to "商城"
@@ -120,6 +119,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
 private fun HistoryReadState(size: Int?, busy: Boolean, specificError: String?, label: String, globalError: String?) {
     val error = historyReadError(size, busy, specificError, globalError)
     if (error != null) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("history-error"))
+    if (busy && size == null) { Spacer(Modifier.height(8.dp)); return }
     if (size == null || size == 0) Surface(Modifier.fillMaxWidth().testTag("history-read-state"),
         shape = Brand.Shape, color = Color.Transparent) {
         Row(Modifier.heightIn(min = 48.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically,
@@ -127,7 +127,7 @@ private fun HistoryReadState(size: Int?, busy: Boolean, specificError: String?, 
             Icon(painterResource(com.gccwebos.android.R.drawable.brand_receipt), null, tint = Brand.Muted,
                 modifier = Modifier.size(24.dp))
             Text(when {
-                busy -> "正在查询$label"
+                busy -> label
                 size == null && error != null -> "${label}查询失败"
                 size == null -> "${label}尚未读取"
                 label == "商城订单" -> "暂无这类订单"
@@ -217,8 +217,7 @@ private fun OrderDetailsDialog(state: OrderDetailController) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 state.selected?.let { DetailField("记录", it.ref) }
                 if (state.busy) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth().testTag("history-detail-loading"), color = Brand.Cyan)
-                    Text("正在读取详情")
+                    Spacer(Modifier.height(14.dp))
                 }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("history-detail-error")) }
                 when (val detail = state.value) {

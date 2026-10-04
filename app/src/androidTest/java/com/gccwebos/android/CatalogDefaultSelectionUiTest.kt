@@ -8,8 +8,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -28,6 +31,8 @@ import org.junit.Test
 class CatalogDefaultSelectionUiTest {
     @get:Rule val compose = createComposeRule()
     private lateinit var commerce: CommerceController
+    private lateinit var owner: AccountController
+    private var showPlans by mutableStateOf(true)
     private var requests = 0
     private val monthly = Offer("actual_monthly_b", "actual_monthly_b_v1",
         LocalizedText("合成目录月套餐", "Synthetic catalog month"), LocalizedText("", ""),
@@ -71,12 +76,13 @@ class CatalogDefaultSelectionUiTest {
                     catalogLoaded = true; commerceModel = model; this.offers = offers
                 }
             }
+            owner = account
             commerce = state
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 GccTheme { Surface {
                     Column(Modifier.width(width.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp)) {
-                        CommercePanel(account, CommerceMode.Plans, stateOverride = state, autoLoad = false)
+                        if (showPlans) CommercePanel(account, CommerceMode.Plans, stateOverride = state, autoLoad = false)
                     }
                 } }
             }
@@ -104,6 +110,46 @@ class CatalogDefaultSelectionUiTest {
         compose.runOnIdle { commerce.offers = listOf(yearly, monthly, cheaper) }
         compose.onNodeWithTag("plan-offer-${cheaper.offerRef}").performScrollTo().assertIsSelected()
         compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertIsNotSelected()
+    }
+
+    @Test fun reenteringPlansDefaultsToRealMonthlyOfferAndDropsReturnShortcut() {
+        launch()
+        compose.onNodeWithTag("plan-offer-${cheaper.offerRef}").performScrollTo().performClick().assertIsSelected()
+        compose.runOnIdle { showPlans = false; owner.purchaseReturnRef = yearly.offerRef }
+        compose.onNodeWithTag("plan-continue").assertDoesNotExist()
+        compose.runOnIdle { showPlans = true }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsSelected()
+        compose.onNodeWithTag("plan-offer-${cheaper.offerRef}").assertIsNotSelected()
+        compose.onNodeWithTag("purchase-return").assertDoesNotExist()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertTextEquals("购买").assertIsEnabled()
+        compose.runOnIdle { assertNull(owner.purchaseReturnRef) }
+    }
+
+    @Test fun offersShareOneGroupAndWaitingNeverShowsASpinnerOrEnablesPurchase() {
+        launch()
+        listOf(monthly, cheaper).forEach { offer ->
+            compose.onNodeWithTag("plan-offer-${offer.offerRef}").assert(hasAnyAncestor(hasTestTag("plan-options")))
+        }
+        compose.runOnIdle { commerce.busy = true }
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("读取中…").assertDoesNotExist()
+    }
+
+    @Test fun refreshKeepsDisplayOnlyAndDropsItWhenItsAccountGenerationChanges() {
+        launch()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsSelected()
+        compose.runOnIdle { commerce.catalogLoaded = false; commerce.offers = emptyList(); commerce.busy = true }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("plan-continue").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
+        compose.runOnIdle { commerce.busy = false; commerce.error = "合成刷新失败" }
+        compose.onNodeWithTag("commerce-error").assertTextEquals("合成刷新失败")
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { owner.authSessionGeneration++ }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
     }
 
     @Test fun changedDefaultVersionOrCancelledCatalogNeedsAnExplicitFreshSelection() {

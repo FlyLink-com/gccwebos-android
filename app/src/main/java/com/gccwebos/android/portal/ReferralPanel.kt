@@ -43,11 +43,11 @@ internal fun ReferralPanel(account: AccountController, autoLoad: Boolean = true,
                         (state.profile?.eligible == true && state.profile?.attributionDays == null)))
                 BrandButton("重试", state::load, modifier = Modifier.width(88.dp).testTag("referral-refresh"))
         }
-        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("referral-loading"), color = Brand.Cyan)
         state.profileError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("referral-profile-error")) }
         val profile = state.profile
         when {
-            profile == null -> Text(if (state.busy) "正在读取推荐资格" else "推荐资格尚未读取", modifier = Modifier.testTag("referral-profile-status"))
+            profile == null -> if (state.busy) Spacer(Modifier.height(8.dp)) else
+                Text("推荐资格尚未读取", modifier = Modifier.testTag("referral-profile-status"))
             !profile.eligible -> Text("当前账户暂不具备推荐资格", modifier = Modifier.testTag("referral-profile-status"))
             else -> {
                 if (state.profileError != null) SupportingText("上次读取的资料")
@@ -75,6 +75,7 @@ internal fun ReferralPanel(account: AccountController, autoLoad: Boolean = true,
             SupportingText("待确认 ${formatCoins(p.pendingRewardCoins)} · 已撤回 ${formatCoins(p.reversedRewardCoins)}")
             if (p.reconciliationRequired) SupportingText("奖励正在对账，请稍后查询。")
             SupportingText("推荐奖励记录 · 非钱包余额")
-        } ?: Text(if (state.busy) "正在读取推荐记录" else "推荐记录尚未读取", modifier = Modifier.testTag("referral-performance-status"))
+        } ?: if (state.busy) Spacer(Modifier.height(8.dp)) else
+            Text("推荐记录尚未读取", modifier = Modifier.testTag("referral-performance-status"))
     }
 }

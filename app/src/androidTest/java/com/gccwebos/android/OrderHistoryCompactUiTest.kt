@@ -189,7 +189,8 @@ class OrderHistoryCompactUiTest {
             compose.onNodeWithTag("history-detail-${value.ref}").performScrollTo().performClick()
             compose.waitUntil { reads.get() == 1 }
             compose.onNodeWithTag("history-detail-${value.ref}").assertIsNotEnabled()
-            compose.onNodeWithTag("history-detail-loading").assertExists()
+            compose.onNodeWithTag("history-detail-loading").assertDoesNotExist()
+            compose.runOnIdle { assertTrue(detailState.busy); assertNull(detailState.value) }
             compose.onNodeWithTag("history-detail-back").performClick()
             compose.runOnIdle { release.complete(Unit) }
             compose.waitForIdle()
@@ -222,7 +223,7 @@ class OrderHistoryCompactUiTest {
                 }
                 compose.onNodeWithTag("history-detail-${value.ref}").performScrollTo().performClick()
                 compose.waitUntil(timeoutMillis = 5_000) { reads.get() == 1 }
-                compose.onNodeWithTag("history-detail-loading").assertExists()
+                compose.onNodeWithTag("history-detail-loading").assertDoesNotExist()
                 compose.runOnIdle { assertTrue(detailState.busy); assertNull(detailState.value) }
                 throw expected
             } finally {

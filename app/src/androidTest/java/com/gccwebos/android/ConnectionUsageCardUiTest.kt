@@ -81,7 +81,8 @@ class ConnectionUsageCardUiTest {
         assertEquals(1, fixture.refreshes)
         assertEquals(0, fixture.primaryActions)
         compose.runOnIdle { fixture.loading = true }
-        compose.onNodeWithTag("account-usage-read-status").assertTextEquals("正在读取")
+        compose.onNodeWithTag("account-usage-read-status").assertTextEquals("读取失败 · 未更新")
+        compose.onNodeWithText("正在读取").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         compose.runOnIdle { fixture.loading = false; fixture.showPrimary = false }
         compose.onNodeWithTag("vpn-connect").assertDoesNotExist()
@@ -89,6 +90,20 @@ class ConnectionUsageCardUiTest {
         assertEquals(2, fixture.refreshes)
         compose.runOnIdle { fixture.refreshEnabled = false }
         compose.onNodeWithTag("account-usage-retry").assertIsNotEnabled()
+    }
+
+    @Test fun ordinaryReadIsQuietAndCannotEnableAnUnverifiedPrimaryAction() {
+        val fixture = Fixture().apply {
+            loading = true
+            presentation = AccountUsagePresentation(AccountUsageState.Unknown)
+        }
+        show(fixture)
+        compose.onNodeWithText("正在读取").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("重试").assertIsNotEnabled()
+            .performTouchInput { click() }
+        assertEquals(0, fixture.primaryActions); assertEquals(0, fixture.refreshes)
     }
 
     @Test fun pendingUsageNeverInventsZeroProgressOrDates() {

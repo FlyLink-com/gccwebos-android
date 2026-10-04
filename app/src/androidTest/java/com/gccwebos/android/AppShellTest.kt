@@ -279,12 +279,15 @@ class AppShellTest {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("nav-Lines").performClick()
         val second = nodeAccount.nodeSelection.snapshot.choices[1].selection
-        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
-        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
-        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
         compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.onNodeWithTag("nav-Connect").performClick()
         repeat(2) {
             compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
             compose.onNodeWithTag("node-choice-1").assertIsSelected()
@@ -318,6 +321,8 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Lines").performClick()
         val old = nodeAccount.nodeSelection.snapshot.choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
+        compose.onNodeWithTag("nav-Lines").performClick()
         compose.runOnIdle { nodeBytes = nodeBytes.toString(Charsets.UTF_8).replace("192.0.2.41", "192.0.2.42").toByteArray() }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
@@ -331,7 +336,7 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Lines").performClick()
         val current = nodeAccount.nodeSelection.snapshot.choices[0].selection
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
-        compose.onNodeWithTag("nav-Connect").performClick()
+        assertNodeSelectionReturnedToConnection()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
         compose.runOnIdle { assertSame(current, nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
     }
@@ -341,6 +346,8 @@ class AppShellTest {
         try {
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
+        compose.onNodeWithTag("nav-Lines").performClick()
         compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
@@ -354,6 +361,8 @@ class AppShellTest {
         compose.onNodeWithTag("nodes-refresh").assertTextEquals("重试").performScrollTo().performClick()
         compose.waitUntil(5000) { nodeReads.get() == 3 && !nodeAccount.nodeSelection.busy }
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
+        compose.onNodeWithTag("nav-Lines").performClick()
         compose.runOnIdle { pendingNodeRead = CompletableDeferred() }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
@@ -366,6 +375,14 @@ class AppShellTest {
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
         compose.runOnIdle { assertNull(nodeAccount.nodeSelection.snapshot.selected); assertTrue(requests.isEmpty()) }
         } finally { pendingNodeRead?.complete(Unit); pendingNodeRead = null }
+    }
+
+    private fun assertNodeSelectionReturnedToConnection() {
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("nav-Connect").assertIsSelected()
+        compose.onNodeWithTag("page-Lines").assertDoesNotExist()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
     }
 
     @Test fun onlyKnownExpiryShowsRenewalWhileRetryAndStorageKeepDistinctStates() {
@@ -384,6 +401,66 @@ class AppShellTest {
         }
         compose.onNodeWithTag("local-subscription-title").assertTextEquals("本地配置已到期")
         compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertExists()
+    }
+
+    @Test fun repeatedPlansTabAndReturnRequestTheDefaultWithoutStartingCheckout() {
+        val recovery = object : CommerceRecovery {
+            override fun read(binding: String, kind: String): PendingCommerce? = throw AssertionError("No recovery reads")
+            override fun save(binding: String, value: PendingCommerce) = throw AssertionError("No order writes")
+            override fun clear(binding: String, kind: String) = throw AssertionError("No recovery clears")
+        }
+        val monthly = Offer("offer_nav_month", "version_nav_month", LocalizedText("合成月卡", "Synthetic month"),
+            LocalizedText("", ""), LocalizedNotices(emptyList(), emptyList()), 30, 3000,
+            listOf("paid_coins"), 30, 17, 0)
+        val yearly = monthly.copy(offerRef = "offer_nav_year", offerVersionRef = "version_nav_year",
+            title = LocalizedText("合成年卡", "Synthetic year"), durationDays = 365, baseCoinUnits = 200)
+        lateinit var commerce: CommerceController
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val owner = remember { offlineUiAccount(scope) }
+            val state = remember {
+                CommerceController(owner, scope, recovery).apply {
+                    commerceModel = CommerceModel.LEGACY; catalogLoaded = true
+                    offers = listOf(monthly, yearly)
+                }
+            }
+            commerce = state
+            AppShell(owner, autoLoadCommerce = false, commerceOverride = state, commerceRecoveryOverride = recovery,
+                paymentOpenerOverride = { throw AssertionError("Navigation cannot open payment") })
+        }
+        fun chooseYear() {
+            compose.onNodeWithTag("catalog-yearly").performScrollTo().performClick()
+            compose.onNodeWithTag("plan-offer-${yearly.offerRef}").performScrollTo().performClick().assertIsSelected()
+        }
+        fun assertMonthly() {
+            compose.onNodeWithTag("catalog-plans").assertIsSelected()
+            compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertIsSelected()
+            compose.onNodeWithTag("plan-price-${monthly.offerRef}", useUnmergedTree = true).assertTextEquals("30 Coins")
+            compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        }
+        compose.onNodeWithTag("nav-Plans").performClick()
+        assertMonthly()
+        chooseYear()
+        compose.onNodeWithTag("nav-Plans").performClick() // Same tab still issues an explicit display reset.
+        assertMonthly()
+        chooseYear()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("nav-Plans").performClick()
+        assertMonthly()
+        chooseYear()
+        compose.runOnIdle { commerce.busy = true }
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("catalog-yearly").assertIsSelected()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").assertIsNotEnabled()
+        compose.runOnIdle { assertTrue(commerce.busy); assertNull(commerce.quote) }
+        compose.runOnIdle { commerce.busy = false; commerce.pendingPurchase = true }
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("purchase-result").performScrollTo().assertExists()
+        compose.onNodeWithTag("plan-continue").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(commerce.pendingPurchase)
+            assertNull(commerce.quote); assertNull(commerce.purchase); assertNull(commerce.recharge); assertNull(commerce.error)
+        }
     }
 
     @Test fun mineHistoryKeepsOrdersAndLedgerReadOnlyEvenWithARetainedQuote() {

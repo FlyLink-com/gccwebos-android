@@ -51,11 +51,13 @@ internal class NodeSelectionController(private val manager: LocalSubscriptionMan
             finally { if (request == generation) busy = false }
         }
     }
-    fun select(selection: ConnectionSelection) {
-        if (busy || !allowed()) return
-        if (accountGeneration != authGeneration()) { invalidate(); return }
-        if (manager.selectNode(selection)) { snapshot = manager.nodeSelectionSnapshot(); message = null }
-        else { snapshot = manager.nodeSelectionSnapshot(); message = "节点已失效，请刷新后重新选择。" }
+    fun select(selection: ConnectionSelection): Boolean {
+        if (busy || !allowed()) return false
+        if (accountGeneration != authGeneration()) { invalidate(); return false }
+        val accepted = manager.selectNode(selection)
+        snapshot = manager.nodeSelectionSnapshot()
+        message = if (accepted) null else "节点已失效，请刷新后重新选择。"
+        return accepted
     }
     fun cancel() = invalidate("读取已取消，请刷新后重新选择。")
     fun invalidate(reason: String? = null) {

@@ -50,7 +50,6 @@ internal fun ConnectionUsageCard(
     Column(modifier.fillMaxWidth().testTag("account-usage-card")) {
         if (authenticated) {
             val readText = when {
-                loading -> "正在读取"
                 error != null && presentation.state == AccountUsageState.Available -> "读取失败 · 未更新"
                 error != null -> "读取失败"
                 else -> presentation.refreshText
@@ -88,13 +87,13 @@ internal fun ConnectionUsageCard(
                 presentation.state == AccountUsageState.Available && label == "一键连接" && !primaryEnabled)
                 "连接功能暂未开放" else null
             ConnectionActionButton(label, { if (enabled) { if (retry) onRefresh() else onPrimaryAction() } },
-                Modifier.padding(top = 23.dp).testTag("vpn-connect"), enabled)
+                Modifier.padding(top = 12.dp).testTag("vpn-connect"), enabled)
             hint?.let { ConnectionActionHint(it) }
         } else if (authenticated && (error != null || presentation.state == AccountUsageState.Unknown ||
                 presentation.state == AccountUsageState.Reconciliation)) {
             // A live VPN command must not remove account recovery or borrow its busy/disabled state.
             ConnectionActionButton("重试", { if (refreshAllowed) onRefresh() },
-                Modifier.padding(top = 23.dp).testTag("account-usage-retry"), refreshAllowed)
+                Modifier.padding(top = 12.dp).testTag("account-usage-retry"), refreshAllowed)
         }
     }
 }
@@ -102,7 +101,7 @@ internal fun ConnectionUsageCard(
 @Composable
 private fun ConnectionRemaining(value: String) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text("剩余流量", color = Brand.Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text("剩余流量", color = Brand.Muted, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val density = LocalDensity.current
             val measurer = rememberTextMeasurer()
@@ -115,7 +114,7 @@ private fun ConnectionRemaining(value: String) {
                     withStyle(SpanStyle(fontSize = 19.sp, fontWeight = FontWeight.Medium)) { append(" GB") }
                 } else withStyle(SpanStyle(fontSize = 28.sp, fontWeight = FontWeight.SemiBold)) { append(value) }
             }
-            val sizes = if (maxWidth < 300.dp) listOf(53, 45, 37, 29, 24) else listOf(61, 53, 45, 37, 29, 24)
+            val sizes = if (maxWidth < 300.dp) listOf(45, 37, 29, 24) else listOf(49, 45, 37, 29, 24)
             val width = with(density) { maxWidth.roundToPx() }
             val size = sizes.firstOrNull { measurer.measure(amount(it), style, softWrap = false).size.width <= width }
                 ?: sizes.last()
@@ -128,10 +127,10 @@ private fun ConnectionRemaining(value: String) {
 
 @Composable
 private fun ConnectionUsageAmounts(presentation: AccountUsagePresentation) {
-    Column(Modifier.fillMaxWidth().padding(top = 24.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         presentation.periodText?.let {
-            Text(it, color = Brand.Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(bottom = 10.dp).testTag("account-usage-period"))
+            Text(it, color = Brand.Muted, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(bottom = 6.dp).testTag("account-usage-period"))
         }
         val used: @Composable () -> Unit = { ConnectionUsageAmount("已用", presentation.usedText, "account-usage-used") }
         val total: @Composable () -> Unit = { ConnectionUsageAmount("总量", presentation.totalText, "account-usage-total") }
@@ -145,7 +144,7 @@ private fun ConnectionUsageAmounts(presentation: AccountUsagePresentation) {
         }
         presentation.progress?.let { progress ->
             LinearProgressIndicator(progress = { progress }, color = Brand.Cyan, trackColor = Brand.SurfaceRaised,
-                modifier = Modifier.padding(top = 12.dp).fillMaxWidth().height(6.dp)
+                modifier = Modifier.padding(top = 8.dp).fillMaxWidth().height(6.dp)
                     .clip(RoundedCornerShape(3.dp)).testTag("account-usage-progress"))
         }
     }
@@ -156,16 +155,16 @@ private fun ConnectionUsageAmount(label: String, value: String, tag: String) {
     Text(buildAnnotatedString {
         append("$label ")
         withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(value) }
-    }, color = Brand.Muted, fontSize = 12.sp, modifier = Modifier.testTag(tag))
+    }, color = Brand.Muted, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.testTag(tag))
 }
 
 @Composable
 private fun ConnectionUsageDates(presentation: AccountUsagePresentation) {
     if (presentation.cycleText == null && presentation.expiresAtText == null) return
     var showDetails by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(top = 23.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         HorizontalDivider(color = Brand.RowDivider)
-        Column(Modifier.padding(top = 17.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             presentation.cycleText?.let {
                 ConnectionDateRow("统计周期", connectionCycleSummary(it), it, "account-usage-cycle")
             }
@@ -190,10 +189,11 @@ private fun ConnectionUsageDates(presentation: AccountUsagePresentation) {
 @Composable
 private fun ConnectionDateRow(label: String, summary: String, full: String, tag: String, onDetails: (() -> Unit)? = null) {
     BoxWithConstraints(Modifier.fillMaxWidth().testTag(tag).semantics { contentDescription = "$label $full" }) {
-        val labelContent: @Composable () -> Unit = { Text(label, color = Brand.Muted, fontSize = 11.sp) }
+        val labelContent: @Composable () -> Unit = { Text(label, color = Brand.Muted, fontSize = 11.sp, lineHeight = 16.sp) }
         val valueContent: @Composable () -> Unit = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                Text(summary, color = Brand.Muted, fontSize = 11.sp, modifier = Modifier.weight(1f, fill = false))
+                Text(summary, color = Brand.Muted, fontSize = 11.sp, lineHeight = 16.sp,
+                    modifier = Modifier.weight(1f, fill = false))
                 onDetails?.let {
                     // A full touch target preserves the preview's compact chevron without a tiny interactive area.
                     IconButton(it, modifier = Modifier.size(48.dp).testTag("account-usage-time-details")
@@ -213,13 +213,17 @@ private fun ConnectionDateRow(label: String, summary: String, full: String, tag:
 
 @Composable
 internal fun ConnectionActionButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
-                                    enabled: Boolean = true) {
+                                    enabled: Boolean = true, connected: Boolean = false) {
     val shape = RoundedCornerShape(18.dp)
     val color = if (enabled) Brand.Text else Brand.DisabledText
     Button(onClick, enabled = enabled,
         modifier = modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape)
-            .background(Brush.horizontalGradient(if (enabled)
-                listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd) else listOf(Brand.Disabled, Brand.Disabled))),
+            .background(Brush.horizontalGradient(when {
+                connected && enabled -> listOf(Color(0xFF087F69), Color(0xFF116747))
+                connected -> listOf(Color(0xFF164B40), Color(0xFF183E34))
+                enabled -> listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.Blue)
+                else -> listOf(Brand.Disabled, Brand.Disabled)
+            })),
         shape = shape, colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent,
             contentColor = color, disabledContainerColor = Color.Transparent, disabledContentColor = color),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp)) {
@@ -237,7 +241,7 @@ internal fun ConnectionActionButton(text: String, onClick: () -> Unit, modifier:
 
 @Composable
 private fun ConnectionActionHint(text: String) {
-    Row(Modifier.fillMaxWidth().padding(top = 13.dp), verticalAlignment = Alignment.Top,
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(7.dp)) {
         Canvas(Modifier.padding(top = 1.dp).size(14.dp)) {
             val stroke = 1.dp.toPx()

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -100,6 +101,8 @@ internal class AccountController(private val repository: PortalRepository, priva
         (restoring || foregroundCheckPending)
     var authenticated by mutableStateOf(false)
     var busy by mutableStateOf(false)
+    var authenticationSubmitting by mutableStateOf(false)
+        private set
     var clearing by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var purchaseReturnRef by mutableStateOf<String?>(null)
@@ -323,7 +326,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         val submittedAnswer = answer; answer = ""
         // A submitted challenge may be consumed even when the response is lost or rejected.
         cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
-        run {
+        run(authenticationSubmission = true) {
             when(val result = repository.login(submittedAccount, submittedPassword, human, submittedAnswer)) {
                 is LoginResult.Authenticated -> { acceptAuthenticated(result.session, submittedEmail); challenge = null; loadResource() }
                 is LoginResult.TotpRequired -> { secondFactorEmail = result.reference to submittedEmail; factorReference = result.reference; challenge = null }
@@ -335,7 +338,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         val reference = factorReference ?: return
         val submittedEmail = secondFactorEmail?.takeIf { it.first == reference }?.second
         val submitted = code; code = ""
-        run {
+        run(authenticationSubmission = true) {
             val result = repository.totp(reference, submitted)
             factorReference = null; secondFactorEmail = null; acceptAuthenticated(result.session, submittedEmail); loadResource()
         }
@@ -480,6 +483,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         if (authenticated) account = displayEmail.orEmpty()
         val current = ++operation
         task?.cancel(); expiryTask?.cancel()
+        authenticationSubmitting = false
         restoring = false; restorationPending = false; foregroundCheckPending = false
         if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
@@ -498,12 +502,13 @@ internal class AccountController(private val repository: PortalRepository, priva
             finally { if (current == operation) { busy = false; clearing = false } }
         }
     }
-    private fun run(action: suspend () -> Unit) {
+    private fun run(authenticationSubmission: Boolean = false, action: suspend () -> Unit) {
         if (busy) return
         // Account/security work cannot race a local selection read or revive its late result.
         if (nodeSelection.busy) nodeSelection.cancel()
         val current = ++operation
         busy = true; error = null
+        authenticationSubmitting = authenticationSubmission
         task = scope.launch {
             try { action() }
             catch (failure: CancellationException) { throw failure }
@@ -539,6 +544,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             } finally {
                 if (current == operation) {
                     busy = false
+                    authenticationSubmitting = false
                     if (foregroundCheckPending && authenticated && factorReference == null) revalidateAccount()
                 }
             }
@@ -572,15 +578,15 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                 registering = true
             })
         }
-        else CircularProgressIndicator(Modifier.size(24.dp).testTag("login-starting"), color = Brand.Cyan)
+        else Spacer(Modifier.size(24.dp).testTag("login-starting"))
     } else AccountPanelContent(useCard = !compactLogin || state.authenticated) {
         Eyebrow("账户与资源")
         Text(if (state.authenticated) "已登录" else if (state.factorReference != null) "完成身份验证" else "欢迎回来",
             style = MaterialTheme.typography.titleLarge)
         SupportingText(if (state.authenticated) "订阅按当前账号权益同步，无需手动导入。" else "安全登录后查看余额、套餐和订阅线路。登录会加密保存在本机，服务端到期或失效后需重新验证。")
-        if (state.busy) CircularProgressIndicator(modifier = Modifier.testTag("account-loading"))
+        if (state.authenticationSubmitting) CircularProgressIndicator(modifier = Modifier.testTag("account-loading"))
         val statusMessage = state.error ?: when {
-            state.busy -> "正在处理，请稍候"
+            state.authenticationSubmitting -> "正在处理，请稍候"
             state.authenticated -> "登录成功，可查看当前资源"
             state.factorReference != null -> "需要身份验证器中的动态验证码"
             else -> "请登录你的账号"
@@ -594,7 +600,7 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
             BrandButton("重新验证已保存登录", state::restoreAccount, modifier = Modifier.testTag("session-restore-retry"))
         }
         if (state.authenticated) {
-            ResourceCard(state, showOperationState = false)
+            ResourceCard(state, showOperationState = false, showReadProgress = false)
             state.importStatus?.let { status -> SupportingText(subscriptionImportMessage(status)) }
             if (state.importStatus == ImportStatus.UNSUPPORTED_CONFIGURATION)
                 state.importRejection?.let { SupportingText(subscriptionRejectionMessage(it)) }
@@ -699,8 +705,8 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                     question(Modifier.weight(.56f))
                 }
             }
-            if (state.busy) CircularProgressIndicator(Modifier.size(24.dp).testTag("account-loading"), color = Brand.Cyan)
-            val status = state.error ?: if (state.busy) "正在处理，请稍候" else null
+            if (state.authenticationSubmitting) CircularProgressIndicator(Modifier.size(24.dp).testTag("account-loading"), color = Brand.Cyan)
+            val status = state.error ?: if (state.authenticationSubmitting) "正在处理，请稍候" else null
             status?.let {
                 Text(it, color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
                     style = MaterialTheme.typography.bodyMedium,
@@ -817,13 +823,15 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean) {
     BrandCard(Modifier.testTag("account-security-state")) {
         Text("安全状态", style = MaterialTheme.typography.titleMedium)
         val status = state.security
-        if (status == null) SupportingText(if (state.busy) "正在读取安全状态…" else "安全状态尚未确认，请重试读取。")
-        else {
+        if (status == null) {
+            if (!state.busy) SupportingText("安全状态尚未确认，请重试读取。")
+        } else {
             SupportingText("身份验证器：${if (status.authenticatorBound) "已绑定" else "未绑定"}")
             SupportingText("通行密钥：${if (status.passkeyEnabled) "已启用" else "未启用"}")
             SupportingText("安全设置：${if (status.setupRequired) "待完成" else "无需补充"}")
         }
-        BrandButton("重新读取安全状态", state::readSecurity, enabled = !state.busy)
+        BrandButton("重新读取安全状态", state::readSecurity, enabled = !state.busy,
+            modifier = Modifier.testTag("security-refresh"))
         SupportingText("这里只展示服务器确认的状态，不修改安全凭据。")
     }
 }

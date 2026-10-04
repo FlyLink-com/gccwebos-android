@@ -39,7 +39,7 @@ internal fun LedgerPanel(account: AccountController, state: CommerceController) 
         }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("ledger-error")) }
         when {
-            state.busy -> LinearProgressIndicator(Modifier.fillMaxWidth().testTag("ledger-loading"), color = Brand.Cyan)
+            state.busy -> Spacer(Modifier.height(8.dp))
             rows == null -> SupportingText("账单尚未读取", Modifier.testTag("ledger-unread"))
             rows.isEmpty() -> SupportingText("暂无账单", Modifier.testTag("ledger-empty"))
         }

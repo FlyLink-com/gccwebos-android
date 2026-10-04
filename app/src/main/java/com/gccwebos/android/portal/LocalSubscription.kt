@@ -46,6 +46,8 @@ data class LocalSubscriptionSnapshot(val status: LocalSubscriptionStatus, val ha
 data class NodeSelectionSnapshot(val status: LocalSubscriptionStatus,
     val choices: List<ConnectionChoice> = emptyList(), val selected: ConnectionSelection? = null,
     val validUntil: Instant? = null)
+/** One local observation for compare-and-set selection, never config or tunnel admission. */
+internal data class NodeSelectionAttempt(val snapshot: NodeSelectionSnapshot, val epoch: Long)
 fun interface LocalConnectionLineResolver {
     /** Display indexes are not authoritative stable line IDs. No production resolver is installed. */
     fun resolve(snapshot: LocalSubscriptionSnapshot, requestedLineId: String?): ResolvedConnectionLine?
@@ -169,6 +171,18 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (authority.selected !== selection) revision++
         authority.selected = selection
         true
+    }
+    internal fun nodeSelectionAttempt(): NodeSelectionAttempt = synchronized(lock) {
+        NodeSelectionAttempt(nodeSelectionSnapshot(), revision)
+    }
+    /** A random suggestion can fill an unchanged empty selection, never replace user intent. */
+    internal fun selectNodeIfUnchanged(selection: ConnectionSelection, expected: NodeSelectionAttempt): Long? = synchronized(lock) {
+        if (revision != expected.epoch || expected.snapshot.selected != null) return@synchronized null
+        val current = nodeSelectionSnapshot()
+        if (revision != expected.epoch || current.status != LocalSubscriptionStatus.READY || current.selected != null ||
+            current.choices != expected.snapshot.choices || current.choices.none { it.selection === selection }) return@synchronized null
+        authority.selected = selection
+        ++revision
     }
     private fun capability(): Secret? {
         // A profile write and a receipt write are separate atomic files. Even when the
@@ -366,7 +380,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             } finally { cached.close() }
             // Upgrade from a durable acknowledged receipt: no Portal login or setup/claim call.
             synchronized(lock) { if (revision != epoch) return@withLock state }
-            refreshLocked(null)
+            refreshLocked()
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) { synchronized(lock) {
             if (revision == epoch) {
@@ -376,7 +390,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             state
         } }
     }
-    suspend fun refresh(): LocalSubscriptionSnapshot = mutex.withLock { refreshLocked(null) }
+    suspend fun refresh(): LocalSubscriptionSnapshot = mutex.withLock { refreshLocked() }
     suspend fun prepare(requested: String?, resolver: LocalConnectionLineResolver, files: PreparedConfigStore): AuthorizedConfig? {
         var prepared: AuthorizedConfig? = null
         try {
@@ -405,7 +419,15 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** No cached activation, no implicit first entry, and no cross-revision name matching. */
     suspend fun prepare(intent: SelectionIntent, files: PreparedConfigStore,
-        addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer): ConfigPreparation {
+        addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer): ConfigPreparation =
+        prepareChecked(intent, files, addressPreparer, expectedEpoch = null)
+
+    internal suspend fun prepareAtEpoch(intent: SelectionIntent, files: PreparedConfigStore,
+        addressPreparer: ConfigAddressPreparer, expectedEpoch: Long): ConfigPreparation =
+        prepareChecked(intent, files, addressPreparer, expectedEpoch)
+
+    private suspend fun prepareChecked(intent: SelectionIntent, files: PreparedConfigStore,
+        addressPreparer: ConfigAddressPreparer, expectedEpoch: Long?): ConfigPreparation {
         var result: ConfigPreparation? = null
         var material: AuthorizedConfig? = null
         var rawCopy: ByteArray? = null
@@ -418,7 +440,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         var selectionAtPreparation: ConnectionSelection? = null
         try {
             mutex.withLock {
-                val snapshot = refreshLocked { fresh, raw, freshBinding, freshEpoch ->
+                val snapshot = refreshLocked(expectedEpoch) { fresh, raw, freshBinding, freshEpoch ->
                     if (fresh.status != LocalSubscriptionStatus.READY) return@refreshLocked
                     val selected = (intent as? SelectionIntent.Selected)?.selection
                     index = authority.choices.indexOfFirst { it.selection === selected }
@@ -480,9 +502,12 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             if (!leaseTransferred) address?.lease?.close()
         }
     }
-    private suspend fun refreshLocked(
-        prepared: ((LocalSubscriptionSnapshot, ByteArray, String, Long) -> Unit)?): LocalSubscriptionSnapshot {
-        val epoch = synchronized(lock) { ++revision }
+    private suspend fun refreshLocked(expectedEpoch: Long? = null,
+        prepared: ((LocalSubscriptionSnapshot, ByteArray, String, Long) -> Unit)? = null): LocalSubscriptionSnapshot {
+        val epoch = synchronized(lock) {
+            if (expectedEpoch != null && revision != expectedEpoch) throw CancellationException("Subscription selection changed")
+            ++revision
+        }
         var knownCapability = false
         try {
             val url = capability() ?: return synchronized(lock) {

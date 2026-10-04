@@ -45,6 +45,7 @@ internal fun nodeConnectionStatus(control: ConnectionControlState): String? = wh
 internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<SafeProxyConfig.NodeSummary>,
     resource: Resource?, hasCapability: Boolean, accountBusy: Boolean, authenticated: Boolean = false,
     connectionControl: ConnectionControlState = ConnectionControlState(),
+    onSelected: () -> Unit = {},
     openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.sync() }
     LaunchedEffect(state.snapshot.validUntil) {
@@ -58,7 +59,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     val total = readyChoices.size + readOnlyNodes.size
     val selectedChoice = readyChoices.firstOrNull { it.selection === value.selected }
     val title = when {
-        state.busy -> "正在读取配置"
+        state.busy -> if (selectedChoice != null) "节点已选择" else "请选择节点"
         value.status == LocalSubscriptionStatus.MISSING && resource == Resource.None -> "暂无套餐"
         value.status == LocalSubscriptionStatus.MISSING && resource == Resource.Reconciliation -> "资源正在对账"
         value.status == LocalSubscriptionStatus.MISSING -> "尚无订阅配置"
@@ -71,20 +72,20 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
         value.choices.isEmpty() -> "请重试读取配置"
         else -> "请选择节点"
     }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.padding(start = 3.dp, end = 3.dp, top = 4.dp, bottom = 5.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("选择节点", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("选择节点", fontSize = 23.sp, fontWeight = FontWeight.Bold)
             Text("从当前订阅中选择适合的线路", fontSize = 12.sp, color = Brand.Muted)
         }
         GlassSurface(Modifier.fillMaxWidth().testTag("nodes-selection-summary")) {
-            Column(Modifier.padding(19.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     NodeGlobe(feature = true)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text(selectedChoice?.name ?: "未选择", fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                        Text(selectedChoice?.name ?: "未选择", fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.testTag("nodes-selected-name"))
-                        Text("只使用账户获准的订阅节点", fontSize = 11.sp, color = Brand.Muted)
+                        Text("选择后返回连接页", fontSize = 11.sp, color = Brand.Muted)
                     }
                 }
                 HorizontalDivider(color = Brand.RowDivider)
@@ -95,7 +96,6 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                 }
             }
         }
-        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
         state.message?.let { Text(it, color = Brand.Muted, modifier = Modifier.testTag("node-selection-message")) }
         // sync() is local-only: the first read and an unsuccessful read still need an explicit recovery.
         // A ready choice list has no permanent manual refresh; busy reads retain the existing cancellation.
@@ -127,7 +127,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                         NodeChoiceRow(choice.name, choice.protocol, true, chosen,
                             modifier = Modifier.testTag("node-choice-${indexed.index}").semantics { selected = chosen }
                                 .clickable(enabled = !state.busy && !accountBusy, role = Role.RadioButton) {
-                                    state.select(choice.selection)
+                                    if (state.select(choice.selection)) onSelected()
                                 })
                     }
                     readOnlyNodes.forEachIndexed { index, node ->
@@ -137,7 +137,6 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                     }
                 }
             }
-            Text("选择节点不会启动 VPN。", color = Brand.Muted, style = MaterialTheme.typography.bodySmall)
         }
         nodeConnectionStatus(connectionControl)?.let { status ->
             Text(status, color = Brand.Muted, modifier = Modifier.testTag("nodes-connection-status"))
@@ -153,22 +152,22 @@ private fun nodeProtocolLabel(protocol: String): String = when (protocol) {
 @Composable
 private fun NodeGlobe(feature: Boolean = false) {
     val shape = RoundedCornerShape(if (feature) 16.dp else 13.dp)
-    Box(Modifier.size(if (feature) 50.dp else 39.dp)
+    Box(Modifier.size(if (feature) 38.dp else 30.dp)
         .background(Brand.Cyan.copy(alpha = if (feature) .10f else .07f), shape)
         .then(if (feature) Modifier.border(1.dp, Brand.Cyan.copy(alpha = .26f), shape) else Modifier),
         contentAlignment = Alignment.Center) {
         Icon(painterResource(R.drawable.brand_globe), contentDescription = null,
-            modifier = Modifier.size(if (feature) 28.dp else 22.dp), tint = if (feature) Brand.Cyan else Brand.Muted)
+            modifier = Modifier.size(if (feature) 22.dp else 18.dp), tint = if (feature) Brand.Cyan else Brand.Muted)
     }
 }
 
 @Composable
 private fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, chosen: Boolean?,
     modifier: Modifier = Modifier, inspectionIndex: Int? = null) {
-    Row(modifier.fillMaxWidth().heightIn(min = 68.dp)
+    Row(modifier.fillMaxWidth().heightIn(min = 56.dp)
         .then(if (chosen == true) Modifier.background(Brand.Cyan.copy(alpha = .08f)) else Modifier)
-        .padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         NodeGlobe()
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,

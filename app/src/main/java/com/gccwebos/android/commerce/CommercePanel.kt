@@ -30,6 +30,7 @@ import com.gccwebos.android.portal.PortalFailure
 import com.gccwebos.android.portal.ReferralController
 import com.gccwebos.android.portal.ReferralPanel
 import com.gccwebos.android.design.*
+import com.gccwebos.android.shouldCancelLoginOnBack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -331,9 +332,10 @@ internal class CommerceController(private val account: AccountController, privat
 
 @Composable
 private fun CatalogOfferCard(offer: Offer, selected: Boolean, enabled: Boolean, modifier: Modifier = Modifier, onSelect: () -> Unit) {
-    BrandCard(modifier.heightIn(min = 138.dp).testTag("plan-offer-${offer.offerRef}")
-        .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect),
-        selected = selected, contentPadding = PaddingValues(18.dp)) {
+    Column(modifier.fillMaxWidth().heightIn(min = 94.dp).testTag("plan-offer-${offer.offerRef}")
+        .background(if (selected) Brand.Cyan.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent, Brand.Shape)
+        .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect)
+        .padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(offer.title.zh, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold)
@@ -343,15 +345,15 @@ private fun CatalogOfferCard(offer: Offer, selected: Boolean, enabled: Boolean, 
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val traffic: @Composable () -> Unit = {
                 Text(if (offer.category == "plan") "${offer.monthlyTrafficGb} GB / 月" else "${offer.trafficGb} GB",
-                    style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+                    fontSize = 22.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.testTag("plan-traffic-${offer.offerRef}"))
             }
             val price: @Composable () -> Unit = {
-                Text(formatCoins(offer.baseCoinUnits), style = MaterialTheme.typography.headlineSmall,
+                Text(formatCoins(offer.baseCoinUnits), fontSize = 18.sp,
                     color = Brand.Cyan, modifier = Modifier.testTag("plan-price-${offer.offerRef}"))
             }
-            if (maxWidth < 310.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { traffic(); price() }
+            if (maxWidth < 260.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { traffic(); price() }
             } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.SpaceBetween) { traffic(); price() }
         }
@@ -366,7 +368,7 @@ private fun CatalogOfferCard(offer: Offer, selected: Boolean, enabled: Boolean, 
 
 @Composable
 private fun CatalogBenefits(offer: Offer?, category: String) {
-    BrandCard(Modifier.testTag("plan-benefits"), contentPadding = PaddingValues(14.dp)) {
+    Column(Modifier.testTag("plan-benefits").padding(12.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (category == "plan") "套餐权益" else "商品权益", style = MaterialTheme.typography.titleMedium)
             if (offer == null) SupportingText("选择商品查看权益") else {
@@ -392,7 +394,8 @@ private data class CatalogSelection(val offer: Offer, val accountGeneration: Lon
 
 @Composable
 internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true,
-    onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null, paymentOpener: ((String) -> Unit)? = null) {
+    onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null, paymentOpener: ((String) -> Unit)? = null,
+    embeddedWallet: Boolean = false, defaultSelectionRequest: Int = 0) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext), includeHistory = mode == CommerceMode.Orders) }
@@ -400,20 +403,31 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     var requestedPeriod by remember(account.authSessionGeneration) { mutableStateOf<CatalogPeriod?>(null) }
     // A catalog selection is the complete server snapshot, scoped to this controller and account.
     // A same-ref replacement (including an altered version, price or delivery) must be selected again.
-    var selectedSnapshot by remember(state) {
-        mutableStateOf(state.quote?.let { CatalogSelection(it.offer, account.authSessionGeneration) })
+    var selectedSnapshot by remember(state, account.authSessionGeneration) {
+        mutableStateOf<CatalogSelection?>(null)
     }
     var selectionNotice by remember(state, account.authSessionGeneration) { mutableStateOf<String?>(null) }
-    // One initial preference per controller/account. A refresh, changed snapshot, explicit
-    // category or user selection must never silently choose another product afterwards.
+    // One default preference per visit. Refreshes and changed snapshots never silently
+    // choose another product, and a new visit never reopens a retained quote.
     var initialSelectionHandled by remember(state, account.authSessionGeneration) {
-        mutableStateOf(selectedSnapshot != null || account.purchaseReturnRef != null)
+        mutableStateOf(false)
     }
+    var handledVisit by remember(state, account.authSessionGeneration) { mutableStateOf<Int?>(null) }
+    val visitReady = mode != CommerceMode.Plans || handledVisit == defaultSelectionRequest
+    val displayOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
+    var lastDisplayedOffers by remember(state, displayOwner) { mutableStateOf<List<Offer>>(emptyList()) }
+    val displayOffers = when {
+        !state.currentSession() -> emptyList()
+        state.catalogLoaded -> state.offers
+        state.busy || state.error != null -> lastDisplayedOffers
+        else -> emptyList()
+    }
+    SideEffect { if (state.currentSession() && state.catalogLoaded) lastDisplayedOffers = state.offers }
     var cancelConfirmation by remember(account.authSessionGeneration, state) { mutableStateOf(false) }
     val walletMode = mode in setOf(CommerceMode.Wallet, CommerceMode.Mine, CommerceMode.Overview)
     var now by remember { mutableStateOf(Instant.now()) }
     val accountReady = state.canOperate()
-    val period = requestedPeriod ?: selectedSnapshot?.offer?.let(::catalogPeriod) ?: initialCatalogPeriod(state.offers)
+    val period = requestedPeriod ?: selectedSnapshot?.offer?.let(::catalogPeriod) ?: initialCatalogPeriod(displayOffers)
     fun currentSelectedOffer(): Offer? = selectedSnapshot?.takeIf { selection ->
         mode == CommerceMode.Plans && state.catalogLoaded && state.canOperate() && !state.pendingPurchase &&
             selection.accountGeneration == account.authSessionGeneration && selection.offer.category == catalogCategory &&
@@ -425,16 +439,25 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     val dockOwner = remember(state, mode) { Any() }
     val continuePurchase: () -> Unit = {
         val selected = currentSelectedOffer()
-        if (selected != null && !state.busy && state.canOperate() && !state.pendingPurchase) state.preview(selected)
+        if (visitReady && selected != null && !state.busy && state.canOperate() && !state.pendingPurchase) state.preview(selected)
     }
     val showPurchase = mode == CommerceMode.Plans && account.authenticated && !account.restoring &&
         !account.foregroundCheckPending && state.catalogLoaded && state.currentSession() && !state.pendingPurchase &&
         state.offers.any { it.category == catalogCategory && (catalogCategory != "plan" || catalogPeriod(it) == period) }
     val purchaseSummary = if (showPurchase) CatalogPurchaseSummary(selectedOffer?.title?.zh,
-        selectedOffer?.baseCoinUnits?.let(::formatCoins), selectedOffer != null && !state.busy && state.canOperate(), state.busy) else null
+        selectedOffer?.baseCoinUnits?.let(::formatCoins), visitReady && selectedOffer != null && !state.busy && state.canOperate(), state.busy) else null
     if (dock != null && mode == CommerceMode.Plans) {
         SideEffect { dock.show(dockOwner, purchaseSummary, continuePurchase) }
         DisposableEffect(dock, dockOwner) { onDispose { dock.clear(dockOwner) } }
+    }
+    LaunchedEffect(state, account.authSessionGeneration, mode, defaultSelectionRequest, accountReady, state.busy, state.pendingPurchase) {
+        if (mode == CommerceMode.Plans && handledVisit != defaultSelectionRequest && state.canOperate() &&
+            !state.busy && !state.pendingPurchase) {
+            catalogCategory = "plan"; requestedPeriod = null; selectedSnapshot = null
+            selectionNotice = null; initialSelectionHandled = false; state.quote = null
+            account.purchaseReturnRef = null
+            handledVisit = defaultSelectionRequest
+        }
     }
     LaunchedEffect(state, account.authSessionGeneration, mode, catalogCategory, state.catalogLoaded, state.offers, accountReady, state.pendingPurchase) {
         if (mode == CommerceMode.Plans && selectedSnapshot != null && currentSelectedOffer() == null) {
@@ -450,12 +473,11 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     LaunchedEffect(state, account.authSessionGeneration, mode, catalogCategory, state.catalogLoaded,
-        state.offers, state.commerceModel, accountReady, state.busy, state.pendingPurchase, state.quote) {
-        if (mode == CommerceMode.Plans && !initialSelectionHandled && state.catalogLoaded &&
+        state.offers, state.commerceModel, accountReady, state.busy, state.pendingPurchase, state.quote, visitReady) {
+        if (mode == CommerceMode.Plans && visitReady && !initialSelectionHandled && state.catalogLoaded &&
             state.canOperate() && !state.busy && !state.pendingPurchase && state.commerceModel != null) {
             initialSelectionHandled = true
-            if (catalogCategory == "plan" && period == CatalogPeriod.Monthly && selectedSnapshot == null && state.quote == null &&
-                account.purchaseReturnRef == null) {
+            if (catalogCategory == "plan" && period == CatalogPeriod.Monthly && selectedSnapshot == null && state.quote == null) {
                 initialMonthlyCatalogOffer(state.offers, state.commerceModel)?.let {
                     selectedSnapshot = CatalogSelection(it, account.authSessionGeneration)
                 }
@@ -499,11 +521,13 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     if (!account.authenticated || account.restoring || account.foregroundCheckPending) {
-        BrandCard(Modifier.testTag("commerce-signed-out")) {
+        val message: @Composable ColumnScope.() -> Unit = {
             Text(if (account.restoring || account.foregroundCheckPending) "正在验证登录"
                 else if(mode == CommerceMode.Wallet) "登录后查看钱包" else if(mode == CommerceMode.Orders) "登录后查看订单" else "登录后查看套餐")
             SupportingText("价格、余额与可购买商品由服务器确认。")
         }
+        if (embeddedWallet) Column(Modifier.testTag("commerce-signed-out"), content = message)
+        else BrandCard(Modifier.testTag("commerce-signed-out"), content = message)
         return
     }
     if (mode == CommerceMode.Plans) {
@@ -514,22 +538,20 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
                 state.quote = null; state.load()
             }, enabled = state.canOperate(), modifier = Modifier.testTag("commerce-refresh"))
         }
-        if (state.busy || !state.catalogLoaded) Text(if (state.busy) "读取中…" else "商品尚未读取",
+        if (!state.busy && !state.catalogLoaded) Text("商品尚未读取",
             modifier = Modifier.testTag("catalog-status"), style = MaterialTheme.typography.bodyMedium)
-        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"), color = Brand.Cyan)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
         selectionNotice?.let { SupportingText(it, Modifier.testTag("plan-selection-notice")) }
     } else if (mode != CommerceMode.Orders && mode != CommerceMode.Ledger && !walletMode) BrandCard(Modifier.testTag("commerce-status")) {
-        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
         BrandButton("刷新钱包与套餐", state::load, enabled = !state.busy, modifier = Modifier.testTag("commerce-refresh"))
     }
     if (walletMode) {
-        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger)
+        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger, embeddedWallet)
         return // Wallet never inherits a retained purchase confirmation from another destination.
     } else if (mode == CommerceMode.Plans) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            CatalogPeriod.entries.filter { it != CatalogPeriod.Other || state.offers.any { offer -> offer.category == "plan" && catalogPeriod(offer) == it } }.forEach { term ->
+            CatalogPeriod.entries.filter { it != CatalogPeriod.Other || displayOffers.any { offer -> offer.category == "plan" && catalogPeriod(offer) == it } }.forEach { term ->
                 FilterChip(selected = catalogCategory == "plan" && period == term, onClick = {
                     initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null
                     catalogCategory = "plan"; requestedPeriod = term
@@ -538,23 +560,26 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             FilterChip(selected = catalogCategory == "data_pack", onClick = { initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null; catalogCategory = "data_pack" }, enabled = !state.busy,
                 label = { Text("流量包") }, modifier = Modifier.testTag("catalog-data-packs"))
         }
-        val shownOffers = if (state.catalogLoaded && state.currentSession()) state.offers.filter {
+        val shownOffers = displayOffers.filter {
             it.category == catalogCategory && (catalogCategory != "plan" || catalogPeriod(it) == period)
-        } else emptyList()
+        }
         if (shownOffers.isEmpty() && !state.busy) BrandCard {
             Text(if (!state.catalogLoaded) "套餐尚未读取" else if (catalogCategory == "data_pack") "暂无可购流量包" else "暂无可购套餐",
                 style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("catalog-empty"))
         }
         if (!state.pendingPurchase && shownOffers.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                shownOffers.forEach { offer -> CatalogOfferCard(offer, selectedOffer == offer,
-                                enabled = !state.busy && state.canOperate(),
+            BrandCard(Modifier.testTag("plan-options"), contentPadding = PaddingValues(6.dp)) {
+                shownOffers.forEachIndexed { index, offer ->
+                    if (index > 0) HorizontalDivider(color = Brand.RowDivider)
+                    CatalogOfferCard(offer, selectedOffer == offer,
+                                enabled = visitReady && state.catalogLoaded && !state.busy && state.canOperate(),
                                 onSelect = { if (!state.busy && state.canOperate() && state.catalogLoaded && state.offers.any { it == offer }) {
                                     initialSelectionHandled = true; state.quote = null; selectionNotice = null
                                     selectedSnapshot = CatalogSelection(offer, account.authSessionGeneration)
                                 } }) }
+                HorizontalDivider(color = Brand.RowDivider)
+                CatalogBenefits(selectedOffer, catalogCategory)
             }
-            CatalogBenefits(selectedOffer, catalogCategory)
             if (dock == null && purchaseSummary != null) CatalogPurchaseDock(purchaseSummary, continuePurchase)
         }
         if (state.pendingPurchase) BrandCard(Modifier.testTag("purchase-result")) {
@@ -577,22 +602,6 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             if(done) BrandButton("完成并同步资源", state::finishPurchase, enabled = !state.busy)
         }
     }
-    if (mode == CommerceMode.Plans && account.purchaseReturnRef != null) BrandCard(Modifier.testTag("purchase-return")) {
-        val retained = state.offers.firstOrNull { it.offerRef == account.purchaseReturnRef }
-        Text("继续所选商品", style = MaterialTheme.typography.titleMedium)
-        SupportingText("充值后需重新报价并确认购买")
-        if (retained != null && state.catalogLoaded) TextButton(onClick = {
-            if (state.canOperate() && !state.busy && state.catalogLoaded && state.offers.any { it == retained }) {
-                catalogCategory = retained.category; requestedPeriod = catalogPeriod(retained)
-                initialSelectionHandled = true
-                selectedSnapshot = CatalogSelection(retained, account.authSessionGeneration); selectionNotice = null; state.quote = null
-            }
-        },
-            enabled = !state.busy && !state.pendingPurchase && state.canOperate(), modifier = Modifier.heightIn(min = 48.dp).testTag("purchase-return-requote")) { Text("重新选择所保留商品") }
-        else SupportingText(if (state.catalogLoaded) "商品当前不可用，请重新选择" else "商品尚未读取，请重试")
-        onRecharge?.let { TextButton(onClick = it, enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp).testTag("purchase-return-recharge")) { Text("去充值") } }
-        TextButton(onClick = { account.purchaseReturnRef = null }) { Text("取消保留商品") }
-    }
     if (mode == CommerceMode.Orders) {
         OrderHistoryPanel(account, state)
         return // History has only read/local-return actions, even if a shared fixture retains a quote.
@@ -601,10 +610,11 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         LedgerPanel(account, state)
         return // Read-only history must not inherit a retained purchase confirmation.
     }
-    state.quote?.let { quote ->
+    state.quote?.takeIf { visitReady }?.let { quote ->
         val valid = quote.purchasableAt(now) && state.canOperate() && !state.pendingPurchase &&
             selectedOffer == quote.offer && state.catalogLoaded && state.offers.any { it == quote.offer }
-        AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, title = { Text(if (quote.offer.category == "data_pack") "确认购买${quote.offer.trafficGb} GB流量包" else "确认购买${quote.offer.durationDays}天套餐") },
+        AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape,
+            title = { Text(if (quote.offer.category == "data_pack") "确认购买${quote.offer.trafficGb} GB流量包" else "确认购买${quote.offer.durationDays}天套餐") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("服务平台：飞连vpn · portal.gccwebos.com")
                 Text("本次扣除：${formatCoins(quote.amountUnits)}")
@@ -628,7 +638,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             }, enabled = valid && !state.busy, modifier = Modifier.testTag("purchase-confirm")) { Text("确认购买") } },
             dismissButton = { TextButton(onClick = { state.quote = null }, enabled = !state.busy, modifier = Modifier.testTag("purchase-cancel")) { Text("取消") } })
     }
-    if(cancelConfirmation) AlertDialog(onDismissRequest = { cancelConfirmation = false },
+    if(cancelConfirmation) AlertDialog(onDismissRequest = { cancelConfirmation = false }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape,
         modifier = Modifier.testTag("purchase-order-cancel-dialog"), title = { Text("请求取消此套餐订单？") },
         text = { Text("能否取消由服务器根据当前状态和取消期限决定，请以返回结果为准。") },
         confirmButton = { TextButton(onClick = { cancelConfirmation = false; state.cancelPurchase() }) { Text("确认取消订单") } },
@@ -694,8 +704,9 @@ internal fun AlipayButton(text: String, onClick: () -> Unit, enabled: Boolean = 
 }
 @Composable
 private fun HistoryState(size: Int?, busy: Boolean, label: String = "订单") {
-    if (size == null || size == 0) BrandCard {
-        Text(if (busy) "正在查询$label" else if (size == null) "${label}尚未读取" else if (label == "订单") "暂无这类订单" else "暂无${label}记录", style = MaterialTheme.typography.titleMedium)
+    if (busy && size == null) Spacer(Modifier.height(14.dp))
+    else if (size == null || size == 0) BrandCard {
+        Text(if (size == null) "${label}尚未读取" else if (label == "订单") "暂无这类订单" else "暂无${label}记录", style = MaterialTheme.typography.titleMedium)
         SupportingText(if (size == null) "查询失败或尚未完成不代表没有订单，请重试。" else "这里只展示服务器返回的记录。")
     }
 }
@@ -717,10 +728,9 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     var historyTab by remember(sessionOwner) { mutableStateOf("orders") }
     var telegramUnavailable by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
-        if (account.factorReference != null || account.busy) account.cancelAuthentication() else view = "mine"
+        if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
     if (view != "mine") TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
-    if (view == "mine") MineWelcomeCard(account)
     if (view == "about") {
         BrandCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -731,7 +741,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad)
     } else if (view == "referral") {
         ReferralPanel(account, autoLoad, referralOverride, copyOverride)
-    } else {
+    } else if (view != "mine") {
         if (view == "history") {
             Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = historyTab == "orders", onClick = { historyTab = "orders" },
@@ -756,13 +766,17 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             } else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
-    if (account.authenticated && account.purchaseReturnRef != null && onReturnToPlans != null) BrandCard {
-        SupportingText("已保留所选商品；充值到账后请返回重新报价。")
-        BrandButton("返回所选商品", onReturnToPlans, modifier = Modifier.testTag("mine-return-purchase"))
-    }
-    if (view == "mine") BrandCard(Modifier.testTag("mine-menu"),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)) {
-        Column {
+    if (view == "mine") BrandCard(Modifier.testTag("mine-surface")) {
+        MineWelcomeCard(account, embedded = true)
+        HorizontalDivider(color = Brand.RowDivider)
+        CommercePanel(account, CommerceMode.Mine, state, autoLoad, paymentOpener = paymentOpener, embeddedWallet = true,
+            onRecharge = { view = if (account.authenticated) "recharge" else "security" },
+            onLedger = { if (account.authenticated) {
+                view = "history"; historyTab = "ledger"
+            } else view = "security" })
+        if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
+        HorizontalDivider(color = Brand.RowDivider)
+        Column(Modifier.testTag("mine-menu")) {
         MineMenuRow("我的订单", "mine-history", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending,
             subtitle = "商品订单与充值记录") {
             view = if (account.authenticated) "history" else "security"
@@ -773,23 +787,12 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
         MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
         }
-    }
-    if (view == "mine") {
-        BrandCard(Modifier.heightIn(min = 82.dp).testTag("mine-referral")
-            .clickable(enabled = !account.busy, role = Role.Button) { view = if (account.authenticated) "referral" else "security" },
-            contentPadding = PaddingValues(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Icon(painterResource(com.gccwebos.android.R.drawable.brand_share), null,
-                    tint = Brand.Cyan, modifier = Modifier.size(32.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text("分享一份好连接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("邀请好友 · 查看推荐与奖励", style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
-                }
-                Text("›", color = Brand.Cyan)
-            }
+        HorizontalDivider(color = Brand.RowDivider)
+        MineMenuRow("分享一份好连接", "mine-referral", !account.busy, subtitle = "邀请好友 · 查看推荐与奖励") {
+            view = if (account.authenticated) "referral" else "security"
         }
-        BrandCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)) {
-        Column {
+        HorizontalDivider(color = Brand.RowDivider)
+        Column(Modifier.testTag("mine-functions")) {
         MineMenuRow("关于与更新", "mine-more") { view = "about" }
         HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
         MineMenuRow("官方频道", "mine-telegram", subtitle = "@flylinevpn") {
@@ -803,14 +806,13 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, onClick = account::logout)
         }
         }
-        }
     }
 }
 
 @Composable
 private fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, subtitle: String? = null, onClick: () -> Unit) {
     TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp).testTag(tag)) {
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag)) {
         val icon = when (tag) {
             "mine-wallet" -> com.gccwebos.android.R.drawable.brand_wallet
             "mine-history" -> com.gccwebos.android.R.drawable.brand_receipt
@@ -821,8 +823,8 @@ private fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, sub
             else -> com.gccwebos.android.R.drawable.brand_arrow
         }
         Icon(painterResource(icon), null, tint = if (enabled) Brand.Cyan else Brand.Muted, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = MaterialTheme.typography.bodyMedium, color = Brand.Text)
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Brand.Muted) }
         }

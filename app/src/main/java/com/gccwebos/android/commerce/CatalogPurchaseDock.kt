@@ -32,21 +32,21 @@ internal val LocalCatalogPurchaseDock = staticCompositionLocalOf<CatalogDockStat
 
 @Composable
 internal fun CatalogPurchaseDock(summary: CatalogPurchaseSummary, onContinue: () -> Unit) {
-    BrandCard(Modifier.testTag("plan-purchase-dock"), contentPadding = PaddingValues(14.dp)) {
+    BrandCard(Modifier.testTag("plan-purchase-dock"), contentPadding = PaddingValues(10.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val details: @Composable (Modifier) -> Unit = { modifier ->
                 Column(modifier, verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(summary.title?.let { "已选 · $it" } ?: "请选择套餐",
                         style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
                     summary.price?.let { Text(it, color = Brand.Cyan, fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.titleLarge) }
+                        style = MaterialTheme.typography.titleMedium) }
                 }
             }
             val action: @Composable (Modifier) -> Unit = { modifier ->
-                BrandButton(if (summary.busy) "处理中…" else "查看购买确认", onContinue,
+                BrandButton("购买", onContinue,
                     enabled = summary.enabled, modifier = modifier.testTag("plan-continue"))
             }
-            if (maxWidth < 310.dp || LocalDensity.current.fontScale > 1.3f) {
+            if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { details(Modifier.fillMaxWidth()); action(Modifier.fillMaxWidth()) }
             } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 details(Modifier.weight(1f)); action(Modifier.weight(1f))

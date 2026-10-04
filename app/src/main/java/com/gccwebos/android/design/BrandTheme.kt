@@ -11,6 +11,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.TextStyle
 
 /** Shared native tokens matched to the validated unified preview; business state stays outside. */
 internal object Brand {
@@ -37,7 +39,7 @@ internal object Brand {
     val RowDivider = GlassBorder.copy(alpha = .22f)
     val RowHighlight = Color.White.copy(alpha = .035f)
     val PriceAccent = Color(0xFFB8EEFF)
-    val Shape = RoundedCornerShape(29.dp)
+    val Shape = RoundedCornerShape(22.dp)
 }
 
 @Composable
@@ -52,6 +54,19 @@ internal fun GccTheme(materialMode: GlassMode? = null, content: @Composable () -
                 surfaceVariant = Brand.SurfaceRaised, onSurfaceVariant = Brand.Muted,
                 outline = Brand.Border, error = Color(0xFFFFB4AB),
             ),
+            typography = Typography(
+                titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium),
+                titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
+                titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+                bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+                bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
+                bodySmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp),
+                labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+                labelMedium = TextStyle(fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+                labelSmall = TextStyle(fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
+            ),
+            shapes = Shapes(extraSmall = RoundedCornerShape(10.dp), small = RoundedCornerShape(14.dp),
+                medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(22.dp), extraLarge = RoundedCornerShape(24.dp)),
             content = content,
         )
     }
@@ -59,16 +74,16 @@ internal fun GccTheme(materialMode: GlassMode? = null, content: @Composable () -
 
 @Composable
 internal fun BrandCard(modifier: Modifier = Modifier, selected: Boolean = false,
-                      contentPadding: PaddingValues = PaddingValues(16.dp), content: @Composable ColumnScope.() -> Unit) {
+                      contentPadding: PaddingValues = PaddingValues(14.dp), content: @Composable ColumnScope.() -> Unit) {
     GlassSurface(modifier.fillMaxWidth(), selected = selected) {
-        Column(Modifier.padding(contentPadding), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        Column(Modifier.padding(contentPadding), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
     }
 }
 
 /** Keep existing positional (modifier, content) wrappers compatible without editing authentication UI. */
 @Composable
 internal fun BrandCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
-    BrandCard(modifier = modifier, selected = false, contentPadding = PaddingValues(16.dp), content = content)
+    BrandCard(modifier = modifier, selected = false, contentPadding = PaddingValues(14.dp), content = content)
 }
 
 @Composable

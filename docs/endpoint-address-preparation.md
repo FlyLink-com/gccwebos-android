@@ -30,4 +30,4 @@ The prior B2 P7 result remains failed, and B2 P8/P9 have not run. Those results 
 
 This validation covers the Android client scope approved on 2026-10-04. Formal release and server changes remain outside that approval.
 
-The normal candidate APK was installed with the existing candidate signer and its installed artifact hash matched the local APK. At this checkpoint the app showed the login form; actual-account configuration and VPN verification await login on the device. PR #21 remains Draft for that verification, fresh combined-head CI and the remaining UI/recovery gates.
+The normal candidate APK was installed with the existing candidate signer and its installed artifact hash matched the local APK. After the operator logged in on the device, the public diagnostic reported `NodeOptions` (unsupported node options). The actual artifact is still rejected before VPN admission; its particular option key/value has not been read or recorded. Real-account hostname/connection interoperability remains unproven. PR #21 remains Draft for that verification, fresh combined-head CI and the remaining UI/recovery gates.

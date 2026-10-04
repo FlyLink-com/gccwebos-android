@@ -48,6 +48,8 @@ TDD produced 6 expected failures across 16 startup/session tests before the fix.
 
 The Android 16 emulator remains closed at the user's request. Existing customer-bearing packages are protected from uninstall/data clearing. The existing native-session maximum is 30 minutes, further bounded by server expiry; changing that authentication contract is outside this startup repair.
 
+The repaired normal candidate at `942bc1a9b29b7f1ca2fa03a641a4f375c1b80db8` was installed in place on physical OPPO/API33. The installed base APK matches SHA256 `3320d04ab2342a08e65ca2d167956c410cddea375e6ad8e1c59dfbbd4cf6cd60`, with the same package/signer and all synthetic/storage/lab/TUN acceptance switches disabled. The 15 predefined private-path existence/type checks matched across installation; no private contents were read, and no uninstall/data clearing occurred. The normal Activity opened to the connection home. No VPN was started by the assistant; actual-account close/reopen restoration remains user acceptance, not an inferred device pass.
+
 ## Remaining acceptance
 
 1. Finish the current PR's hosted CI with all existing source/artifact checks enforced. The local acceptance above does not change the status of a hosted run.

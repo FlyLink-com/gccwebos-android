@@ -149,8 +149,9 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 if (prior != null && prior.accountId != value.accountId) { store.clear() }
                 try {
                     sessions.save(SavedSession.capture(value, now(), elapsed()))
-                    context.ensureActive(); checkGeneration(epoch)
                 } catch (failure: Throwable) { sessions.clear(); throw failure }
+                // A cancelled UI owner must not delete an already saved, still-valid session.
+                context.ensureActive(); checkGeneration(epoch)
                 session = value
             }
             value

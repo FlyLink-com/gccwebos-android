@@ -6,7 +6,7 @@ Risk B: bounded client compatibility and tests in the existing PR. No account/au
 
 The normal QA2 candidate at `d051b95fe3b9ba74bb27f9ad2a8f0cc6128df446` was upgraded with data retained. The user logged in, and the public account/resource surface showed authenticated state. The subsequent fixed import result was `UNSUPPORTED_CONFIGURATION`, with `NodeOptionHeartbeatInterval`. Earlier software had reported `NodeOptionRequestTimeout`.
 
-`PortalRepository.importFresh` downloads the subscription before calling `SafeProxyConfig.validateForPreparation`/`project`. The rejected configuration returns before the durable profile commit and `IMPORTED` result. Login, entitlement/resource display and subscription delivery therefore do not establish a usable VPN profile. The current configuration has not reached native admission or connection testing.
+`PortalRepository.importFresh` downloads the subscription before calling `SafeProxyConfig.validateForPreparation`/`project`. The rejected configuration returns before the durable profile commit and `IMPORTED` result. Login, entitlement/resource display and subscription delivery therefore do not establish a usable VPN profile. At this failure boundary, the configuration had not reached native admission or connection testing.
 
 The parser checks option keys before values and validates every node. An unsupported option in one node can reject the entire import, including attempts to select another node. A changed first rejection category does not prove the preceding option value was valid or that all remaining options will pass. Customer configuration contents and values were not read or recorded.
 
@@ -36,9 +36,21 @@ The installed fixture app SHA256 was `5cfae180f8a1cf72daad86aa07c91ae9f797ab648f
 
 The separately rebuilt normal candidate has all synthetic/storage/lab/TUN acceptance switches disabled. Debug, release compilation, lint, both ABI/16-KiB packaging and release lab exclusion passed. Its APK SHA256 is `8e2c69febea326fecb4b82f453b62810753df8e335dab74bcd6a3d553fb41601`; the installed API36 copy matched, and its login page was opened for the user. Real subscription import and connection still require user-entered login. This normal package is retained and protected from uninstall or data clearing.
 
+## Account restoration after closing the app
+
+After the normal candidate was installed on OPPO with data retained, the user reported that login now loads account information and selectable nodes for one-click connection. The user also reported that closing and reopening the app requires manual account recovery. This report does not independently establish actual endpoint traffic.
+
+The startup defect is confirmed in `AccountController.restore`: finding a cached local subscription returned before `PortalRepository.restoreSession`, leaving the newly created controller unauthenticated without account/resource/usage data. Startup now restores both the cached subscription and the saved account, requiring server validation before publishing authentication. With a normal existing profile and no pending legacy recovery, this reads account overview without downloading or replacing the subscription.
+
+A separate cancellation defect was reproduced: after a successful session save, cancellation of the restoring UI owner was caught as a storage failure and cleared the valid saved session. The post-save cancellation/generation checks now remain before authentication publication but outside the storage-failure clearing block. Actual save failure, explicit logout, 401 invalidation, generation fences and the existing session lifetime are preserved. This does not introduce permanent login or VPN auto-reconnect after process death.
+
+TDD produced 6 expected failures across 16 startup/session tests before the fix. After the fix, all 123 selected account, session, cached-profile and connection-lifecycle JVM tests passed without skips, followed by 41 repository/overview regressions (164 total). Tests cover a newly constructed repository/controller, server-validation gating, network failure and explicit retry, missing/expired sessions, late responses after logout, and cancellation after successful persistence. The existing Compose startup/foreground test now expects automatic restoration; its APK compiled, but the changed instrumentation test has not yet run in this local repair pass. Debug/release builds, lint (zero errors), both JNI ABIs/16-KiB alignment and release lab exclusion passed. These controller tests do not prove an actual OPPO process-death/Keystore recovery.
+
+The Android 16 emulator remains closed at the user's request. Existing customer-bearing packages are protected from uninstall/data clearing. The existing native-session maximum is 30 minutes, further bounded by server expiry; changing that authentication contract is outside this startup repair.
+
 ## Remaining acceptance
 
 1. Finish the current PR's hosted CI with all existing source/artifact checks enforced. The local acceptance above does not change the status of a hosted run.
 2. With a user-entered login on the normal candidate, refresh the actual subscription and require the imported state before connecting, disconnecting and reconnecting. Record only fixed public status categories. If another option is rejected, audit its exact semantics rather than silently deleting arbitrary fields.
 
-Actual configuration values, complete import success and endpoint reachability remain unknown. An emulator pass does not establish OPPO-specific lifecycle behavior. Existing logged-in application data remains protected; rollback uses the retained same-package/same-signer normal candidate without clearing data.
+The user reports successful account and selectable-node loading on OPPO, while independent actual-account import status, endpoint traffic and repaired close/reopen behavior remain to be verified. Actual configuration values were not inspected. An emulator pass does not establish OPPO-specific lifecycle behavior. Existing logged-in application data remains protected; rollback uses the retained same-package/same-signer normal candidate without clearing data.

@@ -320,7 +320,7 @@ class MobileParityUiTest {
             assertNull(profiles.read()); assertNull(saved.read()); assertNull(delivery.record)
         }
     }
-    @Test fun localProfileWalletBrowserReturnRevalidatesAccountInsteadOfSigningOut() {
+    @Test fun localProfileRestoresAccountAutomaticallyAndBrowserReturnRevalidatesIt() {
         lateinit var state: AccountController; var reads = 0
         val delivery = object : DeliveryStore {
             val record = DeliveryRecord("fixture@example.invalid", "binding", "resource", "key", Secret("https://sub.invalid/sub/a/synthetic"), Secret("handoff"), false)
@@ -348,9 +348,13 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
-        compose.runOnIdle { assertEquals(0, reads); state.restoreAccount() }
-        compose.waitUntil(10_000) { state.authenticated && !state.busy }
-        compose.runOnIdle { assertEquals(2, reads); state.onForeground() }
+        compose.runOnIdle {
+            assertTrue(state.authenticated)
+            assertTrue(state.accountUsage.state.value.authenticated)
+            assertSame(Resource.None, state.accountUsage.state.value.resource)
+            assertEquals(2, reads)
+            state.onForeground()
+        }
         compose.waitUntil(10_000) { state.authenticated && !state.busy && !state.foregroundCheckPending }
         compose.runOnIdle { assertEquals(4, reads); assertTrue(state.localSubscription.hasProfile) }
     }

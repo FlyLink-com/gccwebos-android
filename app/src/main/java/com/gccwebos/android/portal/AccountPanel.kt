@@ -180,7 +180,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             try {
                 localSubscription = repository.localSubscriptions.restore()
                 nodes = localSubscription.nodes
-                if (localSubscription.hasProfile) { restorationPending = false; return@run }
+                // Cached connection state and a saved account must both restore on a fresh launch.
                 val saved = repository.restoreSession()
                 restorationPending = false
                 if (saved != null) {

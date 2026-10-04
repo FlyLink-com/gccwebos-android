@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -23,10 +22,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gccwebos.android.ConnectionControlState
 import com.gccwebos.android.ConnectionPhase
-import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.BrandButton
 import com.gccwebos.android.design.GlassSurface
+import com.gccwebos.android.design.NodeRegionIcon
 import com.gccwebos.android.vpn.SafeProxyConfig
 import kotlinx.coroutines.delay
 import java.util.Locale
@@ -46,18 +45,36 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     resource: Resource?, hasCapability: Boolean, accountBusy: Boolean, authenticated: Boolean = false,
     connectionControl: ConnectionControlState = ConnectionControlState(),
     onSelected: () -> Unit = {},
+    latency: NodeLatencyController? = null,
     openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.sync() }
-    LaunchedEffect(state.snapshot.validUntil) {
-        if (state.snapshot.validUntil != null) while (true) { delay(1000); state.sync() }
+    val latestAccountBusy by rememberUpdatedState(accountBusy)
+    LaunchedEffect(state, latency) {
+        while (true) {
+            delay(1000)
+            if (state.snapshot.validUntil != null) state.sync()
+            if (latency?.foreground == true) {
+                latency.sync()
+                val current = state.snapshot
+                if (current.status == LocalSubscriptionStatus.READY && current.choices.isNotEmpty() &&
+                    !latestAccountBusy && !state.busy) latency.ensureMeasured()
+            }
+        }
     }
     DisposableEffect(state) { onDispose { if (state.busy) state.cancel() } }
+    DisposableEffect(latency) { onDispose { latency?.cancel() } }
     val value = state.snapshot
     val readyChoices = if (value.status == LocalSubscriptionStatus.READY) value.choices else emptyList()
     val readOnlyNodes = if (value.choices.isEmpty()) nodes else emptyList()
     val choices = readyChoices.withIndex().toList()
     val total = readyChoices.size + readOnlyNodes.size
     val selectedChoice = readyChoices.firstOrNull { it.selection === value.selected }
+    val canMeasure = value.status == LocalSubscriptionStatus.READY && readyChoices.isNotEmpty() &&
+        !accountBusy && !state.busy && latency?.foreground != false
+    // A measurement completion must not itself trigger another batch. Selection stays independent.
+    LaunchedEffect(latency, value.status, value.choices, accountBusy, state.busy, latency?.foreground) {
+        if (canMeasure) latency?.ensureMeasured() else latency?.cancel()
+    }
     val title = when {
         state.busy -> if (selectedChoice != null) "节点已选择" else "请选择节点"
         value.status == LocalSubscriptionStatus.MISSING && resource == Resource.None -> "暂无套餐"
@@ -81,11 +98,14 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
         GlassSurface(Modifier.fillMaxWidth().testTag("nodes-selection-summary")) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NodeGlobe(feature = true)
+                    NodeRegionIcon(selectedChoice?.name, Modifier.testTag("nodes-selected-region"),
+                        size = 38.dp, emphasized = true)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(selectedChoice?.name ?: "未选择", fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.testTag("nodes-selected-name"))
                         Text("选择后返回连接页", fontSize = 11.sp, color = Brand.Muted)
+                        NodeLatencyBadge(latency?.reading(selectedChoice?.selection),
+                            Modifier.testTag("nodes-selected-latency"))
                     }
                 }
                 HorizontalDivider(color = Brand.RowDivider)
@@ -116,6 +136,17 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                 Text("$total 条",
                     fontSize = 11.sp, color = Brand.Muted, modifier = Modifier.testTag("nodes-count"))
             }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Ping 延迟 · 未回应仍可尝试连接", fontSize = 11.sp, color = Brand.Muted,
+                    modifier = Modifier.weight(1f).testTag("nodes-latency-hint"))
+                TextButton(onClick = {
+                    if (canMeasure && latency?.busy == false) latency.refresh()
+                }, enabled = canMeasure && latency != null && !latency.busy,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-latency-refresh")) {
+                    Text("测延迟", fontSize = 11.sp)
+                }
+            }
             if (readOnlyNodes.isNotEmpty()) Text("以下为已读取信息，配置校验后才能选择。", color = Brand.Muted,
                 style = MaterialTheme.typography.bodySmall)
             GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(23.dp)) {
@@ -125,6 +156,9 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                         val chosen = value.selected === choice.selection
                         if (visibleIndex > 0) HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
                         NodeChoiceRow(choice.name, choice.protocol, true, chosen,
+                            observation = latency?.reading(choice.selection),
+                            regionTag = "node-region-${indexed.index}",
+                            latencyTag = "node-latency-${indexed.index}",
                             modifier = Modifier.testTag("node-choice-${indexed.index}").semantics { selected = chosen }
                                 .clickable(enabled = !state.busy && !accountBusy, role = Role.RadioButton) {
                                     if (state.select(choice.selection)) onSelected()
@@ -133,6 +167,8 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                     readOnlyNodes.forEachIndexed { index, node ->
                         if (index > 0) HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
                         NodeChoiceRow(node.name, node.protocol, node.supported, null,
+                            regionTag = "subscription-node-region-${node.index}",
+                            latencyTag = "subscription-node-latency-${node.index}",
                             modifier = Modifier.testTag("subscription-node-${node.index}"), inspectionIndex = node.index)
                     }
                 }
@@ -150,31 +186,21 @@ private fun nodeProtocolLabel(protocol: String): String = when (protocol) {
 }
 
 @Composable
-private fun NodeGlobe(feature: Boolean = false) {
-    val shape = RoundedCornerShape(if (feature) 16.dp else 13.dp)
-    Box(Modifier.size(if (feature) 38.dp else 30.dp)
-        .background(Brand.Cyan.copy(alpha = if (feature) .10f else .07f), shape)
-        .then(if (feature) Modifier.border(1.dp, Brand.Cyan.copy(alpha = .26f), shape) else Modifier),
-        contentAlignment = Alignment.Center) {
-        Icon(painterResource(R.drawable.brand_globe), contentDescription = null,
-            modifier = Modifier.size(if (feature) 22.dp else 18.dp), tint = if (feature) Brand.Cyan else Brand.Muted)
-    }
-}
-
-@Composable
 private fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, chosen: Boolean?,
+    observation: NodeLatencyObservation? = null, regionTag: String, latencyTag: String,
     modifier: Modifier = Modifier, inspectionIndex: Int? = null) {
     Row(modifier.fillMaxWidth().heightIn(min = 56.dp)
         .then(if (chosen == true) Modifier.background(Brand.Cyan.copy(alpha = .08f)) else Modifier)
         .padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        NodeGlobe()
+        NodeRegionIcon(name, Modifier.testTag(regionTag))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-name-$it") } ?: Modifier)
             Text("${nodeProtocolLabel(protocol)} · ${if (supported) "可解析" else "暂不兼容"}",
                 fontSize = 11.sp, color = Brand.Muted,
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-details-$it") } ?: Modifier)
+            NodeLatencyBadge(observation, Modifier.testTag(latencyTag))
         }
         if (chosen == null) Text("只读", color = Brand.Muted, fontSize = 10.sp)
         else Box(Modifier.size(20.dp).border(1.5.dp, if (chosen) Brand.Cyan else Brand.Border, CircleShape)

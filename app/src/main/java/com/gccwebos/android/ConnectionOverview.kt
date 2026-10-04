@@ -26,6 +26,7 @@ import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.ImportStatus
 import com.gccwebos.android.portal.LocalSubscriptionSnapshot
 import com.gccwebos.android.portal.LocalSubscriptionStatus
+import com.gccwebos.android.portal.NodeLatencyBadge
 import java.time.Instant
 import java.time.Duration
 import kotlinx.coroutines.delay
@@ -245,6 +246,7 @@ internal fun ConnectionOverview(
     var synchronizedNodeGeneration by remember(account) { mutableStateOf<Long?>(null) }
     LaunchedEffect(account, account.authSessionGeneration, snapshot, now) {
         account.nodeSelection.sync() // Local validity only. No configuration import or HTTP.
+        account.nodeLatency.prune()
         synchronizedNodeGeneration = account.authSessionGeneration
     }
     val nodeSnapshot = account.nodeSelection.snapshot
@@ -253,6 +255,16 @@ internal fun ConnectionOverview(
             nodeSnapshot.status == LocalSubscriptionStatus.READY && nodeSnapshot.validUntil?.let { until -> until > now } != false
     }
     val local = connectionOverviewPresentation(snapshot, now, control)
+    LaunchedEffect(account, selectedNode?.selection, account.busy, account.restoring,
+        account.foregroundCheckPending, account.nodeLatency.foreground) {
+        if (selectedNode != null && account.nodeLatency.foreground && !account.busy && !account.restoring &&
+            !account.foregroundCheckPending && !account.clearing) while (true) {
+            account.nodeLatency.sync()
+            account.nodeLatency.ensureMeasured(selectedNode.selection)
+            delay(1_000)
+        }
+    }
+    DisposableEffect(account) { onDispose { account.nodeLatency.cancel() } }
     val operable = !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing && !usage.busy
     val verifiedUsage = account.authenticated && usage.authenticated && !usage.verifying
     val display = accountUsagePresentation(if (verifiedUsage) usage.resource else null, usageNow, usage.notUpdated)
@@ -368,11 +380,7 @@ internal fun ConnectionOverview(
                     val summary: @Composable (Modifier) -> Unit = { modifier ->
                         Row(modifier, verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Box(Modifier.size(39.dp).background(Brand.SurfaceRaised, RoundedCornerShape(13.dp)),
-                                contentAlignment = Alignment.Center) {
-                                Icon(painterResource(R.drawable.brand_globe), null, tint = Brand.Cyan,
-                                    modifier = Modifier.size(22.dp))
-                            }
+                            NodeRegionIcon(name = selectedNode?.name, size = 39.dp, emphasized = true)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
                                 Text(if (account.nodeSelection.busy) "正在刷新" else selectedNode?.name ?: "未选择",
@@ -380,6 +388,11 @@ internal fun ConnectionOverview(
                                     modifier = Modifier.testTag("connection-node-name"))
                                 selectedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
                                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
+                                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text("Ping", color = Brand.Muted, fontSize = 11.sp)
+                                    NodeLatencyBadge(account.nodeLatency.reading(selectedNode?.selection),
+                                        Modifier.testTag("connection-node-latency"))
+                                }
                             }
                         }
                     }
@@ -393,6 +406,7 @@ internal fun ConnectionOverview(
                 }
             }
         }
+        OfficialWebsiteCard()
         // Local configuration evidence has no account/resource binding and is never the account usage.
         if (snapshot.status != LocalSubscriptionStatus.MISSING) {
             val localTitle = if (local.status == LocalSubscriptionStatus.EXPIRED) "本地配置已到期" else local.title

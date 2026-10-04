@@ -135,8 +135,13 @@ class OrderHistoryUiTest {
         compose.onNodeWithTag("history-read-title").assertTextEquals("订单类型查询失败")
         compose.onNodeWithTag("history-error").assertTextEquals("恢复记录不可用")
         compose.runOnIdle { commerce.busy = true }
-        compose.onNodeWithTag("history-read-title").assertTextEquals("正在查询订单类型")
+        compose.onNodeWithTag("history-read-title").assertDoesNotExist()
+        compose.onNodeWithTag("history-read-state").assertDoesNotExist()
         compose.onNodeWithTag("history-error").assertDoesNotExist()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("orders-orders").assertDoesNotExist()
+        compose.onNodeWithText("暂无这类订单").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(commerce.busy); assertNull(commerce.commerceModel); assertNull(commerce.orderPage) }
         compose.runOnIdle { commerce.busy = false; commerce.purchaseHistoryError = "订单类型读取失败" }
         compose.onNodeWithTag("history-read-title").assertTextEquals("订单类型查询失败")
         compose.onNodeWithText("暂无这类订单").assertDoesNotExist()

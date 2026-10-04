@@ -184,6 +184,71 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         authority.selected = selection
         ++revision
     }
+    /** One cache read per batch; no refresh, selection, epoch change or connection admission. */
+    internal fun captureNodeProbeTargets(): List<NodeProbeTarget> = synchronized(lock) {
+        withNodeProbeArtifact { raw, choices ->
+            choices.mapIndexed { index, choice ->
+                NodeProbeTarget(choice.selection, SafeProxyConfig.selectedEndpoint(raw, index), choice.protocol)
+            }
+        } ?: emptyList()
+    }
+    /** Recheck results before publication; a target never renews a removed or changed registry. */
+    internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget): Boolean = synchronized(lock) {
+        if (authority.choices.none { it.selection === target.selection }) return@synchronized false
+        withNodeProbeArtifact { raw, choices ->
+            val index = choices.indexOfFirst { it.selection === target.selection }
+            index >= 0 && choices[index].protocol == target.protocol &&
+                SafeProxyConfig.selectedEndpoint(raw, index) == target.endpoint
+        } == true
+    }
+    /** Memory-only display masking. Never sufficient permission to probe: workers must also
+     * call isCurrentNodeProbeTarget on IO before/after measuring, plus their auth/network/TTL guards. */
+    internal fun isNodeProbeTargetRegistryCurrent(target: NodeProbeTarget): Boolean = synchronized(lock) {
+        authority.selectionStatus == LocalSubscriptionStatus.READY && !authority.selectionRequiresRefresh &&
+            authority.selectionSchema == SafeProxyConfig.SCHEMA_VERSION &&
+            authority.selectionClearVersion == authority.clearVersion && authority.selectionBinding != null &&
+            authority.selectionRevision != null && authority.selectionUntil?.let { it > now() } == true &&
+            authority.choices.any { it.selection === target.selection && it.protocol == target.protocol }
+    }
+    /** Caller holds the authority lock. Unlike nodeSelectionSnapshot, rejection is read-only. */
+    private fun <T> withNodeProbeArtifact(read: (ByteArray, List<ConnectionChoice>) -> T): T? {
+        var cached: CachedSubscription? = null
+        var raw: ByteArray? = null
+        try {
+            if (authority.selectionStatus != LocalSubscriptionStatus.READY || authority.selectionRequiresRefresh ||
+                authority.selectionSchema != SafeProxyConfig.SCHEMA_VERSION ||
+                authority.selectionClearVersion != authority.clearVersion || authority.choices.isEmpty()) return null
+            val until = authority.selectionUntil ?: return null
+            if (until <= now()) return null
+            val binding = authority.selectionBinding ?: return null
+            val fingerprint = authority.selectionRevision ?: return null
+            val choices = authority.choices.toList()
+            if (delivery.readLegacyRecovery() != null) return null
+            val profile = profiles.read() ?: return null
+            cached = profile
+            if (profile.binding != binding || profile.validUntil != until ||
+                profile.observedStatus?.let { it != LocalSubscriptionStatus.READY } == true) return null
+            // Match capability() precedence without reading the same profile for each node.
+            val url = profile.url ?: delivery.read()?.takeIf { !it.pendingAck }?.url ?: return null
+            validateCapability(url, profile.binding)
+            val bytes = profile.copyBytes()
+            raw = bytes
+            val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+            try { if (!fingerprint.contentEquals(digest)) return null } finally { digest.fill(0) }
+            val validated = describe(bytes, profile.validUntil)
+            if (validated.status != LocalSubscriptionStatus.READY || validated.nodes.size != choices.size ||
+                validated.nodes.indices.any { validated.nodes[it].name != choices[it].name ||
+                    validated.nodes[it].protocol != choices[it].protocol }) return null
+            if (authority.selectionStatus != LocalSubscriptionStatus.READY || authority.selectionRequiresRefresh ||
+                authority.selectionSchema != SafeProxyConfig.SCHEMA_VERSION ||
+                authority.selectionRevision !== fingerprint || authority.selectionBinding != binding ||
+                authority.selectionClearVersion != authority.clearVersion || authority.selectionUntil != until ||
+                authority.choices != choices || until <= now()) return null
+            return read(bytes, choices)
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { return null }
+        finally { raw?.fill(0); cached?.close() }
+    }
     private fun capability(): Secret? {
         // A profile write and a receipt write are separate atomic files. Even when the
         // candidate receipt is present, an uncleared journal requires a fresh authenticated

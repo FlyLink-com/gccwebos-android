@@ -79,7 +79,8 @@ internal fun productionRepository(context: Context): PortalRepository {
 /** Process-local ownership only; identity contains no account label or bearer data. */
 internal class CommerceSessionIdentity
 
-internal class AccountController(private val repository: PortalRepository, private val scope: CoroutineScope) {
+internal class AccountController(private val repository: PortalRepository, private val scope: CoroutineScope,
+    nodeLatencyProbe: NodeLatencyProbe? = null) {
     var account by mutableStateOf("")
     var password by mutableStateOf("")
     var answer by mutableStateOf("")
@@ -149,6 +150,9 @@ internal class AccountController(private val repository: PortalRepository, priva
     val accountUsage = AccountUsageController(scope,
         reader = { owner, epoch -> repository.readAccountOverview(owner, epoch) },
         onSessionExpired = { commerceSessionExpired() })
+    val nodeLatency = NodeLatencyController(repository.localSubscriptions, scope, nodeLatencyProbe,
+        authGeneration = { authSessionGeneration },
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing })
     fun refreshAccountUsage() = accountUsage.update()
     fun cancelAccountUsageUpdate() = accountUsage.cancel()
     private fun clearAccountUsage() {
@@ -476,6 +480,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun clearLocal() = reset(clearLocal = true)
     fun cancelAuthentication() = reset(clearLocal = false)
     private fun reset(clearLocal: Boolean) {
+        nodeLatency.cancel()
         clearAccountUsage()
         commerceSessionIdentity = null
         nodeSelection.invalidate()
@@ -506,6 +511,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         if (busy) return
         // Account/security work cannot race a local selection read or revive its late result.
         if (nodeSelection.busy) nodeSelection.cancel()
+        nodeLatency.cancel()
         val current = ++operation
         busy = true; error = null
         authenticationSubmitting = authenticationSubmission

@@ -175,7 +175,11 @@ private val primaryDestinations = listOf(Destination.Connect, Destination.Lines,
 internal class AccountForegroundObserver(private val account: AccountController) : LifecycleEventObserver {
     private var leftForeground = false
     override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
-        if (event == Lifecycle.Event.ON_STOP) leftForeground = true
+        if (event == Lifecycle.Event.ON_STOP) {
+            leftForeground = true
+            account.nodeLatency.setForeground(false)
+        }
+        if (event == Lifecycle.Event.ON_RESUME) account.nodeLatency.setForeground(true)
         if (event == Lifecycle.Event.ON_RESUME && leftForeground) {
             leftForeground = false; account.onForeground()
         }
@@ -203,12 +207,16 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     val account = key(accountOverride, repositoryOverride) {
         val scope = rememberCoroutineScope()
         remember(accountOverride, repositoryOverride) {
-            accountOverride ?: AccountController(repositoryOverride ?: productionRepository(context), scope)
+            accountOverride ?: AccountController(repositoryOverride ?: productionRepository(context), scope,
+                nodeLatencyProbe = if (repositoryOverride == null) com.gccwebos.android.vpn.AndroidNodePingProbe(context) else null)
         }
     }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
     LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
-        account.restoring, account.foregroundCheckPending, account.clearing) { account.nodeSelection.sync() }
+        account.restoring, account.foregroundCheckPending, account.clearing) {
+        account.nodeSelection.sync()
+        account.nodeLatency.sync()
+    }
     // Keep an accepted power command outside keyed destinations. Navigation cannot replay it
     // while the controller is still publishing acceptance/rejection. A new snapshot/revision is the ack.
     var acceptedConnectionCommand by remember(connectionControlState, account) { mutableStateOf(false) }
@@ -232,7 +240,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     DisposableEffect(account, lifecycle) {
         val observer = AccountForegroundObserver(account)
         lifecycle?.addObserver(observer)
-        onDispose { lifecycle?.removeObserver(observer) }
+        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel() }
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
@@ -371,7 +379,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
-                        onSelected = openConnect, openAccount = openAccount)
+                        onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency)
                 }
                 Destination.Plans -> {
                     if (!account.authenticated && !account.retainingCommerceSession) {

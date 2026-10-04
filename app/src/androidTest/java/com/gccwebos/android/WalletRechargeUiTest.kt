@@ -60,7 +60,10 @@ class WalletRechargeUiTest {
     @Test fun unknownErrorAndConfirmedZeroKeepDirectoryStatesSeparate() {
         launch()
         compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
-        compose.onNodeWithTag("recharge-offers-unread").assertExists()
+        compose.onNodeWithTag("recharge-offers-unread").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-offers-empty").assertDoesNotExist()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
         compose.runOnIdle { state.walletError = "合成余额读取失败"; state.rechargeOffersError = "合成档位读取失败" }
         compose.onNodeWithTag("wallet-error").assertTextEquals("合成余额读取失败")
         compose.onNodeWithTag("recharge-offers-error").assertExists()

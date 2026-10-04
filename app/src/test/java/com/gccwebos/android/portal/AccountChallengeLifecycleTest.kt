@@ -85,13 +85,29 @@ class AccountChallengeLifecycleTest {
         }
     }
 
+    @Test fun pendingLoginKeepsAStaticQuestionAndStillBlocksDuplicateSubmission() = runTest {
+        val f = Fixture(backgroundScope)
+        val lease = f.state.enterLoginForm(); f.state.ensureLoginChallenge(lease); runCurrent(); f.fill()
+        val release = CompletableDeferred<Unit>()
+        f.passwordReply = { release.await(); mfa }
+        f.state.login(); runCurrent()
+        assertTrue(f.state.busy); assertTrue(f.state.authenticationSubmitting)
+        assertEquals("验证题", loginQuestionText(f.state))
+        f.state.login(); runCurrent()
+        assertEquals(1, f.calls.count { it.path == "/api/portal/password/session" })
+        release.complete(Unit); runCurrent()
+        assertFalse(f.state.busy); assertFalse(f.state.authenticationSubmitting)
+        assertNotNull(f.state.factorReference)
+        assertEquals(1, f.questions)
+    }
+
     @Test fun refreshInvalidatesOldAnswerAndSingleFlightFailureNeedsExplicitRetry() = runTest {
         val f = Fixture(backgroundScope); val lease = f.state.enterLoginForm()
         f.state.ensureLoginChallenge(lease); runCurrent(); f.fill()
         f.questionReply = { if (it == 2) throw PortalFailure(PortalFailure.Reason.NETWORK) else question(it) }
         f.state.challenge(); f.state.challenge()
         assertNull(f.state.challenge); assertEquals("", f.state.answer); assertTrue(f.state.challengeLoading)
-        assertEquals("加载中…", loginQuestionText(f.state))
+        assertEquals("验证题", loginQuestionText(f.state))
         assertFalse(f.state.busy); assertEquals("p", f.state.password); assertEquals("fixture@example.invalid", f.state.account)
         runCurrent(); assertEquals(2, f.questions); assertNotNull(f.state.challengeError)
         assertEquals("无网络", loginQuestionText(f.state))
@@ -105,7 +121,7 @@ class AccountChallengeLifecycleTest {
         val lease = f.state.enterLoginForm(); f.state.ensureLoginChallenge(lease); runCurrent(); f.fill()
         advanceTimeBy(1001); runCurrent()
         assertTrue(f.state.challengeExpired); assertNull(f.state.challenge); assertEquals("", f.state.answer)
-        assertEquals("刷新重试", loginQuestionText(f.state))
+        assertEquals("换一道题", loginQuestionText(f.state))
         assertEquals("p", f.state.password); f.state.login(); f.state.ensureLoginChallenge(lease); runCurrent()
         assertEquals(1, f.questions); assertTrue(f.calls.none { it.path == "/api/portal/password/session" })
         f.state.challenge(); runCurrent(); assertEquals(2, f.questions); assertFalse(f.state.challengeExpired)
@@ -133,7 +149,7 @@ class AccountChallengeLifecycleTest {
             val lease = f.state.enterLoginForm(); f.state.ensureLoginChallenge(lease); runCurrent()
             assertEquals(reason, f.state.challengeFailureReason)
             assertEquals(reason == PortalFailure.Reason.NETWORK, f.state.challengeError == "无网络")
-            assertEquals(if (reason == PortalFailure.Reason.NETWORK) "无网络" else "刷新重试", loginQuestionText(f.state))
+            assertEquals(if (reason == PortalFailure.Reason.NETWORK) "无网络" else "换一道题", loginQuestionText(f.state))
             assertNull(f.state.challenge); assertFalse(f.state.challengeExpired)
             f.questionReply = { question(it) }
             f.state.refreshLoginChallenge(lease)

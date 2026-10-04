@@ -11,6 +11,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -59,16 +60,17 @@ internal fun OfficialWebsiteCard(
                     }
                 }.testTag("official-website-open").padding(horizontal = 14.dp, vertical = 12.dp)) {
                 val compact = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.5f
-                val globe: @Composable () -> Unit = {
-                    Box(Modifier.size(36.dp).testTag("official-website-globe").drawBehind {
+                val robot: @Composable () -> Unit = {
+                    Box(Modifier.size(64.dp).testTag("official-website-robot").drawBehind {
                         drawCircle(Brand.Cyan.copy(alpha = glow.value))
                     }, contentAlignment = Alignment.Center) {
-                        Icon(painterResource(R.drawable.brand_globe), contentDescription = null,
-                            tint = Brand.Cyan, modifier = Modifier.size(24.dp))
+                        Image(painterResource(R.drawable.brand_robot_welcome), contentDescription = null,
+                            modifier = Modifier.fillMaxSize())
                     }
                 }
                 val title: @Composable () -> Unit = {
-                    Text("官网", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text("其他平台如何使用我们的订阅", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.fillMaxWidth().testTag("official-website-title"))
                 }
                 val domain: @Composable () -> Unit = {
                     Text("gccwebos.com", color = Brand.Muted, style = MaterialTheme.typography.bodyMedium,
@@ -78,31 +80,28 @@ internal fun OfficialWebsiteCard(
                 }
                 val visit: @Composable () -> Unit = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("访问", color = Brand.Cyan, style = MaterialTheme.typography.labelMedium)
+                        Text("点击官网了解更多", color = Brand.Cyan, style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.weight(1f, fill = false).testTag("official-website-action"))
                         Icon(painterResource(R.drawable.brand_arrow), contentDescription = null,
                             tint = Brand.Cyan, modifier = Modifier.size(18.dp))
                     }
                 }
                 if (compact) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        globe()
-                        title()
-                        Spacer(Modifier.weight(1f))
-                        visit()
-                    }
+                    robot()
+                    title()
+                    visit()
                     domain()
                 } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    globe()
+                    robot()
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         title()
+                        visit()
                         domain()
                     }
-                    visit()
                 }
             }
-            if (unavailable) Text("暂时无法打开官网，请安装或启用浏览器后重试。",
+            if (unavailable) Text("暂时无法打开官网",
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp)
                     .testTag("official-website-error").semantics { liveRegion = LiveRegionMode.Polite })

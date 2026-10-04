@@ -79,7 +79,7 @@ class ConnectionSetupRecoveryUiTest {
             assertNotNull(account.error)
             fixture.setupAvailable = false
         }
-        compose.onNodeWithTag("connection-setup-status").assertTextEquals("网络连接失败，请重试")
+        compose.onNodeWithTag("connection-setup-status").assertTextEquals("网络连接失败")
         compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
             .performScrollTo().performClick()
         compose.waitUntil(10_000) { fixture.retryStarted.isCompleted && account.busy }
@@ -114,7 +114,7 @@ class ConnectionSetupRecoveryUiTest {
             compose.onAllNodesWithTag("connection-setup-status").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("connection-setup-status")
-            .assertTextEquals("订阅交付暂不可领取，请稍后重试或联系支持")
+            .assertTextEquals("订阅交付暂不可领取")
         compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
             .performScrollTo().performClick()
         compose.waitUntil(10_000) { fixture.overviews.get() >= 2 && !account.busy }
@@ -213,12 +213,63 @@ class ConnectionSetupRecoveryUiTest {
             account.nodeSelection.snapshot.choices[1].selection.also(account.nodeSelection::select)
         }
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithTag("account-usage-cancel").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
+        compose.onNodeWithTag("connection-setup-status").assertDoesNotExist()
         compose.runOnIdle {
             assertSame(selected, account.nodeSelection.snapshot.selected)
             assertEquals(1, powers.get()); assertEquals(0, navigations.get())
             assertEquals(1, fixture.downloads.get()); assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
         }
+    }
+
+    @Test fun failedUsageReadOnReadyConfigRecoversWithoutStartingUntilAnotherExplicitClick() {
+        val fixture = Fixture(setupAvailable = true)
+        launch(fixture)
+        compose.runOnIdle { fixture.failOverview = true; account.refreshAccountUsage() }
+        compose.waitUntil(10_000) { account.accountUsage.state.value.error != null && !account.accountUsage.state.value.busy }
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-retry").assertDoesNotExist()
+        val gate = CompletableDeferred<Unit>()
+        compose.runOnIdle { fixture.failOverview = false; fixture.overviewGate = gate }
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { fixture.overviews.get() == 3 && account.accountUsage.state.value.busy }
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsNotEnabled()
+        compose.onNodeWithTag("account-usage-cancel").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, powers.get()); gate.complete(Unit) }
+        compose.waitUntil(10_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.error == null }
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.READY, account.localSubscription.status)
+            assertEquals(0, powers.get()); assertEquals(0, navigations.get())
+            assertEquals(1, fixture.downloads.get()); assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
+        }
+        compose.onNodeWithTag("vpn-connect").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, powers.get()) }
+    }
+
+    @Test fun localReadFailureUsesTheStableActionWithoutAutomaticallyStartingAfterRecovery() {
+        val fixture = Fixture(setupAvailable = true, holdRetry = true)
+        launch(fixture)
+        compose.runOnIdle { account.localSubscription = account.localSubscription.copy(status = LocalSubscriptionStatus.RETRY_REQUIRED) }
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("local-subscription-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-validity-countdown").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { fixture.retryStarted.isCompleted && account.nodeSelection.busy }
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsNotEnabled().performTouchInput { click() }
+        compose.runOnIdle {
+            assertFalse(account.busy) // The local selection reader owns this work, not authentication.
+            assertEquals(0, powers.get()); assertEquals(2, fixture.downloads.get())
+            fixture.retryRelease.complete(Unit)
+        }
+        compose.waitUntil(10_000) { !account.nodeSelection.busy && account.localSubscription.status == LocalSubscriptionStatus.READY }
+        compose.runOnIdle {
+            assertEquals(0, powers.get()); assertEquals(0, navigations.get())
+            assertEquals(2, fixture.downloads.get()); assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
+        }
+        compose.onNodeWithTag("vpn-connect").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, powers.get()) }
     }
 
     @Test fun normalWidthKeepsTheNodeEntryInTheInitialViewportWithoutStartingAConnection() {
@@ -261,13 +312,17 @@ class ConnectionSetupRecoveryUiTest {
         val downloads = AtomicInteger()
         val retryStarted = CompletableDeferred<Unit>(); val retryRelease = CompletableDeferred<Unit>()
         val retryReturned = CompletableDeferred<Unit>()
+        var failOverview = false
+        var overviewGate: CompletableDeferred<Unit>? = null
         var control by mutableStateOf(ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true))
         private val wire = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse = when (path) {
                 "/api/portal/password/session" -> WireResponse(200, """{"session":{"sessionRef":"fixture_setup_ui_token","accountId":"fixture_setup_ui_account","issuedAt":"2026-10-03T00:00:00.000Z","expiresAt":"2026-10-03T00:30:00.000Z"}}""")
                 "/api/portal/resources/current/overview" -> {
                     overviews.incrementAndGet()
-                    WireResponse(200, """{"resource":{"state":"available","resourceRef":"resource_${"b".repeat(64)}","plan":{"id":"synthetic_setup_plan","durationDays":30,"monthlyTrafficGb":1},"validUntil":"2026-11-03T00:00:00.000Z","setupAvailable":$setupAvailable,"usage":{"totalBytes":100,"usedBytes":25,"remainingBytes":75,"collectionStatus":"measured","updatedAt":"2026-10-03T00:00:00.000Z","cycleStartedAt":"2026-10-03T00:00:00.000Z","cycleEndsAt":"2026-11-02T00:00:00.000Z"}}}""")
+                    overviewGate?.await()
+                    if (failOverview) WireResponse(503, "") else
+                        WireResponse(200, """{"resource":{"state":"available","resourceRef":"resource_${"b".repeat(64)}","plan":{"id":"synthetic_setup_plan","durationDays":30,"monthlyTrafficGb":1},"validUntil":"2026-11-03T00:00:00.000Z","setupAvailable":$setupAvailable,"usage":{"totalBytes":100,"usedBytes":25,"remainingBytes":75,"collectionStatus":"measured","updatedAt":"2026-10-03T00:00:00.000Z","cycleStartedAt":"2026-10-03T00:00:00.000Z","cycleEndsAt":"2026-11-02T00:00:00.000Z"}}}""")
                 }
                 "/api/portal/commerce/model" -> {
                     assertNull(body); assertNotNull(session)

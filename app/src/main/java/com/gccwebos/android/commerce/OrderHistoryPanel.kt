@@ -55,9 +55,8 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("订单", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f))
-        if (showReadRetry(state.busy, state.canOperate(), listError != null, selectedRows == null))
-            BrandButton("重试", state::load, modifier = Modifier.width(88.dp).testTag("commerce-refresh"))
     }
+    CommerceReadNotice(state, listError, "history-error")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         val purchaseCategory = when (state.commerceModel) {
             CommerceModel.LEGACY -> "orders" to "商城"
@@ -73,7 +72,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
         when (category) {
             "orders" -> {
                 val page = state.orderPage
-                HistoryReadState(page?.orders?.size, state.busy, state.purchaseHistoryError, "商城订单", state.error)
+                HistoryReadState(page?.orders?.size, state.busy, "商城订单")
                 HistoryGroups(page?.orders.orEmpty(), { it.createdAt }) { order ->
                     val selection = HistorySelection(HistoryKind.Legacy, order.ref)
                     HistorySummary("history-order-${order.ref}", historyOfferTitle(order.offer),
@@ -86,7 +85,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                     modifier = Modifier.testTag("orders-more"))
             }
             "plans" -> {
-                HistoryReadState(state.transitions?.size, state.busy, state.purchaseHistoryError, "套餐计划", state.error)
+                HistoryReadState(state.transitions?.size, state.busy, "套餐计划")
                 HistoryGroups(state.transitions.orEmpty(), { it.createdAt }) { order ->
                     val selection = HistorySelection(HistoryKind.Deferred, order.ref)
                     HistorySummary("history-order-${order.ref}", historyOfferTitle(order.offer),
@@ -96,7 +95,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                 }
             }
             "recharge" -> {
-                HistoryReadState(state.rechargeHistory?.size, state.busy, state.rechargeHistoryError, "充值", state.error)
+                HistoryReadState(state.rechargeHistory?.size, state.busy, "充值")
                 HistoryGroups(state.rechargeHistory.orEmpty(), { it.createdAt }) { order ->
                     val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
                     HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
@@ -109,27 +108,22 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                     }
                 }
             }
-            else -> HistoryReadState(null, state.busy, state.purchaseHistoryError, "订单类型", state.error)
+            else -> HistoryReadState(null, state.busy, "订单类型")
         }
     }
     if (details.visible) OrderDetailsDialog(details)
 }
 
 @Composable
-private fun HistoryReadState(size: Int?, busy: Boolean, specificError: String?, label: String, globalError: String?) {
-    val error = historyReadError(size, busy, specificError, globalError)
-    if (error != null) Text(error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("history-error"))
-    if (busy && size == null) { Spacer(Modifier.height(8.dp)); return }
-    if (size == null || size == 0) Surface(Modifier.fillMaxWidth().testTag("history-read-state"),
+private fun HistoryReadState(size: Int?, busy: Boolean, label: String) {
+    if (busy || size == null) return
+    if (size == 0) Surface(Modifier.fillMaxWidth().testTag("history-read-state"),
         shape = Brand.Shape, color = Color.Transparent) {
         Row(Modifier.heightIn(min = 48.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(painterResource(com.gccwebos.android.R.drawable.brand_receipt), null, tint = Brand.Muted,
                 modifier = Modifier.size(24.dp))
             Text(when {
-                busy -> label
-                size == null && error != null -> "${label}查询失败"
-                size == null -> "${label}尚未读取"
                 label == "商城订单" -> "暂无这类订单"
                 else -> "暂无${label}记录"
             }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("history-read-title"))
@@ -216,10 +210,7 @@ private fun OrderDetailsDialog(state: OrderDetailController) {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 state.selected?.let { DetailField("记录", it.ref) }
-                if (state.busy) {
-                    Spacer(Modifier.height(14.dp))
-                }
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("history-detail-error")) }
+                CommerceReadNotice(state, state.error?.takeUnless { state.busy }, "history-detail-error")
                 when (val detail = state.value) {
                     is HistoryDetail.Purchase -> PurchaseDetails(detail.value)
                     is HistoryDetail.Recharge -> RechargeDetails(detail.value)
@@ -228,11 +219,7 @@ private fun OrderDetailsDialog(state: OrderDetailController) {
             }
         },
         confirmButton = { TextButton(onClick = state::back,
-            modifier = Modifier.heightIn(min = 48.dp).testTag("history-detail-back")) { Text("返回列表") } },
-        dismissButton = {
-            if (showReadRetry(state.busy, true, state.error != null, false)) TextButton(onClick = state::retry,
-                modifier = Modifier.heightIn(min = 48.dp).testTag("history-detail-retry")) { Text("重试查询") }
-        })
+            modifier = Modifier.heightIn(min = 48.dp).testTag("history-detail-back")) { Text("返回列表") } })
 }
 
 @Composable

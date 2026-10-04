@@ -10,9 +10,9 @@ private data class RegionNames(val code: String, val chinese: String, val aliase
 private val regionNames = listOf(
     RegionNames("HK", "香港", listOf("香港", "Hong Kong")),
     RegionNames("TW", "台湾", listOf("台湾", "台灣", "臺灣", "Taiwan")),
-    RegionNames("JP", "日本", listOf("日本", "Japan")),
+    RegionNames("JP", "日本", listOf("日本", "Japan", "NRT")),
     RegionNames("KR", "韩国", listOf("韩国", "韓國", "南韩", "南韓", "South Korea", "Republic of Korea")),
-    RegionNames("SG", "新加坡", listOf("新加坡", "Singapore")),
+    RegionNames("SG", "新加坡", listOf("新加坡", "Singapore", "SGP")),
     RegionNames("US", "美国", listOf("美国", "美國", "United States of America", "United States")),
     RegionNames("GB", "英国", listOf("英国", "英國", "United Kingdom", "Great Britain")),
     RegionNames("DE", "德国", listOf("德国", "德國", "Germany")),
@@ -56,12 +56,15 @@ private val prefixCode = Regex("^([A-Z]{2})(?=$|[^\\p{L}])")
 private val routeCode = Regex("(?:[-_/|→>]\\s*)([A-Z]{2})(?=$|[^\\p{L}])")
 
 /** Conservative local matching. Conflicting or malformed flag labels deliberately stay neutral. */
-internal fun nodeRegion(name: String): NodeRegion? {
+internal fun nodeRegion(name: String): NodeRegion? = nodeRegion(name) { knownNodeRegionCode(it) }
+
+internal fun nodeRegion(name: String, knownRegionLookup: (String) -> String?): NodeRegion? {
     if (name.isBlank() || name.toByteArray(Charsets.UTF_8).size > 128 || name.any { it.isISOControl() }) return null
     val codePoints = name.codePoints().toArray()
     // Invisible direction/tag controls must not disguise the meaning of an explicit label.
     if (codePoints.any { it in 0xD800..0xDFFF || Character.getType(it) == Character.FORMAT.toInt() }) return null
     val found = mutableSetOf<String>()
+    knownRegionLookup(name)?.takeIf { it in isoRegionCodes }?.let(found::add)
     var point = 0
     while (point < codePoints.size) {
         if (codePoints[point] !in 0x1F1E6..0x1F1FF) { point++; continue }

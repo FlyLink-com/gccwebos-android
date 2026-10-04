@@ -45,7 +45,7 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     val displayOffers = when {
         !state.currentSession() -> emptyList()
         state.rechargeOffersLoaded -> state.rechargeOffers
-        state.busy -> lastDisplayedOffers
+        state.busy || state.rechargeOffersError != null || state.error != null -> lastDisplayedOffers
         else -> emptyList()
     }
     SideEffect {
@@ -63,10 +63,8 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                 Image(painterResource(R.drawable.brand_wallet_coin), contentDescription = null, modifier = Modifier.size(32.dp))
             }
             MineSpendableBalance(wallet)
-            if (showReadRetry(state.busy, state.canOperate(), walletFailure != null, !state.walletLoaded))
-                BrandButton("重试", state::loadBalance, modifier = Modifier.width(88.dp).testTag("commerce-refresh"))
         } else WalletBalanceMetrics(wallet)
-        walletFailure?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("wallet-error")) }
+        CommerceReadNotice(state, walletFailure?.takeUnless { state.busy }, "wallet-error")
         wallet?.let { w ->
             if (w.status != "active") SupportingText(when (w.status) {
                 "not_created" -> "钱包尚未创建"
@@ -99,9 +97,9 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     flow.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recharge-flow-error")) }
     if (!state.pendingRecharge) {
         Text("选择充值额度", style = MaterialTheme.typography.titleMedium)
+        CommerceReadNotice(state, offersFailure?.takeUnless { state.busy }, "recharge-offers-error")
         when {
-            offersFailure != null -> BrandCard(Modifier.testTag("recharge-offers-error")) { Text(offersFailure) }
-            !state.rechargeOffersLoaded && displayOffers.isEmpty() -> BrandCard(Modifier.testTag("recharge-offers-unread")) { Text("充值档位尚未读取") }
+            displayOffers.isEmpty() && (!state.rechargeOffersLoaded || state.busy || offersFailure != null) -> Unit
             displayOffers.isEmpty() -> BrandCard(Modifier.testTag("recharge-offers-empty")) { Text("当前暂无充值档位") }
             else -> BoxWithConstraints(Modifier.fillMaxWidth().testTag("recharge-offer-grid")) {
                 val columns = when {
@@ -161,9 +159,6 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
         if (order?.status in setOf("credited", "failed_no_charge", "expired")) TextButton(onClick = state::finishRecharge,
             enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp).testTag("recharge-finish")) { Text("核对完成，返回充值") }
     }
-    if (showReadRetry(state.busy, state.canOperate(), walletFailure != null || offersFailure != null,
-            !state.walletLoaded || !state.rechargeOffersLoaded))
-        BrandButton("重试", state::loadWallet, modifier = Modifier.width(88.dp).testTag("commerce-refresh"))
     flow.selectedOffer?.let { offer ->
         AlertDialog(onDismissRequest = flow::cancelSelection, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("确认充值金额") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {

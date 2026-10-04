@@ -87,7 +87,7 @@ class AppShellTest {
                 hasCapability = true, validUntil = Instant.now().plusSeconds(600))
         }
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         // A saved local profile cannot authenticate this account card or open a production engine.
         compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
         compose.onNodeWithText("已连接").assertDoesNotExist()
@@ -189,7 +189,7 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithTag("commerce-signed-out").assertExists()
         compose.onNodeWithText("选择适合你的套餐").assertExists()
-        compose.onNodeWithText("当前套餐尚未加载").assertExists()
+        compose.onNodeWithText("当前套餐尚未加载").assertDoesNotExist()
         compose.onNodeWithTag("anonymous-plans-login").assertIsEnabled()
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
         compose.onNodeWithTag("catalog-status").assertDoesNotExist()
@@ -197,7 +197,7 @@ class AppShellTest {
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("page-Lines").assertExists()
         compose.onNodeWithTag("nav-Lines").assertExists().assertIsSelected()
-        compose.onNodeWithTag("nodes-account").assertTextEquals("登录领取订阅").assertIsEnabled()
+        compose.onNodeWithTag("nodes-account").assertTextEquals("登录").assertIsEnabled()
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
     }
 
@@ -307,8 +307,8 @@ class AppShellTest {
             compose.onNodeWithTag("local-subscription-refresh").assertDoesNotExist()
             compose.runOnIdle { pendingNodeRead = refreshGate; nodeAccount.refreshSubscription() }
             compose.waitUntil(5000) { nodeReads.get() == 3 && nodeAccount.nodeSelection.busy }
-            compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("正在刷新")
-            compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
+            compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
             compose.runOnIdle { refreshGate.complete(Unit); pendingNodeRead = null }
             compose.waitUntil(5000) { !nodeAccount.nodeSelection.busy }
             compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
@@ -328,7 +328,7 @@ class AppShellTest {
         compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
         compose.waitUntil(5000) { nodeReads.get() == 2 && !nodeAccount.nodeSelection.busy }
         compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
-        compose.onNodeWithTag("node-selection-message").assertTextEquals("配置已变化，请重新选择节点。")
+        compose.onNodeWithTag("node-selection-message").assertDoesNotExist()
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
@@ -352,13 +352,15 @@ class AppShellTest {
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.runOnIdle { nodeAccount.nodeSelection.refresh() } // Explicit offline read setup; not a UI reload.
         compose.waitUntil(5000) { nodeAccount.nodeSelection.busy && nodeReads.get() == 2 }
-        compose.onNodeWithTag("nodes-cancel").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-cancel").assertDoesNotExist()
+        compose.runOnIdle { nodeAccount.nodeSelection.cancel() }
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.runOnIdle { pendingNodeRead!!.complete(Unit); pendingNodeRead = null }
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("nodes-refresh").assertTextEquals("重试").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle { nodeAccount.nodeSelection.refresh() }
         compose.waitUntil(5000) { nodeReads.get() == 3 && !nodeAccount.nodeSelection.busy }
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
         assertNodeSelectionReturnedToConnection()
@@ -390,16 +392,16 @@ class AppShellTest {
         compose.runOnIdle {
             state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.RETRY_REQUIRED, validUntil = Instant.EPOCH)
         }
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("读取失败")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
         compose.runOnIdle { state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR) }
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("本地存储异常")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
         compose.runOnIdle {
             state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
                 hasCapability = true, validUntil = Instant.EPOCH)
         }
-        compose.onNodeWithTag("local-subscription-title").assertTextEquals("本地配置已到期")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertExists()
     }
 

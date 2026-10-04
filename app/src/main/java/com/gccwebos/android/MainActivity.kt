@@ -68,6 +68,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     private data class ConsentAttachment(
@@ -132,7 +133,9 @@ class MainActivity : ComponentActivity() {
                 }
             } else {
                 val control by current.control.collectAsState()
+                val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodePingProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
+                    nodeLatencyProbe = nodeProbe,
                     onConnectionPowerAction = { action -> current.power(action) })
             }
         }
@@ -201,14 +204,16 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     connectionControlState: ConnectionControlState = ConnectionControlState(),
     onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
     repositoryOverride: PortalRepository? = null,
-    glassMode: GlassMode? = null) {
+    glassMode: GlassMode? = null,
+    nodeLatencyProbe: com.gccwebos.android.portal.NodeLatencyProbe? = null,
+    autoRefreshPages: Boolean = autoLoadCommerce) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
         val scope = rememberCoroutineScope()
-        remember(accountOverride, repositoryOverride) {
+        remember(accountOverride, repositoryOverride, nodeLatencyProbe) {
             accountOverride ?: AccountController(repositoryOverride ?: productionRepository(context), scope,
-                nodeLatencyProbe = if (repositoryOverride == null) com.gccwebos.android.vpn.AndroidNodePingProbe(context) else null)
+                nodeLatencyProbe = nodeLatencyProbe)
         }
     }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
@@ -245,11 +250,12 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
     var plansVisit by remember { mutableStateOf(0) }
+    var navigationRequest by remember { mutableStateOf(0) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
     val catalogDock = remember { CatalogDockState() }
     BackHandler(enabled = selected != Destination.Connect) {
         if (selected == Destination.Profile && shouldCancelLoginOnBack(account)) account.cancelAuthentication()
-        else selectedName = Destination.Connect.name
+        else { selectedName = Destination.Connect.name; navigationRequest++ }
     }
     GccTheme(materialMode = glassMode) {
         Surface(Modifier.fillMaxSize(), color = Brand.Background) {
@@ -284,6 +290,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                                         .selectable(selected = chosen, onClick = {
                                             if (destination == Destination.Profile) startRegistration = false
                                             if (destination == Destination.Plans) plansVisit++
+                                            navigationRequest++
                                             selectedName = destination.name
                                         }, role = Role.Tab)
                                         .padding(2.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -301,14 +308,14 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                     // Scaffold measures the entire bar, its gap and system inset for content clearance.
                     key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
                         commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
-                        openAccount = { startRegistration = false; selectedName = Destination.Profile.name },
-                        openPlans = { plansVisit++; selectedName = Destination.Plans.name },
-                        openConnect = { selectedName = Destination.Connect.name },
-                        openNodes = { selectedName = Destination.Lines.name },
-                        openRegistration = { startRegistration = true; selectedName = Destination.Profile.name },
+                        openAccount = { startRegistration = false; navigationRequest++; selectedName = Destination.Profile.name },
+                        openPlans = { plansVisit++; navigationRequest++; selectedName = Destination.Plans.name },
+                        openConnect = { navigationRequest++; selectedName = Destination.Connect.name },
+                        openNodes = { navigationRequest++; selectedName = Destination.Lines.name },
+                        openRegistration = { startRegistration = true; navigationRequest++; selectedName = Destination.Profile.name },
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
                         loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
-                        plansVisit = plansVisit) }
+                        plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages) }
                 }
                 }
 
@@ -328,16 +335,8 @@ private fun LoginScreen(account: AccountController, registrationOpener: ((String
             BrandHeader()
             if (account.restoring || account.foregroundCheckPending) Column(Modifier.testTag("session-checking"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("正在验证已保存登录", style = MaterialTheme.typography.titleLarge)
-                SupportingText("验证后显示账户资源。")
-                TextButton(onClick = account::cancelAuthentication) { Text("取消并返回登录") }
+                Image(painterResource(R.drawable.brand_robot_avatar), null, modifier = Modifier.size(52.dp))
             } else {
-                if (account.localSubscription.hasCapability) Column(Modifier.testTag("local-subscription-notice"),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("发现已保存的订阅交付", style = MaterialTheme.typography.titleMedium)
-                    SupportingText("本地配置尚未就绪。可仅使用已保存的订阅链接重新读取，不需要重新领取或登录。")
-                    BrandButton("重新读取本地订阅", account::restoreLocal, enabled = !account.busy, modifier = Modifier.testTag("local-subscription-retry"))
-                }
                 AccountPanel(account, compactLogin = true, registrationOpener = registrationOpener,
                     loginStartupReady = loginStartupReady, registrationOverride = registrationOverride, startRegistration = startRegistration)
             }
@@ -353,9 +352,30 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   openAccount: () -> Unit, openPlans: () -> Unit, openConnect: () -> Unit, openNodes: () -> Unit,
                   openRegistration: () -> Unit, startRegistration: Boolean,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
-                  registrationOverride: RegistrationController?, plansVisit: Int) {
+                  registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
+                  autoRefreshPages: Boolean) {
+    val latestControl by rememberUpdatedState(connectionControlState)
+    LaunchedEffect(account, destination, navigationRequest, autoRefreshPages) {
+        if (!autoRefreshPages || navigationRequest == 0) return@LaunchedEffect
+        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing }.first { it }
+        if (destination == Destination.Profile && !account.authenticated && !startRegistration) {
+            account.restoreAccount()
+        } else if (destination == Destination.Lines) {
+            // An ordinary page visit cannot invalidate an accepted connection preparation.
+            if (!account.nodeSelection.busy && !latestControl.commandPending && latestControl.phase !in
+                setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)) {
+                // Navigation reads never claim or acknowledge a delivery. Those recovery
+                // transactions stay behind the existing explicit connection/import actions.
+                if (account.localSubscription.hasCapability) account.nodeSelection.refresh()
+                else if (account.authenticated) account.refreshAccountUsage()
+                snapshotFlow { !account.busy && !account.nodeSelection.busy }.first { it }
+                account.nodeLatency.refresh()
+            }
+        } else if (destination == Destination.Connect || destination == Destination.Profile) {
+            if (account.authenticated) account.refreshAccountUsage()
+        }
+    }
     if (destination == Destination.Profile) {
-        LaunchedEffect(account) { if (!account.authenticated && account.localSubscription.hasProfile) account.restoreAccount() }
         if (!account.authenticated && !account.retainingCommerceSession) {
             LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride, padding, startRegistration)
             return
@@ -389,7 +409,6 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                                 Text("∞", color = Brand.Cyan, style = MaterialTheme.typography.displayLarge,
                                     modifier = Modifier.clearAndSetSemantics {})
                                 Text("选择适合你的套餐", style = MaterialTheme.typography.titleLarge)
-                                SupportingText(if (account.restoring || account.foregroundCheckPending) "正在确认账户" else "当前套餐尚未加载")
                                 BrandButton("登录查看当前套餐", openAccount,
                                     enabled = !account.busy && !account.restoring && !account.foregroundCheckPending,
                                     modifier = Modifier.testTag("anonymous-plans-login"))
@@ -397,7 +416,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         }
                     } else {
                         CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce,
-                            onRecharge = openAccount, defaultSelectionRequest = plansVisit)
+                            onRecharge = openAccount, defaultSelectionRequest = plansVisit, refreshRequest = navigationRequest)
                     }
                 }
                 Destination.Orders -> {
@@ -406,7 +425,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 }
                 Destination.Profile -> {
                     com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans,
-                        recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride)
+                        recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride,
+                        refreshRequest = navigationRequest)
                 }
             }
             if (!compact) Text(stringResource(R.string.build_stage), color = Brand.Muted,

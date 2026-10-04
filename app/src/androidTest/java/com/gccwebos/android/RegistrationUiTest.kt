@@ -155,7 +155,7 @@ class RegistrationUiTest {
         compose.onNodeWithTag("registration-password").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         compose.onNodeWithTag("registration-confirm-password").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
         compose.onNodeWithTag("registration-legal").assertIsNotEnabled().assertIsOff()
-        compose.onNodeWithText("条款与隐私政策待配置").assertIsDisplayed()
+        compose.onNodeWithText("服务条款暂不可用").assertIsDisplayed()
         compose.onNodeWithTag("login-answer").assertDoesNotExist()
         compose.onNodeWithTag("login-challenge").assertDoesNotExist()
         compose.onNodeWithTag("login-challenge-prompt").assertDoesNotExist()
@@ -198,8 +198,10 @@ class RegistrationUiTest {
         acceptConfiguredLegal()
         compose.onNodeWithTag("registration-send-code").performScrollTo().performClick()
         compose.waitUntil(5_000) { screen.gateway.verificationCalls.get() == 1 && screen.registration.verificationLoading }
-        compose.onNodeWithTag("registration-send-code").assertIsNotEnabled().performTouchInput { click() }
-        compose.onNodeWithTag("registration-submit").assertIsNotEnabled()
+        compose.onNodeWithTag("registration-send-code").assertTextEquals("获取").assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithTag("registration-submit").assertTextEquals("注册").assertIsNotEnabled()
+        compose.onNodeWithTag("registration-loading").assertDoesNotExist()
+        compose.onNodeWithText("发送中…").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(1, screen.gateway.verificationCalls.get())
             assertEquals(listOf(EMAIL), screen.gateway.requestedEmails)
@@ -230,7 +232,9 @@ class RegistrationUiTest {
         compose.onNodeWithTag("registration-code").performScrollTo().performTextReplacement(CODE)
         compose.onNodeWithTag("registration-submit").performScrollTo().performClick()
         compose.waitUntil(5_000) { screen.gateway.registrationCalls.get() == 1 && screen.registration.registering }
-        compose.onNodeWithTag("registration-submit").assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithTag("registration-submit").assertTextEquals("注册").assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithTag("registration-loading").assertDoesNotExist()
+        compose.onNodeWithText("提交中…").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(1, screen.gateway.registrationCalls.get())
             val submitted = screen.gateway.submissions.single()

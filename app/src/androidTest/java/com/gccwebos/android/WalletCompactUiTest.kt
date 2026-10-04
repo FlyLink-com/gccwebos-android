@@ -108,7 +108,11 @@ class WalletCompactUiTest {
         launch()
         tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
         compose.runOnIdle { state.walletError = "合成读取失败"; state.busy = true }
-        compose.onNodeWithTag("wallet-error").assertTextEquals("合成读取失败")
+        compose.onNodeWithTag("wallet-error").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals("合成读取失败", state.walletError)
+            assertNull(state.wallet); assertFalse(state.walletLoaded); assertTrue(state.busy)
+        }
         compose.onNodeWithTag("wallet-loading").assertDoesNotExist()
         compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
@@ -194,18 +198,20 @@ class WalletCompactUiTest {
         assertNoSideEffects()
     }
 
-    @Test fun loadedWalletHidesRoutineRefreshButUnreadAndFailedReadKeepRecovery() {
+    @Test fun walletReadsStaySilentAndNeverExposeAStandaloneRetry() {
         launch {
             wallet = confirmed; walletLoaded = true
             rechargeOffers = listOf(offer); rechargeOffersLoaded = true
         }
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.runOnIdle { state.walletError = "合成读取失败" }
-        compose.onNodeWithTag("commerce-refresh").performScrollTo().assertIsDisplayed().assertTextEquals("重试")
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("wallet-error").assertTextEquals("合成读取失败")
         compose.runOnIdle { state.busy = true }
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.runOnIdle { state.busy = false; state.walletError = null; state.walletLoaded = false; state.wallet = null }
-        compose.onNodeWithTag("commerce-refresh").performScrollTo().assertIsDisplayed().assertTextEquals("重试")
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
         compose.runOnIdle { owner.foregroundCheckPending = true }
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         assertNoSideEffects()

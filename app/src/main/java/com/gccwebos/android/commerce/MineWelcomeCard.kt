@@ -39,7 +39,7 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
     val display = accountUsagePresentation(resource, Instant.now(), usage.notUpdated)
     val title = subscriptionTitle(resource) ?: display.planText ?: "我的账户"
     val status = when {
-        verifying -> "正在确认登录"
+        verifying -> "—"
         account.authenticated && !account.clearing -> "已登录"
         else -> "未登录"
     }
@@ -75,12 +75,12 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val plan = when {
                 !account.authenticated -> "登录后查看套餐"
-                verifying -> "正在确认套餐"
-                else -> display.planText ?: display.statusText ?: "暂未获取"
+                verifying -> "—"
+                else -> display.planText ?: display.statusText ?: "—"
             }
             val expiry = display.expiresAtText?.let {
                 if (display.serviceExpired) "已到期 ${connectionDateSummary(it)}" else "到期 ${connectionDateSummary(it)}"
-            } ?: "有效期暂未获取"
+            } ?: "—"
             val planText: @Composable (Modifier) -> Unit = { modifier ->
                 Text(plan, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
                     modifier = modifier.testTag("mine-current-plan"))

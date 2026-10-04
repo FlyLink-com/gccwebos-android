@@ -13,9 +13,9 @@ import com.gccwebos.android.design.Brand
 internal fun NodeLatencyBadge(observation: NodeLatencyObservation?, modifier: Modifier = Modifier) {
     val label = when (observation) {
         is NodeLatencyObservation.Success -> "${observation.milliseconds} ms"
-        NodeLatencyObservation.NoReply -> "未回应"
-        NodeLatencyObservation.Unavailable -> "暂不可测"
-        NodeLatencyObservation.NetworkChanged -> "待重测"
+        NodeLatencyObservation.NoReply -> "— ms"
+        NodeLatencyObservation.Unavailable -> "— ms"
+        NodeLatencyObservation.NetworkChanged -> "— ms"
         null -> "— ms"
     }
     Text(label, fontSize = 11.sp,

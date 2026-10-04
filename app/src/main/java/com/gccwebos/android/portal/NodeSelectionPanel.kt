@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -22,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gccwebos.android.ConnectionControlState
 import com.gccwebos.android.ConnectionPhase
+import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.BrandButton
 import com.gccwebos.android.design.GlassSurface
@@ -46,6 +48,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     connectionControl: ConnectionControlState = ConnectionControlState(),
     onSelected: () -> Unit = {},
     latency: NodeLatencyController? = null,
+    onImport: (() -> Unit)? = null,
     openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.sync() }
     val latestAccountBusy by rememberUpdatedState(accountBusy)
@@ -75,25 +78,15 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     LaunchedEffect(latency, value.status, value.choices, accountBusy, state.busy, latency?.foreground) {
         if (canMeasure) latency?.ensureMeasured() else latency?.cancel()
     }
-    val title = when {
-        state.busy -> if (selectedChoice != null) "节点已选择" else "请选择节点"
-        value.status == LocalSubscriptionStatus.MISSING && resource == Resource.None -> "暂无套餐"
-        value.status == LocalSubscriptionStatus.MISSING && resource == Resource.Reconciliation -> "资源正在对账"
-        value.status == LocalSubscriptionStatus.MISSING -> "尚无订阅配置"
-        value.status == LocalSubscriptionStatus.EXPIRED -> "订阅已到期"
-        value.status == LocalSubscriptionStatus.INVALID_LINK -> "订阅链接已失效"
-        value.status == LocalSubscriptionStatus.UNSUPPORTED -> "配置暂不受支持"
-        value.status == LocalSubscriptionStatus.STORAGE_ERROR -> "本地配置存储失败"
-        value.status == LocalSubscriptionStatus.RETRY_REQUIRED -> "配置读取失败，请重试"
-        value.selected != null -> "节点已选择"
-        value.choices.isEmpty() -> "请重试读取配置"
-        else -> "请选择节点"
-    }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Column(Modifier.padding(start = 3.dp, end = 3.dp, top = 4.dp, bottom = 5.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text("选择节点", fontSize = 23.sp, fontWeight = FontWeight.Bold)
-            Text("从当前订阅中选择适合的线路", fontSize = 12.sp, color = Brand.Muted)
+        if (onImport != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.weight(1f))
+            onImport?.let { action ->
+                IconButton(action, modifier = Modifier.testTag("nodes-import")) {
+                    Icon(painterResource(R.drawable.brand_receipt), contentDescription = "导入订阅",
+                        tint = Brand.Cyan, modifier = Modifier.size(22.dp))
+                }
+            }
         }
         GlassSurface(Modifier.fillMaxWidth().testTag("nodes-selection-summary")) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -103,32 +96,16 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(selectedChoice?.name ?: "未选择", fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.testTag("nodes-selected-name"))
-                        Text("选择后返回连接页", fontSize = 11.sp, color = Brand.Muted)
                         NodeLatencyBadge(latency?.reading(selectedChoice?.selection),
                             Modifier.testTag("nodes-selected-latency"))
                     }
                 }
-                HorizontalDivider(color = Brand.RowDivider)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("当前选择", fontSize = 11.sp, color = Brand.Muted, modifier = Modifier.weight(1f))
-                    Text(title, fontSize = 11.sp, color = Brand.Muted,
-                        modifier = Modifier.weight(1f).testTag("node-selection-status"))
-                }
             }
         }
-        state.message?.let { Text(it, color = Brand.Muted, modifier = Modifier.testTag("node-selection-message")) }
-        // sync() is local-only: the first read and an unsuccessful read still need an explicit recovery.
-        // A ready choice list has no permanent manual refresh; busy reads retain the existing cancellation.
-        val showReadRetry = !state.busy && (value.status != LocalSubscriptionStatus.READY || value.choices.isEmpty())
-        if (hasCapability) {
-            if (showReadRetry || state.busy) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (showReadRetry) BrandButton("重试", state::refresh, enabled = !accountBusy,
-                    modifier = Modifier.width(88.dp).testTag("nodes-refresh"))
-                if (state.busy) TextButton(onClick = state::cancel,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-cancel")) { Text("取消") }
-            }
-        } else TextButton(onClick = openAccount, enabled = !accountBusy,
-            modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-account")) { Text(if (authenticated) "查看／领取订阅" else "登录领取订阅") }
+        if (!hasCapability) TextButton(onClick = openAccount, enabled = !accountBusy,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-account")) {
+            Text(if (authenticated) "订阅" else "登录")
+        }
         if (total > 0) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -136,19 +113,6 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                 Text("$total 条",
                     fontSize = 11.sp, color = Brand.Muted, modifier = Modifier.testTag("nodes-count"))
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Ping 延迟 · 未回应仍可尝试连接", fontSize = 11.sp, color = Brand.Muted,
-                    modifier = Modifier.weight(1f).testTag("nodes-latency-hint"))
-                TextButton(onClick = {
-                    if (canMeasure && latency?.busy == false) latency.refresh()
-                }, enabled = canMeasure && latency != null && !latency.busy,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-latency-refresh")) {
-                    Text("测延迟", fontSize = 11.sp)
-                }
-            }
-            if (readOnlyNodes.isNotEmpty()) Text("以下为已读取信息，配置校验后才能选择。", color = Brand.Muted,
-                style = MaterialTheme.typography.bodySmall)
             GlassSurface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(23.dp)) {
                 Column {
                     choices.forEachIndexed { visibleIndex, indexed ->
@@ -174,9 +138,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                 }
             }
         }
-        nodeConnectionStatus(connectionControl)?.let { status ->
-            Text(status, color = Brand.Muted, modifier = Modifier.testTag("nodes-connection-status"))
-        }
+
     }
 }
 
@@ -197,7 +159,7 @@ private fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, ch
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-name-$it") } ?: Modifier)
-            Text("${nodeProtocolLabel(protocol)} · ${if (supported) "可解析" else "暂不兼容"}",
+            Text(nodeProtocolLabel(protocol),
                 fontSize = 11.sp, color = Brand.Muted,
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-details-$it") } ?: Modifier)
             NodeLatencyBadge(observation, Modifier.testTag(latencyTag))

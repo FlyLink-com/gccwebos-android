@@ -17,6 +17,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -132,18 +133,18 @@ class BrandUiTest {
         compose.onNodeWithTag("login-challenge-status", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("login-challenge-refresh", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("login-challenge-error", useUnmergedTree = true).assertDoesNotExist()
-        listOf(INITIAL_PROMPT, REFRESHED_PROMPT, "加载中…", "无网络", "刷新重试").forEach { display ->
+        listOf(INITIAL_PROMPT, REFRESHED_PROMPT, "验证题", "无网络", "换一道题").forEach { display ->
             compose.onAllNodesWithText(display, useUnmergedTree = true)
                 .assertCountEquals(if (display == expected) 1 else 0)
         }
-        listOf("机器人验证", "过期刷新重试", "刷新").forEach { caption ->
+        listOf("机器人验证", "过期刷新重试", "刷新", "加载中…", "刷新重试", "正在处理，请稍候").forEach { caption ->
             compose.onAllNodesWithText(caption, useUnmergedTree = true).assertCountEquals(0)
         }
         assertQuestionButton(expected, enabled)
     }
     private fun assertQuestionButton(expected: String, enabled: Boolean = true) {
         val button = compose.onNodeWithTag("login-challenge")
-            .assertContentDescriptionEquals(if (enabled) "$expected，点击刷新验证题" else expected)
+            .assertContentDescriptionEquals(if (enabled) "$expected，点击更换验证题" else expected)
             .assertTextEquals(expected).assertHasClickAction().assertHeightIsAtLeast(48.dp)
         if (enabled) button.assertIsEnabled() else button.assertIsNotEnabled()
     }
@@ -242,7 +243,16 @@ class BrandUiTest {
             registerBounds.right >= submitBounds.right - 1f && registerBounds.left > submitBounds.center.x)
         assertCompactLoginHasNoMoreOrReset()
         capture("compact-login-auto-question")
-        compose.onNodeWithTag("login-account").performTextClearance()
+        compose.runOnIdle {
+            assertFalse("The synthetic question cannot authenticate", state.authenticated)
+            assertFalse("No saved-session restoration was requested", state.restoring)
+            assertFalse(state.foregroundCheckPending)
+            assertNull(state.factorReference)
+            assertTrue(fixture.unexpectedRequests.isEmpty())
+        }
+        compose.onNodeWithTag("login-screen").assertIsDisplayed()
+        compose.onNodeWithTag("registration-form").assertDoesNotExist()
+        compose.onNodeWithTag("login-account").performScrollTo().assertIsDisplayed().performTextClearance()
         compose.onNodeWithTag("login-account").performTextInput("ui-fixture@example.invalid")
         compose.onNodeWithTag("login-password").performTextInput("offline-fixture-password")
         compose.onNodeWithTag("login-password").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
@@ -291,7 +301,7 @@ class BrandUiTest {
         compose.onNodeWithTag("login-answer").performTextReplacement("未提交的旧答案")
         compose.onNodeWithTag("login-challenge").performScrollTo().performClick()
         compose.waitUntil(5_000) { fixture.requests.get() == 2 && state.challengeLoading }
-        assertQuestionPresentation("加载中…", enabled = false)
+        assertQuestionPresentation("验证题", enabled = false)
         compose.onNodeWithTag("login-challenge-prompt", useUnmergedTree = true)
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
         compose.onNodeWithTag("login-challenge").assertIsNotEnabled().performTouchInput { click() }
@@ -328,14 +338,14 @@ class BrandUiTest {
             assertTrue(state.challengeExpired)
             assertEquals(1, fixture.requests.get())
         }
-        assertQuestionPresentation("刷新重试")
+        assertQuestionPresentation("换一道题")
         compose.onNodeWithTag("login-challenge").assertIsEnabled()
         var expectedRequests = 1
         val failures = listOf(
             PortalFailure.Reason.NETWORK to "无网络",
-            PortalFailure.Reason.PROTOCOL to "刷新重试",
-            PortalFailure.Reason.RATE_LIMITED to "刷新重试",
-            PortalFailure.Reason.UNAVAILABLE to "刷新重试",
+            PortalFailure.Reason.PROTOCOL to "换一道题",
+            PortalFailure.Reason.RATE_LIMITED to "换一道题",
+            PortalFailure.Reason.UNAVAILABLE to "换一道题",
         )
         for ((reason, expected) in failures) {
             compose.runOnIdle { fixture.nextFailure = reason }
@@ -408,7 +418,7 @@ class BrandUiTest {
     }
     @Test fun doubledFontKeepsNavigationAndFormActionsReachable() {
         launch(2f)
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("重试").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("一键连接").assertIsNotEnabled()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
         capture("connect-font-200")
         compose.onNodeWithTag("nav-Profile").performClick()
@@ -422,7 +432,7 @@ class BrandUiTest {
     }
     @Test fun smallerFontStillRendersFourAccessibleTabs() {
         launch(.85f)
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("重试").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsNotEnabled()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
         capture("connect-font-85")
         listOf("Connect", "Lines", "Plans", "Profile").forEach { page ->
@@ -430,10 +440,10 @@ class BrandUiTest {
         }
     }
     @Test fun compactConnectionOmitsWalletAndKeepsTruthfulDisabledNodes() {
-        launch()
+        val state = launch()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         // This old rendering fixture has no accepted usage owner; it must remain unknown.
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("重试").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsNotEnabled()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
         compose.onNodeWithTag("connection-power").assertDoesNotExist()
         compose.onNodeWithTag("connection-welcome").assertExists()
@@ -445,26 +455,37 @@ class BrandUiTest {
         capture("compact-connect")
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("subscription-node-name-0").assertTextEquals("合成验收线路 Alpha")
-        compose.onNodeWithTag("subscription-node-details-0").assertTextEquals("SS · 可解析")
+        compose.onNodeWithTag("subscription-node-details-0").assertTextEquals("SS")
+        compose.runOnIdle { assertEquals("ss", state.nodes[0].protocol); assertTrue(state.nodes[0].supported) }
         compose.onNodeWithTag("subscription-node-0").assert(SemanticsMatcher("Node row has no production click action") {
             !it.config.contains(SemanticsActions.OnClick)
         })
         compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.onNodeWithText("已连接", substring = false).assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(state.nodeSelection.snapshot.choices.isEmpty())
+            assertNull(state.nodeSelection.snapshot.selected)
+        }
         capture("compact-nodes")
     }
-    @Test fun retryAndStorageRemainDistinctFromExpiryAndBusyRefreshIsDisabled() {
+    @Test fun unverifiedReadAndStorageFailuresCannotBecomeExpiryOrEnableConnectionWhileBusy() {
         lateinit var state: AccountController
         launch(setup = {
             state = this
             localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.RETRY_REQUIRED)
             resource = (resource as Resource.Available).copy(validUntil = java.time.Instant.EPOCH)
         })
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("读取失败")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsNotEnabled()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
+        compose.runOnIdle { assertEquals(LocalSubscriptionStatus.RETRY_REQUIRED, state.localSubscription.status) }
         compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
         compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
         compose.runOnIdle { state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR) }
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("本地存储异常")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(LocalSubscriptionStatus.STORAGE_ERROR, state.localSubscription.status) }
         compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
         compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
         compose.runOnIdle {
@@ -472,15 +493,21 @@ class BrandUiTest {
             state.busy = true
             state.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.RETRY_REQUIRED, hasCapability = true)
         }
-        compose.onNodeWithTag("local-subscription-refresh").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("local-subscription-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("尚无订阅配置")
-        compose.onNodeWithTag("nodes-refresh").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("node-selection-status").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("subscription-node-0").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(state.busy)
+            assertTrue(state.nodeSelection.snapshot.choices.isEmpty())
+            assertNull(state.nodeSelection.snapshot.selected)
+        }
     }
     @Test fun narrowDoubledFontKeepsCircleAndLongDuplicateNodesReachable() {
         val name = "合成验收重复长名称节点：仅用于离线界面可达性"
-        launch(fontScale = 2f, width = 320.dp, setup = {
+        val state = launch(fontScale = 2f, width = 320.dp, setup = {
             nodes = listOf(
                 com.gccwebos.android.vpn.SafeProxyConfig.NodeSummary(0, name, "ss", true),
                 com.gccwebos.android.vpn.SafeProxyConfig.NodeSummary(1, name, "vmess", false),
@@ -492,13 +519,18 @@ class BrandUiTest {
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
         compose.onNodeWithTag("subscription-node-name-0").performScrollTo().assertTextEquals(name)
         compose.onNodeWithTag("subscription-node-name-1").performScrollTo().assertTextEquals(name)
-        compose.onNodeWithTag("subscription-node-details-1").performScrollTo().assertTextEquals("VMESS · 暂不兼容")
+        compose.onNodeWithTag("subscription-node-details-1").performScrollTo().assertTextEquals("VMESS")
+        compose.runOnIdle { assertEquals("vmess", state.nodes[1].protocol); assertFalse(state.nodes[1].supported) }
         compose.onNodeWithTag("subscription-node-1").assert(SemanticsMatcher("Unsupported row has no production click action") {
             !it.config.contains(SemanticsActions.OnClick)
         })
         compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-connection-status").performScrollTo()
-            .assertTextEquals("连接暂不可用").assertIsDisplayed()
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.onNodeWithText("已连接", substring = false).assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(state.nodeSelection.snapshot.choices.isEmpty())
+            assertNull(state.nodeSelection.snapshot.selected)
+        }
         capture("compact-nodes-narrow-font-200")
     }
     @Test fun totpCancelKeepsSubscriptionAndResetStillRequiresConfirmation() {

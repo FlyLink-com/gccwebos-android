@@ -114,66 +114,86 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
     }
 
-    @Test fun busyRefreshDisablesSelectionAndCancelIsReachableWithoutAuthenticationActions() {
+    @Test fun busyRefreshDisablesSelectionAndControllerCancellationRevokesOldChoices() {
         launch()
         // A normal ready list has no manual reload button. Prepare only the synthetic busy state.
         compose.runOnIdle { pending = CompletableDeferred(); state.refresh() }
-        compose.waitUntil(5000) { state.busy }
+        compose.waitUntil(5000) { state.busy && reads.get() == 2 }
         compose.onNodeWithTag("node-choice-0").assertIsNotEnabled()
-        compose.onNodeWithTag("nodes-cancel").performScrollTo().performClick()
+        compose.runOnIdle { state.cancel() }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-refresh").assertTextEquals("重试")
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-cancel").assertDoesNotExist()
         compose.runOnIdle { assertFalse(state.busy); assertNull(state.snapshot.selected); pending!!.complete(Unit) }
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2, reads.get()); assertEquals(0, navigationCalls.get()) }
     }
 
     @Test fun unsupportedMixedArtifactAndExpiryExposeNoSelectableRows() {
         launch()
+        val original = state.snapshot.choices[0].selection
         compose.runOnIdle {
             bytes = bytes.toString(Charsets.UTF_8).replaceFirst("type: ss", "type: vmess").toByteArray()
             state.refresh() // Explicit fixture state setup, never an automatic production reload.
         }
         compose.waitUntil(5000) { !state.busy && state.snapshot.status == LocalSubscriptionStatus.UNSUPPORTED }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("配置暂不受支持")
-        compose.onNodeWithTag("nodes-refresh").assertTextEquals("重试")
-        compose.runOnIdle { bytes = bytes.toString(Charsets.UTF_8).replace("type: vmess", "type: ss").toByteArray() }
-        compose.onNodeWithTag("nodes-refresh").performClick()
+        compose.onNodeWithTag("node-choice-1").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-node-0").assertHasNoClickAction()
+        compose.onNodeWithTag("subscription-node-1").assertHasNoClickAction()
+        compose.runOnIdle {
+            assertTrue(state.snapshot.choices.isEmpty())
+            assertFalse(state.select(original))
+            bytes = bytes.toString(Charsets.UTF_8).replace("type: vmess", "type: ss").toByteArray()
+            state.refresh()
+        }
         compose.waitUntil(5000) { !state.busy && state.snapshot.status == LocalSubscriptionStatus.READY }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
-        compose.runOnIdle { time = expiry; state.sync() }
+        val restored = state.snapshot.choices[0].selection
+        compose.runOnIdle { assertTrue(state.select(restored)); time = expiry; state.sync() }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("订阅已到期")
+        compose.onNodeWithTag("node-choice-1").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.EXPIRED, state.snapshot.status)
+            assertNull(state.snapshot.selected)
+            assertFalse(state.select(restored))
+        }
         compose.runOnIdle { manager.unlink(); resource = Resource.None; hasCapability = false; state.sync() }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("暂无套餐")
+        compose.onNodeWithTag("nodes-account").assertIsEnabled()
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.MISSING, state.snapshot.status)
+            assertTrue(state.snapshot.choices.isEmpty())
+            assertEquals(3, reads.get()); assertEquals(0, navigationCalls.get())
+        }
     }
 
-    @Test fun firstReadRetryHidesDuringReadAndCancellationRestoresOnlyReadRecovery() {
+    @Test fun firstControllerReadAndCancellationKeepThePageQuietWithoutSelectingOrReloading() {
         launch(initialRead = false, width = 320, fontScale = 2f)
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("尚无订阅配置")
-        val retry = compose.onNodeWithTag("nodes-refresh")
-        retry.assertTextEquals("重试").assertIsEnabled().assertWidthIsAtLeast(88.dp)
-            .assertHeightIsAtLeast(48.dp).performScrollTo().assertIsDisplayed()
-        val host = compose.onNodeWithTag("nodes-fixture-host").fetchSemanticsNode().boundsInRoot
-        val retryBounds = retry.fetchSemanticsNode().boundsInRoot
-        assertTrue(retryBounds.left >= host.left); assertTrue(retryBounds.right <= host.right)
-        compose.runOnIdle { assertEquals(0, reads.get()); pending = CompletableDeferred() }
-        compose.onNodeWithTag("nodes-refresh").performClick()
+        compose.onNodeWithTag("node-selection-status").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.MISSING, state.snapshot.status)
+            assertEquals(0, reads.get()); pending = CompletableDeferred(); state.refresh()
+        }
         compose.waitUntil(5000) { state.busy && reads.get() == 1 }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-cancel").assertHeightIsAtLeast(48.dp).performScrollTo().performClick()
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle { state.cancel() }
         compose.onNodeWithTag("nodes-cancel").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-refresh").assertTextEquals("重试").assertIsEnabled()
-        compose.runOnIdle { assertNull(state.snapshot.selected); pending!!.complete(Unit) }
-        compose.onNodeWithTag("nodes-refresh").performClick()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle { assertFalse(state.busy); assertNull(state.snapshot.selected); pending!!.complete(Unit) }
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, reads.get()); state.refresh() }
         compose.waitUntil(5000) { !state.busy && state.snapshot.status == LocalSubscriptionStatus.READY }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
-        compose.runOnIdle { assertEquals(2, reads.get()); assertNull(state.snapshot.selected) }
+        compose.runOnIdle { assertEquals(2, reads.get()); assertNull(state.snapshot.selected); assertEquals(0, navigationCalls.get()) }
     }
 
     @Test fun doubledFontNarrowGlassChoicesKeepOpaqueIdentityAndDoNotReloadOnSelection() {
@@ -191,7 +211,7 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
     }
 
     @Test fun selectionSummaryTracksTheOriginalChoiceWithoutSearchFiltersOrAnotherRead() {
@@ -219,19 +239,21 @@ class NodeSelectionUiTest {
 """.toByteArray()
     }
 
-    @Test fun nodeCaptionTracksActualOwnerWithoutStartingAConnectionOrReloading() {
+    @Test fun ownerStateChangesKeepTheNodePageQuietWithoutStartingAConnectionOrReloading() {
         connectionControl = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)
         launch()
         compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
         compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
         compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Connecting, canCancel = true) }
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接中")
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
         compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true) }
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("已连接")
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
         compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Disconnecting) }
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("断开中")
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
         compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Failed, canConnect = true) }
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("未连接")
-        compose.runOnIdle { assertEquals(1, reads.get()); assertNull(state.snapshot.selected) }
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
+        compose.runOnIdle { assertEquals(1, reads.get()); assertNull(state.snapshot.selected); assertEquals(0, navigationCalls.get()) }
     }
 }

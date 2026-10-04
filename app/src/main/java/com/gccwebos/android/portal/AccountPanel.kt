@@ -26,10 +26,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -43,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -589,35 +592,26 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
         Eyebrow("账户与资源")
         Text(if (state.authenticated) "已登录" else if (state.factorReference != null) "完成身份验证" else "欢迎回来",
             style = MaterialTheme.typography.titleLarge)
-        SupportingText(if (state.authenticated) "订阅按当前账号权益同步，无需手动导入。" else "安全登录后查看余额、套餐和订阅线路。登录会加密保存在本机，服务端到期或失效后需重新验证。")
-        if (state.authenticationSubmitting) CircularProgressIndicator(modifier = Modifier.testTag("account-loading"))
-        val statusMessage = state.error ?: when {
-            state.authenticationSubmitting -> "正在处理，请稍候"
-            state.authenticated -> "登录成功，可查看当前资源"
+        val statusMessage = when {
+            !state.authenticated && state.error != null -> state.error
             state.factorReference != null -> "需要身份验证器中的动态验证码"
-            else -> "请登录你的账号"
+            else -> null
         }
-        Text(statusMessage, style = MaterialTheme.typography.bodyMedium,
+        statusMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium,
             color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
             modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
-                .semantics { liveRegion = LiveRegionMode.Polite })
-        if (state.restorationPending && !state.busy) {
-            SupportingText("已保存的登录尚未通过服务器验证，主页保持锁定。网络恢复后可重试，或使用账号密码重新登录。")
-            BrandButton("重新验证已保存登录", state::restoreAccount, modifier = Modifier.testTag("session-restore-retry"))
-        }
+                .semantics { liveRegion = LiveRegionMode.Polite }) }
         if (state.authenticated) {
             ResourceCard(state, showOperationState = false, showReadProgress = false)
-            state.importStatus?.let { status -> SupportingText(subscriptionImportMessage(status)) }
-            if (state.importStatus == ImportStatus.UNSUPPORTED_CONFIGURATION)
-                state.importRejection?.let { SupportingText(subscriptionRejectionMessage(it)) }
-            if (state.deliveryReceived && state.importStatus == null) SupportingText(
-                if (state.busy) "订阅已安全保存，正在下载并校验配置"
-                else "订阅已安全保存；自动导入尚未完成，可刷新重试")
-            BrandButton("刷新／重试", state::refresh, enabled = !state.busy, modifier = Modifier.testTag("account-refresh"))
+            TransientReadError(state.error ?: when (state.importStatus) {
+                ImportStatus.UNSUPPORTED_CONFIGURATION -> state.importRejection?.let(::subscriptionRejectionMessage)
+                    ?: "订阅配置暂不兼容"
+                ImportStatus.WAITING_DELIVERY -> "订阅暂未交付"
+                else -> null
+            }, Modifier.testTag("account-read-error"))
             TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅与登录") }
             TextButton(onClick = state::logout, enabled = !state.clearing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-signout")) { Text("退出账户（保留本地订阅）") }
-            SupportingText("退出钱包账户不会删除已保存的订阅。只有明确确认清除本地订阅才会移除它；本地清除不等于服务器撤销。")
         } else if (state.factorReference != null) {
             SupportingText("请输入身份验证器中的 TOTP 验证码")
             OutlinedTextField(state.code, { state.code = it }, enabled = !state.busy,
@@ -711,17 +705,12 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                     question(Modifier.weight(.56f))
                 }
             }
-            if (state.authenticationSubmitting) CircularProgressIndicator(Modifier.size(24.dp).testTag("account-loading"), color = Brand.Cyan)
-            val status = state.error ?: if (state.authenticationSubmitting) "正在处理，请稍候" else null
+            val status = state.error
             status?.let {
                 Text(it, color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
                         .semantics { liveRegion = LiveRegionMode.Polite })
-            }
-            if (state.restorationPending && !state.busy) {
-                SupportingText("已保存的登录需要服务器重新验证。")
-                BrandButton("重新验证已保存登录", state::restoreAccount, modifier = Modifier.testTag("session-restore-retry"))
             }
             BrandButton("登录", state::login,
                 enabled = !state.busy && !state.challengeLoading && state.challenge != null && state.account.isNotBlank() && normalizedLoginPassword(state.password).isNotEmpty() && state.answer.isNotBlank(),
@@ -736,11 +725,11 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
 
 /** Exactly one visible state occupies the refresh target; network is never a fallback placeholder. */
 internal fun loginQuestionText(state: AccountController): String = when {
-    state.challengeLoading || state.busy -> "加载中…"
+    state.challengeLoading || state.busy -> state.challenge?.prompt ?: "验证题"
     state.challengeFailureReason == PortalFailure.Reason.NETWORK -> "无网络"
-    state.challengeExpired || state.challengeError != null -> "刷新重试"
+    state.challengeExpired || state.challengeError != null -> "换一道题"
     state.challenge != null -> state.challenge!!.prompt
-    else -> "刷新重试"
+    else -> "换一道题"
 }
 
 @Composable
@@ -749,7 +738,7 @@ private fun LoginQuestionPanel(state: AccountController, modifier: Modifier, onR
     val display = loginQuestionText(state)
     TextButton(onClick = onRefresh, enabled = refreshEnabled,
         modifier = modifier.heightIn(min = 48.dp).testTag("login-challenge")
-            .semantics { contentDescription = if (refreshEnabled) "$display，点击刷新验证题" else display }) {
+            .semantics { contentDescription = if (refreshEnabled) "$display，点击更换验证题" else display }) {
         Text(display, color = Brand.Cyan, fontSize = 16.sp,
             modifier = Modifier.testTag("login-challenge-prompt").semantics { liveRegion = LiveRegionMode.Polite })
     }
@@ -821,23 +810,48 @@ internal fun subscriptionRejectionMessage(reason: com.gccwebos.android.vpn.SafeP
 }
 
 @Composable
-internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean) {
-    androidx.compose.runtime.LaunchedEffect(state.authSessionGeneration, state.authenticated) {
-        if (autoLoad && state.authenticated) state.readSecurity()
+internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, refreshRequest: Int = 0) {
+    var entryReadStarted by remember(state, state.authSessionGeneration, state.authenticated) { mutableStateOf(false) }
+    var handledRequest by remember(state, state.authSessionGeneration) { mutableStateOf(refreshRequest) }
+    LaunchedEffect(state, state.authSessionGeneration, state.authenticated, autoLoad) {
+        if (autoLoad && state.authenticated) {
+            // One read per entry/verified owner; account restoration can still own the busy slot.
+            snapshotFlow { !state.busy && !state.restoring && !state.foregroundCheckPending && !state.clearing }
+                .first { it }
+            if (!entryReadStarted) { entryReadStarted = true; state.readSecurity() }
+        }
+    }
+    LaunchedEffect(state, state.authSessionGeneration, autoLoad, refreshRequest) {
+        if (handledRequest != refreshRequest) {
+            handledRequest = refreshRequest
+            // Navigation while busy coalesces into the active read; it does not cancel or queue it.
+            if (autoLoad && state.authenticated && !state.busy && !state.restoring &&
+                !state.foregroundCheckPending && !state.clearing) {
+                entryReadStarted = true
+                state.readSecurity()
+            }
+        }
     }
     if (!state.authenticated || state.restoring || state.foregroundCheckPending) return
     BrandCard(Modifier.testTag("account-security-state")) {
         Text("安全状态", style = MaterialTheme.typography.titleMedium)
         val status = state.security
         if (status == null) {
-            if (!state.busy) SupportingText("安全状态尚未确认，请重试读取。")
+            SupportingText("—")
         } else {
             SupportingText("身份验证器：${if (status.authenticatorBound) "已绑定" else "未绑定"}")
             SupportingText("通行密钥：${if (status.passkeyEnabled) "已启用" else "未启用"}")
             SupportingText("安全设置：${if (status.setupRequired) "待完成" else "无需补充"}")
         }
-        BrandButton("重新读取安全状态", state::readSecurity, enabled = !state.busy,
-            modifier = Modifier.testTag("security-refresh"))
-        SupportingText("这里只展示服务器确认的状态，不修改安全凭据。")
     }
+}
+
+/** Read failures are announced once per visible result; revisiting the page owns retrying the read. */
+@Composable
+internal fun TransientReadError(message: String?, modifier: Modifier = Modifier) {
+    val host = remember { SnackbarHostState() }
+    LaunchedEffect(message) {
+        message?.takeIf { it.isNotBlank() }?.let { host.showSnackbar(it, duration = SnackbarDuration.Short) }
+    }
+    SnackbarHost(host, modifier)
 }

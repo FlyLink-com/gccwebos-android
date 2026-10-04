@@ -72,24 +72,29 @@ class ConnectionUsageCardUiTest {
         assertEquals(0, fixture.refreshes)
     }
 
-    @Test fun refreshFailureKeepsSnapshotButRoutesPrimaryToRetryAndRespectsBusy() {
+    @Test fun failureKeepsOneStableActionThatOnlyReadsUntilTheUserClicksAgain() {
         val fixture = Fixture().apply { error = "无法读取" }
         show(fixture)
-        compose.onNodeWithTag("account-usage-read-status").assertTextEquals("读取失败 · 未更新")
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("47 GB")
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("重试").performClick()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").performClick()
         assertEquals(1, fixture.refreshes)
         assertEquals(0, fixture.primaryActions)
         compose.runOnIdle { fixture.loading = true }
-        compose.onNodeWithTag("account-usage-read-status").assertTextEquals("读取失败 · 未更新")
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
         compose.onNodeWithText("正在读取").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        compose.runOnIdle { fixture.loading = false; fixture.error = null }
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsEnabled()
+        assertEquals(0, fixture.primaryActions)
+        compose.onNodeWithTag("vpn-connect").performClick()
+        assertEquals(1, fixture.primaryActions)
         compose.runOnIdle { fixture.loading = false; fixture.showPrimary = false }
         compose.onNodeWithTag("vpn-connect").assertDoesNotExist()
-        compose.onNodeWithTag("account-usage-retry").performScrollTo().assertIsEnabled().performClick()
-        assertEquals(2, fixture.refreshes)
+        compose.onNodeWithTag("account-usage-retry").assertDoesNotExist()
+        assertEquals(1, fixture.refreshes)
         compose.runOnIdle { fixture.refreshEnabled = false }
-        compose.onNodeWithTag("account-usage-retry").assertIsNotEnabled()
+        compose.onNodeWithTag("account-usage-retry").assertDoesNotExist()
     }
 
     @Test fun ordinaryReadIsQuietAndCannotEnableAnUnverifiedPrimaryAction() {
@@ -101,7 +106,7 @@ class ConnectionUsageCardUiTest {
         compose.onNodeWithText("正在读取").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("重试").assertIsNotEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsNotEnabled()
             .performTouchInput { click() }
         assertEquals(0, fixture.primaryActions); assertEquals(0, fixture.refreshes)
     }

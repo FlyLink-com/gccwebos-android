@@ -14,6 +14,7 @@ import com.gccwebos.android.commerce.*
 import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.portal.*
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -28,6 +29,10 @@ class MineReferralUiTest {
     private val copied = mutableListOf<String>()
     private val requests = mutableListOf<Pair<String, String?>>()
     private var density = 1f
+    private var referralVisit by mutableStateOf(0)
+    private var referralRefreshRequest by mutableStateOf(0)
+    private var referralAutoLoad by mutableStateOf(true)
+    private var referralReadGate: CompletableDeferred<Unit>? = null
     private val path = "/r/" + "b".repeat(32)
     private fun owner(scope: CoroutineScope) = AccountController(PortalRepository(
         object : PortalTransport { override suspend fun request(path: String, body: String?, session: Secret?): WireResponse = throw AssertionError("No Portal requests") },
@@ -52,9 +57,12 @@ class MineReferralUiTest {
             }
         }
     }
-    private fun launchReferral(profile: () -> String, font: Float = 1f, unknownGeneration: Boolean = false) {
+    private fun launchReferral(profile: () -> String, font: Float = 1f, unknownGeneration: Boolean = false,
+        expectProfile: Boolean = true) {
         compose.setContent {
             val scope = rememberCoroutineScope(); val owner = remember { owner(scope) }; account = owner
+            // A new key mirrors leaving and re-entering the destination, disposing its read owner.
+            key(referralVisit) {
             val state = remember { ReferralController(owner, scope, { copied += it }, ReferralRepository { route, body ->
                 requests += route to body
                 if (route == ReferralJson.LINK) {
@@ -63,16 +71,20 @@ class MineReferralUiTest {
                     throw PortalFailure(PortalFailure.Reason.NETWORK)
                 }
                 assertNull(body)
+                referralReadGate?.await()
                 WireResponse(200, if (route == ReferralJson.PROFILE) profile() else """{"performance":{"registrations":4,"firstRechargeConversions":1,"creditedFirstRechargeCoins":17,"pendingRewardCoins":3,"availableRewardCoins":5,"reversedRewardCoins":2,"conversionRate":0.25,"reconciliationRequired":false}}""")
             }) }; referral = state
             val actual = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(actual.density, font)) {
                 GccTheme { Column(Modifier.width(320.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp)) {
-                    ReferralPanel(owner, autoLoad = true, stateOverride = state, copyOverride = { copied += it })
+                    ReferralPanel(owner, autoLoad = referralAutoLoad, stateOverride = state,
+                        copyOverride = { copied += it }, refreshRequest = referralRefreshRequest)
                 } }
             }
+            }
         }
-        compose.waitUntil(5_000) { referral.profile != null && referral.performance != null }
+        compose.waitUntil(5_000) { !referral.busy && referral.performance != null &&
+            (if (expectProfile) referral.profile != null else referral.profileError != null) }
     }
     @Test fun mineSectionsShareOneSurfaceAndDoNotOfferAPurchaseReturnShortcut() {
         launchMine()
@@ -117,7 +129,7 @@ class MineReferralUiTest {
             compose.onNodeWithTag("mine-about").performScrollTo().assertIsDisplayed()
             compose.onNodeWithTag("mine-more").assertDoesNotExist()
             compose.onNodeWithTag("mine-functions").assertDoesNotExist()
-            compose.onNodeWithTag("checkUpdate").performScrollTo().assertIsEnabled()
+            compose.onNodeWithTag("checkUpdate").assertDoesNotExist()
             compose.onNodeWithTag("updateStatus").assertDoesNotExist()
             compose.onNodeWithTag("mine-back").performScrollTo().assertIsDisplayed().performClick()
             compose.onNodeWithTag("mine-about").assertDoesNotExist()
@@ -146,8 +158,8 @@ class MineReferralUiTest {
         launchReferral({ """{"profile":{"eligible":true,"linkPath":null,"policy":null}}""" }, font = 2f)
         compose.onNodeWithTag("referral-policy-rate").assertDoesNotExist()
         compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("归因期待确认").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("referral-refresh").performScrollTo().assertIsDisplayed().assertTextEquals("重试")
+        compose.onNodeWithTag("referral-distribution-unavailable").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("referral-refresh").assertDoesNotExist()
         compose.runOnIdle { assertTrue(copied.isEmpty()); assertEquals(2, requests.size); assertTrue(requests.all { it.second == null }) }
     }
 
@@ -201,15 +213,54 @@ class MineReferralUiTest {
         compose.onNodeWithTag("referral-available-reward").performScrollTo().assertExists()
         compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
         val readsBeforeRetry = requests.count { it.first != ReferralJson.LINK }
-        compose.onNodeWithTag("referral-refresh").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithTag("referral-refresh").assertDoesNotExist()
+        compose.runOnIdle { referralVisit++ }
         compose.waitUntil(5_000) { !referral.busy && requests.count { it.first != ReferralJson.LINK } >= readsBeforeRetry + 2 }
         compose.onNodeWithTag("referral-generate").performScrollTo().assertIsNotEnabled()
         compose.runOnIdle {
-            assertSame(original, referral); assertSame(originalGuard, account.referralGenerationGuard)
+            assertNotSame(original, referral); assertSame(originalGuard, account.referralGenerationGuard)
             assertEquals(originalEpoch, account.authSessionGeneration)
             referral.generateLink(); referral.copyLink()
             assertTrue(originalGuard.unknown)
             assertEquals(1, requests.count { it.first == ReferralJson.LINK })
+            assertTrue(copied.isEmpty())
+        }
+    }
+
+    @Test fun failedReferralReadShowsTransientFeedbackAndReentryRetriesOnlyReads() {
+        var unavailable = true
+        launchReferral({
+            if (unavailable) throw PortalFailure(PortalFailure.Reason.NETWORK)
+            """{"profile":{"eligible":false,"linkPath":null,"policy":null}}"""
+        }, expectProfile = false)
+        compose.onNodeWithText("推荐信息暂不可用").assertExists()
+        compose.onNodeWithTag("referral-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("referral-profile-status").assertDoesNotExist()
+        val first = referral
+        compose.runOnIdle { unavailable = false; referralVisit++ }
+        compose.waitUntil(5_000) { referral !== first && !referral.busy && referral.profile != null }
+        compose.onNodeWithTag("referral-profile-status").assertTextEquals("当前账户暂不具备推荐资格")
+        compose.runOnIdle {
+            assertEquals(4, requests.size)
+            assertTrue(requests.all { it.second == null && it.first != ReferralJson.LINK })
+            assertTrue(copied.isEmpty())
+        }
+    }
+
+    @Test fun sameTabRefreshKeepsItsReadOwnerAndCoalescesBusyTokensWithoutGeneratingALink() {
+        launchReferral({ """{"profile":{"eligible":false,"linkPath":null,"policy":null}}""" })
+        val original = referral
+        val release = CompletableDeferred<Unit>()
+        compose.runOnIdle { referralReadGate = release; referralRefreshRequest++ }
+        compose.waitUntil(5_000) { referral.busy && requests.size == 3 }
+        repeat(2) { compose.runOnIdle { referralRefreshRequest++ }; compose.waitForIdle() }
+        compose.runOnIdle { assertSame(original, referral); assertEquals(3, requests.size); release.complete(Unit) }
+        compose.waitUntil(5_000) { !referral.busy && requests.size == 4 }
+        compose.runOnIdle { referralAutoLoad = false; referralRefreshRequest++ }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(4, requests.size); assertSame(original, referral)
+            assertTrue(requests.all { it.second == null && it.first != ReferralJson.LINK })
             assertTrue(copied.isEmpty())
         }
     }

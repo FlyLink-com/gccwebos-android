@@ -193,4 +193,17 @@ class CatalogDefaultSelectionUiTest {
         compose.onNodeWithTag("plan-benefits").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsDisplayed().assertIsEnabled()
     }
+
+    @Test fun catalogCategoriesKeepSelectedSemanticsAndNeverPreviewOnCategoryClick() {
+        launch(width = 320, fontScale = 2f)
+        compose.onNodeWithTag("catalog-plans").performScrollTo().assertIsSelected().assertHeightIsAtLeast(44.dp)
+        compose.onNodeWithTag("catalog-yearly").performScrollTo().assertIsDisplayed().performClick().assertIsSelected()
+        compose.onNodeWithTag("catalog-plans").assertIsNotSelected()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").performScrollTo().assertIsNotSelected()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-data-packs").performScrollTo().assertIsDisplayed().performClick().assertIsSelected()
+        compose.onNodeWithTag("catalog-yearly").assertIsNotSelected()
+        compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购流量包")
+        compose.onNodeWithTag("plan-continue").assertDoesNotExist()
+    }
 }

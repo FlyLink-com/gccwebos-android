@@ -117,7 +117,7 @@ class MineBackNavigationUiTest {
         compose.runOnIdle { account.readSecurity() }
         compose.waitUntil(5_000) { account.busy && securityReads == 1 }
         compose.onNodeWithTag("account-loading").assertDoesNotExist()
-        compose.onNodeWithTag("security-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("security-refresh").assertDoesNotExist()
         compose.onNodeWithText("暂无已发放资源").assertExists()
         back()
         compose.onNodeWithTag("mine-welcome").assertExists()
@@ -132,7 +132,7 @@ class MineBackNavigationUiTest {
         compose.runOnIdle { blockOverview = true; account.refresh() }
         compose.waitUntil(5_000) { account.busy && overviewReads == 3 }
         compose.onNodeWithTag("account-loading").assertDoesNotExist()
-        compose.onNodeWithTag("account-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("account-refresh").assertDoesNotExist()
         compose.onNodeWithText("暂无已发放资源").assertExists()
         back()
         compose.onNodeWithTag("mine-welcome").assertExists()

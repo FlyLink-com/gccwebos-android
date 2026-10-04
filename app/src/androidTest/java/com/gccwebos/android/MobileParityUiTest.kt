@@ -68,7 +68,7 @@ class MobileParityUiTest {
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.runOnIdle { assertEquals("", state.account); assertEquals("fixture@example.invalid", state.authenticatedAccountId); assertEquals(2, reads) }
     }
-    @Test fun restoreNetworkFailureKeepsConnectionAndCanRetryAccountWithoutPassword() {
+    @Test fun restoreNetworkFailureKeepsConnectionAndReenteringAccountRetriesWithoutPassword() {
         val saved = sessions(); var fail = true; lateinit var state: AccountController
         val wire = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
@@ -79,16 +79,19 @@ class MobileParityUiTest {
         compose.setContent {
             val scope = rememberCoroutineScope()
             state = remember { AccountController(PortalRepository(wire, empty, policy, {0}, {at}, sessions = saved), scope).apply { restore() } }
-            AppShell(state, autoLoadCommerce = false)
+            AppShell(state, autoLoadCommerce = false, autoRefreshPages = true)
         }
         compose.waitUntil(10_000) { !state.busy && state.restorationPending }
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("session-restore-retry").performScrollTo().assertIsDisplayed()
-        capture("session-restore-retry")
+        compose.waitUntil(10_000) { !state.busy && state.restorationPending }
+        compose.onNodeWithTag("session-restore-retry").assertDoesNotExist()
+        capture("session-restore-navigation")
         compose.runOnIdle { assertNotNull(saved.read()); fail = false }
-        compose.onNodeWithTag("session-restore-retry").performClick()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
+        compose.runOnIdle { assertEquals("", state.password); assertNotNull(saved.read()) }
         compose.onNodeWithTag("nav-Connect").assertExists()
     }
     @Test fun revokedSavedSessionReturnsToLoginAndClearsToken() {
@@ -181,10 +184,15 @@ class MobileParityUiTest {
         // Same-session validation retains navigation, but cannot expose commerce actions.
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("nav-Plans").performClick()
-        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithTag("commerce-signed-out").assertDoesNotExist()
         compose.onNodeWithTag("catalog-status").assertDoesNotExist()
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(1, reads); release.complete(Unit) }
+        listOf("wallet-card", "wallet-balance", "plan-options", "plan-purchase-dock", "plan-continue")
+            .forEach { compose.onNodeWithTag(it).assertDoesNotExist() }
+        compose.runOnIdle {
+            assertTrue(state.busy); assertTrue(state.foregroundCheckPending)
+            assertEquals(1, reads); release.complete(Unit)
+        }
         compose.waitUntil(10_000) { state.authenticated && !state.busy && !state.foregroundCheckPending }
         compose.runOnIdle { assertEquals(3, reads) }
         compose.onNodeWithTag("commerce-signed-out").assertDoesNotExist()

@@ -346,20 +346,27 @@ class SubscriptionWalletUiTest {
         compose.runOnIdle { assertEquals(2, verifiedOverviewReads.get()) }
     }
 
-    @Test fun verifiedOverviewFailureShowsReadOnlyRetryWithoutPretendingToOpenAPlan() {
-        launchVerifiedOverviewShell()
+    @Test fun oneClickAfterOverviewFailureOnlyRefreshesTheReadWithoutStartingVpnOrOpeningAPlan() {
+        val powerActions = mutableListOf<ConnectionPowerAction>()
+        launchVerifiedOverviewShell(onPowerAction = { powerActions += it })
         compose.runOnIdle { verifiedOverviewFailure = PortalFailure.Reason.NETWORK; account.refreshAccountUsage() }
         compose.waitUntil(5_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.error != null }
-        compose.onNodeWithTag("account-usage-read-status").performScrollTo().assertTextEquals("读取失败")
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
+        compose.onNodeWithTag("connection-read-error").performScrollTo().assertTextEquals("账户信息暂未更新")
         compose.onNodeWithTag("account-usage-no-plan").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("重试")
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsEnabled()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(3, verifiedOverviewReads.get()); verifiedOverviewFailure = null }
+        compose.runOnIdle {
+            assertEquals(3, verifiedOverviewReads.get()); assertTrue(powerActions.isEmpty())
+            verifiedOverviewFailure = null
+        }
         compose.onNodeWithTag("vpn-connect").performClick()
         compose.waitUntil(5_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.error == null }
         compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
         compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn")
-        compose.runOnIdle { assertEquals(4, verifiedOverviewReads.get()) }
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.runOnIdle { assertEquals(4, verifiedOverviewReads.get()); assertTrue(powerActions.isEmpty()) }
     }
 
     @Test fun plansShowServerCatalogWithoutRepeatingResourceAndKeepLocalExpirySeparate() {
@@ -386,7 +393,11 @@ class SubscriptionWalletUiTest {
             account.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.EXPIRED,
                 hasProfile = true, hasCapability = true, validUntil = Instant.EPOCH)
         }
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("本地配置已到期")
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.EXPIRED, account.localSubscription.status)
+            assertEquals(Instant.EPOCH, account.localSubscription.validUntil)
+        }
         compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
         compose.onNodeWithTag("page-Plans").assertIsDisplayed()
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
@@ -438,10 +449,10 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("account-usage-cycle").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("account-usage-expiry").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("account-usage-refresh").assertDoesNotExist()
-        // An available entitlement with MISSING local material exposes preparation guidance,
-        // not Connect admission. This overview-only fixture deliberately does not click Sync.
+        // The one-click action can prepare MISSING local material. Merely rendering or returning
+        // to this page must not prepare it or admit a VPN connection.
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("一键连接").assertIsEnabled()
-        compose.onNodeWithTag("account-usage-primary-hint").assertTextEquals("本机尚无配置")
+        compose.onNodeWithTag("account-usage-primary-hint").assertDoesNotExist()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.onNodeWithTag("connection-power").assertDoesNotExist()
         compose.onNodeWithTag("connection-prepare-cancel").assertDoesNotExist()
@@ -627,8 +638,12 @@ class SubscriptionWalletUiTest {
                 CommercePanel(owner, CommerceMode.Plans, stateOverride = state, autoLoad = true)
             } }
         }
-        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithTag("commerce-signed-out").assertDoesNotExist()
+        listOf("wallet-card", "plan-options", "catalog-empty", "purchase-result", "purchase-confirm")
+            .forEach { compose.onNodeWithTag(it).assertDoesNotExist() }
         compose.runOnIdle {
+            assertTrue(account.restoring)
+            assertFalse(commerce.canOperate())
             assertTrue(paths.isEmpty())
             assertFalse(commerce.busy)
             // Admit a real, deferred read before the eligible catalog effect recomposes.
@@ -674,7 +689,8 @@ class SubscriptionWalletUiTest {
     @Test fun catalogStatesKeepServerDurationCoinsAndTrafficOnCardsAndInDetails() {
         val fixture = offers().first().copy(durationDays = 47, baseCoinUnits = 73, monthlyTrafficGb = 17)
         launchCommerce(CommerceMode.Plans) { error = "合成目录读取失败" }
-        compose.onNodeWithTag("catalog-status").assertTextEquals("商品尚未读取")
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.onNodeWithTag("commerce-error").assertTextEquals("合成目录读取失败")
         compose.onNodeWithTag("plan-offer-${fixture.offerRef}").assertDoesNotExist()
         compose.runOnIdle {

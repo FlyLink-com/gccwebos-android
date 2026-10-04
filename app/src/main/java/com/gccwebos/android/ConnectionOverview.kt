@@ -264,8 +264,15 @@ internal fun ConnectionOverview(
             delay(1_000)
         }
     }
+    // A retained name is display-only while the selection controller reads. Its old opaque
+    // identity never reaches Ping or connection admission through this fallback.
+    val displayedNode = selectedNode ?: nodeSnapshot.choices.firstOrNull { it.selection === nodeSnapshot.selected }?.takeIf {
+        account.nodeSelection.busy && synchronizedNodeGeneration == account.authSessionGeneration &&
+            nodeSnapshot.status == LocalSubscriptionStatus.READY && nodeSnapshot.validUntil?.let { until -> until > now } != false
+    }
     DisposableEffect(account) { onDispose { account.nodeLatency.cancel() } }
-    val operable = !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing && !usage.busy
+    val operable = !account.busy && !account.nodeSelection.busy && !account.restoring &&
+        !account.foregroundCheckPending && !account.clearing && !usage.busy
     val verifiedUsage = account.authenticated && usage.authenticated && !usage.verifying
     val display = accountUsagePresentation(if (verifiedUsage) usage.resource else null, usageNow, usage.notUpdated)
     val setup = connectionSetupGuidance(account.authenticated, verifiedUsage, usage.resource, snapshot, usageNow,
@@ -274,8 +281,14 @@ internal fun ConnectionOverview(
     var acceptedCommand by remember(control, account) { mutableStateOf(false) }
     // Keep service control authoritative without interpreting an idle preparation capability as local readiness.
     val controlMode = showsConnectionCommand(local, control)
+    val usageRecovery = account.authenticated && (usage.error != null ||
+        display.state in setOf(AccountUsageState.Unknown, AccountUsageState.Reconciliation))
+    val recoverBeforeConnect = controlMode && local.action == ConnectionPowerAction.Connect && usageRecovery
+    val localReadRecovery = account.authenticated && verifiedUsage && snapshot.hasCapability &&
+        local.status in setOf(LocalSubscriptionStatus.RETRY_REQUIRED, LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)
     val controlEnabled = onPowerAction != null && !acceptedCommand && local.action != ConnectionPowerAction.None &&
-        (local.action != ConnectionPowerAction.Connect || !account.clearing)
+        (local.action != ConnectionPowerAction.Connect || (!account.clearing && !account.nodeSelection.busy &&
+            (!account.authenticated || (operable && verifiedUsage && !usageRecovery))))
     Column(Modifier.fillMaxWidth().testTag("connection-overview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BrandCard(Modifier.testTag("connection-account-surface"), contentPadding = PaddingValues(18.dp, 16.dp, 18.dp, 16.dp)) {
             // Each section already owns its spacing; avoid stacking the generic card's row gaps.
@@ -283,25 +296,29 @@ internal fun ConnectionOverview(
                 ConnectionWelcome()
                 ConnectionStatusRow(local, display.planText.takeIf { account.authenticated },
                     activePlan = verifiedUsage && connectionPlanIsActive(display), modifier = Modifier.padding(top = 2.dp))
-                if (snapshot.status == LocalSubscriptionStatus.MISSING && control.phase == ConnectionPhase.Failed)
-                    Text(local.title, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag("connection-failure"))
                 ConnectionUsageCard(display, authenticated = account.authenticated,
                     modifier = Modifier.padding(top = 5.dp),
                     onRefresh = account::refreshAccountUsage,
-                    loading = account.busy || usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
+                    loading = account.busy || account.nodeSelection.busy || usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
                     error = usage.error, refreshEnabled = verifiedUsage && operable,
                     primaryLabel = setup.label,
-                    primaryEnabled = setup.enabled,
+                    primaryEnabled = setup.enabled || (localReadRecovery && operable),
                     primaryHint = setup.hint ?: if (control.phase != ConnectionPhase.Unavailable && account.authenticated &&
                         display.state == AccountUsageState.Available) local.title.ifBlank { local.powerLabel } else null,
-                    onPrimaryAction = {
+                    onPrimaryAction = primary@{
                         val currentUsage = account.accountUsage.state.value
                         val currentVerified = account.authenticated && currentUsage.authenticated && !currentUsage.verifying
-                        val currentOperable = !account.busy && !account.restoring && !account.foregroundCheckPending &&
+                        val currentOperable = !account.busy && !account.nodeSelection.busy && !account.restoring && !account.foregroundCheckPending &&
                             !account.clearing && !currentUsage.busy
                         val currentTime = clock()
                         val currentLocal = connectionOverviewPresentation(account.localSubscription, currentTime, latestControl)
+                        if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl) &&
+                            currentVerified && currentOperable && account.localSubscription.hasCapability &&
+                            currentLocal.status in setOf(LocalSubscriptionStatus.RETRY_REQUIRED,
+                                LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)) {
+                            account.refreshSubscription()
+                            return@primary // Read-only recovery never completes with an automatic power action.
+                        }
                         if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl))
                             dispatchConnectionSetup(connectionSetupGuidance(account.authenticated, currentVerified,
                                 currentUsage.resource, account.localSubscription, currentTime, currentOperable, account.busy,
@@ -337,23 +354,24 @@ internal fun ConnectionOverview(
                                     }
                                 })
                     },
-                    showPrimary = !controlMode)
-                if (account.authenticated && verifiedUsage && snapshot.status == LocalSubscriptionStatus.MISSING)
-                    connectionSetupMessage(account.importStatus, account.error, account.busy)?.let { message ->
-                        Text(message, color = if (account.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
-                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-setup-status"))
-                    }
-                preparationHint?.let { message ->
-                    Text(message, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag("connection-preparation-next"))
+                    showPrimary = !controlMode || recoverBeforeConnect)
+                val setupMessage = if (account.authenticated && verifiedUsage && snapshot.status == LocalSubscriptionStatus.MISSING &&
+                    !account.busy) connectionSetupMessage(account.importStatus, account.error, false) else null
+                val notice = when {
+                    account.busy || account.nodeSelection.busy || usage.busy -> null
+                    preparationHint != null -> preparationHint!! to "connection-preparation-next"
+                    control.phase == ConnectionPhase.Failed -> local.title to "connection-failure"
+                    setupMessage != null -> setupMessage to "connection-setup-status"
+                    localReadRecovery -> local.title to "connection-read-error"
+                    usage.error != null -> "账户信息暂未更新" to "connection-read-error"
+                    else -> null
                 }
+                ConnectionNotice(account, account.authSessionGeneration, notice)
                 if (preparationRequest?.let(account::isConnectionPreparationPending) == true) TextButton({
                     preparationRequest?.let(account::cancelConnectionPreparation)
                     preparationRequest = null
                 }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("connection-prepare-cancel")) { Text("取消准备") }
-                if (usage.busy) TextButton(account::cancelAccountUsageUpdate,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-usage-cancel")) { Text("取消更新") }
-                if (controlMode) ConnectionActionButton(
+                if (controlMode && !recoverBeforeConnect) ConnectionActionButton(
                     when (local.action) {
                         ConnectionPowerAction.Connect -> "一键连接"
                         ConnectionPowerAction.Cancel -> "取消连接"
@@ -380,19 +398,16 @@ internal fun ConnectionOverview(
                     val summary: @Composable (Modifier) -> Unit = { modifier ->
                         Row(modifier, verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            NodeRegionIcon(name = selectedNode?.name, size = 39.dp, emphasized = true)
+                            NodeRegionIcon(name = displayedNode?.name, size = 39.dp, emphasized = true)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
-                                Text(if (account.nodeSelection.busy) "正在刷新" else selectedNode?.name ?: "未选择",
+                                Text(displayedNode?.name ?: "未选择",
                                     color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                                     modifier = Modifier.testTag("connection-node-name"))
-                                selectedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
+                                displayedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
                                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
-                                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text("Ping", color = Brand.Muted, fontSize = 11.sp)
-                                    NodeLatencyBadge(account.nodeLatency.reading(selectedNode?.selection),
-                                        Modifier.testTag("connection-node-latency"))
-                                }
+                                NodeLatencyBadge(account.nodeLatency.reading(selectedNode?.selection),
+                                    Modifier.testTag("connection-node-latency"))
                             }
                         }
                     }
@@ -409,16 +424,9 @@ internal fun ConnectionOverview(
         OfficialWebsiteCard()
         // Local configuration evidence has no account/resource binding and is never the account usage.
         if (snapshot.status != LocalSubscriptionStatus.MISSING) {
-            val localTitle = if (local.status == LocalSubscriptionStatus.EXPIRED) "本地配置已到期" else local.title
-            if (localTitle.isNotEmpty()) SupportingText(localTitle, Modifier.testTag("local-subscription-title"))
-            local.countdown?.let { Text("本地配置有效时间 $it", color = Brand.Muted,
-                style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("subscription-validity-countdown")) }
             val action = when {
                 local.status == LocalSubscriptionStatus.EXPIRED -> Triple("查看套餐", "expired-subscription-renew", openPlans)
                 local.status == LocalSubscriptionStatus.INVALID_LINK -> Triple("登录恢复订阅", "open-account", openAccount)
-                snapshot.hasCapability && local.status in setOf(LocalSubscriptionStatus.RETRY_REQUIRED,
-                    LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR) ->
-                    Triple("重试", "local-subscription-refresh", account::refreshSubscription)
                 else -> null
             }
             action?.let { TextButton(it.third, enabled = operable,
@@ -434,6 +442,24 @@ internal fun ConnectionOverview(
             TextButton({ showGuestChoice = false; openRegistration() }, modifier = Modifier.heightIn(min = 48.dp)
                 .testTag("usage-guest-register")) { Text("注册") }
         } }, dismissButton = { TextButton({ showGuestChoice = false }) { Text("取消") } })
+}
+
+/** One brief read/setup failure announcement. It cannot retry, prepare or start a tunnel. */
+@Composable
+private fun ConnectionNotice(account: AccountController, generation: Long, notice: Pair<String, String>?) {
+    val host = remember(account, generation) { SnackbarHostState() }
+    LaunchedEffect(host, notice) {
+        host.currentSnackbarData?.dismiss()
+        notice?.first?.takeIf { it.isNotBlank() }?.let {
+            host.showSnackbar(it.substringBefore('，').substringBefore('；').removeSuffix("。"),
+                duration = SnackbarDuration.Short)
+        }
+    }
+    SnackbarHost(host, Modifier.fillMaxWidth()) { data ->
+        Snackbar(containerColor = Brand.SurfaceRaised, contentColor = Brand.Text) {
+            Text(data.visuals.message, modifier = Modifier.testTag(notice?.second ?: "connection-notice"))
+        }
+    }
 }
 
 @Composable

@@ -48,18 +48,6 @@ internal fun ConnectionUsageCard(
 ) {
     val refreshAllowed = authenticated && !loading && refreshEnabled
     Column(modifier.fillMaxWidth().testTag("account-usage-card")) {
-        if (authenticated) {
-            val readText = when {
-                error != null && presentation.state == AccountUsageState.Available -> "读取失败 · 未更新"
-                error != null -> "读取失败"
-                else -> presentation.refreshText
-            }
-            readText?.let {
-                Text(it, color = if (error != null) MaterialTheme.colorScheme.error else Brand.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(bottom = 10.dp).testTag("account-usage-read-status"))
-            }
-        }
         if (!authenticated) ConnectionRemaining("暂未获取") else when (presentation.state) {
             AccountUsageState.Unknown -> ConnectionRemaining("暂未获取")
             AccountUsageState.NoActivePlan -> if (error != null) ConnectionRemaining("暂未获取") else
@@ -81,19 +69,10 @@ internal fun ConnectionUsageCard(
         if (showPrimary) {
             val retry = authenticated && (error != null || presentation.state == AccountUsageState.Unknown ||
                 presentation.state == AccountUsageState.Reconciliation)
-            val label = if (retry) "重试" else primaryLabel
+            val label = if (retry || primaryLabel in setOf("重试", "准备中")) "一键连接" else primaryLabel
             val enabled = if (retry) refreshAllowed else primaryEnabled && !loading
-            val hint = if (retry) null else primaryHint ?: if (authenticated &&
-                presentation.state == AccountUsageState.Available && label == "一键连接" && !primaryEnabled)
-                "连接功能暂未开放" else null
             ConnectionActionButton(label, { if (enabled) { if (retry) onRefresh() else onPrimaryAction() } },
                 Modifier.padding(top = 12.dp).testTag("vpn-connect"), enabled)
-            hint?.let { ConnectionActionHint(it) }
-        } else if (authenticated && (error != null || presentation.state == AccountUsageState.Unknown ||
-                presentation.state == AccountUsageState.Reconciliation)) {
-            // A live VPN command must not remove account recovery or borrow its busy/disabled state.
-            ConnectionActionButton("重试", { if (refreshAllowed) onRefresh() },
-                Modifier.padding(top = 12.dp).testTag("account-usage-retry"), refreshAllowed)
         }
     }
 }
@@ -236,21 +215,5 @@ internal fun ConnectionActionButton(text: String, onClick: () -> Unit, modifier:
         }
         Spacer(Modifier.width(10.dp))
         Text(text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun ConnectionActionHint(text: String) {
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        Canvas(Modifier.padding(top = 1.dp).size(14.dp)) {
-            val stroke = 1.dp.toPx()
-            drawCircle(Brand.Muted, radius = size.minDimension / 2 - stroke, style = Stroke(stroke))
-            drawCircle(Brand.Muted, radius = stroke / 1.5f, center = Offset(size.width / 2, size.height * .32f))
-            drawLine(Brand.Muted, Offset(size.width / 2, size.height * .47f),
-                Offset(size.width / 2, size.height * .73f), strokeWidth = stroke, cap = StrokeCap.Round)
-        }
-        Text(text, color = Brand.Muted, fontSize = 10.sp, lineHeight = 15.sp,
-            modifier = Modifier.weight(1f).testTag("account-usage-primary-hint"))
     }
 }

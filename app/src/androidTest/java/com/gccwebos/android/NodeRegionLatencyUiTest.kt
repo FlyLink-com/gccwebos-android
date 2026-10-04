@@ -137,7 +137,7 @@ class NodeRegionLatencyUiTest {
         badge(1).assertTextEquals("— ms")
         compose.onNodeWithTag("nodes-selected-region").assertContentDescriptionEquals("地区未标注")
         compose.onNodeWithTag("nodes-selected-latency").assertTextEquals("— ms")
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
         compose.onNodeWithTag("nodes-selected-region").assertContentDescriptionEquals("节点标注地区：日本")
         compose.runOnIdle { assertEquals(0, measurements.get()); assertEquals(1, reads.get()) }
@@ -149,14 +149,14 @@ class NodeRegionLatencyUiTest {
         launch(width = 320)
         compose.waitUntil(5000) { measurements.get() == 2 }
         badge(1).assertTextEquals("— ms")
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
+        compose.runOnIdle { assertTrue(latency.busy) }
         val selected = state.snapshot.choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().assertIsEnabled().performClick()
         compose.runOnIdle { assertSame(selected, state.snapshot.selected); gate.complete(Unit) }
         awaitObservation(1)
         badge(1).assertTextEquals("27 ms")
         compose.onNodeWithTag("nodes-selected-latency").assertTextEquals("27 ms")
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
+        compose.runOnIdle { assertFalse(latency.busy) }
         compose.runOnIdle { showPanel = false }
         compose.runOnIdle { assertFalse(latency.busy); showPanel = true }
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
@@ -170,20 +170,21 @@ class NodeRegionLatencyUiTest {
         capture("node-region-320-font100")
     }
 
-    @Test fun noReplyRemainsSelectableAndExplicitRemeasureDoesNotReloadConfig() {
+    @Test fun noReplyRemainsSelectableAndControllerRemeasureDoesNotReloadConfig() {
         response = { NodeLatencyObservation.NoReply }
         launch()
         awaitObservation(0)
-        badge(0).assertTextEquals("未回应")
-        compose.onNodeWithTag("nodes-latency-hint").assertTextEquals("Ping 延迟 · 未回应仍可尝试连接")
+        badge(0).assertTextEquals("— ms")
+        compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()
         val selected = state.snapshot.choices[0].selection
+        compose.runOnIdle { assertSame(NodeLatencyObservation.NoReply, latency.reading(selected)) }
         compose.onNodeWithTag("node-choice-0").performScrollTo().assertIsEnabled().performClick().assertIsSelected()
         compose.runOnIdle {
             assertSame(selected, state.snapshot.selected)
             elapsed.addAndGet(30_000L) // Explicit refresh cooldown has elapsed on this fake clock.
             response = { NodeLatencyObservation.Success(19L, 7L) }
         }
-        compose.onNodeWithTag("nodes-latency-refresh").performScrollTo().performClick()
+        compose.runOnIdle { latency.refresh() }
         compose.waitUntil(5000) {
             latency.reading(selected) == NodeLatencyObservation.Success(19L, 7L) && !latency.busy
         }
@@ -201,7 +202,7 @@ class NodeRegionLatencyUiTest {
         compose.waitUntil(5000) { measurements.get() == 2 }
         compose.runOnIdle { accountBusy = true }
         compose.waitUntil(5000) { !latency.busy }
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").assertIsNotEnabled()
         compose.runOnIdle { gate.complete(Unit) }
         badge(0).assertTextEquals("— ms")
@@ -244,7 +245,7 @@ class NodeRegionLatencyUiTest {
         compose.waitUntil(5000) { !latency.busy }
         compose.runOnIdle { accountBusy = true }
         compose.runOnIdle { accountBusy = false }
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
         badge(0).assertTextEquals("— ms")
         compose.runOnIdle { assertEquals(2, measurements.get()); latency.setForeground(true) }
         compose.waitUntil(5000) { measurements.get() == 4 }
@@ -261,11 +262,16 @@ class NodeRegionLatencyUiTest {
             .assertContentDescriptionEquals("节点标注地区：日本")
         compose.onNodeWithTag("subscription-node-latency-0", useUnmergedTree = true).assertTextEquals("— ms")
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
-        compose.runOnIdle { assertEquals(0, measurements.get()); assertEquals(1, reads.get()) }
+        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.UNSUPPORTED, state.snapshot.status)
+            assertTrue(state.snapshot.choices.isEmpty())
+            assertNull(state.snapshot.selected)
+            assertEquals(0, measurements.get()); assertEquals(1, reads.get())
+        }
     }
 
-    @Test fun narrowDoubledFontKeepsRegionLatencyAndRemeasureActionInsideTheViewport() {
+    @Test fun narrowDoubledFontKeepsRegionLatencyAndSelectionInsideTheViewport() {
         launch(width = 320, fontScale = 2f)
         awaitObservation(1)
         val host = compose.onNodeWithTag("region-latency-host").fetchSemanticsNode().boundsInRoot
@@ -277,10 +283,8 @@ class NodeRegionLatencyUiTest {
         }
         badge(1).assertTextEquals("27 ms")
         row.performClick().assertIsSelected()
-        val button = compose.onNodeWithTag("nodes-latency-refresh")
-        button.performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
-        val bounds = button.fetchSemanticsNode().boundsInRoot
-        assertTrue(bounds.left >= host.left); assertTrue(bounds.right <= host.right)
+        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, reads.get()); assertEquals(2, measurements.get()) }
         capture("node-region-320-font200")
     }

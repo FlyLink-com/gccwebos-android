@@ -67,6 +67,10 @@ class OfficialWebsiteCardUiTest {
         show(fixture)
         compose.runOnIdle { assertEquals(emptyList<String>(), fixture.first); fixture.width = 340 }
         compose.onNodeWithTag("official-website-domain", useUnmergedTree = true).assertTextEquals("gccwebos.com")
+        compose.onNodeWithTag("official-website-title", useUnmergedTree = true).assertTextEquals("其他平台如何使用我们的订阅")
+        compose.onNodeWithTag("official-website-action", useUnmergedTree = true).assertTextEquals("点击官网了解更多")
+        compose.onNodeWithTag("official-website-robot", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("official-website-globe", useUnmergedTree = true).assertDoesNotExist()
         compose.runOnIdle { assertEquals(emptyList<String>(), fixture.first) }
         compose.onNodeWithTag("official-website-open").performClick()
         compose.runOnIdle { assertEquals(listOf("https://gccwebos.com"), fixture.first) }
@@ -98,7 +102,7 @@ class OfficialWebsiteCardUiTest {
         show(fixture)
         compose.onNodeWithTag("official-website-error").assertDoesNotExist()
         compose.onNodeWithTag("official-website-open").performClick()
-        compose.onNodeWithTag("official-website-error").assertTextEquals("暂时无法打开官网，请安装或启用浏览器后重试。")
+        compose.onNodeWithTag("official-website-error").assertTextEquals("暂时无法打开官网")
         compose.mainClock.advanceTimeBy(8_000)
         compose.runOnIdle { assertEquals(1, fixture.first.size); missing = false }
         compose.onNodeWithTag("official-website-open").assertIsEnabled().performClick()
@@ -144,9 +148,9 @@ class OfficialWebsiteCardUiTest {
         val fixture = Fixture()
         show(fixture)
         compose.waitForIdle()
-        val before = compose.onNodeWithTag("official-website-globe", useUnmergedTree = true).captureToImage().toPixelMap()
+        val before = compose.onNodeWithTag("official-website-robot", useUnmergedTree = true).captureToImage().toPixelMap()
         compose.mainClock.advanceTimeBy(3_500)
-        val after = compose.onNodeWithTag("official-website-globe", useUnmergedTree = true).captureToImage().toPixelMap()
+        val after = compose.onNodeWithTag("official-website-robot", useUnmergedTree = true).captureToImage().toPixelMap()
         assertEquals(before.width, after.width)
         assertEquals(before.height, after.height)
         for (y in 0 until before.height) for (x in 0 until before.width) assertEquals(before[x, y], after[x, y])

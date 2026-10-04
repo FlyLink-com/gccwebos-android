@@ -30,6 +30,28 @@ class NodeRegionTest {
         listOf("Japanology", "Canadian", "Singaporean", "Indianapolis", "Korea").forEach { assertNull(nodeRegion(it)) }
     }
 
+    @Test fun documentedRegionCodesUseTheExistingCaseInsensitiveLetterBoundaries() {
+        listOf("SGP", "sgp-01", "synthetic_sGp_relay", "[SGP] synthetic", "SGP01")
+            .forEach { assertRegion("SG", it) }
+        listOf("NRT", "nrt-01", "synthetic_nRt_relay", "[NRT] synthetic", "NRT01")
+            .forEach { assertRegion("JP", it) }
+        assertEquals("新加坡", nodeRegion("sgp-01")?.displayName)
+        assertEquals("日本", nodeRegion("nrt-01")?.displayName)
+    }
+
+    @Test fun regionCodesInsideLatinOrUnicodeWordsStayNeutral() {
+        listOf("ASGP", "SGPROXY", "syntheticSGP01", "sgpword", "ANRT", "NRTunnel",
+            "syntheticNRT01", "nrtword", "节点SGP", "NRT节点", "éSGP", "NRTé")
+            .forEach { assertNull(nodeRegion(it)) }
+    }
+
+    @Test fun regionCodeConflictsStayNeutralAndEquivalentLabelsAgree() {
+        listOf("SGP-NRT", "sgp [JP]", "nrt Singapore", "🇸🇬 NRT", "SGP-日本")
+            .forEach { assertNull(nodeRegion(it)) }
+        assertRegion("SG", "SGP Singapore [SG]")
+        assertRegion("JP", "NRT Japan [JP]")
+    }
+
     @Test fun isoCodesNeedAnExplicitPrefixOrBracketsAndNeverMatchWordFragments() {
         listOf("JP", "JP01", "JP-01", "JP_01", "JP 01", "[jp] synthetic", "合成【JP】", "合成（jp）", "synthetic (JP)")
             .forEach { assertRegion("JP", it) }

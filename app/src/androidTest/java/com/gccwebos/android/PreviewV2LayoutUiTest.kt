@@ -241,6 +241,11 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("connection-welcome").assert(hasAnyAncestor(hasTestTag("connection-account-surface")))
         compose.onNodeWithTag("account-usage-card").assert(hasAnyAncestor(hasTestTag("connection-account-surface")))
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-retry").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-primary-hint").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-validity-countdown").assertDoesNotExist()
+        compose.onNodeWithText("Ping", substring = false).assertDoesNotExist()
         capture("$prefix-connect")
 
         open("Lines")
@@ -291,7 +296,7 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("mine-about").assertExists()
         compose.onNodeWithTag("mine-more").assertDoesNotExist()
         compose.onNodeWithTag("mine-functions").assertDoesNotExist()
-        compose.onNodeWithTag("checkUpdate").assertExists() // Do not trigger an update check.
+        compose.onNodeWithTag("checkUpdate").assertDoesNotExist() // Offline fixture never reads a manifest.
         reachable("mine-back").performClick()
         reachable("mine-wallet").performClick()
         compose.onNodeWithTag("wallet-paid").assertTextEquals("17 Coins")

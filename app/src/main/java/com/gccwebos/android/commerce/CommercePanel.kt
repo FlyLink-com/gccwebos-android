@@ -393,9 +393,23 @@ private fun CatalogBenefit(label: String, value: String) {
 private data class CatalogSelection(val offer: Offer, val accountGeneration: Long)
 
 @Composable
+private fun CatalogCategoryChip(selected: Boolean, enabled: Boolean, title: String, tag: String, onClick: () -> Unit) {
+    FilterChip(selected = selected, onClick = onClick, enabled = enabled,
+        label = { Text(title, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) },
+        modifier = Modifier.heightIn(min = 44.dp).testTag(tag), shape = androidx.compose.foundation.shape.RoundedCornerShape(13.dp),
+        border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Brand.Cyan else Brand.Border),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Brand.SurfaceRaised, labelColor = Brand.Text,
+            selectedContainerColor = Brand.Cyan, selectedLabelColor = Brand.Background,
+            disabledContainerColor = Brand.SurfaceRaised, disabledLabelColor = Brand.Muted,
+            disabledSelectedContainerColor = Brand.SurfaceRaised,
+        ))
+}
+
+@Composable
 internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true,
     onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null, paymentOpener: ((String) -> Unit)? = null,
-    embeddedWallet: Boolean = false, defaultSelectionRequest: Int = 0) {
+    embeddedWallet: Boolean = false, defaultSelectionRequest: Int = 0, refreshRequest: Int = 0) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext), includeHistory = mode == CommerceMode.Orders) }
@@ -413,7 +427,9 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         mutableStateOf(false)
     }
     var handledVisit by remember(state, account.authSessionGeneration) { mutableStateOf<Int?>(null) }
-    val visitReady = mode != CommerceMode.Plans || handledVisit == defaultSelectionRequest
+    var handledRefresh by remember(state, account.authSessionGeneration, mode) { mutableStateOf<Int?>(null) }
+    val visitReady = (mode != CommerceMode.Plans || handledVisit == defaultSelectionRequest) &&
+        (!autoLoad || handledRefresh == refreshRequest)
     val displayOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
     var lastDisplayedOffers by remember(state, displayOwner) { mutableStateOf<List<Offer>>(emptyList()) }
     val displayOffers = when {
@@ -484,10 +500,10 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             }
         }
     }
-    LaunchedEffect(state, account.authSessionGeneration, accountReady, autoLoad, mode) {
+    LaunchedEffect(state, account.authSessionGeneration, accountReady, autoLoad, mode, refreshRequest) {
         // Login exposes the session before resource loading finishes. Account work can also
         // interrupt an existing read: revoke it, then reload once the same session is eligible.
-        if (!accountReady) state.pauseForAuthentication()
+        if (!accountReady) { handledRefresh = null; state.pauseForAuthentication() }
         if (autoLoad && accountReady) {
             // Commerce busy is not an effect key: completing/failing a read must not retry it.
             snapshotFlow { !state.busy && state.canOperate() }.first { it }
@@ -495,7 +511,9 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
                 if (mode == CommerceMode.Mine) state.loadBalance()
                 else if (walletMode) state.loadWallet()
                 else if (mode == CommerceMode.Ledger) state.loadLedger()
-                else if (!state.catalogLoaded) state.load()
+                else state.load()
+                snapshotFlow { !state.busy }.first { it }
+                if (state.canOperate()) handledRefresh = refreshRequest
             }
         }
     }
@@ -521,30 +539,22 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     if (!account.authenticated || account.restoring || account.foregroundCheckPending) {
+        if (account.restoring || account.foregroundCheckPending) return
         val message: @Composable ColumnScope.() -> Unit = {
-            Text(if (account.restoring || account.foregroundCheckPending) "正在验证登录"
-                else if(mode == CommerceMode.Wallet) "登录后查看钱包" else if(mode == CommerceMode.Orders) "登录后查看订单" else "登录后查看套餐")
-            SupportingText("价格、余额与可购买商品由服务器确认。")
+            Text(if(mode == CommerceMode.Wallet) "登录后查看钱包" else if(mode == CommerceMode.Orders) "登录后查看订单" else "登录后查看套餐")
         }
         if (embeddedWallet) Column(Modifier.testTag("commerce-signed-out"), content = message)
         else BrandCard(Modifier.testTag("commerce-signed-out"), content = message)
         return
     }
     if (mode == CommerceMode.Plans) {
-        if (!state.busy && (!state.catalogLoaded || state.error != null)) {
-            BrandButton("重试", {
-                if (state.catalogLoaded || selectedSnapshot != null) initialSelectionHandled = true
-                selectedSnapshot = null; selectionNotice = null
-                state.quote = null; state.load()
-            }, enabled = state.canOperate(), modifier = Modifier.testTag("commerce-refresh"))
-        }
-        if (!state.busy && !state.catalogLoaded) Text("商品尚未读取",
-            modifier = Modifier.testTag("catalog-status"), style = MaterialTheme.typography.bodyMedium)
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
+        // Preserve transaction feedback; ordinary initial-read failures only announce once.
+        if (state.pendingPurchase || state.catalogLoaded) {
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
+        } else CommerceReadNotice(state, state.error?.takeUnless { state.busy }, "commerce-error")
         selectionNotice?.let { SupportingText(it, Modifier.testTag("plan-selection-notice")) }
     } else if (mode != CommerceMode.Orders && mode != CommerceMode.Ledger && !walletMode) BrandCard(Modifier.testTag("commerce-status")) {
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
-        BrandButton("刷新钱包与套餐", state::load, enabled = !state.busy, modifier = Modifier.testTag("commerce-refresh"))
     }
     if (walletMode) {
         WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger, embeddedWallet)
@@ -552,19 +562,19 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     } else if (mode == CommerceMode.Plans) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             CatalogPeriod.entries.filter { it != CatalogPeriod.Other || displayOffers.any { offer -> offer.category == "plan" && catalogPeriod(offer) == it } }.forEach { term ->
-                FilterChip(selected = catalogCategory == "plan" && period == term, onClick = {
+                CatalogCategoryChip(selected = catalogCategory == "plan" && period == term, onClick = {
                     initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null
                     catalogCategory = "plan"; requestedPeriod = term
-                }, enabled = !state.busy, label = { Text(term.title) }, modifier = Modifier.testTag(term.tag))
+                }, enabled = !state.busy, title = term.title, tag = term.tag)
             }
-            FilterChip(selected = catalogCategory == "data_pack", onClick = { initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null; catalogCategory = "data_pack" }, enabled = !state.busy,
-                label = { Text("流量包") }, modifier = Modifier.testTag("catalog-data-packs"))
+            CatalogCategoryChip(selected = catalogCategory == "data_pack", onClick = { initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null; catalogCategory = "data_pack" }, enabled = !state.busy,
+                title = "流量包", tag = "catalog-data-packs")
         }
         val shownOffers = displayOffers.filter {
             it.category == catalogCategory && (catalogCategory != "plan" || catalogPeriod(it) == period)
         }
-        if (shownOffers.isEmpty() && !state.busy) BrandCard {
-            Text(if (!state.catalogLoaded) "套餐尚未读取" else if (catalogCategory == "data_pack") "暂无可购流量包" else "暂无可购套餐",
+        if (shownOffers.isEmpty() && state.catalogLoaded && !state.busy) BrandCard {
+            Text(if (catalogCategory == "data_pack") "暂无可购流量包" else "暂无可购套餐",
                 style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("catalog-empty"))
         }
         if (!state.pendingPurchase && shownOffers.isNotEmpty()) {
@@ -704,10 +714,8 @@ internal fun AlipayButton(text: String, onClick: () -> Unit, enabled: Boolean = 
 }
 @Composable
 private fun HistoryState(size: Int?, busy: Boolean, label: String = "订单") {
-    if (busy && size == null) Spacer(Modifier.height(14.dp))
-    else if (size == null || size == 0) BrandCard {
-        Text(if (size == null) "${label}尚未读取" else if (label == "订单") "暂无这类订单" else "暂无${label}记录", style = MaterialTheme.typography.titleMedium)
-        SupportingText(if (size == null) "查询失败或尚未完成不代表没有订单，请重试。" else "这里只展示服务器返回的记录。")
+    if (!busy && size == 0) BrandCard {
+        Text(if (label == "订单") "暂无这类订单" else "暂无${label}记录", style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -718,7 +726,7 @@ private fun HistoryState(size: Int?, busy: Boolean, label: String = "订单") {
 internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, stateOverride: CommerceController? = null,
     onReturnToPlans: (() -> Unit)? = null, telegramOpener: ((String) -> Unit)? = null,
     referralOverride: ReferralController? = null, copyOverride: ((String) -> Unit)? = null,
-    recoveryOverride: CommerceRecovery? = null, paymentOpener: ((String) -> Unit)? = null) {
+    recoveryOverride: CommerceRecovery? = null, paymentOpener: ((String) -> Unit)? = null, refreshRequest: Int = 0) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sessionOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
@@ -734,13 +742,13 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     if (view == "about") {
         BrandCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            com.gccwebos.android.update.UpdatePanel()
+            com.gccwebos.android.update.UpdatePanel(autoCheck = autoLoad, refreshRequest = refreshRequest)
         }
     } else if (view == "security") {
         com.gccwebos.android.portal.AccountPanel(account, compactLogin = true)
-        com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad)
+        com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad, refreshRequest)
     } else if (view == "referral") {
-        ReferralPanel(account, autoLoad, referralOverride, copyOverride)
+        ReferralPanel(account, autoLoad, referralOverride, copyOverride, refreshRequest)
     } else if (view != "mine") {
         if (view == "history") {
             Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -759,7 +767,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             "wallet", "recharge" -> CommerceMode.Wallet
             else -> CommerceMode.Mine
         }
-        CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener,
+        CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener, refreshRequest = refreshRequest,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
             onLedger = { if (account.authenticated) {
                 view = "history"; historyTab = "ledger"
@@ -769,7 +777,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     if (view == "mine") BrandCard(Modifier.testTag("mine-surface")) {
         MineWelcomeCard(account, embedded = true)
         HorizontalDivider(color = Brand.RowDivider)
-        CommercePanel(account, CommerceMode.Mine, state, autoLoad, paymentOpener = paymentOpener, embeddedWallet = true,
+        CommercePanel(account, CommerceMode.Mine, state, autoLoad, paymentOpener = paymentOpener, embeddedWallet = true, refreshRequest = refreshRequest,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
             onLedger = { if (account.authenticated) {
                 view = "history"; historyTab = "ledger"

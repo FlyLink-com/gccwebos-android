@@ -32,15 +32,10 @@ internal fun LedgerPanel(account: AccountController, state: CommerceController) 
     BrandCard(Modifier.testTag("ledger-container")) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("账单明细", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-            if (showReadRetry(state.busy, state.canOperate(), state.error != null, rows == null)) {
-                BrandButton("重试", { selectedEntry = null; state.loadLedger() },
-                    modifier = Modifier.width(88.dp).testTag("ledger-refresh"))
-            }
         }
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("ledger-error")) }
+        CommerceReadNotice(state, state.error?.takeUnless { state.busy }, "ledger-error")
         when {
-            state.busy -> Spacer(Modifier.height(8.dp))
-            rows == null -> SupportingText("账单尚未读取", Modifier.testTag("ledger-unread"))
+            state.busy || rows == null -> Unit
             rows.isEmpty() -> SupportingText("暂无账单", Modifier.testTag("ledger-empty"))
         }
         if (state.currentSession()) rows?.groupBy { ledgerDate(it.occurredAt) }?.forEach { (date, entries) ->

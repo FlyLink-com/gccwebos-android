@@ -23,10 +23,12 @@ interface LocalConfigGateway {
     suspend fun prepare(intent: SelectionIntent): ConfigPreparation
     fun invalidatePending()
     fun observeClear(onClear: () -> Unit): java.io.Closeable
+    /** Serialized lifecycle cleanup, including a failed/denied attempt before TUN ownership. */
+    fun clearPreparedMaterial() = Unit
 }
 enum class TunnelTerminal { ENGINE_DIED, PERMISSION_REVOKED }
 
-/** Fake-adapter contract only. Returning true means the bounded synchronous engine boundary
+/** Returning true means the bounded synchronous engine boundary
  * has accepted/copied the bytes. Enqueueing an Android Intent is NOT an implementation.
  * The callback belongs to this acceptance generation, including partial/failed acceptance.
  */
@@ -34,6 +36,13 @@ interface LifecycleTunnel : AtomicActivationTunnel {
     fun accept(config: AuthorizedConfig, terminal: (TunnelTerminal) -> Unit): Boolean
     override fun startAtomically(config: AuthorizedConfig): Boolean = error("Generation callback required")
     override suspend fun start(config: AuthorizedConfig): Boolean = error("Atomic acceptance required")
+}
+
+/** Optional transport allocation. The coordinator owns cleanup before invoking this boundary,
+ * outside the capability/command acceptance fences. Success does not mean engine acceptance.
+ */
+interface TunnelPreparation {
+    suspend fun prepareTransport(): Boolean
 }
 
 /** Safe typed activation failure; never carries raw response/configuration details. */

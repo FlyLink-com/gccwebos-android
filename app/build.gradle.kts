@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -16,12 +18,22 @@ android {
         versionCode = 6
         versionName = "0.4.0-mobile-parity"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["connectionAppLabel"] = "@string/app_name"
+        val packagedEngine = listOf("arm64-v8a", "x86_64").all {
+            rootProject.file("native/build/jniLibs/$it/libgccmihomo.so").isFile
+        }
+        buildConfigField("boolean", "VPN_ENGINE_PACKAGED", packagedEngine.toString())
     }
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            val candidate = providers.gradleProperty("connectionCandidate").orNull == "true"
+            val synthetic = providers.gradleProperty("connectionSyntheticAcceptance").orNull == "true"
+            require(!synthetic || candidate) { "Synthetic connection acceptance requires a separate candidate package" }
+            buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", synthetic.toString())
+            applicationIdSuffix = if (candidate) ".candidate" else ".debug"
+            versionNameSuffix = if (candidate) "-connection-candidate" else "-debug"
+            if (candidate) manifestPlaceholders["connectionAppLabel"] = "飞连 VPN 测试"
             val nativeLab = providers.gradleProperty("nativeVpnLab").orNull == "true"
             buildConfigField("boolean", "NATIVE_VPN_LAB", nativeLab.toString())
             val realTun = providers.gradleProperty("nativeTunAcceptance").orNull == "true"
@@ -30,6 +42,7 @@ android {
             manifestPlaceholders["nativeVpnLabEnabled"] = nativeLab.toString()
         }
         release {
+            buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", "false")
             buildConfigField("boolean", "NATIVE_VPN_LAB", "false")
             buildConfigField("boolean", "NATIVE_TUN_ACCEPTANCE", "false")
             isMinifyEnabled = false
@@ -43,13 +56,41 @@ android {
     }
     buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = true }
-    sourceSets.getByName("test").resources.srcDir("../native/bridge/testdata")
-    sourceSets.getByName("test").kotlin.srcDir("src/acceptanceFixtures/java")
+    sourceSets.getByName("test").resources.directories.add("../native/bridge/testdata")
+    // Verified libraries are generated/materialized separately; no old APK is reused.
+    sourceSets.getByName("main").jniLibs.directories.add("../native/build/jniLibs")
+    sourceSets.getByName("main").assets.directories.add("../native/notices")
+    sourceSets.getByName("test").kotlin.directories.add("src/acceptanceFixtures/java")
     if (providers.gradleProperty("nativeTunAcceptance").orNull == "true") {
-        sourceSets.getByName("androidTest").kotlin.srcDirs("src/acceptanceTest/java", "src/acceptanceFixtures/java")
-        sourceSets.getByName("androidTest").java.srcDir("src/acceptanceTest/java")
+        sourceSets.getByName("androidTest").kotlin.directories.addAll(listOf("src/acceptanceTest/java", "src/acceptanceFixtures/java"))
+        sourceSets.getByName("androidTest").java.directories.add("src/acceptanceTest/java")
         sourceSets.getByName("androidTest").manifest.srcFile("src/acceptanceTest/AndroidManifest.xml")
     }
+    if (providers.gradleProperty("connectionSyntheticAcceptance").orNull == "true") {
+        sourceSets.getByName("androidTest").kotlin.directories.addAll(listOf("src/connectionAcceptanceTest/java", "src/acceptanceFixtures/java"))
+    }
+}
+
+// A device candidate must contain both verified ABIs, never a UI-only APK.
+if (providers.gradleProperty("connectionCandidate").orNull == "true") {
+    tasks.register("verifyConnectionCandidateLibraries") {
+        doLast {
+            val expected = mapOf(
+                "arm64-v8a" to "efe638604b4f54f76fbba85649027f6b72f67b0dab5d5c18d248a1de7e5920bb",
+                "x86_64" to "c2099755603a7784f1c935fc8151b418a5f6859dc8427daa65fd3021add8fe2b")
+            expected.forEach { (abi, digest) ->
+                val file = rootProject.file("native/build/jniLibs/$abi/libgccmihomo.so")
+                check(file.isFile) { "Materialize verified native libraries before building a connection candidate" }
+                val actual = MessageDigest.getInstance("SHA-256").digest(file.readBytes())
+                    .joinToString("") { "%02x".format(it) }
+                check(actual == digest) { "Native library identity mismatch for $abi" }
+            }
+            listOf("Mihomo-GPL-3.0.txt", "CMFA-GPL-3.0.txt").forEach {
+                check(rootProject.file("native/notices/$it").isFile) { "Required native license notice missing" }
+            }
+        }
+    }
+    tasks.named("preBuild").configure { dependsOn("verifyConnectionCandidateLibraries") }
 }
 
 // Pinned to an official documented stable BOM. Original 2026.09.00 was not

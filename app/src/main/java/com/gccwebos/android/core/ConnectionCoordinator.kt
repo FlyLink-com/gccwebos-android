@@ -1,6 +1,7 @@
 package com.gccwebos.android.core
 
 import java.io.Closeable
+import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -48,6 +49,7 @@ data class AccessDecision(val block: BusinessBlock? = null)
  * close() wipes the coordinator's copy, not the caller's constructor argument.
  */
 class AuthorizedConfig(val lineId: String, material: ByteArray,
+    val validUntil: Instant? = null,
     private val activationGuard: (((() -> Boolean)) -> Boolean)? = null) : Closeable {
     private val bytes = material.copyOf()
     private var closed = false
@@ -97,7 +99,7 @@ interface TunnelGateway {
 
 /** Bounded synchronous acceptance boundary for fresh preparation. It must accept/copy bytes
  * before returning, with no deferred start or suspension. Real native activation needs its own
- * cancellation/watchdog contract; no production implementation exists in this slice.
+ * cancellation/watchdog contract; AndroidVpnTunnel supplies the remote implementation.
  */
 interface AtomicActivationTunnel : TunnelGateway {
     fun startAtomically(config: AuthorizedConfig): Boolean
@@ -136,7 +138,7 @@ class ConnectionCoordinator(
     private val timeouts: ConnectionTimeouts = ConnectionTimeouts(),
     private val local: LocalConfigGateway? = null,
 ) {
-    /** Account-independent local capability path; production adapters are not installed. */
+    /** Account-independent local capability path, shared by production and offline contracts. */
     constructor(config: LocalConfigGateway, permission: PermissionGateway, tunnel: LifecycleTunnel,
         probe: TrafficProbe, parentScope: CoroutineScope, timeouts: ConnectionTimeouts = ConnectionTimeouts()) :
         this(null, null, null, permission, tunnel, probe, parentScope, timeouts, config)
@@ -151,10 +153,13 @@ class ConnectionCoordinator(
     private var sequence = 0L
     private var current: Ticket? = null
     private var closed = false
+    private var retirement: Ticket? = null
+    @Volatile private var retirementAdmissionFailed = false
     private var lastRequestedLine: String? = null
     private var lastSelection: SelectionIntent = SelectionIntent.Choose
     // Only accessed while holding lifecycle. True is deliberately retained on cleanup failure.
     @Volatile private var tunnelMayBeRunning = false
+    @Volatile private var preparedMaterialMayExist = false
     private val clearObservation = try { local?.observeClear {
         synchronized(commandLock) {
             if (!closed && owner.isActive) submit(null, Operation.CONNECT, disconnect = true)
@@ -165,8 +170,13 @@ class ConnectionCoordinator(
         require(local != null || (account != null && entitlement != null && config != null))
         require(local == null || tunnel is LifecycleTunnel)
         owner.invokeOnCompletion {
-            local?.invalidatePending()
-            if (!tunnelMayBeRunning) clearObservation?.close()
+            try { local?.invalidatePending() }
+            catch (_: Exception) {
+                // Completion must not interrupt cancel/join and skip the actual cleanup below.
+                retirementAdmissionFailed = true
+                mutableState.value = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+            }
+            if (!retirementAdmissionFailed && !tunnelMayBeRunning && !preparedMaterialMayExist) clearObservation?.close()
         }
     }
 
@@ -225,19 +235,25 @@ class ConnectionCoordinator(
 
     suspend fun disconnect(): ConnectionState = await(submit(null, Operation.CONNECT, disconnect = true))
 
-    /** Call from the lifecycle owner. Safe to repeat. No new commands are admitted afterwards. */
-    suspend fun close(): ConnectionState {
-        val ticket = synchronized(commandLock) {
-            if (closed || !owner.isActive) {
-                closed = true
-                null
-            } else {
-                // submit's monitor is re-entrant. Reserve the final stop before closing admission.
-                val next = submit(null, Operation.CONNECT, disconnect = true)
-                closed = true
-                next
-            }
+    /** Reserve the existing final stop synchronously before an Android lifecycle callback returns.
+     * This closes command admission immediately; it does not release the cleanup/authority lease. */
+    fun beginClose() = synchronized(commandLock) {
+        if (!closed) {
+            try {
+                if (owner.isActive) retirement = submit(null, Operation.CONNECT, disconnect = true)
+            } catch (_: Exception) {
+                retirementAdmissionFailed = true
+                owner.cancel() // Fence any old worker even when final-stop submission failed.
+                mutableState.value = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+            } finally { closed = true }
         }
+        Unit
+    }
+
+    /** Call from the lifecycle owner. Safe to repeat; every caller awaits the same final stop. */
+    suspend fun close(): ConnectionState {
+        beginClose()
+        val ticket = synchronized(commandLock) { retirement }
         return withContext(NonCancellable) {
             if (ticket != null) ticket.result.await()
             owner.cancel()
@@ -247,8 +263,13 @@ class ConnectionCoordinator(
                     mutableState.value = if (stopSafely()) ConnectionState.Disconnected
                         else ConnectionState.Failed(Failure.CLEANUP_FAILED)
                 }
+                if (!tunnelMayBeRunning && preparedMaterialMayExist) {
+                    mutableState.value = if (clearPreparedSafely()) ConnectionState.Disconnected
+                        else ConnectionState.Failed(Failure.CLEANUP_FAILED)
+                }
             }
-            if (!tunnelMayBeRunning) clearObservation?.close()
+            if (retirementAdmissionFailed) mutableState.value = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+            if (!retirementAdmissionFailed && !tunnelMayBeRunning && !preparedMaterialMayExist) clearObservation?.close()
             state.value
         }
     }
@@ -331,6 +352,9 @@ class ConnectionCoordinator(
                 if (tunnelMayBeRunning && !stopSafely()) {
                     throw Abort(ConnectionState.Failed(Failure.CLEANUP_FAILED))
                 }
+                if (preparedMaterialMayExist && !clearPreparedSafely()) {
+                    throw Abort(ConnectionState.Failed(Failure.CLEANUP_FAILED))
+                }
                 checkpoint(ticket)
                 if (ticket.disconnect) return@withLock
 
@@ -353,7 +377,10 @@ class ConnectionCoordinator(
                 // Capture ownership inside the timed block; late material is always wiped.
                 val authorized = step(Step.CONFIG) {
                     if (local == null) requireNotNull(config).forLine(ticket.lineId).also { material = it }
-                    else when (val result = local.prepare(requireNotNull(ticket.selection))) {
+                    else when (val result = run {
+                        preparedMaterialMayExist = true // A failed preparation can still finish its write.
+                        requireNotNull(local).prepare(requireNotNull(ticket.selection))
+                    }) {
                         is ConfigPreparation.Ready -> result.config.also { material = it }
                         is ConfigPreparation.Unavailable -> throw Abort(ConnectionState.Failed(
                             Failure.PREPARATION_FAILED, result.reason))
@@ -373,6 +400,10 @@ class ConnectionCoordinator(
                 val started = step(Step.TUNNEL) {
                     ownsNewTunnel = true
                     tunnelMayBeRunning = true // start may partially allocate, even when it fails.
+                    if (tunnel is TunnelPreparation && !tunnel.prepareTransport()) {
+                        throw Abort(ConnectionState.Failed(Failure.TUNNEL_FAILED))
+                    }
+                    checkpoint(ticket)
                     if (authorized.requiresAtomicActivation) {
                         val atomic = tunnel as? AtomicActivationTunnel
                             ?: throw IllegalStateException("Atomic activation adapter required")
@@ -427,6 +458,8 @@ class ConnectionCoordinator(
             } finally {
                 material?.close()
                 if (ownsNewTunnel && !stopSafely()) outcome = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+                if (!tunnelMayBeRunning && preparedMaterialMayExist && !clearPreparedSafely())
+                    outcome = ConnectionState.Failed(Failure.CLEANUP_FAILED)
                 // Still inside lifecycle: no newer start can race old cleanup.
                 publish(ticket, outcome)
                 ticket.result.complete(outcome)
@@ -441,7 +474,7 @@ class ConnectionCoordinator(
                 var outcome: ConnectionState = ConnectionState.Disconnected
                 if (lifecycle.tryLock()) {
                     try {
-                        if (tunnelMayBeRunning) outcome = ConnectionState.Failed(Failure.CLEANUP_FAILED)
+                        if (tunnelMayBeRunning || preparedMaterialMayExist) outcome = ConnectionState.Failed(Failure.CLEANUP_FAILED)
                         publish(ticket, outcome)
                     } finally { lifecycle.unlock() }
                 }
@@ -469,5 +502,14 @@ class ConnectionCoordinator(
             tunnelMayBeRunning = true
             false
         }
+    }
+
+    private fun clearPreparedSafely(): Boolean = try {
+        local?.clearPreparedMaterial()
+        preparedMaterialMayExist = false
+        true
+    } catch (_: Exception) {
+        preparedMaterialMayExist = true
+        false
     }
 }

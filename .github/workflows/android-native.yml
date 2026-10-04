@@ -109,14 +109,12 @@ jobs:
       - name: Stage validated native libraries for fresh app packaging
         run: |
           set -euo pipefail
-          mkdir -p app/src/debug/jniLibs/{arm64-v8a,x86_64}
           for abi in arm64-v8a x86_64; do
-            cp "native/build/jniLibs/$abi/libgccmihomo.so" "app/src/debug/jniLibs/$abi/"
             cp "native/build/jniLibs/$abi/elf-program-headers.txt" ".build-output/native/$abi-elf-program-headers.txt"
             cp "native/build/jniLibs/$abi/elf-dynamic.txt" ".build-output/native/$abi-elf-dynamic.txt"
           done
-          sha256sum app/src/debug/jniLibs/*/*.so | tee .build-output/native/libraries.sha256
-      - name: Compile opt-in lab APK and verify release exclusion
+          sha256sum native/build/jniLibs/*/*.so | tee .build-output/native/libraries.sha256
+      - name: Compile opt-in lab APK and verify production JNI and release lab exclusion
         run: |
           set -euo pipefail
           chmod +x gradlew scripts/*.sh

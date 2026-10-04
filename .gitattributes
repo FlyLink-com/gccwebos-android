@@ -1,3 +1,6 @@
 # Unified diff context intentionally contains a leading space before Go tabs and
 # empty context lines. Native preparation verifies the exact patch SHA-256.
 native/patches/*.patch -whitespace
+
+# Protocol negative tests intentionally mutate LF-delimited YAML fragments.
+native/bridge/testdata/protocol-contract/** text eol=lf

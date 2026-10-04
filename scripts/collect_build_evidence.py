@@ -76,7 +76,7 @@ manifest = {
     'device_tests': 'not_run_by_this_collector',
     'native_engine_embedded': bool(native_libraries),
     'native_libraries_sha256': native_libraries,
-    'real_vpn': 'debug_lab_only_runtime_unverified' if native_libraries else 'not_integrated',
+    'real_vpn': 'production_adapter_runtime_unverified' if native_libraries else 'engine_not_packaged',
     'production_or_store_release': False,
 }
 (OUT / 'build-manifest.json').write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + '\n')

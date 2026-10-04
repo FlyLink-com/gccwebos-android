@@ -22,7 +22,8 @@ import kotlin.concurrent.thread
 /** Test-only SS AEAD endpoint. Binds ONLY loopback and NEVER forwards or resolves a destination.
  * Every response is synthesized locally from a per-run nonce; no Internet server is involved.
  */
-class SyntheticSsFixture : AutoCloseable {
+class SyntheticSsFixture(private val dnsAnswerLastOctet: Int = 10) : AutoCloseable {
+    init { require(dnsAnswerLastOctet in 1..254) }
     private val random = SecureRandom()
     val password = "ephemeral-fixture-" + randomBytes(16).joinToString("") { "%02x".format(it) }
     val token = randomBytes(12).joinToString("") { "%02x".format(it) }
@@ -103,7 +104,7 @@ class SyntheticSsFixture : AutoCloseable {
                     require(q.copyOfRange(12, 12 + questionTail().size).contentEquals(questionTail()))
                     dnsRequests.incrementAndGet()
                     val response = q.copyOfRange(0, 2) + byteArrayOf(0x81.toByte(), 0x80.toByte(), 0, 1, 0, 1, 0, 0, 0, 0) +
-                        questionTail() + byteArrayOf(0xc0.toByte(), 12, 0, 1, 0, 1, 0, 0, 0, 1, 0, 4, 198.toByte(), 18, 0, 10)
+                        questionTail() + byteArrayOf(0xc0.toByte(), 12, 0, 1, 0, 1, 0, 0, 0, 1, 0, 4, 198.toByte(), 18, 0, dnsAnswerLastOctet.toByte())
                     stream.write(byteArrayOf((response.size shr 8).toByte(), response.size.toByte()) + response)
                 }
                 destination.contentEquals(byteArrayOf(1, 172.toByte(), 19, 0, 2, 3, 85)) -> {

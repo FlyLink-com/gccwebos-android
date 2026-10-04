@@ -1,13 +1,15 @@
-# GCC Web OS Android Mihomo JNI bridge (internal lab milestone)
+# GCC Web OS Android Mihomo JNI bridge
 
 This is a source-built native library, not a stub. It embeds Mihomo v1.19.31,
 commit `ab405bad5beeeac8b003bb01f60f134f6df54471`, with the `cmfa,with_gvisor`
 build tags and one small, recorded TUN descriptor-ownership patch.
 
-It is for the debug-only app-owned VPN lab. It does **not** establish release,
-production endpoint interoperability, Android device VPN behavior, or store readiness.
-The Android app must retain a production feature gate and use a fresh isolated
-`:vpn` process for each run. A watchdog must kill that process on blocked teardown.
+The bridge was initially verified in the debug-only app-owned VPN lab. The current
+[one-click candidate](../docs/one-click-vpn-connection.md) packages verified libraries
+for debug and unsigned release, and has passed synthetic Shadowsocks traffic on OPPO.
+External endpoint interoperability and store readiness remain unverified. The Android
+app retains packaging/API gates and uses a fresh isolated `:vpn` process for each run.
+A watchdog kills that process on blocked teardown.
 
 ## Reproduce
 
@@ -23,7 +25,9 @@ To use an existing identical Go version: `GO=/absolute/path/to/go`.
 4. After accepting the [Android SDK terms](https://developer.android.com/studio/terms),
    install `ndk;29.0.14206865` using Android SDK Manager. Set ANDROID_NDK_HOME to it.
 5. `./scripts/build-native.sh arm64-v8a x86_64`
-6. Copy only `build/jniLibs/<abi>/libgccmihomo.so` into the app's debug jniLibs.
+6. Keep `build/jniLibs/<abi>/libgccmihomo.so` in this generated directory. The app's
+   main source set packages it with GPL notices for debug and release. Candidate
+   builds require the approved library hashes; follow the linked candidate recipe.
    Do not commit toolchains, Go caches, fetched upstream source, or generated .so files.
 
 The artifact is Android API26+, uses Go1.27.1 and NDK r29, is stripped, and has
@@ -55,7 +59,7 @@ rejected. The proxy name and routing policy are fixed. Versioned protocol shapes
 are limited to SS AEAD, VLESS TCP TLS/Reality, Hysteria2 and TUIC v5; see
 [the strict field and unsupported-shape matrix](../docs/offline-protocol-contract.md).
 Explicit SS/VLESS UDP=false is preserved; HY2/TUIC have intrinsic UDP support.
-This parsing support does not enable production VPN or prove interoperability. Example:
+Parsing support alone does not prove endpoint interoperability. Example:
 
 ```json
 {"schemaVersion":1,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}
@@ -74,7 +78,8 @@ VpnService builder settings must match native settings:
 
 - MTU1500; IPv4 `172.19.0.1/30`; DNS `172.19.0.2`; route `0.0.0.0/0`
 - IPv6 `fdfe:dcba:9876::1/126`; route `::/0`; no allowFamily bypass
-- app-scoped allowed application for this lab; no device-wide production routing
+- app-scoped allowed application only for Lab/synthetic acceptance; the normal
+  one-click candidate uses the default routes without this application restriction
 - gVisor stack; auto-route and interface autodetection off
 
 Native duplicates the caller's TUN descriptor using F_DUPFD_CLOEXEC (minimum3).
@@ -112,8 +117,8 @@ This host simulation deliberately substitutes AF_UNIX datagram sockets for an
 Android VPN descriptor. It validates packet paths and native lifecycle, **not**
 Android VpnService consent, protected-loopback routing, underlying network changes,
 Doze, reconnect, OEM behavior, Android JNI invocation, or actual Android tunnel traffic.
-The app should continue to display ENGINE_RUNNING_UNVERIFIED until an Android
-packet-path test passes.
+The one-click app reports Connected only after a probe bound to its verified VPN
+Network succeeds. Host simulation alone cannot satisfy that runtime condition.
 
 ## Pins and licenses
 

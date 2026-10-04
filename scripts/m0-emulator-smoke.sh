@@ -60,6 +60,8 @@ printf 'no\n' | timeout 60 "$AVDMANAGER" --verbose create avd --force \
 timeout 30 "$AVDMANAGER" list avd 2>&1 | tee "$OUT/avd-manager-list.log"
 test -s "$ANDROID_AVD_HOME/gccwebos-m0.ini"
 test -s "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini"
+python3 scripts/test_m0_renderer.py
+cp "$ANDROID_AVD_HOME/gccwebos-m0.avd/config.ini" "$OUT/avd-config.ini"
 timeout 30 "$EMULATOR" -list-avds 2>&1 | tee "$OUT/avd-emulator-list.log"
 grep -Fxq gccwebos-m0 "$OUT/avd-emulator-list.log"
 df -h "$ANDROID_AVD_HOME" | tee "$OUT/disk-space.log"
@@ -74,7 +76,7 @@ HOST_MEMORY_KB=$(awk '/MemTotal:/ { print $2 }' /proc/meminfo)
 printf 'cores=%s memory_mb=%s\n' "$EMU_CORES" "$EMU_MEMORY" | tee "$OUT/emulator-resources.log"
 log 'AVD exists and is discoverable; launching emulator'
 "$EMULATOR" -avd gccwebos-m0 -port 5554 -no-window -no-audio -no-boot-anim \
-  -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none \
+  -no-snapshot -no-metrics -gpu swiftshader_indirect -feature -Vulkan -debug init -camera-back none -camera-front none \
   -accel on -cores "$EMU_CORES" -memory "$EMU_MEMORY" > "$OUT/emulator.log" 2>&1 &
 EMU_PID=$!
 cleanup() {
@@ -99,6 +101,18 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Offline adb commands must not wait indefinitely, including inside cleanup.
 adb() { timeout 45 "$ADB" -s emulator-5554 "$@"; }
+verify_renderer() {
+  local label="$1"
+  adb shell getprop ro.build.version.sdk > "$OUT/$label-api.log"
+  adb shell wm size > "$OUT/$label-size.log"
+  adb shell wm density > "$OUT/$label-density.log"
+  adb shell getprop ro.boot.hardware.vulkan > "$OUT/$label-boot-vulkan.log"
+  adb shell getprop ro.hardware.vulkan > "$OUT/$label-vulkan.log"
+  adb shell getprop debug.hwui.renderer > "$OUT/$label-hwui.log"
+  adb shell getprop ro.opengles.version > "$OUT/$label-gles.log"
+  adb shell getprop debug.renderengine.backend > "$OUT/$label-renderengine.log"
+  bash scripts/verify-m0-renderer.sh "$OUT" "$label"
+}
 sleep 1
 kill -0 "$EMU_PID" || { cat "$OUT/emulator.log"; exit 1; }
 log 'Waiting for emulator transport'
@@ -127,6 +141,7 @@ adb logcat -b main -b system -b events -b crash -d > "$OUT/first-boot-logcat.log
 adb shell dumpsys activity lastanr > "$OUT/first-boot-last-anr.log"
 adb shell dumpsys window > "$OUT/first-boot-window.log"
 adb exec-out screencap -p > "$OUT/first-boot.png"
+verify_renderer first-boot
 log 'Rebooting only the owned disposable AVD once; application is not installed yet'
 adb reboot
 timeout 180 "$ADB" -s emulator-5554 wait-for-device
@@ -149,6 +164,7 @@ adb logcat -b main -b system -b events -b crash -d > "$OUT/post-warmboot-logcat.
 adb shell dumpsys activity lastanr > "$OUT/post-warmboot-last-anr.log"
 adb shell dumpsys window > "$OUT/post-warmboot-window.log"
 adb exec-out screencap -p > "$OUT/post-warmboot.png"
+verify_renderer post-warmboot
 if grep -Eq 'am_anr[[:space:]]*:|ANR in ' "$OUT/post-warmboot-logcat.log"; then
   log 'FAIL: ANR after the single warm boot; no further retry'
   exit 1

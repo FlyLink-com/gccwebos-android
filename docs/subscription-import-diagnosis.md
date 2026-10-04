@@ -28,10 +28,17 @@ The same source's ordinary debug package then completed the full local API36 sui
 
 Source-98 [M0 run37206973350](https://github.com/gccwebos-com/gccwebos-android/actions/runs/37206973350), attempts 1 and 2, each passed build/lint/test-APK compilation and 841 JVM tests with zero failures/errors/skips. Both stopped at `ANR_AFTER_SINGLE_PREINSTALL_WARM_BOOT`, identifying Android SystemUI before application installation. Neither started instrumentation; both ran zero device tests and did not reach the suite deadline. These remain failed platform gates, without establishing an application or subscription-import failure. The local full-suite result is recorded separately and does not rewrite either hosted failure.
 
+## Packaged native candidate on Android 16
+
+Application source `dedb9facca59b128fb094ce0250c396f0f2f1c9b` used the independently verified source-98 native artifact. Fresh candidate app/test builds and lint passed. The hidden, newly owned one-click package passed `OneClickVpnInstrumentedTest` on local API36: exactly one start/pass, no skips or failures, 9.852 seconds. It exercised the actual Activity, owner, permission flow, production service and remote JNI with a synthetic loopback SS peer. TCP, UDP and DNS traffic passed; navigation and Activity recreation retained the same connection; disconnect removed the remote/TUN; reconnect required a fresh remote and Network and another successful traffic probe. This is real native packet-path evidence, not a real account or TUIC endpoint handshake.
+
+The installed fixture app SHA256 was `5cfae180f8a1cf72daad86aa07c91ae9f797ab648f2033baad90ff5abcff753a`; test APK SHA256 was `2a20b94040334bc2613573e784724a627c7fa6c8a8d921afab6987ebf143fc6b`. Both installed hashes matched before and after the test. All 15 predefined private-file paths and both resource directories were absent before and after; the owned app/test were then removed with package absence confirmed.
+
+The separately rebuilt normal candidate has all synthetic/storage/lab/TUN acceptance switches disabled. Debug, release compilation, lint, both ABI/16-KiB packaging and release lab exclusion passed. Its APK SHA256 is `8e2c69febea326fecb4b82f453b62810753df8e335dab74bcd6a3d553fb41601`; the installed API36 copy matched, and its login page was opened for the user. Real subscription import and connection still require user-entered login. This normal package is retained and protected from uninstall or data clearing.
+
 ## Remaining acceptance
 
-1. Verify fresh native candidate packaging and the current PR's CI with all existing source/artifact checks enforced.
-2. While OPPO is unavailable, use the Android 16 emulator for native VPN admission, traffic proof, disconnect and reconnect, recording the exact candidate identity.
-3. With a user-entered login on the normal candidate, refresh the actual subscription and require the imported state before connecting. Record only fixed public status categories. If another option is rejected, audit its exact semantics rather than silently deleting arbitrary fields.
+1. Finish the current PR's hosted CI with all existing source/artifact checks enforced. The local acceptance above does not change the status of a hosted run.
+2. With a user-entered login on the normal candidate, refresh the actual subscription and require the imported state before connecting, disconnecting and reconnecting. Record only fixed public status categories. If another option is rejected, audit its exact semantics rather than silently deleting arbitrary fields.
 
 Actual configuration values, complete import success and endpoint reachability remain unknown. An emulator pass does not establish OPPO-specific lifecycle behavior. Existing logged-in application data remains protected; rollback uses the retained same-package/same-signer normal candidate without clearing data.

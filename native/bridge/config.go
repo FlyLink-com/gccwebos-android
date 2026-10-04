@@ -43,6 +43,7 @@ type inputProxy struct {
 	CongestionController *string       `json:"congestion-controller,omitempty"`
 	UDPRelayMode         *string       `json:"udp-relay-mode,omitempty"`
 	BBRProfile           *string       `json:"bbr-profile,omitempty"`
+	RequestTimeout       *int          `json:"request-timeout,omitempty"`
 }
 
 type inputReality struct {
@@ -62,7 +63,7 @@ var protocolFields = map[string]string{
 	"ss":        "name type server port cipher password udp",
 	"vless":     "name type server port uuid udp tls network servername client-fingerprint flow packet-encoding reality-opts skip-cert-verify",
 	"hysteria2": "name type server port password sni skip-cert-verify alpn up down obfs obfs-password bbr-profile",
-	"tuic":      "name type server port uuid password sni skip-cert-verify alpn congestion-controller udp-relay-mode bbr-profile",
+	"tuic":      "name type server port uuid password sni skip-cert-verify alpn congestion-controller udp-relay-mode bbr-profile request-timeout",
 }
 
 func parseInput(data []byte) (inputConfig, error) {
@@ -263,12 +264,20 @@ func safeProxyMap(p inputProxy) (map[string]any, error) {
 			putOptional(out, "obfs", p.Obfs)
 			putOptional(out, "obfs-password", p.ObfsPassword)
 		} else {
+			if p.RequestTimeout != nil && (*p.RequestTimeout < 0 || *p.RequestTimeout > 30000) {
+				return nil, errConfig
+			}
 			if !validUUID(p.UUID) || (p.CongestionController != nil && !containsWord("cubic new_reno bbr", *p.CongestionController)) || (p.UDPRelayMode != nil && !containsWord("native quic", *p.UDPRelayMode)) {
 				return nil, errConfig
 			}
 			out["uuid"] = *p.UUID // Token is never accepted, selecting TUIC v5 only.
 			putOptional(out, "congestion-controller", p.CongestionController)
 			putOptional(out, "udp-relay-mode", p.UDPRelayMode)
+			if p.RequestTimeout != nil {
+				// Format compatibility only: pinned TUIC v5 does not consume this
+				// millisecond option. Preserve explicit zero; missing stays absent.
+				out["request-timeout"] = *p.RequestTimeout
+			}
 		}
 	}
 	return out, nil

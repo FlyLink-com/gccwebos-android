@@ -165,7 +165,7 @@ object SafeProxyConfig {
             "ss" -> setOf("cipher", "password", "udp")
             "vless" -> setOf("uuid", "udp", "tls", "network", "servername", "client-fingerprint", "flow", "packet-encoding", "reality-opts") + tlsKeys
             "hysteria2" -> setOf("password", "sni", "alpn", "up", "down", "obfs", "obfs-password", "bbr-profile") + tlsKeys
-            "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode", "bbr-profile") + tlsKeys
+            "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode", "bbr-profile", "request-timeout") + tlsKeys
             else -> throw UnsafeProxyConfiguration(RejectionReason.Protocol)
         }
         keys(p, baseKeys + specific)
@@ -224,6 +224,12 @@ object SafeProxyConfig {
                     if ("obfs" in p) { require(p["obfs"] == "salamander"); out.put("obfs", "salamander").put("obfs-password", secret(p, "obfs-password")) }
                 } else {
                     out.put("uuid", uuid(p))
+                    // Bounded compatibility in milliseconds only; the pinned TUIC v5 core does not consume this field.
+                    if ("request-timeout" in p) {
+                        val timeout = p["request-timeout"]
+                        require(timeout is Int && timeout in 0..30000)
+                        out.put("request-timeout", timeout)
+                    }
                     if ("congestion-controller" in p) { require(p["congestion-controller"] in setOf("cubic", "new_reno", "bbr")); out.put("congestion-controller", p["congestion-controller"]) }
                     if ("udp-relay-mode" in p) { require(p["udp-relay-mode"] in setOf("native", "quic")); out.put("udp-relay-mode", p["udp-relay-mode"]) }
                 }

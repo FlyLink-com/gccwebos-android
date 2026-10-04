@@ -1,0 +1,40 @@
+mixed-port: 7897
+allow-lan: false
+mode: rule
+log-level: warning
+unified-delay: true
+tcp-concurrent: true
+global-client-fingerprint: chrome
+profile:
+  store-selected: true
+proxies:
+  - name: "Synthetic TUIC request timeout 30000"
+    type: tuic
+    server: "192.0.2.10"
+    port: 443
+    uuid: "22222222-2222-4222-8222-222222222222"
+    password: "synthetic-only"
+    sni: "fixture.example.invalid"
+    request-timeout: 30000
+    skip-cert-verify: false
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic TUIC request timeout 30000"
+  - name: FALLBACK
+    type: fallback
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic TUIC request timeout 30000"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - AUTO
+      - FALLBACK
+      - "Synthetic TUIC request timeout 30000"
+rules:
+  - MATCH,GLOBAL

@@ -67,6 +67,14 @@ supplies the profile to its BBR callback. The [TUIC controller dispatch](https:/
 uses the profile only for BBR; this bridge preserves an omitted or explicit TUIC
 congestion controller and never switches it to BBR. Arbitrary congestion/window
 tuning, TLS/authentication changes and other unsupported fields remain rejected.
+TUIC v5 also accepts optional `request-timeout` as a strict integer from 0 to
+30000 milliseconds, preserving an explicit zero and omitting a missing value.
+This bound is client compatibility policy. The pinned
+[adapter](https://github.com/MetaCubeX/mihomo/blob/ab405bad5beeeac8b003bb01f60f134f6df54471/adapter/outbound/tuic.go#L271)
+only passes this option to its v4 client; its v5 client does not consume it.
+Accepting this field does not add a v5 timeout feature or allow v4 authentication.
+Null, strings, floats, booleans, negative/out-of-range values, duplicate/alias
+keys and use on SS, VLESS or Hysteria2 remain rejected.
 Parsing support alone does not prove endpoint interoperability. Example:
 
 ```json

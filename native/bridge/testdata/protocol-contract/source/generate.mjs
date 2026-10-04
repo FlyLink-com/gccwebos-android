@@ -22,6 +22,10 @@ for (const profile of ['conservative', 'standard', 'aggressive']) {
 }
 fixtures['tuic-v5-cubic-bbr-profile'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC cubic BBR profile',congestionController:'cubic',bbrProfile:'aggressive'};
 fixtures['tuic-v5-default-bbr-profile'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC default BBR profile',bbrProfile:'standard'};
+// Compatibility integers only: the pinned TUIC v5 core does not consume request-timeout.
+for (const timeout of [0, 1, 8000, 30000]) {
+  fixtures[`tuic-v5-request-timeout-${timeout}`] = {...fixtures['tuic-v5-minimal'],name:`Synthetic TUIC request timeout ${timeout}`,requestTimeout:timeout};
+}
 fs.mkdirSync(new URL('../renderer/',import.meta.url),{recursive:true});
 for(const [name,server] of Object.entries(fixtures)) {
   const input={servers:[server]};

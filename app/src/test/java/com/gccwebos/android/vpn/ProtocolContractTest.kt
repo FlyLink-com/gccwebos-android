@@ -11,7 +11,8 @@ class ProtocolContractTest {
     private val positive = listOf("ss-minimal", "vless-reality", "hysteria2-minimal", "tuic-v5-minimal", "mixed", "vless-tls", "hysteria2-bounded-options", "tuic-v5-bounded-options", "ss-aes192",
         "hysteria2-bbr-conservative", "hysteria2-bbr-standard", "hysteria2-bbr-aggressive",
         "tuic-v5-bbr-conservative", "tuic-v5-bbr-standard", "tuic-v5-bbr-aggressive",
-        "tuic-v5-cubic-bbr-profile", "tuic-v5-default-bbr-profile")
+        "tuic-v5-cubic-bbr-profile", "tuic-v5-default-bbr-profile",
+        "tuic-v5-request-timeout-0", "tuic-v5-request-timeout-1", "tuic-v5-request-timeout-8000", "tuic-v5-request-timeout-30000")
     private fun resource(path: String): ByteArray = requireNotNull(javaClass.getResourceAsStream("/protocol-contract/$path")) { "Missing synthetic contract fixture" }.use { it.readBytes() }
     private fun yaml(name: String) = String(resource("renderer/$name.clash.yaml"), Charsets.UTF_8)
     private fun project(text: String, index: Int = 0) = JSONObject(String(SafeProxyConfig.project(text.toByteArray(), index)))
@@ -120,7 +121,7 @@ class ProtocolContractTest {
         reject(source.replace("    type: tuic", "    type: tuic\n    token: synthetic-only"))
         reject(source.replace("udp-relay-mode: \"quic\"", "udp-relay-mode: \"fallback\""))
         reject(source.replace("congestion-controller: \"bbr\"", "congestion-controller: \"unknown\""))
-        for (key in listOf("request-timeout", "heartbeat-interval", "max-open-streams", "ports", "hop-interval", "fast-open", "reduce-rtt")) reject(source.replace("    type: tuic", "    type: tuic\n    $key: 1"))
+        for (key in listOf("heartbeat-interval", "max-open-streams", "ports", "hop-interval", "fast-open", "reduce-rtt")) reject(source.replace("    type: tuic", "    type: tuic\n    $key: 1"))
     }
     @Test fun tlsNamesAlpnAndCrossProtocolFieldsAreStrict() {
         for (name in listOf("vless-reality", "hysteria2-minimal", "tuic-v5-minimal")) {

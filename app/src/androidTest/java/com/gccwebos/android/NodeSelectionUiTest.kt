@@ -179,6 +179,8 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接中")
         compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true) }
         compose.onNodeWithTag("nodes-connection-status").assertTextEquals("已连接")
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Disconnecting) }
+        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("断开中")
         compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Failed, canConnect = true) }
         compose.onNodeWithTag("nodes-connection-status").assertTextEquals("未连接")
         compose.runOnIdle { assertEquals(1, reads.get()); assertNull(state.snapshot.selected) }

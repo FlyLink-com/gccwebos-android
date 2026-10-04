@@ -1,22 +1,25 @@
 package com.gccwebos.android
 
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.imageResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.Resource
@@ -262,17 +265,16 @@ internal fun ConnectionOverview(
     val controlMode = showsConnectionCommand(local, control)
     val controlEnabled = onPowerAction != null && !acceptedCommand && local.action != ConnectionPowerAction.None &&
         (local.action != ConnectionPowerAction.Connect || !account.clearing)
-    Column(Modifier.fillMaxWidth().testTag("connection-overview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        BrandCard(Modifier.testTag("connection-account-surface")) {
+    Column(Modifier.fillMaxWidth().testTag("connection-overview"), verticalArrangement = Arrangement.spacedBy(15.dp)) {
+        BrandCard(Modifier.testTag("connection-account-surface"), contentPadding = PaddingValues(22.dp, 22.dp, 22.dp, 20.dp)) {
             ConnectionWelcome()
-            Text(local.connectionText, style = MaterialTheme.typography.bodySmall,
-                color = if (control.phase == ConnectionPhase.Connected) Brand.Green else Brand.Muted,
-                modifier = Modifier.testTag("connection-status"))
+            ConnectionStatusRow(local, display.planText.takeIf { account.authenticated }, Modifier.padding(top = 4.dp))
             if (snapshot.status == LocalSubscriptionStatus.MISSING && control.phase == ConnectionPhase.Failed)
                 Text(local.title, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("connection-failure"))
-            AccountUsageCard(display, authenticated = account.authenticated,
-                onRefresh = account::refreshAccountUsage, onLogin = openAccount, onRegister = openRegistration,
+            ConnectionUsageCard(display, authenticated = account.authenticated,
+                modifier = Modifier.padding(top = 15.dp),
+                onRefresh = account::refreshAccountUsage,
                 loading = account.busy || usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
                 error = usage.error, refreshEnabled = verifiedUsage && operable,
                 primaryLabel = setup.label,
@@ -322,7 +324,7 @@ internal fun ConnectionOverview(
                                 }
                             })
                 },
-                showPrimary = !controlMode, primaryTestTag = "vpn-connect", embedded = true)
+                showPrimary = !controlMode)
             if (account.authenticated && verifiedUsage && snapshot.status == LocalSubscriptionStatus.MISSING)
                 connectionSetupMessage(account.importStatus, account.error, account.busy)?.let { message ->
                     Text(message, color = if (account.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
@@ -338,7 +340,7 @@ internal fun ConnectionOverview(
             }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("connection-prepare-cancel")) { Text("取消准备") }
             if (usage.busy) TextButton(account::cancelAccountUsageUpdate,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-usage-cancel")) { Text("取消更新") }
-            if (controlMode) BrandButton(
+            if (controlMode) ConnectionActionButton(
                 when (local.action) {
                     ConnectionPowerAction.Connect -> "一键连接"
                     ConnectionPowerAction.Cancel -> "取消连接"
@@ -347,7 +349,7 @@ internal fun ConnectionOverview(
                 }, {
                     if (controlEnabled && !acceptedCommand) { acceptedCommand = true; onPowerAction?.invoke(local.action) }
                 }, enabled = controlEnabled,
-                modifier = Modifier.testTag("vpn-connect").semantics {
+                modifier = Modifier.padding(top = 13.dp).testTag("vpn-connect").semantics {
                     contentDescription = when (local.action) {
                         ConnectionPowerAction.Connect -> "一键连接"
                         ConnectionPowerAction.Disconnect -> "断开"
@@ -356,24 +358,35 @@ internal fun ConnectionOverview(
                     stateDescription = local.connectionText
                 })
         }
-        BrandCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) {
-            TextButton(onClick = openNodes, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
+        GlassSurface(shape = RoundedCornerShape(23.dp)) {
+            TextButton(onClick = openNodes, shape = RoundedCornerShape(23.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 19.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 77.dp).testTag("connection-nodes")) {
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val summary: @Composable (Modifier) -> Unit = { modifier ->
-                        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("当前节点", color = Brand.Muted, style = MaterialTheme.typography.labelSmall)
-                            Text(if (account.nodeSelection.busy) "正在刷新" else selectedNode?.name ?: "未选择",
-                                color = Brand.Text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("connection-node-name"))
-                            selectedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
-                                style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
+                        Row(modifier, verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Box(Modifier.size(39.dp).background(Brand.SurfaceRaised, RoundedCornerShape(13.dp)),
+                                contentAlignment = Alignment.Center) {
+                                Icon(painterResource(R.drawable.brand_globe), null, tint = Brand.Cyan,
+                                    modifier = Modifier.size(22.dp))
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
+                                Text(if (account.nodeSelection.busy) "正在刷新" else selectedNode?.name ?: "未选择",
+                                    color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.testTag("connection-node-name"))
+                                selectedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
+                                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
+                            }
                         }
                     }
                     if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) Column(Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        summary(Modifier.fillMaxWidth()); Text("选择节点 ›", modifier = Modifier.align(Alignment.End))
+                        summary(Modifier.fillMaxWidth()); Text("选择节点 ›", fontSize = 12.sp, modifier = Modifier.align(Alignment.End))
                     } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        summary(Modifier.weight(1f)); Text("选择节点 ›")
+                        summary(Modifier.weight(1f)); Text("选择节点 ›", fontSize = 12.sp)
                     }
                 }
             }
@@ -407,28 +420,57 @@ internal fun ConnectionOverview(
         } }, dismissButton = { TextButton({ showGuestChoice = false }) { Text("取消") } })
 }
 
-/** Draw only the upper 53% of the approved mobile asset; its old chest brand is excluded. */
+@Composable
+private fun ConnectionStatusRow(local: ConnectionOverviewPresentation, plan: String?, modifier: Modifier = Modifier) {
+    val tone = when (local.tone) {
+        ConnectionVisualTone.Connected -> Brand.Green
+        ConnectionVisualTone.Connecting -> Brand.Cyan
+        ConnectionVisualTone.Error -> MaterialTheme.colorScheme.error
+        ConnectionVisualTone.Neutral -> Brand.Muted
+    }
+    val status: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(Modifier.size(6.dp).background(tone, CircleShape))
+            Text(local.connectionText, color = tone, fontSize = 12.sp, modifier = Modifier.testTag("connection-status"))
+        }
+    }
+    val badge: @Composable () -> Unit = {
+        plan?.let {
+            Text(it, color = Brand.Muted, fontSize = 10.sp, letterSpacing = .4.sp,
+                modifier = Modifier.background(Brand.SurfaceRaised.copy(alpha = .45f), RoundedCornerShape(8.dp))
+                    .border(1.dp, Brand.RowDivider, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 5.dp)
+                    .testTag("account-usage-plan"))
+        }
+    }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        if (maxWidth < 260.dp || LocalDensity.current.fontScale >= 1.5f) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { status(); badge() }
+        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) { status(); badge() }
+    }
+}
+
+/** Exact V2 welcome asset; it already carries the current mobile brand. */
 @Composable
 private fun ConnectionWelcome() {
-    val robot = ImageBitmap.imageResource(R.drawable.brand_welcome_wave)
-    val sourceHeight = (robot.height * .53f).toInt().coerceAtLeast(1)
-    val greeting: @Composable (Modifier) -> Unit = { modifier ->
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("欢迎回来", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            SupportingText("飞连vpn·与你同行")
-        }
-    }
-    val image: @Composable (Modifier) -> Unit = { modifier ->
-        Canvas(modifier.width(82.dp).aspectRatio(robot.width.toFloat() / sourceHeight)) {
-            drawImage(robot, srcOffset = IntOffset.Zero, srcSize = IntSize(robot.width, sourceHeight),
-                dstSize = IntSize(size.width.toInt(), size.height.toInt()))
-        }
-    }
     BoxWithConstraints(Modifier.fillMaxWidth().testTag("connection-welcome")) {
-        if (maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.5f) Column(Modifier.fillMaxWidth(),
+        val compact = maxWidth < 300.dp
+        val greeting: @Composable (Modifier) -> Unit = { modifier ->
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("欢迎回来", fontSize = if (compact) 25.sp else 29.sp, lineHeight = if (compact) 34.sp else 39.sp,
+                    letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
+                Text("飞连vpn · 与你同行", color = Brand.Muted, fontSize = if (compact) 11.sp else 12.sp,
+                    letterSpacing = .45.sp)
+            }
+        }
+        val image: @Composable (Modifier) -> Unit = { modifier ->
+            Image(painterResource(R.drawable.brand_robot_welcome), contentDescription = null,
+                contentScale = ContentScale.Fit, modifier = modifier.size(if (compact) 88.dp else 108.dp))
+        }
+        if (maxWidth < 230.dp || LocalDensity.current.fontScale >= 1.5f) Column(Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             greeting(Modifier.fillMaxWidth()); image(Modifier.align(Alignment.End))
-        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) { greeting(Modifier.weight(1f)); image(Modifier) }
+        } else Row(Modifier.fillMaxWidth().heightIn(min = 102.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) { greeting(Modifier.weight(1f)); image(Modifier) }
     }
 }

@@ -37,7 +37,7 @@ internal object Brand {
     val RowDivider = GlassBorder.copy(alpha = .22f)
     val RowHighlight = Color.White.copy(alpha = .035f)
     val PriceAccent = Color(0xFFB8EEFF)
-    val Shape = RoundedCornerShape(22.dp)
+    val Shape = RoundedCornerShape(29.dp)
 }
 
 @Composable

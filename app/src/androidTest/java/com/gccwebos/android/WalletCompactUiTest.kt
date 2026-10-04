@@ -133,9 +133,11 @@ class WalletCompactUiTest {
         assertNoSideEffects()
     }
 
-    @Test fun mineUsesSameSixFieldsAndKeepsLargeRechargeAndLedgerTargets() {
+    @Test fun mineShowsOnlyServerSpendableBalanceAndKeepsLargeRechargeAndLedgerTargets() {
         launch(CommerceMode.Mine, width = 320, fontScale = 2f) { wallet = confirmed; walletLoaded = true }
-        assertConfirmedFields()
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("31 Coins")
+        tags.drop(1).forEach { compose.onNodeWithTag(it).assertDoesNotExist() }
+        compose.onNodeWithText("49 Coins").assertDoesNotExist()
         listOf("mine-recharge", "mine-ledger").forEach { tag ->
             val node = compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed()
             assertTrue(node.fetchSemanticsNode().boundsInRoot.height / densityScale >= 48f)

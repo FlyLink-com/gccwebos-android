@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.design.GlassMode
 import com.gccwebos.android.portal.*
+import com.gccwebos.android.vpn.SafeProxyConfig
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CompletableDeferred
@@ -47,6 +48,7 @@ class NodeSelectionUiTest {
     private var resource by mutableStateOf<Resource?>(null)
     private var hasCapability by mutableStateOf(true)
     private var connectionControl by mutableStateOf(ConnectionControlState())
+    private var inspectedNodes by mutableStateOf<List<SafeProxyConfig.NodeSummary>>(emptyList())
     private fun launch(initialRead: Boolean = true, width: Int = 360, fontScale: Float = 1f) {
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -66,7 +68,8 @@ class NodeSelectionUiTest {
                 }
                 manager = LocalSubscriptionManager(receipt, MemoryLocalProfileStore(), source,
                     OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { time }, LocalSubscriptionAuthority())
-                NodeSelectionController(manager, scope, { 0L }).also { state = it }
+                NodeSelectionController(manager, scope, { 0L }, onSnapshot = { inspectedNodes = it.nodes })
+                    .also { state = it }
             }
             LaunchedEffect(owner) { if (initialRead) owner.refresh() } // Explicit synthetic fixture setup only.
             val density = LocalDensity.current
@@ -74,7 +77,7 @@ class NodeSelectionUiTest {
                 GccTheme(materialMode = GlassMode.Solid) {
                     Column(Modifier.width(width.dp).fillMaxHeight().testTag("nodes-fixture-host")
                         .verticalScroll(rememberScrollState())) {
-                        NodeSelectionPanel(owner, manager.snapshot().nodes, resource, hasCapability, false,
+                        NodeSelectionPanel(owner, inspectedNodes, resource, hasCapability, false,
                             connectionControl = connectionControl) {}
                     }
                 }
@@ -159,6 +162,8 @@ class NodeSelectionUiTest {
         val second = state.snapshot.choices[1].selection
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         val host = compose.onNodeWithTag("nodes-fixture-host").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithTag("nodes-search").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-filter-all").assertDoesNotExist()
         val row = compose.onNodeWithTag("node-choice-1")
         row.performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(64.dp)
         val bounds = row.fetchSemanticsNode().boundsInRoot
@@ -168,6 +173,31 @@ class NodeSelectionUiTest {
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
+    }
+
+    @Test fun selectionSummaryTracksTheOriginalChoiceWithoutSearchFiltersOrAnotherRead() {
+        appendVlessNode()
+        launch()
+        val third = state.snapshot.choices[2].selection
+        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("未选择")
+        compose.onNodeWithTag("nodes-search").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-filter-all").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-count").assertTextEquals("3 条")
+        compose.onNodeWithTag("node-choice-2").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("Fixture Alpha")
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.runOnIdle { assertSame(third, state.snapshot.selected); assertEquals(1, reads.get()) }
+    }
+
+    private fun appendVlessNode() {
+        bytes += """  - name: Fixture Alpha
+    type: vless
+    server: 192.0.2.12
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+    servername: tls.fixture.invalid
+""".toByteArray()
     }
 
     @Test fun nodeCaptionTracksActualOwnerWithoutStartingAConnectionOrReloading() {

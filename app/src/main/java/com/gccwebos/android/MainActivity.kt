@@ -48,9 +48,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.*
 import com.gccwebos.android.commerce.CommerceMode
 import com.gccwebos.android.commerce.CommercePanel
+import com.gccwebos.android.commerce.CatalogDockState
+import com.gccwebos.android.commerce.CatalogPurchaseDock
+import com.gccwebos.android.commerce.LocalCatalogPurchaseDock
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.AccountPanel
 import com.gccwebos.android.portal.RegistrationController
@@ -58,7 +62,6 @@ import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.NodeSelectionPanel
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.productionRepository
-import com.gccwebos.android.update.UpdatePanel
 import com.gccwebos.android.vpn.ActivityVpnPermission
 import com.gccwebos.android.vpn.ConnectionOwnerService
 import java.time.Instant
@@ -228,6 +231,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
+    val catalogDock = remember { CatalogDockState() }
     BackHandler(enabled = selected != Destination.Connect) {
         if (selected == Destination.Profile && !account.authenticated &&
             (account.factorReference != null || account.busy)) account.cancelAuthentication()
@@ -240,11 +244,19 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                 val loginPage = selected == Destination.Profile && !account.authenticated && !account.retainingCommerceSession
                 val backdropModifier = if (loginPage) Modifier.fillMaxSize() else Modifier.widthIn(max = 680.dp).fillMaxSize()
                 BrandBackdrop(backdropModifier, loginPage = loginPage)
+                CompositionLocalProvider(LocalCatalogPurchaseDock provides catalogDock) {
                 Scaffold(containerColor = Color.Transparent, bottomBar = {
-                    Box(Modifier.fillMaxWidth().navigationBarsPadding()
-                        .padding(start = 14.dp, end = 14.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding()
+                        .padding(start = 14.dp, end = 14.dp, bottom = 10.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (selected == Destination.Plans) catalogDock.summary?.let { summary ->
+                            Column(Modifier.widthIn(max = 680.dp).fillMaxWidth().heightIn(max = 240.dp)
+                                .verticalScroll(rememberScrollState())) {
+                                CatalogPurchaseDock(summary, catalogDock::continuePurchase)
+                            }
+                        }
                         GlassSurface(Modifier.widthIn(max = 760.dp).fillMaxWidth().testTag("glass-navigation"),
-                            shape = RoundedCornerShape(25.dp), kind = GlassSurfaceKind.Navigation) {
+                            shape = RoundedCornerShape(24.dp), kind = GlassSurfaceKind.Navigation) {
                             // A minimum, not a fixed height: wrapped or enlarged labels grow this row.
                             Row(Modifier.fillMaxWidth().selectableGroup().heightIn(min = 70.dp).padding(horizontal = 6.dp, vertical = 7.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
@@ -276,6 +288,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         openRegistration = { startRegistration = true; selectedName = Destination.Profile.name },
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
                         loginStartupReady = loginStartupReady, registrationOverride = registrationOverride) }
+                }
                 }
 
             }
@@ -332,9 +345,9 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
         // Readable line lengths on tablets; no fixed-height account forms or data cards.
         Column(Modifier.widthIn(max = 680.dp).fillMaxSize()
-            .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = if (compact) 16.dp else 20.dp)
+            .verticalScroll(rememberScrollState()).padding(horizontal = 19.dp, vertical = if (compact) 16.dp else 20.dp)
             .testTag("page-${destination.name}"),
-            verticalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 18.dp)) {
+            verticalArrangement = Arrangement.spacedBy(if (compact) 15.dp else 18.dp)) {
             BrandHeader()
             when (destination) {
                 Destination.Connect -> {
@@ -342,14 +355,13 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         onConnectionPowerAction, openRegistration)
                 }
                 Destination.Lines -> {
-                    Text("订阅节点", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending,
                         authenticated = account.authenticated, connectionControl = connectionControlState, openAccount = openAccount)
                 }
                 Destination.Plans -> {
-                    Text("套餐", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    PageTitle("选择你的套餐", "先看流量和有效期，再决定怎么用")
                     if (!account.authenticated && !account.retainingCommerceSession) {
                         BrandCard(Modifier.testTag("commerce-signed-out")) {
                             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
@@ -365,7 +377,6 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         }
                     } else {
                         CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce, onRecharge = openAccount)
-                        if (account.authenticated) ResourceCard(account)
                     }
                 }
                 Destination.Orders -> {
@@ -375,11 +386,6 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 Destination.Profile -> {
                     com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans,
                         recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride)
-                    var details by remember(account.authSessionGeneration) { mutableStateOf(false) }
-                    TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-more")) {
-                        Text(if (details) "收起关于与更新" else "关于与更新")
-                    }
-                    if (details) BrandCard { UpdatePanel() }
                 }
             }
             if (!compact) Text(stringResource(R.string.build_stage), color = Brand.Muted,
@@ -395,7 +401,7 @@ private fun BrandHeader() {
         Image(painterResource(R.drawable.brand_robot_avatar), contentDescription = null,
             modifier = Modifier.size(42.dp), contentScale = ContentScale.Fit)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("飞连vpn", style = MaterialTheme.typography.titleLarge,
+            Text("飞连vpn", style = MaterialTheme.typography.titleLarge, fontSize = 25.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag("brand-name"))
             Box(Modifier.width(112.dp).height(3.dp).background(Brush.horizontalGradient(
                 listOf(androidx.compose.ui.graphics.Color(0xFFFF27DF), Brand.Blue, Brand.Cyan))))

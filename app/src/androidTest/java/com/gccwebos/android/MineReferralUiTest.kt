@@ -87,13 +87,42 @@ class MineReferralUiTest {
     }
     @Test fun largeFontMenusKeepMinimumTouchAndTelegramUsesOnlyTheExactChannelOnClick() {
         launchMine(font = 2f)
-        for (tag in listOf("mine-wallet", "mine-security", "mine-referral", "mine-telegram", "mine-signout")) {
+        for (tag in listOf("mine-wallet", "mine-security", "mine-referral", "mine-more", "mine-telegram", "mine-signout")) {
             val node = compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().fetchSemanticsNode()
             assertTrue(node.boundsInRoot.height / density >= 48f)
         }
         compose.runOnIdle { assertTrue(opened.isEmpty()) }
         compose.onNodeWithTag("mine-telegram").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf("https://t.me/flylinevpn"), opened); assertTrue(requests.isEmpty()); assertTrue(copied.isEmpty()) }
+    }
+    @Test fun aboutEntryBelongsToFunctionsAndNavigationDoesNotChangeAccountOrRequestData() {
+        launchMine(font = 2f)
+        val wallet = Wallet("active", 1, 43, 0, 0, 43, 7, 9)
+        val before = compose.runOnIdle {
+            commerce.wallet = wallet; commerce.walletLoaded = true
+            Triple(account.authSessionGeneration, account.resource, account.localSubscription)
+        }
+        repeat(2) {
+            compose.onNodeWithTag("mine-more").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+                .performScrollTo().assertIsDisplayed().performClick()
+            compose.onNodeWithTag("mine-about").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("mine-more").assertDoesNotExist()
+            compose.onNodeWithTag("mine-functions").assertDoesNotExist()
+            compose.onNodeWithTag("checkUpdate").performScrollTo().assertIsEnabled()
+            compose.onNodeWithTag("updateStatus").assertDoesNotExist()
+            compose.onNodeWithTag("mine-back").performScrollTo().assertIsDisplayed().performClick()
+            compose.onNodeWithTag("mine-about").assertDoesNotExist()
+            compose.onNodeWithTag("mine-back").assertDoesNotExist()
+            compose.onNodeWithTag("mine-more").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+            compose.onNodeWithTag("wallet-balance").assertTextEquals("43 Coins")
+        }
+        compose.runOnIdle {
+            assertTrue(account.authenticated); assertEquals(before.first, account.authSessionGeneration)
+            assertSame(before.second, account.resource); assertSame(before.third, account.localSubscription)
+            assertEquals("opaque_ui_account_fixture", account.account)
+            assertSame(wallet, commerce.wallet); assertFalse(account.busy); assertFalse(commerce.busy)
+            assertTrue(opened.isEmpty()); assertTrue(copied.isEmpty()); assertTrue(requests.isEmpty())
+        }
     }
     @Test fun dynamicPolicyReadAndUserCopyDoNotGenerateLinksOrChangeWallet() {
         launchReferral({ """{"profile":{"eligible":true,"linkPath":"$path","policy":{"policyRef":"referral_ui_policy","version":3,"effectiveAt":"2026-09-30T00:00:00.000Z","rateBps":735,"rounding":"floor","attributionDays":47,"confirmationDays":9},"attributionDays":47}}""" })

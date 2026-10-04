@@ -151,7 +151,7 @@ class SubscriptionWalletUiTest {
         }
     }
 
-    private fun launchShell(fontScale: Float = 1f, allowLoginChallenge: Boolean = false,
+    private fun launchShell(fontScale: Float = 1f, allowLoginChallenge: Boolean = false, catalog: List<Offer>? = null,
         setup: AccountController.() -> Unit = {}) {
         // Permitting an offline question does not mount the private login page.
         // Anonymous launch stays on Connect; only an explicit My action requests it.
@@ -160,9 +160,19 @@ class SubscriptionWalletUiTest {
             val scope = rememberCoroutineScope()
             val controller = remember { accountFixture(scope, allowLoginChallenge).apply(setup) }
             account = controller
+            val catalogState = remember(controller) { catalog?.let { fixtures ->
+                CommerceController(controller, scope, object : CommerceRecovery {
+                    override fun read(binding: String, kind: String): PendingCommerce? =
+                        throw AssertionError("Catalog rendering must not read recovery storage")
+                    override fun save(binding: String, value: PendingCommerce) =
+                        throw AssertionError("Catalog rendering must not create an order")
+                    override fun clear(binding: String, kind: String) =
+                        throw AssertionError("Catalog rendering must not clear recovery storage")
+                }).apply { offers = fixtures; catalogLoaded = true; commerceModel = CommerceModel.LEGACY }
+            } }
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                AppShell(accountOverride = controller, autoLoadCommerce = false)
+                AppShell(accountOverride = controller, autoLoadCommerce = false, commerceOverride = catalogState)
             }
         }
     }
@@ -343,10 +353,47 @@ class SubscriptionWalletUiTest {
         compose.runOnIdle { assertEquals(4, verifiedOverviewReads.get()) }
     }
 
-    @Test fun activeResourceHasDurationCountdownAndTruthfulTrafficStates() {
-        launchShell { resource = available() }
+    @Test fun plansShowServerCatalogWithoutRepeatingResourceAndKeepLocalExpirySeparate() {
+        val fixtures = offers()
+        launchShell(catalog = fixtures) { resource = available() }
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("resource-card").assertDoesNotExist()
+        compose.onNodeWithTag("resource-countdown").assertDoesNotExist()
+        compose.onNodeWithTag("plan-title-${fixtures.first().offerRef}", useUnmergedTree = true)
+            .performScrollTo().assertTextEquals("30天")
+        compose.onNodeWithTag("plan-traffic-${fixtures.first().offerRef}", useUnmergedTree = true)
+            .assertTextEquals("10 GB / 月")
+        compose.onNodeWithTag("plan-price-${fixtures.first().offerRef}", useUnmergedTree = true)
+            .assertTextEquals("20 Coins")
+        capture("plans-with-active-resource")
+        compose.runOnIdle { account.resource = available().copy(validUntil = Instant.EPOCH) }
+        compose.onNodeWithTag("nav-Connect").performClick()
+        // Portal resource expiry cannot establish the separate local configuration's validity.
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
+        compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
+        compose.runOnIdle {
+            account.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.EXPIRED,
+                hasProfile = true, hasCapability = true, validUntil = Instant.EPOCH)
+        }
+        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("本地配置已到期")
+        compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
+        compose.onNodeWithTag("resource-card").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${fixtures.first().offerRef}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+    }
+
+    @Test fun resourceComponentRetainsDurationCountdownAndTruthfulUnknownStaleAndExpiredTraffic() {
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val owner = remember { accountFixture(scope).apply { resource = available() } }
+            account = owner
+            GccTheme { Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
+                ResourceCard(owner)
+            } }
+        }
         compose.onNodeWithText("30天").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextContains("剩余", substring = true)
         compose.onNodeWithText("1.0 KiB").performScrollTo().assertIsDisplayed()
@@ -363,20 +410,6 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithText("768 B · 数据已过期").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { account.resource = available().copy(validUntil = Instant.EPOCH) }
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextEquals("已到期")
-        compose.onNodeWithTag("nav-Connect").performClick()
-        // Portal resource expiry cannot establish the separate local configuration's validity.
-        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
-        compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
-        compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
-        compose.runOnIdle {
-            account.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.EXPIRED,
-                hasProfile = true, hasCapability = true, validUntil = Instant.EPOCH)
-        }
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("本地配置已到期")
-        compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
-        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
-        compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextEquals("已到期")
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
     }
 
     @Test fun largeFontGuidanceAndResourcesKeepActionsReachable() {
@@ -465,17 +498,64 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
     }
 
-    @Test fun threeServerShapedOffersHaveDurationOnlyHeadingsAtLargeFont() {
+    @Test fun serverOffersKeepExactDurationPriceAndTrafficWithinMonthAndYearFiltersAtLargeFont() {
         val fixtures = offers()
         launchCommerce(CommerceMode.Plans, fontScale = 2f) { offers = fixtures; catalogLoaded = true; commerceModel = CommerceModel.LEGACY }
+        compose.onNodeWithTag("catalog-other").assertDoesNotExist()
         fixtures.forEach { offer ->
+            compose.onNodeWithTag(if (offer.durationDays == 365L) "catalog-yearly" else "catalog-plans")
+                .performScrollTo().performClick()
             compose.onNodeWithTag("plan-title-${offer.offerRef}", useUnmergedTree = true).performScrollTo()
                 .assertTextEquals("${offer.durationDays}天")
             compose.onNodeWithTag("plan-price-${offer.offerRef}", useUnmergedTree = true).performScrollTo().assertTextEquals(formatCoins(offer.baseCoinUnits))
+            compose.onNodeWithTag("plan-traffic-${offer.offerRef}", useUnmergedTree = true)
+                .performScrollTo().assertTextEquals("${offer.monthlyTrafficGb} GB / 月")
             compose.onNodeWithTag("plan-offer-${offer.offerRef}").performScrollTo().performClick().assertIsSelected()
             compose.onNodeWithTag("plan-continue").performScrollTo().assertIsDisplayed().assertIsEnabled()
         }
         capture("offers-font-200")
+    }
+
+    @Test fun periodAndCategoryChangesKeepNonstandardOffersAndRejectOldSelectionsAndLateQuotes() {
+        val monthly = offers().first()
+        val yearly = offers().last()
+        val other = offer("offline_47_days", 47, 17, 73)
+        val secondOther = offer("offline_83_days", 83, 29, 91)
+        val pack = monthly.copy(offerRef = "offline_data_pack", offerVersionRef = "offline_data_pack_v1",
+            category = "data_pack", durationDays = null, monthlyTrafficGb = null,
+            discountBasisPoints = null, trafficGb = 23)
+        launchCommerce(CommerceMode.Plans) {
+            offers = listOf(monthly, yearly, other, secondOther, pack)
+            catalogLoaded = true; commerceModel = CommerceModel.LEGACY
+        }
+        compose.onNodeWithTag("catalog-plans").assertIsSelected()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertExists()
+        listOf(yearly, other, secondOther, pack).forEach {
+            compose.onNodeWithTag("plan-offer-${it.offerRef}").assertDoesNotExist()
+        }
+        compose.onNodeWithTag("catalog-other").performScrollTo().performClick()
+        listOf(other, secondOther).forEach {
+            compose.onNodeWithTag("plan-title-${it.offerRef}", useUnmergedTree = true)
+                .performScrollTo().assertTextEquals("${it.durationDays}天")
+        }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${other.offerRef}").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("catalog-yearly").performScrollTo().performClick()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").assertIsNotSelected()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { commerce.quote = quote(other) }
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertNull(commerce.quote) }
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("catalog-data-packs").performScrollTo().performClick()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${pack.offerRef}").assertIsNotSelected()
+        compose.onNodeWithTag("plan-traffic-${pack.offerRef}", useUnmergedTree = true).assertTextEquals("23 GB")
+        compose.runOnIdle { commerce.quote = quote(yearly) }
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { assertNull(commerce.quote); assertNull(commerce.purchase); assertFalse(commerce.pendingPurchase) }
     }
 
     @Test fun quoteDialogCanBeCancelledRepeatedlyWithoutPurchase() {
@@ -582,7 +662,7 @@ class SubscriptionWalletUiTest {
         }
     }
 
-    @Test fun catalogStatesKeepServerDurationCoinsAndTrafficInDetails() {
+    @Test fun catalogStatesKeepServerDurationCoinsAndTrafficOnCardsAndInDetails() {
         val fixture = offers().first().copy(durationDays = 47, baseCoinUnits = 73, monthlyTrafficGb = 17)
         launchCommerce(CommerceMode.Plans) { error = "合成目录读取失败" }
         compose.onNodeWithTag("catalog-status").assertTextEquals("商品尚未读取")
@@ -594,13 +674,16 @@ class SubscriptionWalletUiTest {
         }
         compose.onNodeWithTag("plan-title-${fixture.offerRef}", useUnmergedTree = true).performScrollTo().assertTextEquals("47天")
         compose.onNodeWithTag("plan-price-${fixture.offerRef}", useUnmergedTree = true).assertTextEquals("73 Coins")
-        compose.onNodeWithText("17 GB").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-other").assertIsSelected()
+        compose.onNodeWithTag("plan-traffic-${fixture.offerRef}", useUnmergedTree = true).assertTextEquals("17 GB / 月")
         compose.onNodeWithTag("plan-offer-${fixture.offerRef}").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("plan-benefits").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("17 GB").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { commerce.busy = true }
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("catalog-plans").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-yearly").assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-other").assertIsNotEnabled()
         compose.onNodeWithTag("catalog-data-packs").assertIsNotEnabled()
     }
 

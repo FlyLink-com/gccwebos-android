@@ -79,3 +79,19 @@ that the complete hosted-emulator suite or physical camera flow ran in this batc
 Exact-head CI validation remains pending. The old runs remain failed; neither the
 timeout increase nor the focused OPPO result proves a green hosted UI suite. This
 note records no customer data, configuration content or credentials.
+
+## First manual-import head: source allowlist mismatch
+
+Both jobs for `119ca07b987b8eaafe3376b084553c54a90bedf5` failed before compilation:
+[validate 37268231598](https://github.com/gccwebos-com/gccwebos-android/actions/runs/37268231598/job/111629494148)
+and [native-lab 37268231571](https://github.com/gccwebos-com/gccwebos-android/actions/runs/37268231571/job/111629493871).
+Their `scripts/verify_source.py` exact manifest-permission assertion still listed the old
+permissions and rejected the approved bundled scanner's CAMERA permission. Wrapper
+verification succeeded; Gradle, native compilation and device suites did not run.
+
+The follow-up adds CAMERA to that exact set and additionally requires optional camera
+hardware, the non-exported scanner excluded from recents, and removal of the library's
+generic CaptureActivity. It does not permit arbitrary extra permissions or remove the
+VPN/service boundaries. `python scripts/verify_source.py` and `git diff --check` pass locally.
+Only the source gate and this record change; the tested app/test APK inputs are unchanged.
+The two failed runs remain failures. Hosted validation must be assessed on the follow-up head.

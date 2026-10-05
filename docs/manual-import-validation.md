@@ -114,3 +114,7 @@ separate, unresolved gates. Normal-app installation/migration is outside this ap
 The hosted full-suite timeout evidence, corrected recreation/resume fixture contracts and
 new suite budgets are recorded in [ci-ui-suite-budget-2026-10-04.md](ci-ui-suite-budget-2026-10-04.md).
 The previous hosted runs remain failed; local validation is not a green exact-head CI result.
+The first implementation push also exposed an outdated CAMERA permission allowlist in the
+source checker before any hosted compilation. The linked CI note records that failure and
+the strict allowlist/scanner-boundary correction. This checker-only follow-up does not change
+the application or test source inputs used for the final APK validation.

@@ -37,8 +37,18 @@ android = '{http://schemas.android.com/apk/res/android}'
 assert manifest.find('application').get(android + 'usesCleartextTraffic') == 'false'
 assert {p.get(android + 'name') for p in manifest.findall('uses-permission')} == {
     'android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE',
+    'android.permission.CAMERA',
     'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED',
     'android.permission.POST_NOTIFICATIONS'}
+camera = manifest.find("uses-feature[@android:name='android.hardware.camera.any']",
+                       {'android': 'http://schemas.android.com/apk/res/android'})
+assert camera is not None and camera.get(android + 'required') == 'false'
+activities = {a.get(android + 'name'): a for a in manifest.findall('.//activity')}
+scanner = activities['.manualimport.ManualQrScannerActivity']
+assert scanner.get(android + 'exported') == 'false'
+assert scanner.get(android + 'excludeFromRecents') == 'true'
+assert activities['com.journeyapps.barcodescanner.CaptureActivity'].get(
+    '{http://schemas.android.com/tools}node') == 'remove'
 services = {s.get(android + 'name'): s for s in manifest.findall('.//service')}
 assert set(services) == {'.vpn.ConnectionOwnerService', '.vpn.ProductionVpnService'}
 assert all(s.get(android + 'exported') == 'false' for s in services.values())

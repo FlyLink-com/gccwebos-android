@@ -79,7 +79,7 @@ HOST_MEMORY_KB=$(awk '/MemTotal:/ { print $2 }' /proc/meminfo)
 printf 'cores=%s memory_mb=%s\n' "$EMU_CORES" "$EMU_MEMORY" | tee "$OUT/emulator-resources.log"
 log 'AVD exists and is discoverable; launching emulator'
 "$EMULATOR" -avd gccwebos-m0 -port 5554 -no-window -no-audio -no-boot-anim \
-  -no-snapshot -no-metrics -gpu swiftshader_indirect -feature -Vulkan -debug init -camera-back none -camera-front none \
+  -no-snapshot -no-metrics -gpu swangle -feature -Vulkan -debug init -camera-back none -camera-front none \
   -accel on -cores "$EMU_CORES" -memory "$EMU_MEMORY" > "$OUT/emulator.log" 2>&1 &
 EMU_PID=$!
 cleanup() {

@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity() {
                 }
             } else {
                 val control by current.control.collectAsState()
-                val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodePingProbe(applicationContext) }
+                val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodeLatencyProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
                     nodeLatencyProbe = nodeProbe,
                     sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,

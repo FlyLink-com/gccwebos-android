@@ -708,8 +708,12 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     /** One cache read per batch; no refresh, selection, epoch change or connection admission. */
     internal fun captureNodeProbeTargets(): List<NodeProbeTarget> = synchronized(lock) {
         withNodeProbeArtifact { raw, choices ->
+            val endpoints = SafeProxyConfig.probeEndpoints(raw)
+            if (endpoints.size != choices.size || endpoints.indices.any { endpoints[it].protocol != choices[it].protocol })
+                return@withNodeProbeArtifact emptyList()
             choices.mapIndexed { index, choice ->
-                NodeProbeTarget(choice.selection, SafeProxyConfig.selectedEndpoint(raw, index), choice.protocol)
+                val endpoint = endpoints[index]
+                NodeProbeTarget(choice.selection, endpoint.endpoint, endpoint.protocol, endpoint.port, probeTransport(endpoint))
             }
         } ?: emptyList()
     }
@@ -718,9 +722,17 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (authority.choices.none { it.selection === target.selection }) return@synchronized false
         withNodeProbeArtifact { raw, choices ->
             val index = choices.indexOfFirst { it.selection === target.selection }
-            index >= 0 && choices[index].protocol == target.protocol &&
-                SafeProxyConfig.selectedEndpoint(raw, index) == target.endpoint
+            if (index < 0 || choices[index].protocol != target.protocol) return@withNodeProbeArtifact false
+            val endpoint = SafeProxyConfig.probeEndpoints(raw).getOrNull(index) ?: return@withNodeProbeArtifact false
+            endpoint.endpoint == target.endpoint && endpoint.port == target.port && endpoint.protocol == target.protocol &&
+                probeTransport(endpoint) == target.transport
         } == true
+    }
+    private fun probeTransport(endpoint: SafeProxyConfig.ProbeEndpoint): NodeProbeTransport = when (endpoint.protocol) {
+        "ss", "vless" -> NodeProbeTransport.Tcp
+        "tuic" -> NodeProbeTransport.Quic
+        "hysteria2" -> if (endpoint.obfuscated) NodeProbeTransport.Icmp else NodeProbeTransport.Quic
+        else -> throw UnsafeProxyConfiguration(SafeProxyConfig.RejectionReason.Protocol)
     }
     /** Memory-only display masking. Never sufficient permission to probe: workers must also
      * call isCurrentNodeProbeTarget on IO before/after measuring, plus their auth/network/TTL guards. */

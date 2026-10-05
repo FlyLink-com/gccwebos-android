@@ -77,6 +77,19 @@ object SafeProxyConfig {
     fun selectedEndpoint(yaml: ByteArray, selectedIndex: Int): String = classified(RejectionReason.InputSyntax) {
         string(selected(preparation(yaml).proxies, selectedIndex), "server", RejectionReason.Endpoint)
     }
+    /** Worker-only metadata, never credentials, UI details, a resolved address or connection authority. */
+    internal class ProbeEndpoint internal constructor(val endpoint: String, val port: Int, val protocol: String,
+        val obfuscated: Boolean) {
+        override fun toString() = "ProbeEndpoint(<redacted>)"
+    }
+    /** Validate every node before extracting any target; no display-only or partial-list fallback. */
+    internal fun probeEndpoints(yaml: ByteArray): List<ProbeEndpoint> = classified(RejectionReason.InputSyntax) {
+        preparation(yaml).proxies.map { proxy ->
+            val protocol = string(proxy, "type", RejectionReason.Protocol)
+            ProbeEndpoint(string(proxy, "server", RejectionReason.Endpoint), proxy["port"] as Int, protocol,
+                protocol == "hysteria2" && "obfs" in proxy)
+        }
+    }
     /** Only the selected endpoint is replaced; this validates the address, not its resolution or lease. */
     fun projectResolved(yaml: ByteArray, selectedIndex: Int, ipv4: String): ByteArray = classified(RejectionReason.InputSyntax) {
         val proxy = selected(preparation(yaml).proxies, selectedIndex)

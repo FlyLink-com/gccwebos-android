@@ -79,12 +79,112 @@ class NodeProbeTargetsTest {
         val targets = f.manager.captureNodeProbeTargets()
         assertEquals(listOf("192.0.2.10", "192.0.2.11"), targets.map { it.endpoint })
         assertTrue(targets.all { it.protocol == "ss" })
+        assertTrue(targets.all { it.port == 443 && it.transport == NodeProbeTransport.Tcp })
         assertNotSame(targets[0].selection, targets[1].selection)
         targets.forEachIndexed { index, target -> assertSame(f.authority.choices[index].selection, target.selection) }
         assertEquals(1, f.profiles.reads)
         assertEquals(epoch, f.authority.epoch); assertSame(selected, f.authority.selected)
         assertEquals("NodeProbeTarget(<redacted>)", targets[0].toString())
         assertThrows(IllegalArgumentException::class.java) { f.profiles.lastRead!!.copyBytes() }
+        f.assertNoWrites()
+    }
+
+    @Test fun transportAndRealPortAreExtractedForEverySupportedProtocolWithoutWritingOrDownloading() {
+        val raw = """proxies:
+  - name: same display name
+    type: ss
+    server: 192.0.2.10
+    port: 8443
+    cipher: aes-128-gcm
+    password: synthetic-only
+  - name: same display name
+    type: vless
+    server: 192.0.2.10
+    port: 9443
+    uuid: 11111111-2222-4333-8444-555555555555
+    tls: true
+    servername: synthetic.example
+  - name: same display name
+    type: tuic
+    server: 192.0.2.10
+    port: 10443
+    uuid: 11111111-2222-4333-8444-555555555555
+    password: synthetic-only
+    sni: synthetic.example
+  - name: same display name
+    type: hysteria2
+    server: 192.0.2.10
+    port: 11443
+    password: synthetic-only
+    sni: synthetic.example
+  - name: same display name
+    type: hysteria2
+    server: 192.0.2.10
+    port: 12443
+    password: synthetic-only
+    sni: synthetic.example
+    obfs: salamander
+    obfs-password: synthetic-obfuscation-only
+""".toByteArray()
+        val f = try { Fixture(raw) } finally { raw.fill(0) }
+        val epoch = f.authority.epoch
+        val targets = f.manager.captureNodeProbeTargets()
+        assertEquals(listOf(8443, 9443, 10443, 11443, 12443), targets.map { it.port })
+        assertEquals(listOf(NodeProbeTransport.Tcp, NodeProbeTransport.Tcp, NodeProbeTransport.Quic,
+            NodeProbeTransport.Quic, NodeProbeTransport.Icmp), targets.map { it.transport })
+        assertEquals(listOf("ss", "vless", "tuic", "hysteria2", "hysteria2"), targets.map { it.protocol })
+        assertTrue(targets.all { it.endpoint == "192.0.2.10" })
+        assertEquals(1, f.profiles.reads)
+        targets.forEach { assertTrue(f.manager.isCurrentNodeProbeTarget(it)) }
+        assertEquals(epoch, f.authority.epoch)
+        f.assertNoWrites()
+    }
+
+    @Test fun fullAdmissionBindsPortTransportProtocolAndEndpointToTheExactOpaqueChoice() {
+        val f = Fixture()
+        val target = f.manager.captureNodeProbeTargets().first()
+        assertTrue(f.manager.isCurrentNodeProbeTarget(NodeProbeTarget(target.selection, target.endpoint,
+            target.protocol, target.port, target.transport)))
+        assertFalse(f.manager.isCurrentNodeProbeTarget(NodeProbeTarget(target.selection, target.endpoint,
+            target.protocol, target.port + 1, target.transport)))
+        assertFalse(f.manager.isCurrentNodeProbeTarget(NodeProbeTarget(target.selection, target.endpoint,
+            target.protocol, target.port, NodeProbeTransport.Quic)))
+        assertFalse(f.manager.isCurrentNodeProbeTarget(NodeProbeTarget(target.selection, target.endpoint,
+            "vless", target.port, target.transport)))
+        assertFalse(f.manager.isCurrentNodeProbeTarget(NodeProbeTarget(target.selection, "192.0.2.90",
+            target.protocol, target.port, target.transport)))
+        assertFalse(f.manager.isCurrentNodeProbeTarget(NodeProbeTarget(ConnectionSelection(), target.endpoint,
+            target.protocol, target.port, target.transport)))
+        // The old three-argument constructor is retained for isolated ICMP tests, never an upgrade to TCP admission.
+        val oldFixtureTarget = NodeProbeTarget(target.selection, target.endpoint, target.protocol)
+        assertEquals(0, oldFixtureTarget.port); assertEquals(NodeProbeTransport.Icmp, oldFixtureTarget.transport)
+        assertFalse(f.manager.isCurrentNodeProbeTarget(oldFixtureTarget))
+        f.assertNoWrites()
+    }
+
+    @Test fun changedPortAndMixedInvalidPortCannotReuseOldTargetsEvenWithInjectedMatchingDigest() {
+        val f = Fixture()
+        val target = f.manager.captureNodeProbeTargets().first()
+        val changed = artifact("192.0.2.10", "192.0.2.11").toString(Charsets.UTF_8)
+            .replaceFirst("port: 443", "port: 8443").toByteArray()
+        try {
+            f.profiles.replace(raw = changed)
+            f.authority.selectionRevision = MessageDigest.getInstance("SHA-256").digest(changed)
+        } finally { changed.fill(0) }
+        assertFalse(f.manager.isCurrentNodeProbeTarget(target))
+        val changedTargets = f.manager.captureNodeProbeTargets()
+        assertEquals(listOf(8443, 443), changedTargets.map { it.port })
+        assertTrue(f.manager.isCurrentNodeProbeTarget(changedTargets.first()))
+        val malformed = artifact("192.0.2.10", "192.0.2.11").toString(Charsets.UTF_8)
+            .replaceFirst("port: 443", "port: 65536").toByteArray()
+        try {
+            f.profiles.replace(raw = malformed)
+            f.authority.selectionRevision = MessageDigest.getInstance("SHA-256").digest(malformed)
+        } finally { malformed.fill(0) }
+        val epoch = f.authority.epoch
+        assertTrue(f.manager.captureNodeProbeTargets().isEmpty())
+        assertFalse(f.manager.isCurrentNodeProbeTarget(changedTargets.last()))
+        assertEquals(epoch, f.authority.epoch)
         f.assertNoWrites()
     }
 

@@ -91,8 +91,8 @@ class SelectedNodeActivityRecreationTest {
                 var writeStarted = false
                 assertNull("A previous fixture must release its repository override", ConnectionRuntimeOverrides.repositoryFactory)
                 try {
-                    // Each navigation still performs the real manager's fresh-read path. This
-                    // owned fixture models that response locally so UI waiting cannot hit a cloud URL.
+                    // Healthy navigation and Activity restoration use the validated local profile.
+                    // Count any unexpected request through this owned source without real HTTP.
                     ConnectionRuntimeOverrides.repositoryFactory = {
                         PortalRepository(object : PortalTransport {
                             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse =
@@ -118,7 +118,7 @@ class SelectedNodeActivityRecreationTest {
                     }
                     base.evaluate() // MainActivity creates/restores its own real service/controller owners.
                     assertEquals("Inspector subscription source was never used", 0, subscriptionReads.get())
-                    assertTrue("Quiet navigation exercised the injected fresh read", navigationReads.get() > 0)
+                    assertEquals("Healthy navigation and recreation must not download the subscription", 0, navigationReads.get())
                     assertPrivateAccountStoresAbsent()
                 } finally {
                     // Inner Compose/Activity rule has already disposed and destroyed its Activity.
@@ -166,6 +166,7 @@ class SelectedNodeActivityRecreationTest {
 
     private fun selectSecondAndNavigate(): ConnectionSelection {
         waitForReadyNodes()
+        val priorReads = navigationReads.get()
         compose.waitUntil(5000) { compose.onAllNodesWithTag("nav-Lines").fetchSemanticsNodes().size == 1 }
         compose.onNodeWithTag("nav-Lines").performClick()
         waitForSelectableNodes()
@@ -186,7 +187,10 @@ class SelectedNodeActivityRecreationTest {
             compose.onNodeWithTag("node-choice-1").assertIsSelected()
             compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         }
-        compose.runOnIdle { assertSame(selected, inspector.nodeSelectionSnapshot().selected) }
+        compose.runOnIdle {
+            assertSame(selected, inspector.nodeSelectionSnapshot().selected)
+            assertEquals("Healthy tab navigation must keep using local nodes", priorReads, navigationReads.get())
+        }
         return selected
     }
 
@@ -225,8 +229,10 @@ class SelectedNodeActivityRecreationTest {
         inspector = manager()
         assertNotSame(oldInspector, inspector)
         waitForReadyNodes()
-        compose.waitUntil(5000) { navigationReads.get() > priorReads }
         waitForSelectableNodes()
+        compose.runOnIdle {
+            assertEquals("Recreated selectable nodes must not require a subscription download", priorReads, navigationReads.get())
+        }
         compose.activityRule.scenario.onActivity { current ->
             assertNotSame(oldActivity, current)
             assertEquals(Lifecycle.State.DESTROYED, oldActivity.lifecycle.currentState)

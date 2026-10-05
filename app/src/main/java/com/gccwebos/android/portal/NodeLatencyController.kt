@@ -20,7 +20,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 
-/** Physical Ping evidence only; none of these observations authorize a VPN connection. */
+/** Node transport RTT only; none of these observations authorize a VPN connection. */
 internal sealed interface NodeLatencyObservation {
     data class Success(val milliseconds: Long, val networkKey: Long) : NodeLatencyObservation
     data object NoReply : NodeLatencyObservation
@@ -45,7 +45,7 @@ internal class NodeLatencyController(
 ) {
     private data class Reading(val target: NodeProbeTarget, val observation: NodeLatencyObservation,
         val measuredAt: Long, val network: Long?, val account: Long)
-    private data class Attempt(val at: Long, val network: Long?)
+    private data class Attempt(val at: Long, val network: Long?, val cooldown: Long = CooldownMillis)
 
     private val readings = mutableStateMapOf<ConnectionSelection, Reading>()
     private val attempts = mutableMapOf<ConnectionSelection, Attempt>()
@@ -90,9 +90,12 @@ internal class NodeLatencyController(
         }
         attempts.keys.toList().forEach { key ->
             val attempt = attempts[key] ?: return@forEach
-            if (attempt.network != network || !recent(attempt.at, now, CooldownMillis)) attempts.remove(key)
+            if (attempt.network != network || !recent(attempt.at, now, attempt.cooldown)) attempts.remove(key)
         }
     }
+
+    /** UI clock tick: only expire memory evidence, never parse or decrypt configuration. */
+    fun pruneExpired() = prune()
 
     /** Revalidates cached display evidence without starting any network measurement. */
     fun sync() {
@@ -145,7 +148,7 @@ internal class NodeLatencyController(
                     (selection == null || target.selection === selection) &&
                         (force || readings[target.selection]?.let { visible(it, now, network) } != true) &&
                         (!force || attempts[target.selection]?.let {
-                            it.network == network && recent(it.at, now, CooldownMillis)
+                            it.network == network && recent(it.at, now, it.cooldown)
                         } != true)
                 }
                 coroutineScope {
@@ -191,7 +194,10 @@ internal class NodeLatencyController(
             readings.remove(target.selection)
             return
         }
-        readings[target.selection] = Reading(target, observation, elapsedMillis(), network, account)
+        val completedAt = elapsedMillis()
+        if (observation !is NodeLatencyObservation.Success)
+            attempts[target.selection] = Attempt(completedAt, network, FailedCooldownMillis)
+        readings[target.selection] = Reading(target, observation, completedAt, network, account)
     }
 
     private suspend fun captureTargets(): List<NodeProbeTarget> = withContext(ioDispatcher) {
@@ -237,7 +243,8 @@ internal class NodeLatencyController(
 
     private fun visible(entry: Reading, now: Long, network: Long?): Boolean =
         entry.account == authGeneration() && entry.network == network &&
-            recent(entry.measuredAt, now, ResultTtlMillis) &&
+            recent(entry.measuredAt, now, if (entry.observation is NodeLatencyObservation.Success)
+                ResultTtlMillis else FailedResultTtlMillis) &&
             manager.isNodeProbeTargetRegistryCurrent(entry.target) &&
             (entry.observation !is NodeLatencyObservation.Success || entry.observation.networkKey == network)
 
@@ -247,7 +254,9 @@ internal class NodeLatencyController(
 
     private companion object {
         const val ResultTtlMillis = 120_000L
+        const val FailedResultTtlMillis = 10_000L
         const val CooldownMillis = 30_000L
+        const val FailedCooldownMillis = 2_000L
         const val ProbeTimeoutMillis = 4_000L
         const val MaxNodes = 128
     }

@@ -1,0 +1,159 @@
+{
+  "date": "2026-10-05",
+  "scope": "Owned isolated OPPO API33 fixture with synthetic data only",
+  "jvm": {
+    "tests": 175,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "Error": 0,
+    "Fatal": 0,
+    "Warning": 23,
+    "Hint": 6,
+    "Informational": 0
+  },
+  "android": {
+    "fresh": {
+      "reported": 2,
+      "started": 2,
+      "passed": 2,
+      "skipped": 0,
+      "failed": 0
+    },
+    "main": {
+      "reported": 71,
+      "started": 71,
+      "passed": 71,
+      "skipped": 0,
+      "failed": 0
+    },
+    "total": {
+      "reported": 73,
+      "started": 73,
+      "passed": 73,
+      "skipped": 0,
+      "failed": 0
+    },
+    "main_excluded_classes": [
+      "com.gccwebos.android.SelectedNodeActivityRecreationTest"
+    ]
+  },
+  "logs": [
+    {
+      "name": "oppo-fresh-complete.log",
+      "sha256": "151f4daa8d62e2054916e36ce1cace2365d8fbba6944e8926401023503ed0bc7"
+    },
+    {
+      "name": "oppo-library-complete.log",
+      "sha256": "d35ec04827f343bc8a74c5117f53fc0ff8d89c8e0fd5a3139d73b0d39e0b0961"
+    }
+  ],
+  "fixture": {
+    "source_base_commit": "3423fcd1e7a4d4372ea0de79c434cf7b167c73bf",
+    "source_working_tree_fingerprint": "b4d841e6b288c68157a5f3482865f35058b51f4690d1780829463f36debe4a72",
+    "artifacts": [
+      {
+        "package": "com.gccwebos.android.candidate.acceptance.library20261005",
+        "apk": "library-ui-fixture.apk",
+        "sha256": "d062ca317672e1d62af01f2c909f6d73425314b913e842ea2717559018a9387b",
+        "bytes": 144217108,
+        "signer_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+        "verified": true
+      },
+      {
+        "package": "com.gccwebos.android.candidate.acceptance.library20261005.test",
+        "apk": "library-ui-fixture-test.apk",
+        "sha256": "672ce46d64092cb2f2207a4f24bbe36a7b9dd06c5e92e2437e2e8acd31d78e99",
+        "bytes": 2279237,
+        "signer_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+        "verified": true
+      }
+    ],
+    "changed_source_sha256": {
+      "app/src/androidTest/java/com/gccwebos/android/ConfigurationLibraryFlowUiTest.kt": "feb80829e93c91ee332eaa328bc091053ec2e9b808285afadd7abaa07f585957",
+      "app/src/androidTest/java/com/gccwebos/android/ConfigurationLibraryUiTest.kt": "30da276d0640ebb217347f7905620141e5ba46fdc4626917e06240e70d42506b",
+      "app/src/androidTest/java/com/gccwebos/android/ManualImportHostUiTest.kt": "8d54403b1665956d004bb3bea84b0c7ad46bdbc3d3c2d89e383cd60f79c41488",
+      "app/src/androidTest/java/com/gccwebos/android/SelectedNodeActivityRecreationTest.kt": "d1af8c733b9ab566af2da458be74bf4edfd5197165084b00185440f69110322b",
+      "app/src/androidTest/java/com/gccwebos/android/portal/EncryptedManualSourceStoreTest.kt": "abad77be9c9a038db17c78bf7e7450e1570b796a1819379cc157998514e2329e",
+      "app/src/androidTest/java/com/gccwebos/android/portal/ManualImportUpgradeTest.kt": "b7323196302f5c0db73f801a3b62febebc27d3b495d6096745a311120a16731c",
+      "app/src/main/java/com/gccwebos/android/MainActivity.kt": "6ca359a371dbfeebd81ec7199fb20676b1bad9f3a5a22ac28dd3c83090647510",
+      "app/src/main/java/com/gccwebos/android/manualimport/ManualImportHost.kt": "07552aefe386a4ca5fc3a6155949d116c32827e780dadb946c365ea602ee9930",
+      "app/src/main/java/com/gccwebos/android/portal/AccountPanel.kt": "27f7bcaf82c1e9c9aa2ae14df9e763451dde595e1a9f32cb836e24aef6d17416",
+      "app/src/main/java/com/gccwebos/android/portal/ConfigurationLibrary.kt": "0fbc6841fbb8609478178f9ceb4bb0a670a560b5805233eba9860c0ea8fabc9f",
+      "app/src/main/java/com/gccwebos/android/portal/ConfigurationLibraryController.kt": "cae79b890c41f6db6edf99d1c7519ff0356555bdd774abfee306e9202675060d",
+      "app/src/main/java/com/gccwebos/android/portal/ConfigurationLibraryPanel.kt": "fff5fe38c886028c04180ebcc7f85b088e37234182be4a4f1f720372d3d4235b",
+      "app/src/main/java/com/gccwebos/android/portal/EncryptedManualSourceStore.kt": "4dc65c194d6c8559d4d1ef3c8634f08fbc4ed8d1158e30dfcbe3ecf4c4525bf8",
+      "app/src/main/java/com/gccwebos/android/portal/LocalSubscription.kt": "98af7ffdbe71bc9a7d797d56541a1436f52bc6b74ed480b3998c392203dd743e",
+      "app/src/main/java/com/gccwebos/android/portal/ManualImportController.kt": "e4a225fb4d80195e40baa9cfdc89ebc514deb6c2599b4a84af10842587bd59f8",
+      "app/src/main/java/com/gccwebos/android/portal/ManualSourceStore.kt": "f67a57519594b46bdec3d27304048212bc2fd30e7d25618ecf6d6fc135538e0a",
+      "app/src/main/java/com/gccwebos/android/portal/NodeSelectionPanel.kt": "95a58e92f97e9b63fd9e46cb2ea9ca3d141545a86cbc6119ec648a7c00d9046e",
+      "app/src/test/java/com/gccwebos/android/portal/ConfigurationLibraryBoundaryTest.kt": "9fde78511100cd13eb1b866c146d3f4033b004da3e0938c143217edc61dee837",
+      "app/src/test/java/com/gccwebos/android/portal/ConfigurationLibraryManagerTest.kt": "d59fc36708da29f096f7f56ba3a18d7d43cf9ece71e6b498798929834ed3ffe6",
+      "app/src/test/java/com/gccwebos/android/portal/ConfigurationLibraryTest.kt": "6796a2be7f8f1ca8cab5f15a5f0a3af4bfabdad023366267413c35c789facedf",
+      "app/src/test/java/com/gccwebos/android/portal/ExternalManualImportTest.kt": "6c42d5f0d55a41cc16f05200d57557619d453938ca5c95f01a83e87ba6216341",
+      "app/src/test/java/com/gccwebos/android/portal/ManualImportControllerTest.kt": "887d9cd3e3f13f18506425890842ed1baaa05386b180214fa0a2b1b01ae6244a"
+    },
+    "scope": "isolated synthetic Android UI staging; no customer data copied"
+  },
+  "earlier_attempts": [
+    {
+      "log": "fixture-build.log",
+      "jvm_passed": 182,
+      "jvm_failed": 1,
+      "failure": "LocalSubscriptionTest.everyPreparationDownloadsAgainAndWorksWithoutPortalToken: Windows lacks posix:permissions; retained for Linux CI"
+    },
+    {
+      "log": "oppo-library-main.log",
+      "passed": 58,
+      "failed": 1,
+      "reason": "Old test expected v1 after explicit source change; updated to v3 and verified removal preserves no ghost entry"
+    },
+    {
+      "log": "oppo-library-final.log",
+      "passed": 59,
+      "failed": 0,
+      "skipped": 0,
+      "scope": "Before async import ticket performance correction"
+    },
+    {
+      "log": "oppo-fresh-async.log",
+      "passed": 0,
+      "failed": 2,
+      "reason": "Fixture screenshot anti-reuse guard found previous synthetic screenshots. Preserved then removed only the five owned screenshots before rerun."
+    }
+  ],
+  "normal_user_data_migrated": false,
+  "normal_candidate_installed": false,
+  "real_user_vpn_tested": false,
+  "real_node_rtt_tested": false,
+  "historical_opt_in_upgrade_fixture": "Updated to assert retained v3 library and downgradeReady=false; compiled only, not executed on historical package",
+  "normal_app_retained_source": "3423fcd1e7a4d4372ea0de79c434cf7b167c73bf",
+  "schema_operator_approval": "pending; implementation and synthetic staging only",
+  "rollback": "Before v3 write: old same-signer APK; after v3 write: v3-capable forward fix. No downgrade maintenance API implemented.",
+  "synthetic_screenshot": {
+    "name": "two-configurations.png",
+    "sha256": "a2156d223f4e467bb0b6911c6e3649d3386a825d7c77d6136dd94f21c1fd79c0"
+  },
+  "cleanup": {
+    "normal_apk_sha256": "9ddcf2ad8be1c9ac56a2ddc4056ca0d0047ac74d1dd7a6f1ad9634d1a5a241f4",
+    "stay_on_modified": false,
+    "owned_packages": [
+      {
+        "package": "com.gccwebos.android.candidate.acceptance.library20261005.test",
+        "uninstalled": true
+      },
+      {
+        "package": "com.gccwebos.android.candidate.acceptance.library20261005",
+        "uninstalled": true
+      }
+    ],
+    "stay_on_before": 0,
+    "normal_app_retained": true,
+    "stay_on_after": 0
+  },
+  "source_check_passed": true,
+  "fixture_build_passed": true,
+  "normal_candidate_build_passed": true
+}

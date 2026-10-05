@@ -60,6 +60,7 @@ import com.gccwebos.android.portal.AccountPanel
 import com.gccwebos.android.portal.RegistrationController
 import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.NodeSelectionPanel
+import com.gccwebos.android.portal.ConfigurationLibraryPanel
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.productionRepository
 import com.gccwebos.android.vpn.ActivityVpnPermission
@@ -133,7 +134,7 @@ class MainActivity : ComponentActivity() {
                 }
             } else {
                 val control by current.control.collectAsState()
-                val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodePingProbe(applicationContext) }
+                val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodeLatencyProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
                     nodeLatencyProbe = nodeProbe,
                     sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,
@@ -224,8 +225,13 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
     LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
         account.restoring, account.foregroundCheckPending, account.clearing) {
-        account.nodeSelection.sync()
+        account.nodeSelection.expireIfNeeded()
         account.nodeLatency.sync()
+    }
+    LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
+        account.restoring, account.foregroundCheckPending, account.clearing,
+        account.manualImport.busy, account.nodeSelection.busy) {
+        account.configurationLibrary.refresh()
     }
     // Keep an accepted power command outside keyed destinations. Navigation cannot replay it
     // while the controller is still publishing acceptance/rejection. A new snapshot/revision is the ack.
@@ -250,7 +256,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     DisposableEffect(account, lifecycle) {
         val observer = AccountForegroundObserver(account)
         lifecycle?.addObserver(observer)
-        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel(); account.manualImport.cancel() }
+        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel(); account.manualImport.cancel(); account.configurationLibrary.cancel() }
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
@@ -258,6 +264,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     var navigationRequest by remember { mutableStateOf(0) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
     val catalogDock = remember { CatalogDockState() }
+    val catalogDisplayCache = remember(account, account.commerceSessionIdentity) {
+        com.gccwebos.android.commerce.CatalogDisplayCache(account.commerceSessionIdentity)
+    }
     BackHandler(enabled = selected != Destination.Connect) {
         if (selected == Destination.Profile && shouldCancelLoginOnBack(account)) account.cancelAuthentication()
         else { selectedName = Destination.Connect.name; navigationRequest++ }
@@ -320,7 +329,8 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         openRegistration = { startRegistration = true; navigationRequest++; selectedName = Destination.Profile.name },
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
                         loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
-                        plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages) }
+                        plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages,
+                        catalogDisplayCache = catalogDisplayCache) }
                 }
                 }
 
@@ -358,7 +368,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   openRegistration: () -> Unit, startRegistration: Boolean,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
                   registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
-                  autoRefreshPages: Boolean) {
+                  autoRefreshPages: Boolean,
+                  catalogDisplayCache: com.gccwebos.android.commerce.CatalogDisplayCache) {
     val latestControl by rememberUpdatedState(connectionControlState)
     DisposableEffect(account, destination) {
         onDispose { if (destination == Destination.Lines) account.manualImport.cancel() }
@@ -368,7 +379,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
     val nodesOwnerGeneration = account.authSessionGeneration.takeIf { destination == Destination.Lines }
     LaunchedEffect(account, destination, navigationRequest, autoRefreshPages, nodesOwnerGeneration) {
         if (!autoRefreshPages || (navigationRequest == 0 && destination != Destination.Lines)) return@LaunchedEffect
-        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing && !account.manualImport.busy }.first { it }
+        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing &&
+            !account.manualImport.busy && !account.configurationLibrary.busy }.first { it }
         if (destination == Destination.Profile && !account.authenticated && !startRegistration) {
             account.restoreAccount()
         } else if (destination == Destination.Lines) {
@@ -377,7 +389,10 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)) {
                 // Navigation reads never claim or acknowledge a delivery. Those recovery
                 // transactions stay behind the existing explicit connection/import actions.
-                if (account.localSubscription.hasCapability) account.nodeSelection.refresh()
+                if (account.localSubscription.hasCapability) account.nodeSelection.refreshIfNeeded {
+                    !latestControl.commandPending && latestControl.phase !in
+                        setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
+                }
                 else if (account.authenticated) account.refreshAccountUsage()
                 snapshotFlow { !account.busy && !account.nodeSelection.busy }.first { it }
                 account.nodeLatency.refresh()
@@ -406,25 +421,22 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         onConnectionPowerAction, openRegistration)
                 }
                 Destination.Lines -> {
-                    LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
-                    NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
+                    LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.expireIfNeeded() }
+                    ConfigurationLibraryPanel(account.configurationLibrary, account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
                         onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency,
-                        onImport = account.manualImport::open)
+                        onImport = account.manualImport::open, onReplace = account.manualImport::openForReplacement)
                     val importer = account.manualImport
-                    val source = account.localSubscription.sourceKind
                     val importUsage by account.accountUsage.state.collectAsState()
                     com.gccwebos.android.manualimport.ManualImportHost(
                         visible = importer.visible,
                         busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
                             account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
                         error = importer.error,
-                        canUseAccount = source != com.gccwebos.android.portal.ManualSourceKind.LegacyRemote,
-                        canRemove = source in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
-                            com.gccwebos.android.portal.ManualSourceKind.ImportedRemote,
-                            com.gccwebos.android.portal.ManualSourceKind.ExternalRemote),
-                        onDismiss = importer::cancel, onBegin = importer::begin, onSubmit = importer::submit,
+                        canUseAccount = false,
+                        canRemove = false,
+                        onDismiss = importer::cancel, onBegin = importer::beginAsync, onSubmit = importer::submit,
                         onCancel = importer::cancel, onFailure = importer::failure,
                         onUseAccount = importer::useAccount, onRemove = importer::remove)
                 }
@@ -443,7 +455,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         }
                     } else {
                         CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce,
-                            onRecharge = openAccount, defaultSelectionRequest = plansVisit, refreshRequest = navigationRequest)
+                            onRecharge = openAccount, defaultSelectionRequest = plansVisit, refreshRequest = navigationRequest,
+                            catalogDisplayCache = catalogDisplayCache)
                     }
                 }
                 Destination.Orders -> {

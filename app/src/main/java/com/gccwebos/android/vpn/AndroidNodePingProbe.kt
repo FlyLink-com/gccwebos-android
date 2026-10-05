@@ -13,7 +13,9 @@ import com.gccwebos.android.portal.NodeLatencyProbe
 import com.gccwebos.android.portal.NodeProbeTarget
 import java.io.Closeable
 import java.io.FileDescriptor
+import java.io.IOException
 import java.net.InetAddress
+import java.net.Socket
 import java.security.SecureRandom
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -137,6 +139,7 @@ internal interface NodePingNetwork : Closeable {
     fun readbackCurrent(): Boolean
     suspend fun resolveA(host: String): List<String>
     fun bindSocket(socket: FileDescriptor)
+    fun bindSocket(socket: Socket) { throw IOException("TCP socket binding unavailable") }
 }
 
 internal class AndroidNodePingNetwork(private val held: AndroidPhysicalNetworkLease) : NodePingNetwork {
@@ -145,6 +148,7 @@ internal class AndroidNodePingNetwork(private val held: AndroidPhysicalNetworkLe
     override fun readbackCurrent(): Boolean = held.readbackCurrent()
     override suspend fun resolveA(host: String): List<String> = AndroidAddressPreparationNetwork(held).resolveA(host)
     override fun bindSocket(socket: FileDescriptor) = held.network.bindSocket(socket)
+    override fun bindSocket(socket: Socket) = held.network.bindSocket(socket)
     override fun close() = held.close()
     override fun toString() = "AndroidNodePingNetwork(<opaque>)"
 }

@@ -20,12 +20,17 @@ class EncryptedManualSourceStore internal constructor(
     private val directory: File,
     private val keyProvider: (create: Boolean) -> SecretKey,
     private val writeObserver: ((ManualSourceWritePhase) -> Unit)? = null
-) : ManualSourceStore {
+) : LibraryManualSourceStore {
     constructor(context: Context) : this(context.noBackupFilesDir, ::manualSourceKey)
 
     private val file = AtomicFile(File(directory, FILE_NAME))
 
-    @Synchronized override fun read(): ManualSourceRecord? = storage {
+    @Synchronized override fun read(): ManualSourceRecord? = readLibrary()?.use { it.activeSource() }
+
+    @Synchronized override fun readLibrary(): ConfigurationLibrary? = storage { readEnvelope()?.second }
+
+    /** Format is retained separately so compatibility writes do not implicitly migrate v1/v2. */
+    private fun readEnvelope(): Pair<Int, ConfigurationLibrary>? {
         val encrypted = try {
             file.openRead().use { input ->
                 require(input.channel.size() in MIN_CIPHERTEXT_BYTES..MAX_CIPHERTEXT_BYTES.toLong())
@@ -43,7 +48,7 @@ class EncryptedManualSourceStore internal constructor(
         } catch (_: FileNotFoundException) {
             require(!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists() &&
                 !File(file.baseFile.path + ".new").exists())
-            return@storage null
+            return null
         }
         try {
             require(encrypted.size in MIN_CIPHERTEXT_BYTES.toInt()..MAX_CIPHERTEXT_BYTES)
@@ -51,36 +56,58 @@ class EncryptedManualSourceStore internal constructor(
             cipher.init(Cipher.DECRYPT_MODE, keyProvider(false), GCMParameterSpec(128, encrypted.copyOfRange(0, 12)))
             cipher.updateAAD(AAD.toByteArray(Charsets.US_ASCII))
             val plain = cipher.doFinal(encrypted, 12, encrypted.size - 12)
-            try { ManualSourceCodec.decode(plain) } finally { plain.fill(0) }
+            try { return ConfigurationLibraryCodec.version(plain) to ConfigurationLibraryCodec.decode(plain) }
+            finally { plain.fill(0) }
         } finally { encrypted.fill(0) }
     }
 
     @Synchronized override fun save(record: ManualSourceRecord) = storage {
-        val plain = ManualSourceCodec.encode(record)
+        val previous = readEnvelope()
         try {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, keyProvider(true))
-            cipher.updateAAD(AAD.toByteArray(Charsets.US_ASCII))
-            val ciphertext = cipher.doFinal(plain)
-            val encrypted = cipher.iv + ciphertext
-            ciphertext.fill(0)
+            if (previous?.first == 3) {
+                previous.second.withActiveSource(record).use { saveLibrary(it) }
+            } else {
+                val plain = ManualSourceCodec.encode(record)
+                try { writeEncrypted(plain) {
+                    val received = read() ?: throw IllegalStateException()
+                    try { require(record.sameEnvelope(received)) } finally { received.close() }
+                } } finally { plain.fill(0) }
+            }
+        } finally { previous?.second?.close() }
+    }
+
+    @Synchronized override fun saveLibrary(library: ConfigurationLibrary) = storage {
+        val plain = ConfigurationLibraryCodec.encode(library)
+        try { writeEncrypted(plain) {
+            val received = readEnvelope() ?: throw IllegalStateException()
+            try { require(received.first == 3 && library.sameEnvelope(received.second)) }
+            finally { received.second.close() }
+        } } finally { plain.fill(0) }
+    }
+
+    private fun writeEncrypted(plain: ByteArray, verify: () -> Unit) {
+        // The caller owns and wipes the plaintext.
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, keyProvider(true))
+        cipher.updateAAD(AAD.toByteArray(Charsets.US_ASCII))
+        val ciphertext = cipher.doFinal(plain)
+        val encrypted = cipher.iv + ciphertext
+        ciphertext.fill(0)
+        try {
+            require(cipher.iv.size == 12 && encrypted.size in MIN_CIPHERTEXT_BYTES.toInt()..MAX_CIPHERTEXT_BYTES)
+            val output = file.startWrite()
             try {
-                require(cipher.iv.size == 12 && encrypted.size in MIN_CIPHERTEXT_BYTES.toInt()..MAX_CIPHERTEXT_BYTES)
-                val output = file.startWrite()
-                try {
-                    output.write(encrypted)
-                    writeObserver?.invoke(ManualSourceWritePhase.BeforeSync)
-                    output.fd.sync()
-                    writeObserver?.invoke(ManualSourceWritePhase.BeforeFinish)
-                    file.finishWrite(output)
-                } catch (failure: Exception) { file.failWrite(output); throw failure }
-                writeObserver?.invoke(ManualSourceWritePhase.AfterFinish)
-                syncDirectory()
-                writeObserver?.invoke(ManualSourceWritePhase.BeforeReadback)
-                val received = read() ?: throw IllegalStateException()
-                try { require(record.sameEnvelope(received)) } finally { received.close() }
-            } finally { encrypted.fill(0) }
-        } finally { plain.fill(0) }
+                output.write(encrypted)
+                writeObserver?.invoke(ManualSourceWritePhase.BeforeSync)
+                output.fd.sync()
+                writeObserver?.invoke(ManualSourceWritePhase.BeforeFinish)
+                file.finishWrite(output)
+            } catch (failure: Exception) { file.failWrite(output); throw failure }
+            writeObserver?.invoke(ManualSourceWritePhase.AfterFinish)
+            syncDirectory()
+            writeObserver?.invoke(ManualSourceWritePhase.BeforeReadback)
+            verify()
+        } finally { encrypted.fill(0) }
     }
 
     private fun syncDirectory() {
@@ -99,7 +126,7 @@ class EncryptedManualSourceStore internal constructor(
         const val KEY_ALIAS = "gccwebos.manual.source.v1"
         const val AAD = "gccwebos.manual.source.v1"
         private const val MIN_CIPHERTEXT_BYTES = 29L
-        private const val MAX_CIPHERTEXT_BYTES = ManualSourceCodec.MAX_ENCODED_BYTES + 28
+        private const val MAX_CIPHERTEXT_BYTES = ConfigurationLibraryCodec.MAX_ENCODED_BYTES + 28
     }
 }
 

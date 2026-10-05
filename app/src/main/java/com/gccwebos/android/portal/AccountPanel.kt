@@ -151,22 +151,27 @@ internal class AccountController(private val repository: PortalRepository, priva
     private var automaticQuestionJob: Job? = null
     val nodeSelection: NodeSelectionController = NodeSelectionController(repository.localSubscriptions, scope,
         authGeneration = { authSessionGeneration },
-        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy },
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !configurationLibrary.busy },
         onSnapshot = { localSubscription = it; nodes = it.nodes })
     val accountUsage = AccountUsageController(scope,
         reader = { owner, epoch -> repository.readAccountOverview(owner, epoch) },
         onSessionExpired = { commerceSessionExpired() })
     val nodeLatency: NodeLatencyController = NodeLatencyController(repository.localSubscriptions, scope, nodeLatencyProbe,
         authGeneration = { authSessionGeneration },
-        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy })
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !configurationLibrary.busy })
+    val configurationLibrary: ConfigurationLibraryController = ConfigurationLibraryController(repository.localSubscriptions, scope,
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !nodeSelection.busy },
+        commitFence = sourceCommitFence,
+        onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() })
     val manualImport: ManualImportController = ManualImportController(repository.localSubscriptions, scope,
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !nodeSelection.busy &&
-            !accountUsage.state.value.busy && !accountUsage.state.value.verifying },
+            !accountUsage.state.value.busy && !accountUsage.state.value.verifying && !configurationLibrary.busy },
         commitFence = sourceCommitFence,
         onSnapshot = {
             nodeLatency.cancel()
-            localSubscription = it; nodes = it.nodes; nodeSelection.sync()
+            localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded()
         }, onSettled = { scope.launch {
+            configurationLibrary.refresh()
             if (foregroundCheckPending && authenticated && !busy && !manualImport.busy && !clearing) revalidateAccount()
         } })
     fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
@@ -185,6 +190,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         return true
     }
     fun onForeground() {
+        configurationLibrary.cancel()
         // Handler delays can pause during sleep; the repository's elapsed clock cannot.
         expireLoginChallengeIfNeeded()
         // Authenticator app round trips must retain the still-bounded TOTP ticket.
@@ -498,6 +504,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun cancelAuthentication() = reset(clearLocal = false)
     private fun reset(clearLocal: Boolean) {
         manualImport.cancel()
+        configurationLibrary.clearDisplay()
         nodeLatency.cancel()
         clearAccountUsage()
         commerceSessionIdentity = null

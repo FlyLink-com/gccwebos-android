@@ -1,0 +1,179 @@
+{
+  "jvm": {
+    "tests": 83,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "error": 0,
+    "fatal": 0,
+    "warning": 23,
+    "hint": 6
+  },
+  "apk_build": true,
+  "android_test_compile": true,
+  "device_tests_executed": true,
+  "library_v3_implemented": false,
+  "device_api": 33,
+  "device_manufacturer": "OPPO",
+  "fixture_package": "com.gccwebos.android.candidate.acceptance.node20261005",
+  "device_ui_passed": 32,
+  "batches": [
+    {
+      "log": "oppo-ui-first.log",
+      "sha256": "a5d89bbb2ff02f50cd498230133c087b6efa18b787e018fdf9297ecaaaa23f8f",
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "tests": [
+        "com.gccwebos.android.NodeSelectionUiTest#firstControllerReadAndCancellationKeepThePageQuietWithoutSelectingOrReloading",
+        "com.gccwebos.android.NodeSelectionUiTest#unsupportedMixedArtifactAndExpiryExposeNoSelectableRows",
+        "com.gccwebos.android.NodeSelectionUiTest#busyRefreshDisablesSelectionAndControllerCancellationRevokesOldChoices",
+        "com.gccwebos.android.NodeSelectionUiTest#collapsingTheConfigurationPreservesSelectionWithoutReadingOrNavigating",
+        "com.gccwebos.android.NodeSelectionUiTest#selectionSummaryTracksTheOriginalChoiceWithoutSearchFiltersOrAnotherRead",
+        "com.gccwebos.android.NodeSelectionUiTest#ownerStateChangesKeepTheNodePageQuietWithoutStartingAConnectionOrReloading",
+        "com.gccwebos.android.NodeSelectionUiTest#duplicateChoicesStartUnselectedAndClickUsesTheCorrectOpaqueObjectWithoutReading",
+        "com.gccwebos.android.NodeSelectionUiTest#ordinaryRowsUseTwoCompactLinesAndKeepLongNamesInsideTheViewport",
+        "com.gccwebos.android.NodeSelectionUiTest#acceptedSelectionReturnsToConnectOnlyAfterControllerAcceptedIt",
+        "com.gccwebos.android.NodeSelectionUiTest#doubledFontNarrowGlassChoicesKeepOpaqueIdentityAndDoNotReloadOnSelection",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#readOnlyInspectedNodesShowRegionWithoutMeasuringOrExposingChoice",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#labelsRecognizeExplicitRegionAndLeaveUnknownNeutralWithUnknownLatency",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#elapsedResultsHideThenRemeasureWithoutReloadingOrChangingSelection",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#backgroundSuspensionRejectsRecompositionUntilForegroundReturns",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#narrowDoubledFontKeepsRegionLatencyAndSelectionInsideTheViewport",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#automaticMeasurementRetainsSelectionAndCompletedReadingsAcrossPageReturn",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#lightningRemeasuresWithoutReloadingConfigOrChangingSelection",
+        "com.gccwebos.android.NodeRegionLatencyUiTest#accountBusyCancelsPendingMeasurementsWithoutTurningPingIntoSelectionAuthorization",
+        "com.gccwebos.android.QuietNavigationUiTest#healthyRepeatedNavigationKeepsTheLocalSelectionWithoutSubscriptionHttp",
+        "com.gccwebos.android.QuietNavigationUiTest#serviceRepositoryInjectionRetainsProbeAndDisplaysMeasuredMilliseconds",
+        "com.gccwebos.android.QuietNavigationUiTest#repeatedNodeNavigationRetriesQuietlyAndNeverStartsAConnection",
+        "com.gccwebos.android.QuietNavigationUiTest#nodeNavigationDoesNotInvalidateAnAcceptedConnectionPreparation",
+        "com.gccwebos.android.QuietNavigationUiTest#navigationWaitingForAccountIdleRechecksTheLatestConnectionOwner",
+        "com.gccwebos.android.NodeForegroundRecoveryUiTest#sameSessionForegroundValidationRecoversMountedNodesWithFreshHandlesAndNoPowerAction",
+        "com.gccwebos.android.NodeForegroundRecoveryUiTest#foregroundRecoveryCannotRefreshThroughAnAcceptedConnectionPhase",
+        "com.gccwebos.android.NodeForegroundRecoveryUiTest#restoredNodesTabRecoversWithoutAnotherNavigationClick",
+        "com.gccwebos.android.CatalogDisplayCacheUiTest#resumedPlansReadOncePerVisitNeverPollRechargeAndRefreshAfterRealBackgroundReturn",
+        "com.gccwebos.android.CatalogDisplayCacheUiTest#returningToPlansDisplaysLastCatalogBeforeRefreshWithoutEnablingPurchase",
+        "com.gccwebos.android.CatalogDisplayCacheUiTest#differentVerifiedSessionNeverShowsPreviousCatalog"
+      ]
+    },
+    {
+      "log": "oppo-layout.log",
+      "sha256": "ffb2746e64a63238c5d44548d2f90e490dd62ab445772995ea9a6694bc2fd279",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "tests": [
+        "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2At320DpDoubledFontKeepsNavigationAndActionsReachable",
+        "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2FourPageHierarchyAt320DpUsesOnlySyntheticState",
+        "com.gccwebos.android.PreviewV2LayoutUiTest#previewV2FourPageHierarchyAt390DpUsesOnlySyntheticState"
+      ]
+    }
+  ],
+  "fixture_apks": [
+    {
+      "package": "com.gccwebos.android.candidate.acceptance.node20261005",
+      "apk": "node-ui-fixture.apk",
+      "sha256": "e68af4a91e90973fbe75684f3e98478eb1209f17ac88cce9e3b299734cbf37b6",
+      "bytes": 144266483,
+      "signer_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+      "verified": true
+    },
+    {
+      "package": "com.gccwebos.android.candidate.acceptance.node20261005.test",
+      "apk": "node-ui-fixture-test.apk",
+      "sha256": "04c4d6e03491ad13759124c560f481f519ea12b2157e44d3aab4cd9481cc6079",
+      "bytes": 1689161,
+      "signer_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+      "verified": true
+    }
+  ],
+  "scope": "Synthetic isolated UI only; no real account, payment or VPN result",
+  "screenshots": [
+    {
+      "name": "320dp-font100-confirmation.png",
+      "sha256": "f8aaa35455110e9dae2b6c0983b754a7e5f64a2cbc2ee7ca4b2b314253d5f4af"
+    },
+    {
+      "name": "320dp-font100-connect.png",
+      "sha256": "e8ab81272a3c0741ffbfd179ee9c25ac1b65428998e4a623cfd03f4f61634c38"
+    },
+    {
+      "name": "320dp-font100-mine-functions.png",
+      "sha256": "396ca806125014ddb9e90f6f9330b08ff0fe489220bca8aba52a3e2bc5ad593f"
+    },
+    {
+      "name": "320dp-font100-mine.png",
+      "sha256": "59e1ea36c73ad83da450b554b826df2fe0148926963e0d0f6a3c4d1bdecda158"
+    },
+    {
+      "name": "320dp-font100-nodes.png",
+      "sha256": "eb9c1ba45403a53557b4c50d028c3e7960c9a5db2098f452e62d1174dc4202f3"
+    },
+    {
+      "name": "320dp-font100-plans-yearly.png",
+      "sha256": "f0c1457bf10c455da20d04ab1ef99743e3f105b34087b627537b3b764350ce8f"
+    },
+    {
+      "name": "320dp-font100-plans.png",
+      "sha256": "616ab182ee6e3b22a3f5f4ced0f57fa049beb71d65e775fc3f05f6108db82d1c"
+    },
+    {
+      "name": "320dp-font200-confirmation.png",
+      "sha256": "f88d6b4c191fa2b2a80ec044b52c48cbcfdcfb81955fca7089ae1c4c309e27d6"
+    },
+    {
+      "name": "320dp-font200-connect.png",
+      "sha256": "85072918dca85c43cda0f0a0555eafcca025690296d059309a6d43d37083fc60"
+    },
+    {
+      "name": "320dp-font200-mine-functions.png",
+      "sha256": "e732fb4332fb63b98cf3f5bd64d3a1aa76ed883e7fe8aa80fc1993b4d4e5fe20"
+    },
+    {
+      "name": "320dp-font200-nodes.png",
+      "sha256": "d13b924b51d7e9d00111c8323832db0bc6151cd27f354cdac289013da15f3270"
+    },
+    {
+      "name": "320dp-font200-plans.png",
+      "sha256": "273acfa57a0dbd8525244b2860dcffbcbe57705745252a47807cbb9bdf35e15b"
+    },
+    {
+      "name": "390dp-font100-confirmation.png",
+      "sha256": "f8aaa35455110e9dae2b6c0983b754a7e5f64a2cbc2ee7ca4b2b314253d5f4af"
+    },
+    {
+      "name": "390dp-font100-connect.png",
+      "sha256": "080da772a265dace19cb2a041a7cd0dcc724e37a557b3dce0175e2c0594979aa"
+    },
+    {
+      "name": "390dp-font100-mine-functions.png",
+      "sha256": "9493a3ba1412e856db5720443285eb037301a81297b39bf7e900f462df9a874b"
+    },
+    {
+      "name": "390dp-font100-mine.png",
+      "sha256": "9493a3ba1412e856db5720443285eb037301a81297b39bf7e900f462df9a874b"
+    },
+    {
+      "name": "390dp-font100-nodes.png",
+      "sha256": "37a2af518076bb7cf7055dd592f29decfac2ba4c851b7a07529ce01fd2fe06fc"
+    },
+    {
+      "name": "390dp-font100-plans-yearly.png",
+      "sha256": "4121dd21035a1f9c33ebe42435ddf1c6c6c56314f6db8d787ae77b9b536a538f"
+    },
+    {
+      "name": "390dp-font100-plans.png",
+      "sha256": "48ea519eaa34d16048973e2d844719dd986808be1a2074c1ba29d98dfc684b7d"
+    },
+    {
+      "name": "node-region-320-font100.png",
+      "sha256": "360b72a0593a8b8773a19c1a42a0dc6a93e7d9593b9cf80eb4bb7cf4ebed73ce"
+    },
+    {
+      "name": "node-region-320-font200.png",
+      "sha256": "ed994d050733894624f595cc06c2286084b787863ab726f41be007bcb653b777"
+    }
+  ]
+}

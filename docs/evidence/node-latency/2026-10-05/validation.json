@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-05",
+  "source_commit": "70bac49d40cd9ad0540624d0b40b8a8c8df10223",
+  "apk_sha256": "b23a10ffcd6ab205b8ce935be99e1956f2761e10a7aa568a2e9abfa3ddd0425a",
+  "package": "com.gccwebos.android.candidate",
+  "installed_bytes_verified": true,
+  "normal_data_cleared": false,
+  "test_flags_disabled": true,
+  "native_unchanged": true,
+  "jvm_targeted": {
+    "tests": 80,
+    "failed": 0,
+    "skipped": 0
+  },
+  "android_final_unique": {
+    "tests": 33,
+    "failed": 0,
+    "skipped": 0,
+    "classes": {
+      "com.gccwebos.android.NodeRegionLatencyUiTest": 9,
+      "com.gccwebos.android.ConfigurationLibraryUiTest": 8,
+      "com.gccwebos.android.ConfigurationLibraryFlowUiTest": 2,
+      "com.gccwebos.android.AndroidNodeLatencyProbeTest": 9,
+      "com.gccwebos.android.AndroidNodePingUiTest": 5
+    }
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 23,
+    "hints": 6
+  },
+  "windows_baseline": {
+    "source": "00e949eed6850cd4fc8b01f15a541c74cbdf2627",
+    "tests": 59,
+    "failed": 8,
+    "current_failure_names_match": true,
+    "cause": "Windows rejects POSIX initial file permissions"
+  },
+  "real_node_display": {
+    "vpn_connected_ui_verified": true,
+    "node_rows": [
+      {
+        "protocol": "VLESS",
+        "value": "128 ms"
+      },
+      {
+        "protocol": "VLESS",
+        "value": "超时"
+      },
+      {
+        "protocol": "HYSTERIA2",
+        "value": "171 ms"
+      },
+      {
+        "protocol": "HYSTERIA2",
+        "value": "超时"
+      },
+      {
+        "protocol": "TUIC",
+        "value": "120 ms"
+      },
+      {
+        "protocol": "TUIC",
+        "value": "超时"
+      }
+    ],
+    "scope": "Endpoint RTT; not authenticated proxy or traffic validation"
+  },
+  "owned_fixture_removed": true,
+  "earlier_attempts": "Initial compile/API, static-field assertion, lint annotation and VPN-active fixture binding failures retained separately; none counted as passes"
+}

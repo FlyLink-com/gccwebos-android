@@ -121,6 +121,55 @@ class NodeLatencyControllerTest {
         assertEquals(NodeLatencyObservation.Success(12, 8), f.controller.reading(selection))
     }
 
+    @Test fun failedManualRemeasureDebouncesFromCompletionThenSuccessRestoresTheLongCooldown() = runTest {
+        for (failure in listOf(NodeLatencyObservation.NoReply, NodeLatencyObservation.Unavailable)) {
+            val f = Fixture(this); f.import()
+            val selection = f.selections()[0]
+            f.probe.response = { delay(1_500); failure }
+            f.controller.ensureMeasured(selection); runCurrent()
+            advanceTimeBy(1_500); runCurrent()
+            assertEquals(failure, f.controller.reading(selection))
+            f.probe.response = { NodeLatencyObservation.Success(15, 7) }
+            repeat(3) { f.controller.refresh(selection); runCurrent() }
+            advanceTimeBy(1_999); f.controller.refresh(selection); runCurrent()
+            assertEquals(1, f.probe.calls.size)
+            advanceTimeBy(1); f.controller.refresh(selection); runCurrent()
+            assertEquals(2, f.probe.calls.size)
+            assertEquals(NodeLatencyObservation.Success(15, 7), f.controller.reading(selection))
+            advanceTimeBy(29_999); f.controller.refresh(selection); runCurrent()
+            assertEquals(2, f.probe.calls.size)
+            advanceTimeBy(1); f.controller.refresh(selection); runCurrent()
+            assertEquals(3, f.probe.calls.size)
+            assertEquals(1, f.downloads); assertEquals(1, f.profiles.saves)
+        }
+    }
+
+    @Test fun automaticFailureRetryIsBoundedAndLeavesSuccessfulNodesAtTheirOriginalTtl() = runTest {
+        val f = Fixture(this); f.import()
+        val selections = f.selections()
+        f.probe.response = { target -> if (target.selection === selections[0])
+            NodeLatencyObservation.Success(12, 7) else NodeLatencyObservation.NoReply }
+        f.controller.ensureMeasured(); runCurrent()
+        val storageReads = f.profiles.reads
+        repeat(9) {
+            advanceTimeBy(1_000); f.controller.ensureMeasured(); runCurrent()
+            assertEquals(2, f.probe.calls.size)
+        }
+        assertEquals(storageReads, f.profiles.reads)
+        advanceTimeBy(1_000); f.controller.ensureMeasured(); runCurrent()
+        assertEquals(3, f.probe.calls.size)
+        repeat(10) { f.controller.ensureMeasured(); runCurrent() }
+        assertEquals(3, f.probe.calls.size)
+        repeat(109) { advanceTimeBy(1_000); f.controller.ensureMeasured(); runCurrent() }
+        assertEquals(1, f.probe.calls.count { it === selections[0] })
+        assertEquals(12, f.probe.calls.count { it === selections[1] })
+        assertEquals(NodeLatencyObservation.Success(12, 7), f.controller.reading(selections[0]))
+        advanceTimeBy(1_000); f.controller.ensureMeasured(); runCurrent()
+        assertEquals(2, f.probe.calls.count { it === selections[0] })
+        assertEquals(13, f.probe.calls.count { it === selections[1] })
+        assertEquals(1, f.downloads); assertEquals(1, f.profiles.saves)
+    }
+
     @Test fun backgroundBlocksNewWorkAndLateResultsUntilThePageReturnsToForeground() = runTest {
         val f = Fixture(this); f.import()
         val selections = f.selections()

@@ -13,9 +13,9 @@ import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/** Opt-in same-signature upgrade acceptance; fixed disposable package and baseline hash required. */
+/** Opt-in profile-preserving v3 library acceptance; not a downgrade preparation fixture. */
 class ManualImportUpgradeTest {
-    @Test fun verifyUpgradeAndPrepareRollback() {
+    @Test fun verifyUpgradePreservesProfileAndConfigurationLibrary() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val args = InstrumentationRegistry.getArguments()
         assumeTrue("Owned upgrade acceptance only", args.getString("manualUpgradeStage") == "candidate")
@@ -53,6 +53,14 @@ class ManualImportUpgradeTest {
                 imported.validity == LocalSourceValidity.LocalNoServerExpiry && imported.validUntil == null)
         } finally { raw.fill(0) }
         unchanged(); assertTrue("Local import must not download", fakeDownloads == 0)
+        val localId = requireNotNull(sidecar.readLibrary()).use { library ->
+            assertTrue("First import must create exactly one local entry", library.entries.size == 1)
+            val entry = library.entries.single()
+            entry.copySource().use { assertTrue("First entry must be local", it.kind == ManualSourceKind.ImportedLocal) }
+            assertTrue("First import must select its entry", library.selector == ConfigurationSelector.Entry &&
+                library.selectedEntryId == entry.id)
+            entry.id
+        }
         val reopened = LocalSubscriptionManager(EncryptedDeliveryStore(context), EncryptedLocalProfileStore(context),
             SubscriptionSource { throw AssertionError("Local restore must not download") },
             OriginPolicy("https://portal.gccwebos.com", setOf("https://sub.gccwebos.com")),
@@ -65,10 +73,32 @@ class ManualImportUpgradeTest {
             assertTrue("Explicit synthetic link must choose its remote envelope", imported.sourceKind == ManualSourceKind.ImportedRemote && imported.validUntil == UNTIL)
         } finally { link.fill(0) }
         unchanged(); assertTrue("Only one injected read is expected", fakeDownloads == 1)
+        requireNotNull(sidecar.readLibrary()).use { library ->
+            assertTrue("Second import must append instead of replacing local configuration", library.entries.size == 2)
+            val localEntry = library.entries.single { it.id == localId }
+            localEntry.copySource().use { assertTrue("Original local entry must remain local", it.kind == ManualSourceKind.ImportedLocal) }
+            val remoteEntry = library.entries.single { it.id != localId }
+            remoteEntry.copySource().use { assertTrue("New entry must be the synthetic remote", it.kind == ManualSourceKind.ImportedRemote) }
+            assertTrue("Second import must select only the new remote entry", library.selector == ConfigurationSelector.Entry &&
+                library.selectedEntryId == remoteEntry.id)
+        }
         manager.removeManualSource { action -> assertNoOwner(context); action() }
         sidecar.read()!!.use {
-            assertTrue("Rollback requires complete empty tombstone", it.kind == ManualSourceKind.None && !it.clearPending &&
+            assertTrue("Removing the active entry must leave no selected source", it.kind == ManualSourceKind.None && !it.clearPending &&
                 it.copyBytes() == null && it.url == null && it.validUntil == null)
+        }
+        requireNotNull(sidecar.readLibrary()).use { library ->
+            assertTrue("Removal must keep the unselected local entry in v3", library.entries.size == 1 &&
+                library.selector == ConfigurationSelector.None && library.selectedEntryId == null && !library.clearPending)
+            val retained = library.entries.single()
+            assertTrue("Removal must preserve the original local entry ID", retained.id == localId)
+            retained.copySource().use { source ->
+                assertTrue("Retained entry must still be local", source.kind == ManualSourceKind.ImportedLocal)
+                val bytes = requireNotNull(source.copyBytes())
+                val expectedLocal = yaml("Synthetic imported local", "192.0.2.11")
+                try { assertArrayEquals("Retained local configuration must not change", expectedLocal, bytes) }
+                finally { bytes.fill(0); expectedLocal.fill(0) }
+            }
         }
         assertTrue("None must not fall back to legacy profile", manager.restore().status == LocalSubscriptionStatus.MISSING)
         unchanged()
@@ -77,7 +107,11 @@ class ManualImportUpgradeTest {
             putString("manualV1Sha256", expected)
             putString("manualSidecarSha256", sha(File(context.noBackupFilesDir, "manual-source.bin")))
             putString("manualClearPending", "false")
-            putString("manualCandidate", "verified-preserved-v1-empty-tombstone-no-http-no-vpn")
+            putString("manualSchemaVersion", "3")
+            putString("manualRetainedEntries", "1")
+            putString("manualSelector", "None")
+            putString("downgradeReady", "false")
+            putString("manualCandidate", "verified-preserved-profile-v1-library-v3-retained-local-no-http-no-vpn")
         })
     }
 

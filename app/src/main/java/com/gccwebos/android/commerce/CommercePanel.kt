@@ -84,6 +84,17 @@ internal class CommerceController(private val account: AccountController, privat
         operation++; requestJob?.cancel(); requestJob = null; busy = false
         quote = null; recharge = null
     }
+    /** Catalog reads never wait for wallet, recharge offers, or recharge recovery. */
+    fun loadCatalog() = run {
+        catalogLoaded = false; commerceModel = null; offers = emptyList(); quote = null; purchase = null
+        val r = repository()
+        // Preserve an existing purchase before exposing a new checkout action. An unknown
+        // create is never replayed by navigation; currentPurchase only reads a known result.
+        pendingPurchase = r.pending("purchase") != null
+        readPart({ r.currentPurchase() }) { purchase = it }
+        readPart({ r.loadModel() }) { commerceModel = it }
+        if (commerceModel != null) readPart({ r.offers() }) { offers = it; catalogLoaded = true }
+    }
     fun load() = run {
         orderPage = null; rechargeHistory = null; transitions = null; catalogLoaded = false; commerceModel = null
         purchaseHistoryError = null; rechargeHistoryError = null
@@ -409,7 +420,8 @@ private fun CatalogCategoryChip(selected: Boolean, enabled: Boolean, title: Stri
 @Composable
 internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true,
     onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null, paymentOpener: ((String) -> Unit)? = null,
-    embeddedWallet: Boolean = false, defaultSelectionRequest: Int = 0, refreshRequest: Int = 0) {
+    embeddedWallet: Boolean = false, defaultSelectionRequest: Int = 0, refreshRequest: Int = 0,
+    catalogDisplayCache: CatalogDisplayCache? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext), includeHistory = mode == CommerceMode.Orders) }
@@ -432,13 +444,20 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         (!autoLoad || handledRefresh == refreshRequest)
     val displayOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
     var lastDisplayedOffers by remember(state, displayOwner) { mutableStateOf<List<Offer>>(emptyList()) }
+    val cachedOffers = if (mode == CommerceMode.Plans) catalogDisplayCache?.read(account.commerceSessionIdentity).orEmpty() else emptyList()
     val displayOffers = when {
         !state.currentSession() -> emptyList()
         state.catalogLoaded -> state.offers
-        state.busy || state.error != null -> lastDisplayedOffers
-        else -> emptyList()
+        state.busy || state.error != null -> lastDisplayedOffers.ifEmpty { cachedOffers }
+        else -> cachedOffers
     }
-    SideEffect { if (state.currentSession() && state.catalogLoaded) lastDisplayedOffers = state.offers }
+    SideEffect {
+        if (state.currentSession() && state.catalogLoaded) {
+            lastDisplayedOffers = state.offers
+            if (mode == CommerceMode.Plans && !state.busy && state.error == null)
+                catalogDisplayCache?.publish(account.commerceSessionIdentity, state.offers)
+        }
+    }
     var cancelConfirmation by remember(account.authSessionGeneration, state) { mutableStateOf(false) }
     val walletMode = mode in setOf(CommerceMode.Wallet, CommerceMode.Mine, CommerceMode.Overview)
     var now by remember { mutableStateOf(Instant.now()) }
@@ -508,7 +527,8 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             // Commerce busy is not an effect key: completing/failing a read must not retry it.
             snapshotFlow { !state.busy && state.canOperate() }.first { it }
             if (state.canOperate()) {
-                if (mode == CommerceMode.Mine) state.loadBalance()
+                if (mode == CommerceMode.Plans) state.loadCatalog()
+                else if (mode == CommerceMode.Mine) state.loadBalance()
                 else if (walletMode) state.loadWallet()
                 else if (mode == CommerceMode.Ledger) state.loadLedger()
                 else state.load()
@@ -521,17 +541,27 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     // A browser return is merely a reason to reread. It never confirms, creates or pays an order.
     val lifecycle = (LocalActivity.current as? ComponentActivity)?.lifecycle
     DisposableEffect(lifecycle, state, autoLoad, mode) {
-        val observer = LifecycleEventObserver { _, event -> if(autoLoad && event == Lifecycle.Event.ON_RESUME &&
-            state.currentSession() && !account.restoring && !account.foregroundCheckPending) {
-            cancelConfirmation = false
-            if (mode == CommerceMode.Mine) state.loadBalance() else if (walletMode) state.loadWallet()
-            else if (mode == CommerceMode.Ledger) state.loadLedger() else state.load()
-        } }
+        // Registering on an already resumed Activity replays ON_RESUME. The initial
+        // LaunchedEffect owns that read; only an actual background return adds another.
+        var leftForeground = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) leftForeground = true
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val returned = leftForeground
+                leftForeground = false
+                if (autoLoad && returned && state.currentSession() && !account.restoring && !account.foregroundCheckPending) {
+                    cancelConfirmation = false
+                    if (mode == CommerceMode.Plans) state.loadCatalog()
+                    else if (mode == CommerceMode.Mine) state.loadBalance() else if (walletMode) state.loadWallet()
+                    else if (mode == CommerceMode.Ledger) state.loadLedger() else state.load()
+                }
+            }
+        }
         lifecycle?.addObserver(observer)
         onDispose { lifecycle?.removeObserver(observer) }
     }
-    LaunchedEffect(state, lifecycle, autoLoad) {
-        if (autoLoad) lifecycle?.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+    LaunchedEffect(state, lifecycle, autoLoad, walletMode) {
+        if (autoLoad && walletMode) lifecycle?.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 kotlinx.coroutines.delay(10_000)
                 if (account.authenticated && !account.restoring && !account.foregroundCheckPending) state.pollRecharge()

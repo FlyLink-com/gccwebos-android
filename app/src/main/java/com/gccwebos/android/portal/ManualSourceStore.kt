@@ -112,13 +112,21 @@ interface ManualSourceStore {
     fun save(record: ManualSourceRecord)
 }
 
-class MemoryManualSourceStore(initial: ManualSourceRecord? = ManualSourceRecord(kind = ManualSourceKind.LegacyRemote)) : ManualSourceStore {
-    private var value = initial?.duplicate()
-    @Synchronized override fun read(): ManualSourceRecord? = value?.duplicate()
+class MemoryManualSourceStore(initial: ManualSourceRecord? = ManualSourceRecord(kind = ManualSourceKind.LegacyRemote)) : LibraryManualSourceStore {
+    private var value = initial?.let(ConfigurationLibrary::fromLegacy)
+    private var libraryFormat = false
+    @Synchronized override fun read(): ManualSourceRecord? = value?.activeSource()
+    @Synchronized override fun readLibrary(): ConfigurationLibrary? = value?.duplicate()
     @Synchronized override fun save(record: ManualSourceRecord) {
-        val replacement = record.duplicate()
+        val replacement = if (libraryFormat) requireNotNull(value).withActiveSource(record) else ConfigurationLibrary.fromLegacy(record)
         value?.close()
         value = replacement
+    }
+    @Synchronized override fun saveLibrary(library: ConfigurationLibrary) {
+        val replacement = library.duplicate()
+        value?.close()
+        value = replacement
+        libraryFormat = true
     }
 }
 

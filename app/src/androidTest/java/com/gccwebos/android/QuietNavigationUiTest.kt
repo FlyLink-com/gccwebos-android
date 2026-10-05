@@ -21,6 +21,7 @@ class QuietNavigationUiTest {
     private var gate: CompletableDeferred<Unit>? = null
     private var control by mutableStateOf(ConnectionControlState())
     private lateinit var account: AccountController
+    private lateinit var repository: PortalRepository
     private val expiry = Instant.parse("2099-01-01T00:00:00Z")
     private val bytes = """proxies:
   - name: Synthetic Japan
@@ -36,7 +37,7 @@ class QuietNavigationUiTest {
         val profiles = MemoryLocalProfileStore().apply {
             CachedSubscription(sessionBinding(url), bytes, expiry, url).use { save(it) }
         }
-        val repository = PortalRepository(object : PortalTransport {
+        repository = PortalRepository(object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse =
                 error("This signed-out fixture must not access Portal")
         }, object : DeliveryStore {
@@ -77,6 +78,10 @@ class QuietNavigationUiTest {
         compose.waitForIdle()
     }
 
+    private fun awaitNodeChoice() {
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("node-choice-0").fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @Test fun serviceRepositoryInjectionRetainsProbeAndDisplaysMeasuredMilliseconds() {
         launch(refreshPages = false)
         compose.onNodeWithTag("nav-Lines").performClick()
@@ -84,7 +89,9 @@ class QuietNavigationUiTest {
         compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertTextEquals("27 ms")
         compose.onNodeWithTag("node-region-0", useUnmergedTree = true)
             .assertContentDescriptionEquals("节点标注地区：日本")
-        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
+            .assertContentDescriptionEquals("测试节点延迟")
+        compose.onNodeWithText("测试节点延迟").assertDoesNotExist()
         compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, reads.get()); assertEquals(0, commands.get()) }
     }
@@ -92,18 +99,23 @@ class QuietNavigationUiTest {
     @Test fun repeatedNodeNavigationRetriesQuietlyAndNeverStartsAConnection() {
         failRead = true
         gate = CompletableDeferred()
-        launch(refreshPages = true)
+        launch(refreshPages = true, captureAccount = true)
+        compose.waitUntil(5000) { ::account.isInitialized && !account.busy && !account.restoring }
+        // A failed/invalidated registry needs recovery. Healthy page visits use the local list.
+        compose.runOnIdle { repository.localSubscriptions.invalidateNodeSelection() }
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.waitUntil(5000) { reads.get() == 1 }
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-cancel").assertDoesNotExist()
         compose.onNodeWithText("正在刷新").assertDoesNotExist()
-        compose.onNodeWithTag("node-choice-0").assertIsNotEnabled()
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.runOnIdle { assertEquals(1, reads.get()) }
         compose.runOnIdle { gate!!.complete(Unit); gate = null }
-        compose.waitForIdle()
+        compose.waitUntil(5000) { !account.nodeSelection.busy &&
+            account.nodeSelection.snapshot.status == LocalSubscriptionStatus.RETRY_REQUIRED }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
         compose.runOnIdle { failRead = false }
         compose.onNodeWithTag("nav-Lines").performClick()
@@ -118,17 +130,29 @@ class QuietNavigationUiTest {
         control = ConnectionControlState(phase = ConnectionPhase.Connecting, commandPending = true)
         launch(refreshPages = true)
         compose.onNodeWithTag("nav-Lines").performClick()
+        awaitNodeChoice()
         compose.onNodeWithTag("node-choice-0").assertExists()
+        val original = repository.localSubscriptions.nodeSelectionSnapshot().choices.single().selection
         compose.runOnIdle { assertEquals(0, reads.get()); control = ConnectionControlState() }
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.waitUntil(5000) { reads.get() == 1 }
-        compose.runOnIdle { assertEquals(0, commands.get()) }
+        compose.waitForIdle()
+        awaitNodeChoice()
+        compose.onNodeWithTag("node-choice-0").assertIsEnabled().performClick()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.runOnIdle {
+            assertSame(original, repository.localSubscriptions.nodeSelectionSnapshot().selected)
+            assertEquals(0, reads.get()); assertEquals(0, commands.get())
+        }
     }
 
     @Test fun navigationWaitingForAccountIdleRechecksTheLatestConnectionOwner() {
         launch(refreshPages = true, captureAccount = true)
         compose.waitUntil(5000) { ::account.isInitialized && !account.busy && !account.restoring }
-        compose.runOnIdle { account.busy = true }
+        compose.runOnIdle {
+            account.busy = true
+            // Keep a real recovery request pending so the latest connection-owner guard matters.
+            repository.localSubscriptions.invalidateNodeSelection()
+        }
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.runOnIdle { control = ConnectionControlState(phase = ConnectionPhase.Connecting, commandPending = true) }
         compose.runOnIdle { account.busy = false }
@@ -137,5 +161,28 @@ class QuietNavigationUiTest {
         compose.runOnIdle { control = ConnectionControlState() }
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.waitUntil(5000) { reads.get() == 1 }
+    }
+
+    @Test fun healthyRepeatedNavigationKeepsTheLocalSelectionWithoutSubscriptionHttp() {
+        launch(refreshPages = true, captureAccount = true)
+        compose.waitUntil(5000) { ::account.isInitialized && !account.busy && !account.restoring }
+        compose.onNodeWithTag("nav-Lines").performClick()
+        awaitNodeChoice()
+        compose.onNodeWithTag("node-choice-0").assertIsEnabled().performClick()
+        compose.onNodeWithTag("page-Connect").assertExists()
+        val original = repository.localSubscriptions.nodeSelectionSnapshot().selected
+        assertNotNull(original)
+        repeat(3) {
+            compose.onNodeWithTag("nav-Lines").performClick()
+            awaitNodeChoice()
+            compose.onNodeWithTag("node-choice-0").assertIsEnabled().assertIsSelected()
+            compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+            compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()
+            compose.onNodeWithTag("nav-Connect").performClick()
+            compose.runOnIdle {
+                assertSame(original, repository.localSubscriptions.nodeSelectionSnapshot().selected)
+                assertEquals(0, reads.get()); assertEquals(0, commands.get())
+            }
+        }
     }
 }

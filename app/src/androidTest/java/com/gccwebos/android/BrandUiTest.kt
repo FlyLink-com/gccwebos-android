@@ -112,7 +112,12 @@ class BrandUiTest {
             val scope = rememberCoroutineScope()
             val account = remember {
                 (if (signedIn) offlineUiAccount(scope) else challengeFixture.account(scope))
-                    .apply { authenticated = signedIn }.apply(setup)
+                    .apply {
+                        authenticated = signedIn
+                        // This display-only fixture owns no admitted node choices. Repository
+                        // recreation shares the process registry, so revoke earlier test handles.
+                        nodeSelection.invalidate()
+                    }.apply(setup)
             }
             controller = account
             val registration = remember { challengeFixture.registration(scope, account) }
@@ -126,6 +131,19 @@ class BrandUiTest {
         }
         if (!signedIn) compose.onNodeWithTag("nav-Profile").performClick()
         return controller
+    }
+    private fun awaitReadOnlyConfiguration(state: AccountController) {
+        // The library now reads its active group on IO; Compose idleness alone does not await it.
+        compose.waitUntil(5_000) {
+            !state.configurationLibrary.busy && !state.nodeSelection.busy &&
+                state.configurationLibrary.snapshot.items.any { it.active }
+        }
+        compose.runOnIdle {
+            val active = state.configurationLibrary.snapshot.items.single { it.active }
+            assertEquals(ManualSourceKind.LegacyRemote, active.kind)
+            assertTrue("Display summaries must not create node authority", state.nodeSelection.snapshot.choices.isEmpty())
+            assertNull(state.nodeSelection.snapshot.selected)
+        }
     }
     private fun assertQuestionPresentation(expected: String, enabled: Boolean = true) {
         compose.onAllNodesWithTag("login-challenge-prompt", useUnmergedTree = true).assertCountEquals(1)
@@ -454,6 +472,7 @@ class BrandUiTest {
         compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         capture("compact-connect")
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
+        awaitReadOnlyConfiguration(state)
         compose.onNodeWithTag("subscription-node-name-0").assertTextEquals("合成验收线路 Alpha")
         compose.onNodeWithTag("subscription-node-details-0").assertTextEquals("SS")
         compose.runOnIdle { assertEquals("ss", state.nodes[0].protocol); assertTrue(state.nodes[0].supported) }
@@ -517,6 +536,7 @@ class BrandUiTest {
         compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         capture("compact-connect-narrow-font-200")
         compose.onNodeWithTag("connection-nodes").performScrollTo().performClick()
+        awaitReadOnlyConfiguration(state)
         compose.onNodeWithTag("subscription-node-name-0").performScrollTo().assertTextEquals(name)
         compose.onNodeWithTag("subscription-node-name-1").performScrollTo().assertTextEquals(name)
         compose.onNodeWithTag("subscription-node-details-1").performScrollTo().assertTextEquals("VMESS")

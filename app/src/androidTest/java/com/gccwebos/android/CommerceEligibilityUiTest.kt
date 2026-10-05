@@ -139,7 +139,8 @@ class CommerceEligibilityUiTest {
     private fun expectedReads(mode: CommerceMode) = when (mode) {
         CommerceMode.Mine -> listOf(walletPath)
         CommerceMode.Wallet -> listOf(walletPath, rechargeOffersPath)
-        else -> listOf(walletPath, rechargeOffersPath, "/api/portal/commerce/model", "/api/portal/catalog/offers")
+        // Plans revalidate the catalog without loading wallet or recharge resources.
+        else -> listOf("/api/portal/commerce/model", "/api/portal/catalog/offers")
     }
 
     private fun assertLoaded(mode: CommerceMode, units: Int = 20) {
@@ -157,7 +158,13 @@ class CommerceEligibilityUiTest {
         assertLoaded(mode)
         // Let ordinary busy->idle recompositions settle; they must not trigger another read.
         compose.mainClock.advanceTimeBy(1000); compose.waitForIdle()
-        compose.runOnIdle { assertEquals(expectedReads(mode), commerceReads.map { it.first }) }
+        compose.runOnIdle {
+            assertEquals(expectedReads(mode).map { it to "eligibility_token_a" }, commerceReads)
+            if (mode == CommerceMode.Plans) {
+                assertNull(commerce.wallet); assertFalse(commerce.walletLoaded)
+                assertTrue(commerce.rechargeOffers.isEmpty()); assertFalse(commerce.rechargeOffersLoaded)
+            }
+        }
     }
 
     @Test fun passwordLoginDefersMineUntilResourceSuccess() = assertSingleInitialRead(CommerceMode.Mine, false)
@@ -174,10 +181,13 @@ class CommerceEligibilityUiTest {
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.waitUntil(5000) { !commerce.busy && commerceReads.size == expectedReads(CommerceMode.Plans).size * 2 }
         assertLoaded(CommerceMode.Plans)
+        compose.mainClock.advanceTimeBy(1000); compose.waitForIdle()
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.onNodeWithTag("catalog-status").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(expectedReads(CommerceMode.Plans) + expectedReads(CommerceMode.Plans), commerceReads.map { it.first })
+            assertTrue(commerceReads.all { it.second == "eligibility_token_a" })
+            assertNull(commerce.wallet); assertFalse(commerce.walletLoaded); assertFalse(commerce.rechargeOffersLoaded)
             assertNull(commerce.quote); assertNull(commerce.purchase); assertNull(commerce.recharge)
             assertFalse(commerce.pendingPurchase); assertFalse(commerce.pendingRecharge)
         }

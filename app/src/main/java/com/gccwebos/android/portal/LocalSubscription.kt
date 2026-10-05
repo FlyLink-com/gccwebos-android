@@ -14,6 +14,7 @@ import java.io.Closeable
 import com.gccwebos.android.vpn.SafeProxyConfig
 import com.gccwebos.android.vpn.UnsafeProxyConfiguration
 import java.time.Instant
+import java.util.UUID
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.CancellationException
@@ -159,6 +160,192 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             else LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
         set(value) { observed = value; stateClearVersion = authority.clearVersion }
     fun snapshot(): LocalSubscriptionSnapshot = synchronized(lock) { state }
+    private val libraryOwner = Any()
+
+    private fun readLibrary(): ConfigurationLibrary = synchronized(lock) {
+        val active = readManualSource()
+        try {
+            if (manualSources is LibraryManualSourceStore) {
+                try { manualSources.readLibrary() ?: throw PortalFailure(PortalFailure.Reason.STORAGE) }
+                catch (_: Exception) {
+                    authority.manualStorageBlocked = true
+                    revision++; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR)
+                    throw PortalFailure(PortalFailure.Reason.STORAGE)
+                }
+            } else if (active != null) ConfigurationLibrary.fromLegacy(active)
+            else ManualSourceRecord(revision = "00000000-0000-0000-0000-000000000000",
+                kind = ManualSourceKind.LegacyRemote).use(ConfigurationLibrary::fromLegacy)
+        } finally { active?.close() }
+    }
+
+    /** Summary reads never register choices or activate an inactive entry. */
+    internal fun configurationLibrarySnapshot(): ConfigurationLibrarySnapshot = synchronized(lock) {
+        try {
+            readLibrary().use { library ->
+                val items = mutableListOf<ConfigurationItem>()
+                fun handle(id: String?) = ConfigurationHandle(libraryOwner, library.revision, id, authority.clearVersion)
+                val accountActive = library.selector == ConfigurationSelector.Account
+                val cached = profiles.read()
+                try {
+                    if (cached != null) {
+                        val raw = cached.copyBytes()
+                        try {
+                            val parsed = describeForLibrary(raw, cached.validUntil, cached.observedStatus)
+                            items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
+                                parsed.nodes, parsed.status, accountActive)
+                        } finally { raw.fill(0) }
+                    } else if (accountActive || delivery.read()?.let { !it.pendingAck } == true) {
+                        items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
+                            if (accountActive) state.nodes else emptyList(),
+                            if (accountActive) state.status else LocalSubscriptionStatus.MISSING, accountActive)
+                    }
+                } finally { cached?.close() }
+                for (entry in library.entries) entry.copySource().use { source ->
+                    val raw = source.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+                    try {
+                        val parsed = describeForLibrary(raw, source.validUntil, source.observedStatus)
+                        items += ConfigurationItem(handle(entry.id), entry.name, source.kind, parsed.nodes,
+                            parsed.status, library.selector == ConfigurationSelector.Entry && library.selectedEntryId == entry.id)
+                    } finally { raw.fill(0) }
+                }
+                ConfigurationLibrarySnapshot(items)
+            }
+        } catch (_: Exception) { ConfigurationLibrarySnapshot(storageError = true) }
+    }
+
+    private fun describeForLibrary(raw: ByteArray, until: Instant?, status: LocalSubscriptionStatus?): LocalSubscriptionSnapshot {
+        val parsed = try { describe(raw, until) } catch (_: UnsafeProxyConfiguration) {
+            LocalSubscriptionSnapshot(LocalSubscriptionStatus.UNSUPPORTED, true, true,
+                try { SafeProxyConfig.inspect(raw) } catch (_: Exception) { emptyList() }, until)
+        }
+        return if (until != null && until <= now()) parsed.copy(status = LocalSubscriptionStatus.EXPIRED)
+            else status?.let { parsed.copy(status = it) } ?: parsed
+    }
+
+    private fun requireLibraryHandle(handle: ConfigurationHandle, library: ConfigurationLibrary) {
+        if (handle.owner !== libraryOwner || handle.clearVersion != authority.clearVersion ||
+            handle.libraryRevision != library.revision || library.clearPending ||
+            (handle.entryId != null && library.entries.none { it.id == handle.entryId }))
+            throw CancellationException("Configuration library changed")
+    }
+
+    private fun writeLibrary(library: ConfigurationLibrary) {
+        val store = manualSources as? LibraryManualSourceStore ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+        try {
+            store.saveLibrary(library)
+            val received = store.readLibrary() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+            try { if (!library.sameEnvelope(received)) throw PortalFailure(PortalFailure.Reason.STORAGE) }
+            finally { received.close() }
+        } catch (_: Exception) {
+            authority.manualStorageBlocked = true
+            revision++; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR)
+            state = state.copy(status = LocalSubscriptionStatus.STORAGE_ERROR)
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        }
+    }
+
+    internal suspend fun renameConfiguration(handle: ConfigurationHandle, name: String) = mutex.withLock {
+        val normalized = ConfigurationName.normalize(name)
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        synchronized(lock) {
+            context.ensureActive()
+            readLibrary().use { library ->
+                requireLibraryHandle(handle, library)
+                val id = handle.entryId ?: throw IllegalArgumentException()
+                val replacement = library.entries.map { entry ->
+                    entry.copySource().use { ConfigurationEntry(entry.id, if (entry.id == id) normalized else entry.name, it) }
+                }
+                try { ConfigurationLibrary(entries = replacement, selector = library.selector,
+                    selectedEntryId = library.selectedEntryId, selectorRevision = library.selectorRevision).use(::writeLibrary) }
+                finally { replacement.forEach { it.close() } }
+                // Metadata does not advance the active authority or content revision.
+            }
+        }
+    }
+
+    internal suspend fun removeConfiguration(handle: ConfigurationHandle,
+        commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot = mutex.withLock {
+        val context = currentCoroutineContext()
+        val active = synchronized(lock) { readLibrary().use { library ->
+            requireLibraryHandle(handle, library)
+            require(handle.entryId != null)
+            library.selector == ConfigurationSelector.Entry && library.selectedEntryId == handle.entryId
+        } }
+        var committed = false
+        val action = { synchronized(lock) {
+            context.ensureActive()
+            if (committed) throw CancellationException("Configuration operation consumed")
+            readLibrary().use { library ->
+                requireLibraryHandle(handle, library)
+                val nextRevision = if (active) UUID.randomUUID().toString() else library.selectorRevision
+                ConfigurationLibrary(entries = library.entries.filter { it.id != handle.entryId },
+                    selector = if (active) ConfigurationSelector.None else library.selector,
+                    selectedEntryId = if (active) null else library.selectedEntryId, selectorRevision = nextRevision).use { next ->
+                    if (active) { revision++; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR) }
+                    writeLibrary(next)
+                    if (active) {
+                        authority.selectionSourceKind = ManualSourceKind.None
+                        authority.selectionSourceRevision = nextRevision
+                        invalidateSelections(LocalSubscriptionStatus.MISSING)
+                        state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = ManualSourceKind.None)
+                    }
+                    committed = true
+                }
+            }
+        }; Unit }
+        if (active) commitFence(action) else action()
+        if (!committed) throw CancellationException("Configuration operation cancelled")
+        snapshot()
+    }
+
+    internal suspend fun activateConfiguration(handle: ConfigurationHandle,
+        commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot {
+        val result = mutex.withLock {
+            val library = synchronized(lock) { readLibrary() }
+            try {
+                synchronized(lock) { requireLibraryHandle(handle, library) }
+                val (ticket, previous) = captureSourceCommit(null)
+                previous.close()
+                val entry = library.entries.firstOrNull { it.id == handle.entryId }
+                if (handle.entryId == null) {
+                    ManualSourceRecord(kind = ManualSourceKind.LegacyRemote).use { record ->
+                        commitSource(record, null, ticket, commitFence) { current ->
+                            requireLibraryHandle(handle, current)
+                            ConfigurationLibrary(entries = current.entries, selector = ConfigurationSelector.Account,
+                                selectorRevision = record.revision)
+                        }
+                    }
+                } else requireNotNull(entry).copySource().use { old ->
+                    if (old.observedStatus != null || old.validUntil?.let { it <= now() } == true)
+                        throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_EXPIRED)
+                    val downloaded = when (old.kind) {
+                        ManualSourceKind.ImportedRemote -> source.read(requireNotNull(old.url))
+                        ManualSourceKind.ExternalRemote -> (externalSource ?: throw UnsupportedManualSubscriptionLink()).read(requireNotNull(old.url))
+                        else -> null
+                    }
+                    val raw = downloaded?.bytes ?: requireNotNull(old.copyBytes())
+                    try {
+                        val until = downloaded?.validUntil ?: old.validUntil
+                        ManualSourceRecord(kind = old.kind, bytes = raw, url = old.url, validUntil = until).use { fresh ->
+                            val staged = manualSnapshot(raw, fresh)
+                            if (staged.status != LocalSubscriptionStatus.READY) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_EXPIRED)
+                            commitSource(fresh, staged, ticket, commitFence) { current ->
+                                requireLibraryHandle(handle, current)
+                                ConfigurationEntry(entry.id, entry.name, fresh).use { updated ->
+                                    ConfigurationLibrary(entries = current.entries.map { if (it.id == entry.id) updated else it },
+                                        selector = ConfigurationSelector.Entry, selectedEntryId = entry.id,
+                                        selectorRevision = fresh.revision)
+                                }
+                            }
+                        }
+                    } finally { raw.fill(0) }
+                }
+                snapshot()
+            } finally { library.close() }
+        }
+        return if (handle.entryId == null) refresh() else result
+    }
     /** Called under the shared authority lock. Never initialize after a failed/live missing read. */
     private fun readManualSource(allowBlocked: Boolean = false): ManualSourceRecord? = synchronized(lock) {
         val store = manualSources ?: return null
@@ -249,7 +436,10 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     private fun writeManualSource(record: ManualSourceRecord) {
         val store = manualSources ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
         try {
-            store.save(record)
+            if (record.clearPending && store is LibraryManualSourceStore) {
+                ConfigurationLibrary(selector = ConfigurationSelector.None, selectorRevision = record.revision,
+                    clearPending = true).use(::writeLibrary)
+            } else store.save(record)
             val readback = store.read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
             try { if (!record.sameEnvelope(readback)) throw PortalFailure(PortalFailure.Reason.STORAGE) }
             finally { readback.close() }
@@ -261,16 +451,26 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             throw PortalFailure(PortalFailure.Reason.STORAGE)
         }
     }
-    private data class SourceCommitTicket(val epoch: Long, val clearVersion: Long, val sourceRevision: String)
-    private fun captureSourceCommit(expected: ManualSourceVersion?): Pair<SourceCommitTicket, ManualSourceRecord> = synchronized(lock) {
+    private data class SourceCommitTicket(val epoch: Long, val clearVersion: Long, val sourceRevision: String,
+        val libraryRevision: String?)
+    private fun captureSourceCommit(expected: ManualSourceVersion?, advanceEpoch: Boolean = true): Pair<SourceCommitTicket, ManualSourceRecord> = synchronized(lock) {
         val old = readManualSource(allowBlocked = true) ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
-        if (expected != null && (expected.clearVersion != authority.clearVersion || expected.revision != old.revision)) {
-            old.close(); throw CancellationException("Configuration source changed")
+        try {
+            if (expected != null && (expected.clearVersion != authority.clearVersion || expected.revision != old.revision))
+                throw CancellationException("Configuration source changed")
+            val libraryRevision = (manualSources as? LibraryManualSourceStore)?.readLibrary()?.use { it.revision }
+            if (manualSources is LibraryManualSourceStore && libraryRevision == null)
+                throw PortalFailure(PortalFailure.Reason.STORAGE)
+            if (advanceEpoch) revision++
+            SourceCommitTicket(revision, authority.clearVersion, old.revision, libraryRevision) to old
+        } catch (failure: Exception) {
+            old.close()
+            if (failure !is CancellationException) authority.manualStorageBlocked = true
+            throw failure
         }
-        SourceCommitTicket(++revision, authority.clearVersion, old.revision) to old
     }
     private suspend fun commitSource(record: ManualSourceRecord, staged: LocalSubscriptionSnapshot?, ticket: SourceCommitTicket,
-        commitFence: ((() -> Unit) -> Unit)) {
+        commitFence: ((() -> Unit) -> Unit), libraryEdit: ((ConfigurationLibrary) -> ConfigurationLibrary)? = null) {
         // Lock order is connection command lock -> authority lock. Never call the owner while holding lock.
         var committed = false
         val context = currentCoroutineContext()
@@ -283,9 +483,17 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 val current = readManualSource(allowBlocked = true)
                 try { if (current?.revision != ticket.sourceRevision) throw CancellationException("Configuration source changed") }
                 finally { current?.close() }
-                revision++ // Persistence/readback failure also revokes every older admission.
-                invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR)
-                writeManualSource(record)
+                val edited = if (libraryEdit != null && manualSources is LibraryManualSourceStore) {
+                    readLibrary().use { currentLibrary ->
+                        if (currentLibrary.revision != ticket.libraryRevision) throw CancellationException("Configuration library changed")
+                        libraryEdit(currentLibrary)
+                    }
+                } else null
+                try {
+                    revision++ // Persistence/readback failure also revokes every older admission.
+                    invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR)
+                    if (edited != null) writeLibrary(edited) else writeManualSource(record)
+                } finally { edited?.close() }
                 authority.manualStorageBlocked = false
                 authority.selectionSourceKind = record.kind
                 authority.selectionSourceRevision = record.revision
@@ -304,17 +512,34 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** Explicit import stages all bytes before taking the connection-owner commit fence. Never starts a VPN. */
     suspend fun importManual(input: ByteArray, expectedSource: ManualSourceVersion? = null,
-        commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot = mutex.withLock {
+        commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
+        importManualChange(input, expectedSource, null, commitFence)
+
+    internal suspend fun replaceConfiguration(input: ByteArray, handle: ConfigurationHandle,
+        expectedSource: ManualSourceVersion? = null, commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
+        importManualChange(input, expectedSource, handle, commitFence)
+
+    private suspend fun importManualChange(input: ByteArray, expectedSource: ManualSourceVersion?,
+        replacement: ConfigurationHandle?, commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot = mutex.withLock {
         val owned = input.copyOf()
         var old: ManualSourceRecord? = null
+        var targetSource: ManualSourceRecord? = null
         var staged: ManualSourceRecord? = null
         try {
             require(owned.size in 1..SafeProxyConfig.MAX_BYTES)
             val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(owned)).toString().trim()
             require(text.isNotEmpty() && '\u0000' !in text)
-            val (ticket, previous) = captureSourceCommit(expectedSource)
+            var replacementActive = false
+            if (replacement != null) synchronized(lock) { readLibrary().use { library ->
+                requireLibraryHandle(replacement, library)
+                val id = replacement.entryId ?: throw IllegalArgumentException()
+                targetSource = library.entries.single { it.id == id }.copySource()
+                replacementActive = library.selector == ConfigurationSelector.Entry && library.selectedEntryId == id
+            } }
+            val (ticket, previous) = captureSourceCommit(expectedSource, replacement == null || replacementActive)
             old = previous
+            val expirySource = targetSource ?: previous
             val next: LocalSubscriptionSnapshot
             if (Regex("^[A-Za-z][A-Za-z0-9+.-]*://").containsMatchIn(text)) {
                 val official = try { policy.subscription(text) } catch (_: Exception) { null }
@@ -326,9 +551,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 val result = reader.read(url)
                 try {
                     currentCoroutineContext().ensureActive()
-                    val known = if (previous.kind == kind && previous.url?.value == url.value &&
-                        (kind == ManualSourceKind.ExternalRemote || previous.observedStatus == null))
-                        previous.validUntil else if (kind == ManualSourceKind.ImportedRemote && previous.kind == ManualSourceKind.LegacyRemote) {
+                    val known = if (expirySource.kind == kind && expirySource.url?.value == url.value &&
+                        (kind == ManualSourceKind.ExternalRemote || expirySource.observedStatus == null))
+                        expirySource.validUntil else if (kind == ManualSourceKind.ImportedRemote && expirySource.kind == ManualSourceKind.LegacyRemote) {
                             if (delivery.readLegacyRecovery() != null) null else {
                                 val profile = profiles.read()
                                 try { profile?.takeIf { it.url?.value == url.value && it.binding == sessionBinding(url) &&
@@ -348,25 +573,87 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 next = manualSnapshot(owned, requireNotNull(staged))
             }
             currentCoroutineContext().ensureActive()
-            commitSource(requireNotNull(staged), next, ticket, commitFence)
-            next
-        } finally { owned.fill(0); staged?.close(); old?.close() }
+            val edit: (ConfigurationLibrary) -> ConfigurationLibrary = { library ->
+                val record = requireNotNull(staged)
+                if (replacement == null) {
+                    ConfigurationEntry(record.revision, "配置 ${library.entries.size + 1}", record).use { entry ->
+                        ConfigurationLibrary(entries = library.entries + entry, selector = ConfigurationSelector.Entry,
+                            selectedEntryId = entry.id, selectorRevision = record.revision)
+                    }
+                } else {
+                    requireLibraryHandle(replacement, library)
+                    val oldEntry = library.entries.single { it.id == replacement.entryId }
+                    ConfigurationEntry(oldEntry.id, oldEntry.name, record).use { entry ->
+                        ConfigurationLibrary(entries = library.entries.map { if (it.id == entry.id) entry else it },
+                            selector = library.selector, selectedEntryId = library.selectedEntryId,
+                            selectorRevision = if (replacementActive) record.revision else library.selectorRevision)
+                    }
+                }
+            }
+            if (replacement == null || replacementActive) {
+                commitSource(requireNotNull(staged), next, ticket, commitFence, edit)
+                next
+            } else {
+                val context = currentCoroutineContext()
+                var committed = false
+                commitFence { synchronized(lock) {
+                    context.ensureActive()
+                    if (committed || revision != ticket.epoch || authority.clearVersion != ticket.clearVersion)
+                        throw CancellationException("Configuration replacement cancelled")
+                    readLibrary().use { library ->
+                        if (library.revision != ticket.libraryRevision) throw CancellationException("Configuration library changed")
+                        edit(library).use(::writeLibrary)
+                    }
+                    committed = true
+                } }
+                if (!committed) throw CancellationException("Configuration replacement cancelled")
+                snapshot()
+            }
+        } finally { owned.fill(0); staged?.close(); targetSource?.close(); old?.close() }
     }
     suspend fun useAccountSource(commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
         replaceSourceSelector(ManualSourceKind.LegacyRemote, commitFence)
-    suspend fun removeManualSource(commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
-        replaceSourceSelector(ManualSourceKind.None, commitFence)
+    suspend fun removeManualSource(commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot {
+        if (manualSources is LibraryManualSourceStore) {
+            val active = synchronized(lock) { readLibrary().use { library ->
+                if (library.selector == ConfigurationSelector.Entry)
+                    ConfigurationHandle(libraryOwner, library.revision, library.selectedEntryId, authority.clearVersion)
+                else null
+            } }
+            if (active != null) return removeConfiguration(active, commitFence)
+        }
+        return replaceSourceSelector(ManualSourceKind.None, commitFence)
+    }
     private suspend fun replaceSourceSelector(kind: ManualSourceKind, commitFence: ((() -> Unit) -> Unit)) = mutex.withLock {
         val (ticket, previous) = captureSourceCommit(null)
         try {
             currentCoroutineContext().ensureActive()
-            ManualSourceRecord(kind = kind).use { commitSource(it, null, ticket, commitFence) }
+            ManualSourceRecord(kind = kind).use { record -> commitSource(record, null, ticket, commitFence) { library ->
+                ConfigurationLibrary(entries = library.entries,
+                    selector = if (kind == ManualSourceKind.LegacyRemote) ConfigurationSelector.Account else ConfigurationSelector.None,
+                    selectorRevision = record.revision)
+            } }
             state
         } finally { previous.close() }
     }
     /** Selection invalidation preserves the user's encrypted subscription and delivery receipt. */
     fun invalidateNodeSelection() = synchronized(lock) {
         revision++; invalidateSelections(); authority.selectionRequiresRefresh = true; Unit
+    }
+    /** UI-only clock/registry observation. This does not read stores or grant selection/admission. */
+    internal fun nodeSelectionDisplaySnapshot(): NodeSelectionSnapshot = synchronized(lock) {
+        if (authority.manualStorageBlocked || authority.incompleteClear)
+            return@synchronized NodeSelectionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
+                validUntil = state.validUntil, sourceKind = authority.selectionSourceKind,
+                validity = sourceValidity(authority.selectionSourceKind, state.validUntil))
+        val observed = authority.selectionStatus ?: state.status
+        val until = if (authority.selectionStatus != null) authority.selectionUntil else state.validUntil
+        val status = if (observed == LocalSubscriptionStatus.READY && until?.let { it <= now() } == true)
+            LocalSubscriptionStatus.EXPIRED else observed
+        val ready = status == LocalSubscriptionStatus.READY
+        NodeSelectionSnapshot(status, if (ready) authority.choices.toList() else emptyList(),
+            if (ready) authority.selected else null, until, authority.selectionSourceKind,
+            sourceValidity(authority.selectionSourceKind, until))
     }
     fun nodeSelectionSnapshot(): NodeSelectionSnapshot = synchronized(lock) {
         fun result(status: LocalSubscriptionStatus, choices: List<ConnectionChoice> = emptyList(),
@@ -421,8 +708,12 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     /** One cache read per batch; no refresh, selection, epoch change or connection admission. */
     internal fun captureNodeProbeTargets(): List<NodeProbeTarget> = synchronized(lock) {
         withNodeProbeArtifact { raw, choices ->
+            val endpoints = SafeProxyConfig.probeEndpoints(raw)
+            if (endpoints.size != choices.size || endpoints.indices.any { endpoints[it].protocol != choices[it].protocol })
+                return@withNodeProbeArtifact emptyList()
             choices.mapIndexed { index, choice ->
-                NodeProbeTarget(choice.selection, SafeProxyConfig.selectedEndpoint(raw, index), choice.protocol)
+                val endpoint = endpoints[index]
+                NodeProbeTarget(choice.selection, endpoint.endpoint, endpoint.protocol, endpoint.port, probeTransport(endpoint))
             }
         } ?: emptyList()
     }
@@ -431,9 +722,17 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (authority.choices.none { it.selection === target.selection }) return@synchronized false
         withNodeProbeArtifact { raw, choices ->
             val index = choices.indexOfFirst { it.selection === target.selection }
-            index >= 0 && choices[index].protocol == target.protocol &&
-                SafeProxyConfig.selectedEndpoint(raw, index) == target.endpoint
+            if (index < 0 || choices[index].protocol != target.protocol) return@withNodeProbeArtifact false
+            val endpoint = SafeProxyConfig.probeEndpoints(raw).getOrNull(index) ?: return@withNodeProbeArtifact false
+            endpoint.endpoint == target.endpoint && endpoint.port == target.port && endpoint.protocol == target.protocol &&
+                probeTransport(endpoint) == target.transport
         } == true
+    }
+    private fun probeTransport(endpoint: SafeProxyConfig.ProbeEndpoint): NodeProbeTransport = when (endpoint.protocol) {
+        "ss", "vless" -> NodeProbeTransport.Tcp
+        "tuic" -> NodeProbeTransport.Quic
+        "hysteria2" -> if (endpoint.obfuscated) NodeProbeTransport.Icmp else NodeProbeTransport.Quic
+        else -> throw UnsafeProxyConfiguration(SafeProxyConfig.RejectionReason.Protocol)
     }
     /** Memory-only display masking. Never sufficient permission to probe: workers must also
      * call isCurrentNodeProbeTarget on IO before/after measuring, plus their auth/network/TTL guards. */

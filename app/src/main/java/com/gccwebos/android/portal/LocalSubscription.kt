@@ -302,7 +302,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             val next: LocalSubscriptionSnapshot
             if (Regex("^[A-Za-z][A-Za-z0-9+.-]*://").containsMatchIn(text)) {
                 val url = try { Secret(policy.subscription(text)) }
-                    catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_REVOKED) }
+                    catch (_: Exception) { throw UnsupportedManualSubscriptionLink() }
                 val result = source.read(url)
                 try {
                     currentCoroutineContext().ensureActive()

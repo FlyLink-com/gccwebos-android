@@ -95,7 +95,8 @@ internal class ManualImportController(
                 throw cancel
             }
             catch (failure: Exception) {
-                if (ticket === value) error = when ((failure as? PortalFailure)?.reason) {
+                if (ticket === value) error = if (failure is UnsupportedManualSubscriptionLink) "暂不支持此订阅链接"
+                else when ((failure as? PortalFailure)?.reason) {
                     PortalFailure.Reason.STORAGE -> "本地配置暂不可用"
                     PortalFailure.Reason.NETWORK -> "导入失败"
                     PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE -> "订阅不可用或未提供有效期"

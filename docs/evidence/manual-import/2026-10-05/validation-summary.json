@@ -1,0 +1,20 @@
+{
+  "sourceHead": "eed8ed295b9e4f878b01de12a6b0586a48a76051",
+  "workingTreeBuild": true,
+  "productionChangeSincePreviousUiApk": "ManualImportController.useAccount uses refresh after explicit source commit",
+  "sourceInputCount": 289,
+  "sourceInputsSha256": "e6ab05f467039ddd2bee09ce316f007fe5f05976a05a78fe5fbf24bbd50e50f4",
+  "trackedCodeDiffSha256": "3ff896f924ca0e566bffa4da0e320f85d98c4aa7c79635a78de0b01cdbf27831",
+  "debugAndAndroidTestBuild": "passed",
+  "lint": {
+    "Error": 0,
+    "Fatal": 0,
+    "Warning": 31,
+    "Hint": 6,
+    "Information": 0
+  },
+  "focusedTests": 172,
+  "focusedFailures": 0,
+  "focusedErrors": 0,
+  "focusedSkipped": 0
+}

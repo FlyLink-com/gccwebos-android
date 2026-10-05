@@ -1,0 +1,27 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportDeviceFlowTest#realCameraPermissionDenialReturnsFixedFailureWithoutImport"
+  ],
+  "expected": 1,
+  "started": 1,
+  "passed": 1,
+  "negativeCodes": [],
+  "ok": [
+    1
+  ],
+  "timedOut": false,
+  "success": true,
+  "sanitizedExceptionTypes": [],
+  "sanitizedStackFrames": [],
+  "fixedDeviceStatus": {
+    "manualDeviceWaiting": [
+      "camera-permission-denial"
+    ],
+    "manualDevicePath": [
+      "camera-denied"
+    ],
+    "manualDeviceResult": [
+      "real-camera-permission-denied-no-import-no-http-no-vpn"
+    ]
+  }
+}

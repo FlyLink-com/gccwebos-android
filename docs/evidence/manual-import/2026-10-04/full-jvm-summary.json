@@ -1,0 +1,780 @@
+[
+  {
+    "name": "com.gccwebos.android.commerce.CatalogDockStateTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CatalogInitialSelectionTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CatalogPeriodTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CommerceCatalogStateTest",
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CommerceHistoryDetailTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CommerceHistoryLoadTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CommerceJsonTest",
+    "tests": 18,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CommercePageLifecycleIntegrationTest",
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CommerceRepositoryTest",
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.CommerceWalletStateTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.MineBalanceTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.MobileParityContractTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.OrderDetailControllerTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.RechargeFlowControllerTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.commerce.WalletForegroundResumeTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.ConnectionIntegrationPresentationTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.ConnectionOverviewTest",
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.ConnectionSetupGuidanceTest",
+    "tests": 16,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.ConnectionUsageFormattingTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.ConnectionCoordinatorTest",
+    "tests": 53,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.ConnectionOwnerHandoffTest",
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.EngineAdmissionHostTest",
+    "tests": 20,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.PreparedMaterialLifecycleTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.RemoteCopySupervisorTest",
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.SourceChangeCleanupAwaitTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.SourceChangeFenceTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.core.TransportPreparationTest",
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.AccountUsageClockTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.AccountUsagePresentationTest",
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.GlassMaterialPolicyTest",
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.KnownNodeRegionsTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.NodeRegionTest",
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.ReadRetryPresentationTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.ResourceGuidanceTest",
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.ResourcePresentationTest",
+    "tests": 20,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.design.SubscriptionTitleTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.manualimport.ManualInputBoundaryTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.manualimport.SingleQrDecoderTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.AccountChallengeLifecycleTest",
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.AccountDisplayEmailTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.AccountLoginAttemptTest",
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.AccountStartupRestoreTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.AccountUsageBindingTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.AccountUsageControllerTest",
+    "tests": 27,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.AddressPreparationFenceTest",
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.CachedSubscriptionRestoreTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.ConnectionOwnerLeaseTest",
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.LegacySubscriptionRecoveryTest",
+    "tests": 39,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.LocalConnectionLifecycleTest",
+    "tests": 27,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.LocalSubscriptionTest",
+    "tests": 12,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "failed": [
+      {
+        "test": "everyPreparationDownloadsAgainAndWorksWithoutPortalToken",
+        "type": "java.lang.UnsupportedOperationException"
+      }
+    ]
+  },
+  {
+    "name": "com.gccwebos.android.portal.ManualImportControllerTest",
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.ManualSourceAuthorityTest",
+    "tests": 32,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.ManualSourceRepositoryClearTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.ManualSourceStoreTest",
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.NodeConnectionStatusTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.NodeLatencyControllerTest",
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.NodeProbeTargetsTest",
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.NodeSelectionControllerTest",
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.OneClickConfigGatewayTest",
+    "tests": 22,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.PortalJsonUsageCycleTest",
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.PortalRepositoryOverviewReadTest",
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.PortalRepositoryTest",
+    "tests": 30,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.PreparedConfigClearTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.ReferralContractTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.ReferralControllerTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.ReferralLifecycleIntegrationTest",
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.RegistrationFlowTest",
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.SessionPersistenceTest",
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.StorageDiagnosticsTest",
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.portal.SubscriptionImportTest",
+    "tests": 47,
+    "failures": 7,
+    "errors": 0,
+    "skipped": 0,
+    "failed": [
+      {
+        "test": "resolverSelectsSecondExplicitlyMappedNodeWithoutInventingIndexIdentity",
+        "type": "java.lang.AssertionError"
+      },
+      {
+        "test": "legacyRereadsSetupAfterAckAndAcrossRestartWithoutAdoptingOldPendingReceipt",
+        "type": "java.lang.AssertionError"
+      },
+      {
+        "test": "restartedPreparationFetchesNewBytesRatherThanReadingPriorConfigFile",
+        "type": "java.lang.AssertionError"
+      },
+      {
+        "test": "freshWalletRetriesPersistedKeyAndPendingAckWithoutAnotherClaim",
+        "type": "java.lang.AssertionError"
+      },
+      {
+        "test": "stalePermissionAttemptCannotApplyAfterNewerSwitch",
+        "type": "java.lang.AssertionError"
+      },
+      {
+        "test": "failedFreshDownloadNeverReusesOldFileOrCachedPreview",
+        "type": "java.io.FileNotFoundException"
+      },
+      {
+        "test": "everyAdmittedConnectReconnectAndSwitchRefreshesDownloadsAndWritesBeforeStart",
+        "type": "java.lang.AssertionError"
+      }
+    ]
+  },
+  {
+    "name": "com.gccwebos.android.portal.SubscriptionOriginPolicyTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.update.ReleaseManifestTests",
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.update.UpdateRepositoryTests",
+    "tests": 12,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.AndroidConfigAddressPreparerTest",
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.BoundedVpnCallTest",
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.ConnectionControlsTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.IcmpEchoPacketTest",
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.LabPermissionAttemptTest",
+    "tests": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.NativeVpnSessionTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.ProductionVpnAdmissionTest",
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.ProtocolContractTest",
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.SafeProxyBbrProfileTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.SafeProxyConfigTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.SafeProxyNodeOptionReasonTest",
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.SafeProxyPreparationTest",
+    "tests": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.SafeProxyRejectionReasonTest",
+    "tests": 17,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.SafeProxyRequestTimeoutTest",
+    "tests": 10,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.SyntheticSsFixtureTest",
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.TuicDefaultOptionsTest",
+    "tests": 19,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.VpnControlFlagsTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.VpnPermissionTicketsTest",
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.VpnTransportPinTest",
+    "tests": 4,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  },
+  {
+    "name": "com.gccwebos.android.vpn.VpnTransportReceiptTest",
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failed": []
+  }
+]

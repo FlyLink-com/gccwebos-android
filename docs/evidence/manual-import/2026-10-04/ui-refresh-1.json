@@ -1,0 +1,19 @@
+{
+  "package": "com.gccwebos.android.candidate.acceptance.manualui20261004",
+  "ownershipRun": "23f198a1-ed4b-4029-95b6-8e50832f4516",
+  "sequence": 1,
+  "previousInstalled": {
+    "com.gccwebos.android.candidate.acceptance.manualui20261004": "6635324bd3c0394c015c6d92de0c2e46d8a3b2f42b48bb58fc9feaa227834457",
+    "com.gccwebos.android.candidate.acceptance.manualui20261004.test": "1013d0ccaad3179583cc309488f39fe99c7cd58b31e3c2b767a3313ddc917156"
+  },
+  "newExpected": {
+    "com.gccwebos.android.candidate.acceptance.manualui20261004": "6635324bd3c0394c015c6d92de0c2e46d8a3b2f42b48bb58fc9feaa227834457",
+    "com.gccwebos.android.candidate.acceptance.manualui20261004.test": "d619a2f2eadda43210e527c9a62d1f3a246596f272da395d37fe9f1c31571d47"
+  },
+  "eighteenPrivatePathsAbsentBefore": true,
+  "noUninstallOrDataClear": true,
+  "eighteenPrivatePathsAbsentAfter": true,
+  "changedPackages": [
+    "com.gccwebos.android.candidate.acceptance.manualui20261004.test"
+  ]
+}

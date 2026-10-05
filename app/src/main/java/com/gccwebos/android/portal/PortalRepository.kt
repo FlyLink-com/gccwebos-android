@@ -29,9 +29,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private val subscription: SubscriptionSource = SubscriptionTransport(policy),
     private val sessions: SessionStore = MemorySessionStore(),
     profiles: LocalProfileStore = MemoryLocalProfileStore(),
-    private val allowHostnamePreparation: Boolean = false) {
+    private val allowHostnamePreparation: Boolean = false,
+    manualSources: ManualSourceStore? = null) {
     val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now,
-        allowHostnamePreparation = allowHostnamePreparation)
+        allowHostnamePreparation = allowHostnamePreparation, manualSources = manualSources)
     private val mutex = Mutex()
     private val generation = AtomicLong()
     private val activationLock = Any()
@@ -118,9 +119,11 @@ class PortalRepository(private val transport: PortalTransport, private val store
         invalidateImport()
         val value = PortalJson.session(JSONObject(body), elapsed())
         require(value.valid(now(), elapsed()))
-        val prior = store.read()
-        context.ensureActive()
-        if (prior != null && prior.accountId != value.accountId) { store.clear() }
+        localSubscriptions.whenLegacySource {
+            val prior = store.read()
+            context.ensureActive()
+            if (prior != null && prior.accountId != value.accountId) { store.clear() }
+        }
         context.ensureActive()
         totpExpiry = null
         try {
@@ -145,8 +148,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
             synchronized(activationLock) {
                 checkGeneration(epoch)
                 if (!value.valid(now(), elapsed())) { sessions.clear(); throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED) }
-                val prior = store.read()
-                if (prior != null && prior.accountId != value.accountId) { store.clear() }
+                localSubscriptions.whenLegacySource {
+                    val prior = store.read()
+                    if (prior != null && prior.accountId != value.accountId) { store.clear() }
+                }
                 try {
                     sessions.save(SavedSession.capture(value, now(), elapsed()))
                 } catch (failure: Throwable) { sessions.clear(); throw failure }
@@ -266,7 +271,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
         selection: ((Resource.Available) -> ResolvedConnectionLine?)? = null,
         onPrepared: ((Resource.Available, ResolvedConnectionLine, ByteArray, Long, Long) -> Unit)? = null,
         onOverview: (BoundAccountOverview) -> Unit = {},
-    ): ImportSnapshot = mutex.withLock {
+    ): ImportSnapshot = mutex.withLock { localSubscriptions.withLegacySource {
         guarded {
             val epoch = generation.get()
             val clearVersion = localSubscriptions.captureClearVersion()
@@ -338,7 +343,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 ImportSnapshot(resource, ImportStatus.IMPORTED, nodes)
             } finally { raw.fill(0) }
         }
-    }
+    } }
 
     /** Cached offline preview only. NEVER use as a fresh connect/reconnect/switch source.
      * Not evidence that a tunnel was started or traffic verified.
@@ -391,7 +396,7 @@ class PortalRepository(private val transport: PortalTransport, private val store
         sessionBinding(Secret(activeSession().accountId))
     }
     suspend fun acquire(resource: Resource.Available): Unit = mutex.withLock {
-        guarded { acquireLocked(resource); Unit }
+        localSubscriptions.withLegacySource { guarded { acquireLocked(resource); Unit } }
     }
     /** A partial profile write must not make the account UI bypass authenticated recovery. */
     internal fun hasPendingLegacyRecovery(): Boolean = synchronized(activationLock) {
@@ -576,15 +581,23 @@ class PortalRepository(private val transport: PortalTransport, private val store
         }
     }
     /** Local sign-out only. There is no verified native server revocation endpoint. */
-    suspend fun clearLocalData() {
+    suspend fun clearLocalData(cleanup: suspend () -> Unit = {},
+        commitFence: ((() -> Unit) -> Unit) = { it() }) {
         synchronized(activationLock) {
             generation.incrementAndGet(); session = null; totpExpiry = null; invalidateImport()
-            try { sessions.clear() } finally { localSubscriptions.unlink() }
+            // Revoke the saved session before waiting for an admitted network read to drain.
+            // A failed first attempt must still tombstone the source and stop its owner;
+            // the final store attempt below remains mandatory and propagates failure.
+            try { sessions.clear() } catch (_: Exception) { }
         }
         // Finish admitted local cleanup even if the Activity scope is disposed while IO is draining.
         // HTTPS operations holding the mutex have the transport's bounded timeout.
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-            mutex.withLock { invalidateImport(); session = null; totpExpiry = null; try { sessions.clear() } finally { localSubscriptions.unlink() } }
+            localSubscriptions.unlinkAndAwait(cleanup = {
+                try { mutex.withLock {
+                    invalidateImport(); session = null; totpExpiry = null; sessions.clear()
+                } } finally { cleanup() }
+            }, commitFence = commitFence)
         }
     }
     /** Account logout does not unlink a previously acknowledged local subscription capability. */

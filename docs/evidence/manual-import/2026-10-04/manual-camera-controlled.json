@@ -1,0 +1,27 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportDeviceFlowTest#realCameraStagesSyntheticQrThenExplicitConfirmationImportsRemote"
+  ],
+  "expected": 1,
+  "started": 1,
+  "passed": 1,
+  "negativeCodes": [],
+  "ok": [
+    1
+  ],
+  "timedOut": false,
+  "success": true,
+  "sanitizedExceptionTypes": [],
+  "sanitizedStackFrames": [],
+  "fixedDeviceStatus": {
+    "manualDeviceWaiting": [
+      "physical-camera-synthetic-qr"
+    ],
+    "manualDevicePath": [
+      "camera"
+    ],
+    "manualDeviceResult": [
+      "real-platform-explicit-confirm-single-import-no-http-no-vpn"
+    ]
+  }
+}

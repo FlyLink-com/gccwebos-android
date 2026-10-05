@@ -1,13 +1,14 @@
-# Manual configuration import: inventory and proposed approval scope
+# Manual configuration import: approved scope and original inventory
 
 Date: 2026-10-04. Worktree: `C:\Users\g\.codex\worktrees\pr-acceptance-oct3\gccwebos-android`.
 
-This is an **A-class preparation document**, not an implementation or release acceptance.
+This records the **A-class preparation and approved implementation scope**, not release acceptance.
 The menu, document picker and camera presentation are B-class work; explicit adoption of a
 new capability, local-source authority and persistent source selection affect admission
-semantics and use the A-class gate. Operator approval for that implementation is **pending**.
-No authority, encrypted-profile schema, production backend or device has been changed by
-this inventory. Unrelated B-class UI work may proceed independently.
+semantics and use the A-class gate. The operator approved continuing this scope with
+“同意批准继续” on 2026-10-04. Implementation and isolated validation may proceed under
+the boundaries below. This approval is not a production/backend change or normal-app migration approval.
+The following inventory describes its original preparation snapshot; its line references are historical.
 
 ## Verified inventory
 
@@ -245,6 +246,10 @@ makes no network requests. PASS is neither operator approval nor implementation 
 
 ## Post-approval offline validation checklist
 
+This original checklist is retained for scope comparison. Executed coverage, failed
+attempts and remaining gaps are recorded in [manual-import-validation.md](manual-import-validation.md);
+in particular, a behavioral RED was not established for every original input path.
+
 - [ ] TDD RED for all three real input paths, then GREEN with the same assertions.
 - [ ] Synthetic QR encode/decode round trip plus invalid/multiple payload handling; no GMS or
   external scanner fallback. File URL and genuine raw-YAML fixtures both reach real validation.
@@ -271,7 +276,8 @@ makes no network requests. PASS is neither operator approval nor implementation 
 
 ## Isolated OPPO validation and rollback gate
 
-All steps below are **planned and unexecuted**. Use one newly owned, distinguishable fixture
+The steps below define the approved validation gate; completed execution and remaining gaps
+are recorded in [the implementation receipt](manual-import-validation.md). Use a newly owned, distinguishable fixture
 applicationId and signing key on the authorized OPPO; do not touch the ordinary installed app.
 
 1. Inventory device transport/API/unlocked state and exclusive test ownership. Before creating
@@ -304,14 +310,14 @@ unfiltered instrumentation/logcat output. A failure is recorded, not converted t
 
 ## Exact operator approval scope
 
-Approval would authorize **local Android code, tests, bundled scanner dependency/license and
+The received approval authorizes **local Android code, tests, bundled scanner dependency/license and
 documentation changes**, implementing all three inputs and the additive encrypted sidecar
 source model described here, plus builds and **isolated OPPO fixture** installation/testing
 and same-signature rollback. It includes only synthetic or explicitly owned test materials.
 It does not authorize production/backend changes, deployments, new origin support, purchases,
 credential extraction, ordinary-app data migration/replacement or normal-app installation.
 
-The next gate is operator approval of this concrete source/clear/rollback proposal. Only
-after that approval should authority/storage implementation and runtime validation begin.
+The implementation approval was received on 2026-10-04. Runtime evidence and independent review
+must still be assessed before claiming acceptance; approval alone does not satisfy those checks.
 Any need to modify native admission encoding, original v1 schema, backend contracts, or the
 normal installed app is outside this scope and must be brought back as a concrete change.

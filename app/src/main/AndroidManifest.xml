@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -13,6 +15,9 @@
         android:usesCleartextTraffic="false"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".manualimport.ManualQrScannerActivity" android:exported="false"
+            android:excludeFromRecents="true" />
+        <activity android:name="com.journeyapps.barcodescanner.CaptureActivity" tools:node="remove" />
         <service android:name=".vpn.ConnectionOwnerService" android:exported="false" />
         <!-- A user-configured VPN qualifies for systemExempted. Lint models only the
              exact-alarm permission alternative. prepare() is checked before foreground().

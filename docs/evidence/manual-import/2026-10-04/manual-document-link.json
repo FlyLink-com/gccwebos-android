@@ -1,0 +1,27 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportDeviceFlowTest#realDocumentPickerStagesOwnedLinkThenExplicitConfirmationImportsRemote"
+  ],
+  "expected": 1,
+  "started": 1,
+  "passed": 1,
+  "negativeCodes": [],
+  "ok": [
+    1
+  ],
+  "timedOut": false,
+  "success": true,
+  "sanitizedExceptionTypes": [],
+  "sanitizedStackFrames": [],
+  "fixedDeviceStatus": {
+    "manualDeviceWaiting": [
+      "saf-owned-link-selection"
+    ],
+    "manualDevicePath": [
+      "document-link"
+    ],
+    "manualDeviceResult": [
+      "real-platform-explicit-confirm-single-import-no-http-no-vpn"
+    ]
+  }
+}

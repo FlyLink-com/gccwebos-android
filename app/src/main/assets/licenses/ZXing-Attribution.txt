@@ -1,0 +1,12 @@
+ZXing Android Embedded 4.3.0
+Copyright (C) 2012-2022 ZXing authors, Journey Mobile
+https://github.com/journeyapps/zxing-android-embedded/tree/v4.3.0
+Licensed under Apache License 2.0. Full license is bundled alongside this notice.
+
+ZXing Core 3.4.1
+Copyright ZXing authors
+https://github.com/zxing/zxing/tree/zxing-3.4.1
+The upstream LICENSE and NOTICE are bundled alongside this notice.
+
+These dependencies are unmodified. This app supplies its own private scanner Activity,
+QR-only decoder adapter, process-local result handoff, bounded input reader and confirmation UI.

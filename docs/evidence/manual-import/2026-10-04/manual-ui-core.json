@@ -1,0 +1,32 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportHostUiTest",
+    "com.gccwebos.android.ManualImportPlatformContractTest",
+    "com.gccwebos.android.ManualImportAccountUiTest",
+    "com.gccwebos.android.portal.EncryptedManualSourceStoreTest",
+    "com.gccwebos.android.portal.EncryptedLocalProfileStoreTest"
+  ],
+  "expected": 21,
+  "started": 21,
+  "passed": 19,
+  "negativeCodes": [
+    -2,
+    -2
+  ],
+  "ok": [],
+  "timedOut": false,
+  "success": false,
+  "sanitizedExceptionTypes": [
+    "java.lang.AssertionError"
+  ],
+  "sanitizedStackFrames": [
+    "androidx.compose.ui.test.SemanticsNodeInteraction.assertDoesNotExist(SemanticsNodeInteraction.kt:101)",
+    "com.gccwebos.android.ManualImportAccountUiTest.availableAccountCannotSupplyExpiryToAnImportedRemoteLink(ManualImportAccountUiTest.kt:154)",
+    "androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow(SemanticsNodeInteraction.kt:178)",
+    "androidx.compose.ui.test.SemanticsNodeInteraction.fetchOneOrThrow$default(SemanticsNodeInteraction.kt:150)",
+    "androidx.compose.ui.test.SemanticsNodeInteraction.fetchSemanticsNode(SemanticsNodeInteraction.kt:84)",
+    "androidx.compose.ui.test.ActionsKt.performScrollTo(Actions.kt:80)",
+    "com.gccwebos.android.ManualImportAccountUiTest.validLocalSourceConnectsWithoutInventingAccountUsageAndOnlyAfterExplicitPowerClick(ManualImportAccountUiTest.kt:122)"
+  ],
+  "fixedDeviceStatus": {}
+}

@@ -14,6 +14,8 @@ import java.io.Closeable
 import com.gccwebos.android.vpn.SafeProxyConfig
 import com.gccwebos.android.vpn.UnsafeProxyConfiguration
 import java.time.Instant
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -40,14 +42,27 @@ class MemoryLocalProfileStore : LocalProfileStore {
     override fun clear() { value?.close(); value = null }
 }
 enum class LocalSubscriptionStatus { MISSING, READY, EXPIRED, RETRY_REQUIRED, INVALID_LINK, UNSUPPORTED, STORAGE_ERROR }
+/** Local files carry no claim about server subscription expiry or account rights. */
+sealed interface LocalSourceValidity {
+    data class RemoteExpiry(val until: Instant?) : LocalSourceValidity
+    data object LocalNoServerExpiry : LocalSourceValidity
+}
 data class LocalSubscriptionSnapshot(val status: LocalSubscriptionStatus, val hasProfile: Boolean = false,
-    val hasCapability: Boolean = false, val nodes: List<SafeProxyConfig.NodeSummary> = emptyList(), val validUntil: Instant? = null)
+    val hasCapability: Boolean = false, val nodes: List<SafeProxyConfig.NodeSummary> = emptyList(), val validUntil: Instant? = null,
+    val sourceKind: ManualSourceKind = ManualSourceKind.LegacyRemote,
+    val validity: LocalSourceValidity = LocalSourceValidity.RemoteExpiry(validUntil))
 /** Credential-free, process-local UI selection; never connection admission or a persisted ID. */
 data class NodeSelectionSnapshot(val status: LocalSubscriptionStatus,
     val choices: List<ConnectionChoice> = emptyList(), val selected: ConnectionSelection? = null,
-    val validUntil: Instant? = null)
+    val validUntil: Instant? = null,
+    val sourceKind: ManualSourceKind = ManualSourceKind.LegacyRemote,
+    val validity: LocalSourceValidity = LocalSourceValidity.RemoteExpiry(validUntil))
 /** One local observation for compare-and-set selection, never config or tunnel admission. */
 internal data class NodeSelectionAttempt(val snapshot: NodeSelectionSnapshot, val epoch: Long)
+/** Opaque UI operation fence; contains no configuration, URL or account material. */
+class ManualSourceVersion internal constructor(internal val revision: String?, internal val clearVersion: Long) {
+    override fun toString() = "ManualSourceVersion([OPAQUE])"
+}
 fun interface LocalConnectionLineResolver {
     /** Display indexes are not authoritative stable line IDs. No production resolver is installed. */
     fun resolve(snapshot: LocalSubscriptionSnapshot, requestedLineId: String?): ResolvedConnectionLine?
@@ -71,6 +86,11 @@ class LocalSubscriptionAuthority {
     internal var selectionStatus: LocalSubscriptionStatus? = null
     internal var selectionUntil: Instant? = null
     internal var selectionRequiresRefresh = false
+    internal var selectionSourceKind = ManualSourceKind.LegacyRemote
+    internal var selectionSourceRevision: String? = null
+    internal var manualSourceInitialized = false
+    internal var manualStorageBlocked = false
+    internal var incompleteClear = false
     internal var clearObserver: (() -> Unit)? = null
     private var ownerReleased = CompletableDeferred<Unit>().apply { complete(Unit) }
     internal fun observeClear(observer: () -> Unit): Closeable = synchronized(lock) {
@@ -112,7 +132,8 @@ class LocalSubscriptionAuthority {
 class LocalSubscriptionManager(private val delivery: DeliveryStore, private val profiles: LocalProfileStore,
     private val source: SubscriptionSource, private val policy: OriginPolicy, private val now: () -> Instant,
     private val authority: LocalSubscriptionAuthority = LocalSubscriptionAuthority.process,
-    private val allowHostnamePreparation: Boolean = false) {
+    private val allowHostnamePreparation: Boolean = false,
+    private val manualSources: ManualSourceStore? = null) {
     private val mutex get() = authority.mutex
     private val lock get() = authority.lock
     private var revision: Long
@@ -129,40 +150,233 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     private var stateClearVersion = authority.clearVersion
     private var observed = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
     private var state: LocalSubscriptionSnapshot
-        get() = if (stateClearVersion == authority.clearVersion) observed
+        get() = if (manualSources != null && (authority.incompleteClear || authority.manualStorageBlocked))
+            observed.copy(status = LocalSubscriptionStatus.STORAGE_ERROR)
+            else if (stateClearVersion == authority.clearVersion) observed
             else LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
         set(value) { observed = value; stateClearVersion = authority.clearVersion }
     fun snapshot(): LocalSubscriptionSnapshot = synchronized(lock) { state }
+    /** Called under the shared authority lock. Never initialize after a failed/live missing read. */
+    private fun readManualSource(allowBlocked: Boolean = false): ManualSourceRecord? = synchronized(lock) {
+        val store = manualSources ?: return null
+        if ((!allowBlocked && authority.manualStorageBlocked) || authority.incompleteClear)
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        try {
+            var record = store.read()
+            if (record == null) {
+                if (authority.manualSourceInitialized) throw PortalFailure(PortalFailure.Reason.STORAGE)
+                authority.manualSourceInitialized = true // A failed first write cannot authorize a retry fallback.
+                val initial = ManualSourceRecord(kind = ManualSourceKind.LegacyRemote)
+                try {
+                    store.save(initial)
+                    record = store.read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+                    if (!initial.sameEnvelope(record)) {
+                        record.close(); throw PortalFailure(PortalFailure.Reason.STORAGE)
+                    }
+                } finally { initial.close() }
+            }
+            authority.manualSourceInitialized = true
+            if (record.clearPending) {
+                record.close()
+                authority.incompleteClear = true
+                throw PortalFailure(PortalFailure.Reason.STORAGE)
+            }
+            try { if (record.kind == ManualSourceKind.ImportedRemote) validateCapability(requireNotNull(record.url)) }
+            catch (failure: Exception) { record.close(); throw failure }
+            return record
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) {
+            authority.manualSourceInitialized = true // A failed read is never evidence of a never-created store.
+            authority.manualStorageBlocked = true
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        }
+    }
+    fun sourceKind(): ManualSourceKind = synchronized(lock) {
+        readManualSource()?.use { it.kind } ?: ManualSourceKind.LegacyRemote
+    }
+    fun captureManualSourceVersion(): ManualSourceVersion = synchronized(lock) {
+        val source = readManualSource()
+        try { ManualSourceVersion(source?.revision, authority.clearVersion) } finally { source?.close() }
+    }
+    fun isManualSourceVersionCurrent(version: ManualSourceVersion): Boolean = synchronized(lock) {
+        try { val current = readManualSource(); try {
+            version.clearVersion == authority.clearVersion && version.revision == current?.revision
+        } finally { current?.close() } } catch (_: Exception) { false }
+    }
+    internal suspend fun <T> withLegacySource(action: suspend () -> T): T = mutex.withLock {
+        synchronized(lock) { requireLegacySource() }
+        action()
+    }
+    internal fun <T> whenLegacySource(action: () -> T): T? = synchronized(lock) {
+        val selected = readManualSource()
+        try {
+            if (selected != null && selected.kind != ManualSourceKind.LegacyRemote) null else action()
+        } finally { selected?.close() }
+    }
+    private fun requireLegacySource() {
+        val selected = readManualSource()
+        try { if (selected != null && selected.kind != ManualSourceKind.LegacyRemote)
+            throw PortalFailure(PortalFailure.Reason.RECONCILIATION)
+        } finally { selected?.close() }
+    }
+    private fun sourceBinding(record: ManualSourceRecord): String = when (record.kind) {
+        ManualSourceKind.ImportedLocal -> "local:${record.revision}:${record.contentIdentity}"
+        ManualSourceKind.ImportedRemote -> "remote:${record.revision}:${sessionBinding(requireNotNull(record.url))}"
+        else -> throw PortalFailure(PortalFailure.Reason.STORAGE)
+    }
+    private fun manualSnapshot(raw: ByteArray, record: ManualSourceRecord): LocalSubscriptionSnapshot {
+        val parsed = describe(raw, record.validUntil)
+        return parsed.copy(sourceKind = record.kind, validity = if (record.kind == ManualSourceKind.ImportedLocal)
+            LocalSourceValidity.LocalNoServerExpiry else LocalSourceValidity.RemoteExpiry(record.validUntil))
+    }
+    /** Save/readback occurs as one authority transaction, with no profile-v1 or delivery write. */
+    private fun writeManualSource(record: ManualSourceRecord) {
+        val store = manualSources ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+        try {
+            store.save(record)
+            val readback = store.read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+            try { if (!record.sameEnvelope(readback)) throw PortalFailure(PortalFailure.Reason.STORAGE) }
+            finally { readback.close() }
+        } catch (failure: Exception) {
+            authority.manualStorageBlocked = true
+            invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR)
+            state = state.copy(status = LocalSubscriptionStatus.STORAGE_ERROR)
+            if (failure is CancellationException) throw failure
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        }
+    }
+    private data class SourceCommitTicket(val epoch: Long, val clearVersion: Long, val sourceRevision: String)
+    private fun captureSourceCommit(expected: ManualSourceVersion?): Pair<SourceCommitTicket, ManualSourceRecord> = synchronized(lock) {
+        val old = readManualSource(allowBlocked = true) ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+        if (expected != null && (expected.clearVersion != authority.clearVersion || expected.revision != old.revision)) {
+            old.close(); throw CancellationException("Configuration source changed")
+        }
+        SourceCommitTicket(++revision, authority.clearVersion, old.revision) to old
+    }
+    private suspend fun commitSource(record: ManualSourceRecord, staged: LocalSubscriptionSnapshot?, ticket: SourceCommitTicket,
+        commitFence: ((() -> Unit) -> Unit)) {
+        // Lock order is connection command lock -> authority lock. Never call the owner while holding lock.
+        var committed = false
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        commitFence {
+            synchronized(lock) {
+                context.ensureActive()
+                if (committed || revision != ticket.epoch || authority.clearVersion != ticket.clearVersion)
+                    throw CancellationException("Configuration import cancelled")
+                val current = readManualSource(allowBlocked = true)
+                try { if (current?.revision != ticket.sourceRevision) throw CancellationException("Configuration source changed") }
+                finally { current?.close() }
+                revision++ // Persistence/readback failure also revokes every older admission.
+                invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR)
+                writeManualSource(record)
+                authority.manualStorageBlocked = false
+                authority.selectionSourceKind = record.kind
+                authority.selectionSourceRevision = record.revision
+                val next = staged ?: LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = record.kind)
+                val bytes = record.copyBytes()
+                try {
+                    if (next.status == LocalSubscriptionStatus.READY && bytes != null)
+                        observeContent(bytes, sourceBinding(record), next.nodes, next.validUntil, record.kind, record.revision)
+                    else invalidateSelections(next.status, next.validUntil)
+                    state = next
+                    committed = true
+                } finally { bytes?.fill(0) }
+            }
+        }
+        if (!committed) throw CancellationException("Configuration import cancelled")
+    }
+    /** Explicit import stages all bytes before taking the connection-owner commit fence. Never starts a VPN. */
+    suspend fun importManual(input: ByteArray, expectedSource: ManualSourceVersion? = null,
+        commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot = mutex.withLock {
+        val owned = input.copyOf()
+        var old: ManualSourceRecord? = null
+        var staged: ManualSourceRecord? = null
+        try {
+            require(owned.size in 1..SafeProxyConfig.MAX_BYTES)
+            val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(owned)).toString().trim()
+            require(text.isNotEmpty() && '\u0000' !in text)
+            val (ticket, previous) = captureSourceCommit(expectedSource)
+            old = previous
+            val next: LocalSubscriptionSnapshot
+            if (Regex("^[A-Za-z][A-Za-z0-9+.-]*://").containsMatchIn(text)) {
+                val url = try { Secret(policy.subscription(text)) }
+                    catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_REVOKED) }
+                val result = source.read(url)
+                try {
+                    currentCoroutineContext().ensureActive()
+                    val known = if (previous.kind == ManualSourceKind.ImportedRemote && previous.url?.value == url.value &&
+                        previous.observedStatus == null)
+                        previous.validUntil else if (previous.kind == ManualSourceKind.LegacyRemote) {
+                            if (delivery.readLegacyRecovery() != null) null else {
+                                val profile = profiles.read()
+                                try { profile?.takeIf { it.url?.value == url.value && it.binding == sessionBinding(url) &&
+                                    it.observedStatus == null }?.validUntil }
+                                finally { profile?.close() }
+                            }
+                        } else null
+                    val until = result.validUntil ?: known ?: throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE)
+                    if (until <= now()) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_EXPIRED)
+                    staged = ManualSourceRecord(kind = ManualSourceKind.ImportedRemote, bytes = result.bytes, url = url,
+                        validUntil = until)
+                    next = manualSnapshot(result.bytes, requireNotNull(staged))
+                } finally { result.bytes.fill(0) }
+            } else {
+                staged = ManualSourceRecord(kind = ManualSourceKind.ImportedLocal, bytes = owned)
+                next = manualSnapshot(owned, requireNotNull(staged))
+            }
+            currentCoroutineContext().ensureActive()
+            commitSource(requireNotNull(staged), next, ticket, commitFence)
+            next
+        } finally { owned.fill(0); staged?.close(); old?.close() }
+    }
+    suspend fun useAccountSource(commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
+        replaceSourceSelector(ManualSourceKind.LegacyRemote, commitFence)
+    suspend fun removeManualSource(commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
+        replaceSourceSelector(ManualSourceKind.None, commitFence)
+    private suspend fun replaceSourceSelector(kind: ManualSourceKind, commitFence: ((() -> Unit) -> Unit)) = mutex.withLock {
+        val (ticket, previous) = captureSourceCommit(null)
+        try {
+            currentCoroutineContext().ensureActive()
+            ManualSourceRecord(kind = kind).use { commitSource(it, null, ticket, commitFence) }
+            state
+        } finally { previous.close() }
+    }
     /** Selection invalidation preserves the user's encrypted subscription and delivery receipt. */
     fun invalidateNodeSelection() = synchronized(lock) {
         revision++; invalidateSelections(); authority.selectionRequiresRefresh = true; Unit
     }
     fun nodeSelectionSnapshot(): NodeSelectionSnapshot = synchronized(lock) {
+        fun result(status: LocalSubscriptionStatus, choices: List<ConnectionChoice> = emptyList(),
+            selected: ConnectionSelection? = null, until: Instant? = null) = NodeSelectionSnapshot(status, choices,
+            selected, until, authority.selectionSourceKind, if (authority.selectionSourceKind == ManualSourceKind.ImportedLocal)
+                LocalSourceValidity.LocalNoServerExpiry else LocalSourceValidity.RemoteExpiry(until))
         val observed = authority.selectionStatus ?: state.status
         val until = if (authority.selectionStatus != null) authority.selectionUntil else state.validUntil
         val status = if (observed == LocalSubscriptionStatus.READY && until?.let { it <= now() } == true)
             LocalSubscriptionStatus.EXPIRED else observed
         if (status != LocalSubscriptionStatus.READY) {
             if (status != LocalSubscriptionStatus.MISSING) invalidateSelections(status, until)
-            return@synchronized NodeSelectionSnapshot(status, validUntil = until)
+            return@synchronized result(status, until = until)
         }
         val binding = authority.selectionBinding
-            ?: return@synchronized NodeSelectionSnapshot(status, validUntil = until)
+            ?: return@synchronized result(status, until = until)
         val current = try { sameCapability(binding) }
             catch (failure: PortalFailure) {
                 val failed = if (failure.reason == PortalFailure.Reason.STORAGE)
                     LocalSubscriptionStatus.STORAGE_ERROR else LocalSubscriptionStatus.INVALID_LINK
                 revision++; invalidateSelections(failed, until)
                 state = state.copy(status = failed)
-                return@synchronized NodeSelectionSnapshot(failed, validUntil = until)
+                return@synchronized result(failed, until = until)
             }
             catch (_: Exception) { false }
         if (!current) {
             revision++; invalidateSelections(LocalSubscriptionStatus.INVALID_LINK, until)
             state = state.copy(status = LocalSubscriptionStatus.INVALID_LINK)
-            return@synchronized NodeSelectionSnapshot(LocalSubscriptionStatus.INVALID_LINK, validUntil = state.validUntil)
+            return@synchronized result(LocalSubscriptionStatus.INVALID_LINK, until = state.validUntil)
         }
-        NodeSelectionSnapshot(status, authority.choices.toList(), authority.selected, until)
+        result(status, authority.choices.toList(), authority.selected, until)
     }
     /** Object identity from the current validated registry only. This does not perform HTTP or prepare. */
     fun selectNode(selection: ConnectionSelection): Boolean = synchronized(lock) {
@@ -205,9 +419,11 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
      * call isCurrentNodeProbeTarget on IO before/after measuring, plus their auth/network/TTL guards. */
     internal fun isNodeProbeTargetRegistryCurrent(target: NodeProbeTarget): Boolean = synchronized(lock) {
         authority.selectionStatus == LocalSubscriptionStatus.READY && !authority.selectionRequiresRefresh &&
+            !authority.manualStorageBlocked && !authority.incompleteClear &&
             authority.selectionSchema == SafeProxyConfig.SCHEMA_VERSION &&
             authority.selectionClearVersion == authority.clearVersion && authority.selectionBinding != null &&
-            authority.selectionRevision != null && authority.selectionUntil?.let { it > now() } == true &&
+            authority.selectionRevision != null &&
+            (authority.selectionSourceKind == ManualSourceKind.ImportedLocal || authority.selectionUntil?.let { it > now() } == true) &&
             authority.choices.any { it.selection === target.selection && it.protocol == target.protocol }
     }
     /** Caller holds the authority lock. Unlike nodeSelectionSnapshot, rejection is read-only. */
@@ -218,6 +434,12 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             if (authority.selectionStatus != LocalSubscriptionStatus.READY || authority.selectionRequiresRefresh ||
                 authority.selectionSchema != SafeProxyConfig.SCHEMA_VERSION ||
                 authority.selectionClearVersion != authority.clearVersion || authority.choices.isEmpty()) return null
+            val selectedSource = readManualSource()
+            if (selectedSource != null) try {
+                if (selectedSource.kind != ManualSourceKind.LegacyRemote)
+                    return withManualNodeProbeArtifact(selectedSource, read)
+                if (selectedSource.revision != authority.selectionSourceRevision) return null
+            } finally { selectedSource.close() }
             val until = authority.selectionUntil ?: return null
             if (until <= now()) return null
             val binding = authority.selectionBinding ?: return null
@@ -249,7 +471,26 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         catch (_: Exception) { return null }
         finally { raw?.fill(0); cached?.close() }
     }
+    private fun <T> withManualNodeProbeArtifact(record: ManualSourceRecord,
+        read: (ByteArray, List<ConnectionChoice>) -> T): T? {
+        if (record.kind !in setOf(ManualSourceKind.ImportedLocal, ManualSourceKind.ImportedRemote) ||
+            record.revision != authority.selectionSourceRevision || record.kind != authority.selectionSourceKind ||
+            sourceBinding(record) != authority.selectionBinding || record.validUntil != authority.selectionUntil ||
+            record.observedStatus?.let { it != LocalSubscriptionStatus.READY } == true ||
+            (record.kind == ManualSourceKind.ImportedRemote && record.validUntil?.let { it > now() } != true)) return null
+        val bytes = record.copyBytes() ?: return null
+        try {
+            val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+            try { if (authority.selectionRevision?.contentEquals(digest) != true) return null } finally { digest.fill(0) }
+            val parsed = manualSnapshot(bytes, record)
+            val choices = authority.choices.toList()
+            if (parsed.status != LocalSubscriptionStatus.READY || parsed.nodes.size != choices.size ||
+                parsed.nodes.indices.any { parsed.nodes[it].name != choices[it].name || parsed.nodes[it].protocol != choices[it].protocol }) return null
+            return read(bytes, choices)
+        } finally { bytes.fill(0) }
+    }
     private fun capability(): Secret? {
+        requireLegacySource()
         // A profile write and a receipt write are separate atomic files. Even when the
         // candidate receipt is present, an uncleared journal requires a fresh authenticated
         // model/resource check and verified commit. URL equality alone is not completion.
@@ -265,10 +506,34 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             require(binding == null || sessionBinding(url) == binding)
         } catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_REVOKED) }
     }
-    private fun sameCapability(binding: String) = capability()?.let(::sessionBinding) == binding
-    private fun observeContent(raw: ByteArray, binding: String, nodes: List<SafeProxyConfig.NodeSummary>, until: Instant?) {
+    private fun sameCapability(binding: String): Boolean {
+        val selectedSource = readManualSource()
+        if (selectedSource != null) try {
+            if (selectedSource.kind != ManualSourceKind.LegacyRemote) {
+                if (selectedSource.kind == ManualSourceKind.None || sourceBinding(selectedSource) != binding ||
+                    authority.selectionBinding != binding || selectedSource.kind != authority.selectionSourceKind ||
+                    selectedSource.revision != authority.selectionSourceRevision ||
+                    selectedSource.validUntil != authority.selectionUntil || selectedSource.observedStatus != null ||
+                    (selectedSource.kind == ManualSourceKind.ImportedRemote && selectedSource.validUntil?.let { it > now() } != true)) return false
+                run {
+                    val bytes = selectedSource.copyBytes() ?: return false
+                    try { val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+                        try { if (authority.selectionRevision?.contentEquals(digest) != true) return false }
+                        finally { digest.fill(0) }
+                    } finally { bytes.fill(0) }
+                }
+                return true
+            }
+            if (authority.selectionBinding == binding && authority.selectionSourceRevision != selectedSource.revision) return false
+        } finally { selectedSource.close() }
+        return capability()?.let(::sessionBinding) == binding
+    }
+    private fun observeContent(raw: ByteArray, binding: String, nodes: List<SafeProxyConfig.NodeSummary>, until: Instant?,
+        kind: ManualSourceKind = ManualSourceKind.LegacyRemote, sourceRevision: String? = null) {
+        val observedRevision = if (sourceRevision != null) sourceRevision else readManualSource()?.use { it.revision }
         val digest = MessageDigest.getInstance("SHA-256").digest(raw)
         if (authority.selectionBinding != binding || authority.selectionClearVersion != authority.clearVersion ||
+            authority.selectionSourceKind != kind || authority.selectionSourceRevision != observedRevision ||
             authority.selectionSchema != SafeProxyConfig.SCHEMA_VERSION ||
             authority.selectionRevision?.contentEquals(digest) != true) {
             authority.selectionRevision?.fill(0)
@@ -280,6 +545,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             authority.selected = null
         } else digest.fill(0)
         authority.selectionStatus = LocalSubscriptionStatus.READY
+        authority.selectionSourceKind = kind
+        authority.selectionSourceRevision = observedRevision
         authority.selectionUntil = until
         authority.selectionRequiresRefresh = false
     }
@@ -310,6 +577,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** Only called after acknowledged delivery and strict projection; never a connection admission. */
     fun remember(raw: ByteArray, url: Secret, until: Instant?): LocalSubscriptionSnapshot = synchronized(lock) {
+        requireLegacySource()
         val binding = sessionBinding(url)
         check(sameCapability(binding)) { "Subscription changed" }
         val next = describe(raw, until)
@@ -327,6 +595,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     /** Repository-only legacy transaction; ordinary capability checks are never relaxed. */
     internal fun rememberRecoveredLegacy(raw: ByteArray, journal: LegacyRecoveryJournal, until: Instant?,
         checkCurrent: () -> Unit): LocalSubscriptionSnapshot = synchronized(lock) {
+        requireLegacySource()
         require(journal.phase in setOf(LegacyRecoveryPhase.ACKNOWLEDGED, LegacyRecoveryPhase.PROFILE_COMMITTING))
         val candidate = journal.candidate
         require(!candidate.pendingAck && candidate.url != null && candidate.handoff != null)
@@ -384,17 +653,95 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             }
         }
     }
-    fun unlink() {
+    private data class ClearTicket(val sourceRevision: String, val clearVersion: Long)
+    private fun verifyLegacyAbsent() {
+        val profile = profiles.read()
+        try { if (profile != null || delivery.read() != null || delivery.readLegacyRecovery() != null)
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        } finally { profile?.close() }
+    }
+    /** Tombstone and old-store deletion are durable before the owner begins its final cleanup. */
+    private fun beginUnlink(): ClearTicket? {
         var observer: (() -> Unit)? = null
-        try { synchronized(lock) {
+        try { return synchronized(lock) {
             revision++; authority.clearVersion++; invalidateSelections()
             observer = authority.clearObserver
+            state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
+                sourceKind = if (manualSources == null) ManualSourceKind.LegacyRemote else ManualSourceKind.None)
+            if (manualSources != null) {
+                authority.incompleteClear = true
+                authority.manualSourceInitialized = true
+                try {
+                    ManualSourceRecord(kind = ManualSourceKind.None, clearPending = true).use { tombstone ->
+                        writeManualSource(tombstone)
+                        authority.selectionSourceKind = ManualSourceKind.None
+                        authority.selectionSourceRevision = tombstone.revision
+                        try { profiles.clear() } finally { delivery.clear() }
+                        verifyLegacyAbsent()
+                        val finalSource = manualSources.read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+                        try { if (!tombstone.sameEnvelope(finalSource)) throw PortalFailure(PortalFailure.Reason.STORAGE) }
+                        finally { finalSource.close() }
+                        return@synchronized ClearTicket(tombstone.revision, authority.clearVersion)
+                    }
+                } catch (_: Exception) {
+                    authority.manualStorageBlocked = true
+                    invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR)
+                    throw PortalFailure(PortalFailure.Reason.STORAGE)
+                }
+            } else try { profiles.clear() } finally { delivery.clear() }
             state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
-            try { profiles.clear() } finally { delivery.clear() }
+            null
         } } finally { observer?.invoke() } // Never call the owner while holding the capability lock.
+    }
+    private fun finishUnlink(ticket: ClearTicket, commitFence: ((() -> Unit) -> Unit)) {
+        var completed = false
+        commitFence { synchronized(lock) {
+            if (completed || authority.clearVersion != ticket.clearVersion) throw CancellationException("Local clear superseded")
+            val selected = manualSources?.read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+            try { if (selected.kind != ManualSourceKind.None || !selected.clearPending || selected.revision != ticket.sourceRevision)
+                throw PortalFailure(PortalFailure.Reason.STORAGE)
+            } finally { selected.close() }
+            verifyLegacyAbsent()
+            ManualSourceRecord(kind = ManualSourceKind.None).use { tombstone ->
+                writeManualSource(tombstone)
+                authority.selectionSourceKind = ManualSourceKind.None
+                authority.selectionSourceRevision = tombstone.revision
+            }
+            authority.incompleteClear = false
+            authority.manualStorageBlocked = false
+            invalidateSelections(LocalSubscriptionStatus.MISSING)
+            state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = ManualSourceKind.None)
+            completed = true
+        } }
+        if (!completed) throw PortalFailure(PortalFailure.Reason.STORAGE)
+    }
+    /** Legacy no-sidecar callers retain their API. A manual source with a live owner must await cleanup. */
+    fun unlink() {
+        val ticket = beginUnlink() ?: return
+        finishUnlink(ticket) { action -> synchronized(lock) {
+            if (authority.clearObserver != null) throw PortalFailure(PortalFailure.Reason.STORAGE)
+            action()
+        } }
+    }
+    suspend fun unlinkAndAwait(cleanup: suspend () -> Unit, commitFence: ((() -> Unit) -> Unit)) {
+        val ticket = beginUnlink()
+        cleanup() // No authority lock/mutex is held while the actual owner stops and removes prepared material.
+        currentCoroutineContext().ensureActive()
+        if (ticket != null) finishUnlink(ticket, commitFence)
     }
     private fun rememberObservation(kind: LocalSubscriptionStatus) {
         if (kind !in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.INVALID_LINK)) return
+        val selectedSource = readManualSource()
+        if (selectedSource != null) try {
+            if (selectedSource.kind != ManualSourceKind.LegacyRemote) {
+                if (selectedSource.kind == ManualSourceKind.ImportedRemote) {
+                    val bytes = selectedSource.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+                    try { ManualSourceRecord(selectedSource.revision, selectedSource.kind, bytes, selectedSource.url,
+                        selectedSource.validUntil, kind).use(::writeManualSource) } finally { bytes.fill(0) }
+                }
+                return
+            }
+        } finally { selectedSource.close() }
         val old = profiles.read() ?: return
         try {
             val raw = old.copyBytes()
@@ -406,6 +753,13 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         val epoch = synchronized(lock) { ++revision }
         var knownCapability = false
         try {
+            val selectedSource = synchronized(lock) { readManualSource() }
+            if (selectedSource != null) try {
+                if (selectedSource.kind != ManualSourceKind.LegacyRemote) {
+                    knownCapability = selectedSource.kind != ManualSourceKind.None
+                    return@withLock restoreManualSource(selectedSource, epoch)
+                }
+            } finally { selectedSource.close() }
             val url = capability() ?: return@withLock synchronized(lock) {
                 if (revision == epoch) {
                     invalidateSelections(LocalSubscriptionStatus.MISSING)
@@ -456,6 +810,68 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         } }
     }
     suspend fun refresh(): LocalSubscriptionSnapshot = mutex.withLock { refreshLocked() }
+    private fun requireSameSource(record: ManualSourceRecord, epoch: Long) {
+        if (revision != epoch) throw CancellationException("Configuration source changed")
+        val current = readManualSource()
+        try { if (current == null || !record.sameEnvelope(current)) throw CancellationException("Configuration source changed") }
+        finally { current?.close() }
+    }
+    private fun restoreManualSource(record: ManualSourceRecord, epoch: Long): LocalSubscriptionSnapshot = synchronized(lock) {
+        requireSameSource(record, epoch)
+        authority.selectionSourceKind = record.kind
+        authority.selectionSourceRevision = record.revision
+        if (record.kind == ManualSourceKind.None) {
+            invalidateSelections(LocalSubscriptionStatus.MISSING)
+            state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = record.kind)
+            return@synchronized state
+        }
+        val bytes = record.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+        try {
+            val parsed = try { manualSnapshot(bytes, record) } catch (_: UnsafeProxyConfiguration) {
+                LocalSubscriptionSnapshot(LocalSubscriptionStatus.UNSUPPORTED, hasProfile = true, hasCapability = true,
+                    validUntil = record.validUntil, sourceKind = record.kind,
+                    validity = if (record.kind == ManualSourceKind.ImportedLocal) LocalSourceValidity.LocalNoServerExpiry
+                        else LocalSourceValidity.RemoteExpiry(record.validUntil))
+            }
+            val blocked = authority.selectionStatus?.takeIf { it != LocalSubscriptionStatus.READY }
+            state = (blocked ?: record.observedStatus)?.let { parsed.copy(status = it) } ?: parsed
+            if (state.status == LocalSubscriptionStatus.READY && !authority.selectionRequiresRefresh)
+                observeContent(bytes, sourceBinding(record), state.nodes, state.validUntil, record.kind, record.revision)
+            else invalidateSelections(state.status, state.validUntil)
+            state
+        } finally { bytes.fill(0) }
+    }
+    private suspend fun refreshManualSource(record: ManualSourceRecord, epoch: Long,
+        prepared: ((LocalSubscriptionSnapshot, ByteArray, String, Long) -> Unit)?): LocalSubscriptionSnapshot {
+        if (record.kind == ManualSourceKind.None) return synchronized(lock) {
+            requireSameSource(record, epoch)
+            authority.selectionSourceKind = record.kind; authority.selectionSourceRevision = record.revision
+            invalidateSelections(LocalSubscriptionStatus.MISSING)
+            state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = record.kind); state
+        }
+        val downloaded = if (record.kind == ManualSourceKind.ImportedRemote) source.read(requireNotNull(record.url)) else null
+        val bytes = downloaded?.bytes ?: record.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+        try {
+            currentCoroutineContext().ensureActive()
+            val until = if (record.kind == ManualSourceKind.ImportedRemote) downloaded?.validUntil ?: record.validUntil else null
+            if (record.kind == ManualSourceKind.ImportedRemote && until == null) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE)
+            val fresh = ManualSourceRecord(record.revision, record.kind, bytes, record.url, until)
+            try {
+                val next = manualSnapshot(bytes, fresh)
+                return synchronized(lock) {
+                    requireSameSource(record, epoch)
+                    if (record.kind == ManualSourceKind.ImportedRemote) writeManualSource(fresh)
+                    authority.selectionSourceKind = record.kind; authority.selectionSourceRevision = record.revision
+                    if (next.status == LocalSubscriptionStatus.READY)
+                        observeContent(bytes, sourceBinding(fresh), next.nodes, next.validUntil, fresh.kind, fresh.revision)
+                    else invalidateSelections(next.status, next.validUntil)
+                    state = next
+                    prepared?.invoke(next, bytes, sourceBinding(fresh), epoch)
+                    next
+                }
+            } finally { fresh.close() }
+        } finally { bytes.fill(0) }
+    }
     suspend fun prepare(requested: String?, resolver: LocalConnectionLineResolver, files: PreparedConfigStore): AuthorizedConfig? {
         var prepared: AuthorizedConfig? = null
         try {
@@ -575,6 +991,13 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         }
         var knownCapability = false
         try {
+            val selectedSource = synchronized(lock) { readManualSource() }
+            if (selectedSource != null) try {
+                if (selectedSource.kind != ManualSourceKind.LegacyRemote) {
+                    knownCapability = selectedSource.kind != ManualSourceKind.None
+                    return refreshManualSource(selectedSource, epoch, prepared)
+                }
+            } finally { selectedSource.close() }
             val url = capability() ?: return synchronized(lock) {
                 if (revision != epoch) throw CancellationException("Subscription operation cancelled")
                 invalidateSelections(LocalSubscriptionStatus.MISSING)

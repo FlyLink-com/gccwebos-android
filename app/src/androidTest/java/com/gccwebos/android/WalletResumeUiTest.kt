@@ -111,19 +111,29 @@ class WalletResumeUiTest {
         compose.onNodeWithTag("payment-open-confirm").performClick()
         compose.runOnIdle { assertEquals(1, opens); assertTrue(account.authenticated); assertEquals(hasProfile, account.localSubscription.hasProfile) }
         val before = reads
+        val owner = account.commerceSessionIdentity
         compose.runOnIdle { gate = CompletableDeferred() }
         stopAndResume()
+        compose.waitUntil(5000) { account.restoring && account.foregroundCheckPending }
         compose.onNodeWithTag("nav-Profile").assertExists()
         compose.onNodeWithTag("mine-back").assertExists()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
-        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        // The same owner's foreground verification stays quiet. It revokes payment controls
+        // until the GET completes without presenting a logged-out placeholder or losing recovery.
+        compose.onNodeWithTag("commerce-signed-out").assertDoesNotExist()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(1, posts); assertEquals(1, opens); gate!!.complete(Unit) }
+        compose.runOnIdle {
+            assertTrue(account.retainingCommerceSession); assertSame(owner, account.commerceSessionIdentity)
+            assertEquals(1, posts); assertEquals(1, opens); gate!!.complete(Unit)
+        }
         compose.waitUntil(5000) { reads > before && account.authenticated && !account.busy }
         compose.onNodeWithTag("mine-back").assertExists()
         compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("等待付款或支付确认")
         compose.onNodeWithText("到账目标 10 Coins · 订单 resume_ui_order").assertExists()
-        compose.runOnIdle { assertEquals(1, posts); assertEquals(1, opens) }
+        compose.runOnIdle {
+            assertSame(owner, account.commerceSessionIdentity)
+            assertEquals(1, posts); assertEquals(1, opens)
+        }
     }
     @Test fun walletWithoutProfileSurvivesTheProductionActivityResumeAndOnlyRereadsPending() = assertSameSessionReturn(false)
     @Test fun walletWithProfileSurvivesTheProductionActivityResumeAndOnlyRereadsPending() = assertSameSessionReturn(true)

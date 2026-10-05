@@ -1,0 +1,24 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportHostUiTest",
+    "com.gccwebos.android.ManualImportPlatformContractTest",
+    "com.gccwebos.android.ManualImportAccountUiTest",
+    "com.gccwebos.android.portal.EncryptedManualSourceStoreTest",
+    "com.gccwebos.android.portal.EncryptedLocalProfileStoreTest",
+    "com.gccwebos.android.SelectedNodeActivityRecreationTest",
+    "com.gccwebos.android.WalletResumeUiTest",
+    "com.gccwebos.android.OfficialWebsiteCardUiTest"
+  ],
+  "expected": 32,
+  "started": 32,
+  "passed": 32,
+  "negativeCodes": [],
+  "ok": [
+    32
+  ],
+  "timedOut": false,
+  "success": true,
+  "sanitizedExceptionTypes": [],
+  "sanitizedStackFrames": [],
+  "fixedDeviceStatus": {}
+}

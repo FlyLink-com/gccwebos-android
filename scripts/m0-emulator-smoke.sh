@@ -222,10 +222,11 @@ adb shell uiautomator dump /sdcard/m0-window.xml > "$OUT/ui-dump.log"
 adb pull /sdcard/m0-window.xml "$OUT/window.xml"
 verify_ui_xml "$OUT/window.xml"
 log 'Running instrumented tests'
-# The 109-case suite completed 49 cases in 234s on the two-core API33 host
-# (~521s projected total). Bound the whole suite at 720s; individual test
-# deadlines, ANR gates and the workflow job budget remain unchanged.
-timeout 720 "$ADB" -s emulator-5554 shell am instrument -w -r "$TEST_RUNNER" \
+# At eed8ed2, API36 reached case 161/254 at the 720s suite deadline; the
+# complete API33 suite took 1054.569s. Allow 1800s for the expanded API36 suite.
+# Per-test/boot deadlines, ANR gates and the 45-minute workflow limit stay unchanged.
+# Evidence and remaining CI failures: docs/ci-ui-suite-budget-2026-10-04.md.
+timeout 1800 "$ADB" -s emulator-5554 shell am instrument -w -r "$TEST_RUNNER" \
   | tee "$OUT/instrumentation.log"
 grep -Eq 'OK \([1-9][0-9]* tests?\)' "$OUT/instrumentation.log"
 if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' "$OUT/instrumentation.log"; then exit 1; fi

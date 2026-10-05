@@ -76,14 +76,17 @@ internal fun productionRepository(context: Context): PortalRepository {
     val policy = OriginPolicy("https://portal.gccwebos.com", setOf("https://sub.gccwebos.com"))
     return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime,
         sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context),
-        allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME)
+        allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME,
+        manualSources = EncryptedManualSourceStore(context))
 }
 
 /** Process-local ownership only; identity contains no account label or bearer data. */
 internal class CommerceSessionIdentity
 
 internal class AccountController(private val repository: PortalRepository, private val scope: CoroutineScope,
-    nodeLatencyProbe: NodeLatencyProbe? = null) {
+    nodeLatencyProbe: NodeLatencyProbe? = null,
+    sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
+    private val clearLocalData: suspend () -> Unit = { repository.clearLocalData() }) {
     var account by mutableStateOf("")
     var password by mutableStateOf("")
     var answer by mutableStateOf("")
@@ -146,17 +149,27 @@ internal class AccountController(private val repository: PortalRepository, priva
     private var questionJob: Job? = null
     private var questionExpiryJob: Job? = null
     private var automaticQuestionJob: Job? = null
-    val nodeSelection = NodeSelectionController(repository.localSubscriptions, scope,
+    val nodeSelection: NodeSelectionController = NodeSelectionController(repository.localSubscriptions, scope,
         authGeneration = { authSessionGeneration },
-        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing },
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy },
         onSnapshot = { localSubscription = it; nodes = it.nodes })
     val accountUsage = AccountUsageController(scope,
         reader = { owner, epoch -> repository.readAccountOverview(owner, epoch) },
         onSessionExpired = { commerceSessionExpired() })
-    val nodeLatency = NodeLatencyController(repository.localSubscriptions, scope, nodeLatencyProbe,
+    val nodeLatency: NodeLatencyController = NodeLatencyController(repository.localSubscriptions, scope, nodeLatencyProbe,
         authGeneration = { authSessionGeneration },
-        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing })
-    fun refreshAccountUsage() = accountUsage.update()
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy })
+    val manualImport: ManualImportController = ManualImportController(repository.localSubscriptions, scope,
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !nodeSelection.busy &&
+            !accountUsage.state.value.busy && !accountUsage.state.value.verifying },
+        commitFence = sourceCommitFence,
+        onSnapshot = {
+            nodeLatency.cancel()
+            localSubscription = it; nodes = it.nodes; nodeSelection.sync()
+        }, onSettled = { scope.launch {
+            if (foregroundCheckPending && authenticated && !busy && !manualImport.busy && !clearing) revalidateAccount()
+        } })
+    fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
     fun cancelAccountUsageUpdate() = accountUsage.cancel()
     private fun clearAccountUsage() {
         usageAuthentication = null
@@ -178,10 +191,10 @@ internal class AccountController(private val repository: PortalRepository, priva
         if (factorReference != null || !authenticated) return
         accountUsage.suspendForVerification()
         foregroundCheckPending = true
-        if (!busy) revalidateAccount()
+        if (!busy && !manualImport.busy) revalidateAccount()
     }
     fun restore() {
-        if (busy) return
+        if (busy || manualImport.busy) return
         clearAccountUsage()
         expiryTask?.cancel()
         authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null; importRejection = null
@@ -203,7 +216,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun restoreAccount() = checkAccount(force = false)
     private fun revalidateAccount() = checkAccount(force = true)
     private fun checkAccount(force: Boolean) {
-        if (busy || factorReference != null || (authenticated && !force)) return
+        if (busy || manualImport.busy || factorReference != null || (authenticated && !force)) return
         accountUsage.suspendForVerification()
         val checkOperation = operation + 1
         expiryTask?.cancel(); authenticated = false; security = null
@@ -225,7 +238,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     }
     fun readSecurity() = run { security = null; security = repository.security() }
     fun refreshSubscription() {
-        if (busy || restoring || foregroundCheckPending || clearing) return
+        if (busy || manualImport.busy || restoring || foregroundCheckPending || clearing) return
         val recoveryPending = try { authenticated && repository.hasPendingLegacyRecovery() }
         catch (failure: PortalFailure) { run { throw failure }; return }
         if (recoveryPending) run { loadResource() }
@@ -459,7 +472,8 @@ internal class AccountController(private val repository: PortalRepository, priva
         }
         importStatus = null; importRejection = null; deliveryReceived = false; resource = null
         try {
-            if (localSubscription.hasProfile && !repository.hasPendingLegacyRecovery()) {
+            if (repository.localSubscriptions.sourceKind() != ManualSourceKind.LegacyRemote ||
+                localSubscription.hasProfile && !repository.hasPendingLegacyRecovery()) {
                 // Wallet login never silently replaces a separately saved local VPN capability.
                 publish(repository.refreshWithObservation())
             } else {
@@ -483,6 +497,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun clearLocal() = reset(clearLocal = true)
     fun cancelAuthentication() = reset(clearLocal = false)
     private fun reset(clearLocal: Boolean) {
+        manualImport.cancel()
         nodeLatency.cancel()
         clearAccountUsage()
         commerceSessionIdentity = null
@@ -493,7 +508,8 @@ internal class AccountController(private val repository: PortalRepository, priva
         task?.cancel(); expiryTask?.cancel()
         authenticationSubmitting = false
         restoring = false; restorationPending = false; foregroundCheckPending = false
-        if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
+        if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
+            sourceKind = ManualSourceKind.None)
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
         referralGenerationGuard = ReferralGenerationGuard()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
@@ -502,7 +518,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             try {
-                if (clearLocal) { repository.clearLocalData(); localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING) } else repository.signOutAccount()
+                if (clearLocal) { clearLocalData(); localSubscription = repository.localSubscriptions.snapshot() } else repository.signOutAccount()
                 nodes = localSubscription.nodes
                 error = null
             }
@@ -511,7 +527,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         }
     }
     private fun run(authenticationSubmission: Boolean = false, action: suspend () -> Unit) {
-        if (busy) return
+        if (busy || manualImport.busy) return
         // Account/security work cannot race a local selection read or revive its late result.
         if (nodeSelection.busy) nodeSelection.cancel()
         nodeLatency.cancel()

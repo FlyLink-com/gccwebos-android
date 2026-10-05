@@ -1,0 +1,17 @@
+{
+  "errors": 0,
+  "skipped": 0,
+  "failures": 2,
+  "stage": "account-switch-behavioral-red",
+  "actualStatus": "MISSING",
+  "tests": 12,
+  "expectations": [
+    "READY after fresh account read",
+    "RETRY_REQUIRED on network failure with no cached fallback"
+  ],
+  "failed": [
+    "useAccountFreshReadFailureKeepsCachedV1ButDoesNotPublishSelectableFallback",
+    "useAccountWithExistingV1FreshlyReloadsSelectableNodesInTheSameOperation"
+  ],
+  "productionUseAccount": "useAccountSource then restore"
+}

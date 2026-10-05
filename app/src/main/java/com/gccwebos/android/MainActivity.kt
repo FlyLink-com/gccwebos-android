@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
                 val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodePingProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
                     nodeLatencyProbe = nodeProbe,
+                    sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,
                     onConnectionPowerAction = { action -> current.power(action) })
             }
         }
@@ -206,14 +207,18 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     repositoryOverride: PortalRepository? = null,
     glassMode: GlassMode? = null,
     nodeLatencyProbe: com.gccwebos.android.portal.NodeLatencyProbe? = null,
-    autoRefreshPages: Boolean = autoLoadCommerce) {
+    autoRefreshPages: Boolean = autoLoadCommerce,
+    sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
+    clearLocalData: (suspend () -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
         val scope = rememberCoroutineScope()
         remember(accountOverride, repositoryOverride, nodeLatencyProbe) {
-            accountOverride ?: AccountController(repositoryOverride ?: productionRepository(context), scope,
-                nodeLatencyProbe = nodeLatencyProbe)
+            val repository = repositoryOverride ?: productionRepository(context)
+            accountOverride ?: AccountController(repository, scope,
+                nodeLatencyProbe = nodeLatencyProbe, sourceCommitFence = sourceCommitFence,
+                clearLocalData = clearLocalData ?: { repository.clearLocalData() })
         }
     }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
@@ -245,7 +250,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     DisposableEffect(account, lifecycle) {
         val observer = AccountForegroundObserver(account)
         lifecycle?.addObserver(observer)
-        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel() }
+        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel(); account.manualImport.cancel() }
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
@@ -355,12 +360,15 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
                   autoRefreshPages: Boolean) {
     val latestControl by rememberUpdatedState(connectionControlState)
+    DisposableEffect(account, destination) {
+        onDispose { if (destination == Destination.Lines) account.manualImport.cancel() }
+    }
     // Verified authentication revokes old opaque node handles. A mounted Nodes page must
     // rebuild them with a fresh read; other pages do not gain another navigation refresh.
     val nodesOwnerGeneration = account.authSessionGeneration.takeIf { destination == Destination.Lines }
     LaunchedEffect(account, destination, navigationRequest, autoRefreshPages, nodesOwnerGeneration) {
         if (!autoRefreshPages || (navigationRequest == 0 && destination != Destination.Lines)) return@LaunchedEffect
-        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing }.first { it }
+        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing && !account.manualImport.busy }.first { it }
         if (destination == Destination.Profile && !account.authenticated && !startRegistration) {
             account.restoreAccount()
         } else if (destination == Destination.Lines) {
@@ -400,9 +408,24 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 Destination.Lines -> {
                     LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
-                        account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending,
+                        account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
-                        onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency)
+                        onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency,
+                        onImport = account.manualImport::open)
+                    val importer = account.manualImport
+                    val source = account.localSubscription.sourceKind
+                    val importUsage by account.accountUsage.state.collectAsState()
+                    com.gccwebos.android.manualimport.ManualImportHost(
+                        visible = importer.visible,
+                        busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
+                            account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
+                        error = importer.error,
+                        canUseAccount = source != com.gccwebos.android.portal.ManualSourceKind.LegacyRemote,
+                        canRemove = source in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
+                            com.gccwebos.android.portal.ManualSourceKind.ImportedRemote),
+                        onDismiss = importer::cancel, onBegin = importer::begin, onSubmit = importer::submit,
+                        onCancel = importer::cancel, onFailure = importer::failure,
+                        onUseAccount = importer::useAccount, onRemove = importer::remove)
                 }
                 Destination.Plans -> {
                     if (!account.authenticated && !account.retainingCommerceSession) {

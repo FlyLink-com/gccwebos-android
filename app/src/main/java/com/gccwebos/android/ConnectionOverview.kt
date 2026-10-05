@@ -71,8 +71,10 @@ internal fun connectionOverviewPresentation(
 ): ConnectionOverviewPresentation {
     val status = if (snapshot.status == LocalSubscriptionStatus.READY && snapshot.hasProfile && snapshot.hasCapability &&
         snapshot.validUntil?.let { it <= now } == true) LocalSubscriptionStatus.EXPIRED else snapshot.status
+    val localValidity = snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ImportedLocal &&
+        snapshot.validity == com.gccwebos.android.portal.LocalSourceValidity.LocalNoServerExpiry && snapshot.validUntil == null
     val confirmedReady = status == LocalSubscriptionStatus.READY && snapshot.hasProfile && snapshot.hasCapability &&
-        snapshot.validUntil?.let { it > now } == true
+        (localValidity || snapshot.validUntil?.let { it > now } == true)
     val localError = status in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.RETRY_REQUIRED,
         LocalSubscriptionStatus.INVALID_LINK, LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)
     val connectionText = when (control.phase) {
@@ -99,6 +101,7 @@ internal fun connectionOverviewPresentation(
         status == LocalSubscriptionStatus.MISSING -> "未配置"
         !confirmedReady -> "订阅待确认"
         control.phase == ConnectionPhase.Unavailable -> "连接暂不可用"
+        localValidity -> "本地配置"
         else -> ""
     }
     val tone = when {
@@ -271,7 +274,7 @@ internal fun ConnectionOverview(
             nodeSnapshot.status == LocalSubscriptionStatus.READY && nodeSnapshot.validUntil?.let { until -> until > now } != false
     }
     DisposableEffect(account) { onDispose { account.nodeLatency.cancel() } }
-    val operable = !account.busy && !account.nodeSelection.busy && !account.restoring &&
+    val operable = !account.busy && !account.manualImport.busy && !account.nodeSelection.busy && !account.restoring &&
         !account.foregroundCheckPending && !account.clearing && !usage.busy
     val verifiedUsage = account.authenticated && usage.authenticated && !usage.verifying
     val display = accountUsagePresentation(if (verifiedUsage) usage.resource else null, usageNow, usage.notUpdated)
@@ -281,14 +284,17 @@ internal fun ConnectionOverview(
     var acceptedCommand by remember(control, account) { mutableStateOf(false) }
     // Keep service control authoritative without interpreting an idle preparation capability as local readiness.
     val controlMode = showsConnectionCommand(local, control)
-    val usageRecovery = account.authenticated && (usage.error != null ||
+    val manualSource = snapshot.sourceKind in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
+        com.gccwebos.android.portal.ManualSourceKind.ImportedRemote)
+    val usageRecovery = !manualSource && account.authenticated && (usage.error != null ||
         display.state in setOf(AccountUsageState.Unknown, AccountUsageState.Reconciliation))
     val recoverBeforeConnect = controlMode && local.action == ConnectionPowerAction.Connect && usageRecovery
     val localReadRecovery = account.authenticated && verifiedUsage && snapshot.hasCapability &&
         local.status in setOf(LocalSubscriptionStatus.RETRY_REQUIRED, LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)
     val controlEnabled = onPowerAction != null && !acceptedCommand && local.action != ConnectionPowerAction.None &&
-        (local.action != ConnectionPowerAction.Connect || (!account.clearing && !account.nodeSelection.busy &&
-            (!account.authenticated || (operable && verifiedUsage && !usageRecovery))))
+        (local.action != ConnectionPowerAction.Connect || (!account.clearing && !account.manualImport.busy &&
+            !account.nodeSelection.busy && (if (manualSource) !account.busy && !account.restoring && !account.foregroundCheckPending
+            else !account.authenticated || (operable && verifiedUsage && !usageRecovery))))
     Column(Modifier.fillMaxWidth().testTag("connection-overview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BrandCard(Modifier.testTag("connection-account-surface"), contentPadding = PaddingValues(18.dp, 16.dp, 18.dp, 16.dp)) {
             // Each section already owns its spacing; avoid stacking the generic card's row gaps.
@@ -401,6 +407,8 @@ internal fun ConnectionOverview(
                             NodeRegionIcon(name = displayedNode?.name, size = 39.dp, emphasized = true)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
+                                if (snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ImportedLocal)
+                                    Text("本地配置", color = Brand.Cyan, fontSize = 10.sp, modifier = Modifier.testTag("connection-local-source"))
                                 Text(displayedNode?.name ?: "未选择",
                                     color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                                     modifier = Modifier.testTag("connection-node-name"))

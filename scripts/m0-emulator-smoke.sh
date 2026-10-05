@@ -6,6 +6,7 @@ source scripts/instrumentation-batches.sh
 OUT="$PWD/.build-output/device"
 mkdir -p "$OUT"
 python3 scripts/test_instrumentation_batches.py 2>&1 | tee "$OUT/instrumentation-offline-tests.log"
+python3 scripts/test_m0_anr_diagnostics.py 2>&1 | tee "$OUT/anr-diagnostics-offline-tests.log"
 SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 : "${SDK_ROOT:?Android SDK is required}"
 SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
@@ -103,6 +104,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Offline adb commands must not wait indefinitely, including inside cleanup.
 adb() { instrumentation_timeout 45 "$ADB" -s emulator-5554 "$@"; }
+collect_boot_anr() {
+  # Only invoked after a pre-install boot failure on the AVD created above.
+  # Preserve the original failure even when collection fails or times out.
+  if ! python3 scripts/collect_m0_anr.py --adb "$ADB" --out "$OUT/anr"; then
+    log 'ANR diagnostics collection failed; original boot failure remains'
+  fi
+}
 verify_renderer() {
   local label="$1"
   adb shell getprop ro.build.version.sdk > "$OUT/$label-api.log"
@@ -131,7 +139,7 @@ while (( SECONDS < deadline )); do
   sleep 2
 done
 [ "$booted" = true ] || { log 'FAIL: emulator boot timed out'; exit 1; }
-# API36 first boot repeatedly stalls SystemUIService on this disposable two-core host.
+# API36 startup has stalled on both two-core and four-core disposable hosts.
 # Retain the first-boot failure evidence, then warm-boot ONCE before any APK installation.
 # No ANR dialog is dismissed and no app/foreground/instrumentation gate is bypassed.
 log 'Preserving initial API36 boot diagnostics before one bounded warm boot'
@@ -169,11 +177,13 @@ adb exec-out screencap -p > "$OUT/post-warmboot.png"
 verify_renderer post-warmboot
 if grep -Eq 'am_anr[[:space:]]*:|ANR in ' "$OUT/post-warmboot-logcat.log"; then
   log 'FAIL: ANR after the single warm boot; no further retry'
+  collect_boot_anr
   exit 1
 fi
 grep -E 'mCurrentFocus|mFocusedApp' "$OUT/post-warmboot-window.log" > "$OUT/post-warmboot-focus.log"
 if grep -Eiq 'Application Not Responding|Application Error|isn.t responding' "$OUT/post-warmboot-focus.log"; then
   log 'FAIL: system error window after warm boot'
+  collect_boot_anr
   exit 1
 fi
 printf '%s\n' 'One pre-install disposable-AVD warm boot completed; first-boot evidence retained; normal gates still required.' \

@@ -67,6 +67,9 @@ android {
     }
     buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = true }
+    // Go already strips this verified library (-s -w). NDK stripping rewrites ELF
+    // metadata even then; preserve its fixed byte identity for every APK variant.
+    packaging.jniLibs.keepDebugSymbols += "**/libgccmihomo.so"
     sourceSets.getByName("test").resources.directories.add("../native/bridge/testdata")
     // Verified libraries are generated/materialized separately; no old APK is reused.
     sourceSets.getByName("main").jniLibs.directories.add("../native/build/jniLibs")

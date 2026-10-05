@@ -31,8 +31,10 @@ Debug / candidate 不属于正式升级链，自动入口同时检查包名与 D
 
 原 M1 阶段的 24 个 JVM JUnit 用例通过 Kotlin 2.3.10 CLI / JVM17 target / coroutines1.10.2 / OkHttp4.12.0：版本和最低支持边界、debug 隔离、无发布、schema/JSON/UTF-8/日期/路径恶意输入、重复点击、取消/迟到结果、Http Call取消、重定向和错误终点、Content-Type、超大/无长度响应。此历史结果不作为本轮新增自动检查的验收结果。
 
-本轮先增加 `AutomaticUpdateControllerTest` 13 项 JVM 边界测试，以及 `AutomaticUpdateUiTest` 5 项和 `AndroidAutomaticUpdateStoreTest` 3 项 Android 测试。覆盖持久化限频/跨实例、时间回拨与坏值、IO 调度、取消/迟到结果、非正式包隔离、实际展示后去重、前后台切换、手动弹窗互斥、显式浏览器点击、静默失败及原页面可操作性。全部使用合成清单和注入浏览器，偏好存储测试仅使用 instrumentation APK 自有 Context。
+本轮先增加 `AutomaticUpdateControllerTest` 13 项 JVM 边界测试，以及 `AutomaticUpdateUiTest` 5 项和 `AndroidAutomaticUpdateStoreTest` 3 项 Android 测试。覆盖持久化限频/跨实例、时间回拨与坏值、IO 调度、取消/迟到结果、非正式包隔离、实际展示后去重、前后台切换、手动弹窗互斥、显式浏览器点击、静默失败及原页面可操作性。全部使用合成清单和注入浏览器。偏好存储 fixture 使用 instrumentation 实际运行的 target UID，将调度偏好名映射到每项测试独有的随机文件名；保留写入成功断言，只清理该随机文件，不触碰实际调度或账户偏好。
 
 本轮定向 JVM 共 37 项通过、0 失败、0 跳过（新增自动检查 13 项和既有 parser/repository 24 项）；release APK、普通 debug APK、Android 测试 APK 构建及 release Lint 通过，Lint 0 error / 27 warning / 6 hint。独立源码复核已完成，修复了损坏的超上界持久化版本值和 Home 返回重复提示边界。
 
-OPPO 当前锁屏，新增 8 项 Android 测试及既有更新 UI 回归尚未实机执行；等待解锁和修正提交的完整 CI。当前 release 产物未签名，不能安装或称为已发布；签名及官网下载链另外验收。本轮不修改生产清单 URL、schema 或账户存储，没有增加权限或执行真实下载/安装。记录见 [正式发布准备](stable-release-preparation.md)。
+`cc3c1e5` 的 M0 CI 暴露旧 fixture 的测试 APK 数据目录不可用：三项存储用例各在初始化和清理失败，报告六次失败；五项自动更新 UI 均通过。OPPO 旧包复现同样失败，修正 fixture 后，新增 8 项和既有 3 项更新 UI 共 11 项全部通过、0 跳过。自有临时 debug app/test 已卸载，普通 candidate 的 APK 哈希不变，未重装或清理该应用及其数据；没有实际下载更新文件。
+
+当前 release 产物仍未签名，不能安装或称为已发布；完整修正提交 CI、正式签名及官网下载链另外验收。本轮不修改生产清单 URL、schema 或账户存储，没有增加权限。记录见 [正式发布准备](stable-release-preparation.md)。

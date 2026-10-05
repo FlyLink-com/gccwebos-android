@@ -1,0 +1,199 @@
+{
+  "date": "2026-10-05",
+  "risk": "B fixes within A release preparation",
+  "state": "CI failures repaired and locally validated; unsigned and unpublished",
+  "failed_head": "cc3c1e58165834d366a47d8b259a017970bccfe3",
+  "prior_ci": {
+    "m0": {
+      "run_id": 37360418624,
+      "conclusion": "failure",
+      "build_jvm_lint": "passed",
+      "main_ui_batch_reported_tests": 318,
+      "reported_failure_events": 6,
+      "unique_failing_cases": 3,
+      "failure_scope": "AndroidAutomaticUpdateStoreTest @Before and @After; bodies not entered",
+      "observed_logcat_error": "SharedPreferences mkdir ENOENT in instrumentation APK data path",
+      "automatic_update_ui_cases_passed": 5
+    },
+    "native": {
+      "run_id": 37360418454,
+      "conclusion": "failure",
+      "raw_native_input_hashes": "passed",
+      "compilation": "passed",
+      "jvm_passed": 1124,
+      "failed_gate": "Release APK arm64 native full-byte SHA-256",
+      "jni_ui_real_tun": "not run",
+      "artifact_compared": "Linux debug APK (release APK not retained by failed workflow)",
+      "raw_vs_packaged_debug_native": [
+        {
+          "abi": "arm64-v8a",
+          "raw_bytes": 62047848,
+          "raw_sha256": "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+          "packaged_bytes": 62047848,
+          "packaged_sha256": "30a35588e2605bb5343fcb43300b2ef53217646858e848a60e2aa892fcfdda47",
+          "removed_sections": [],
+          "changed_common_sections": [
+            ".shstrtab"
+          ],
+          "same_executable_sections": true
+        },
+        {
+          "abi": "x86_64",
+          "raw_bytes": 66849800,
+          "raw_sha256": "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8",
+          "packaged_bytes": 66849800,
+          "packaged_sha256": "98e668e0343fc9a11b37c72d4a9ee36dbb1aeecb4eee52634c4379f3db649020",
+          "removed_sections": [],
+          "changed_common_sections": [
+            ".shstrtab"
+          ],
+          "same_executable_sections": true
+        }
+      ],
+      "inference": "Common AGP strip path explains release hash mismatch; exact release transformation was not directly inspected"
+    }
+  },
+  "changes": {
+    "production_kotlin_changed": false,
+    "storage_fixture": "Run under target UID; map only official schedule name to per-case UUID SharedPreferences; assert successful commit and delete only owned fixture",
+    "native_packaging": "Preserve **/libgccmihomo.so bytes across all variants; keep strict original and APK hashes",
+    "policy_boundaries": [
+      "missing preservation rule",
+      "broader or additional library patterns",
+      "variant or property conditional rules"
+    ],
+    "changed_code_sha256": {
+      "app/build.gradle.kts": "c98a8981e47607d6d998da6847fef9f47fe6ff0e522b43f44972806e3b83905a",
+      "app/src/androidTest/java/com/gccwebos/android/update/AndroidAutomaticUpdateStoreTest.kt": "e58566ce3aa145fcd10900856b8752843b90ee74004d0e8b9fd034e45effe358",
+      "scripts/verify_release_policy.py": "7028246da9add9a707cf927f478eeb3073d799572298e5ba4470ebc4c9a0366e",
+      "scripts/test_release_policy.py": "4fa754c6b846e0de5b4358c59ad17180cf4a4e9255572d1e0697a051ebb2d115"
+    }
+  },
+  "validation": {
+    "policy_tdd": {
+      "red_tests": 21,
+      "red_failures": 1,
+      "green_tests": 21,
+      "green_failures": 0
+    },
+    "source_checks": "passed",
+    "independent_native_fix_review": "passed",
+    "build": {
+      "tasks": [
+        ":app:assembleRelease",
+        ":app:lintRelease",
+        ":app:assembleDebug",
+        ":app:assembleDebugAndroidTest"
+      ],
+      "result": "passed",
+      "seconds": 57,
+      "actionable_tasks": 122,
+      "executed_tasks": 13,
+      "up_to_date_tasks": 109,
+      "log_sha256": "2482f6f1b58ac7a47ae67a2089efb83955c626efb7a344f665a390ea7e6dfbb2"
+    },
+    "unsigned_apk": {
+      "source_base": "cc3c1e58165834d366a47d8b259a017970bccfe3",
+      "source_working_tree_fingerprint": "f3a5920b70f055ddd92bfa7330e8cd18f0c54b27b350179cc99e573aa5182ffa",
+      "artifact": "app-release-unsigned.apk",
+      "sha256": "92781f801064ab521491490820e46a8ab6a07d3625e4b8f4a708e63100aca025",
+      "bytes": 139985834,
+      "signed": false,
+      "installable_release": false,
+      "published": false,
+      "dex_build_config": {
+        "APPLICATION_ID": "com.gccwebos.android",
+        "VERSION_CODE": 7,
+        "VERSION_NAME": "0.4.0",
+        "DEBUG": false,
+        "VPN_ENGINE_PACKAGED": true,
+        "CONNECTION_ENDPOINT_HOSTNAME": true,
+        "CONNECTION_SYNTHETIC_ACCEPTANCE": false,
+        "STORAGE_SYNTHETIC_ACCEPTANCE": false,
+        "NATIVE_VPN_LAB": false,
+        "NATIVE_TUN_ACCEPTANCE": false
+      },
+      "native_libraries": {
+        "arm64-v8a": "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+        "x86_64": "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8"
+      },
+      "license_assets": {
+        "assets/CMFA-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+        "assets/Mihomo-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+        "assets/licenses/ZXing-Android-Embedded-4.3.0-Apache-2.0.txt": "1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6",
+        "assets/licenses/ZXing-Attribution.txt": "c69a6f7010aef3637239ecb4869ecb7f3b5440fce808e52abcab94da712f1ec1",
+        "assets/licenses/ZXing-Core-3.4.1-Apache-2.0.txt": "b6707837e6fa0daf4cd09fe5e511086361d8b7126e34cce0a8624972491fc7ef",
+        "assets/licenses/ZXing-Core-3.4.1-NOTICE.txt": "e798d8427c9067b330d96630c6546eef83a8d466f6f57b7388259b76b93312f9"
+      },
+      "zipalign_16k": true,
+      "elf_16k": true,
+      "zip_crc": true,
+      "lab_components_absent": true,
+      "lint": {
+        "Error": 0,
+        "Warning": 27,
+        "Hint": 6
+      },
+      "remaining": "Formal signing identity, signed APK verification, device acceptance, complete CI, source bundle and public website distribution."
+    },
+    "release_and_debug_bytes_unchanged_locally": true,
+    "debug_apks": [
+      {
+        "path": "app/build/outputs/apk/debug/app-debug.apk",
+        "package": "com.gccwebos.android.debug",
+        "sha256": "22cdf4273376a2c04f627edb0c1114d6282751ca49cb9de8d4e6bacf075ac667",
+        "signer_verified": true
+      },
+      {
+        "path": "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk",
+        "package": "com.gccwebos.android.debug.test",
+        "sha256": "878050f62259e721776ef11837af878df6937db320f5fbeb5106d2736b33e01a",
+        "signer_verified": true
+      }
+    ],
+    "device": {
+      "model_family": "OPPO",
+      "red": {
+        "unique_cases": 3,
+        "failure_events": 6,
+        "test_bodies_executed": false,
+        "failed_hooks": [
+          "clearBefore",
+          "clearAfter"
+        ],
+        "log_sha256": "b5956dad55e5729ddb522e5ccfa5a5458e2c3275fcfcd1396f466e1fd1ef0864"
+      },
+      "corrected": {
+        "passed": 11,
+        "failed": 0,
+        "skipped": 0,
+        "classes": {
+          "com.gccwebos.android.update.AndroidAutomaticUpdateStoreTest": 3,
+          "com.gccwebos.android.AutomaticUpdateUiTest": 5,
+          "com.gccwebos.android.UpdateUiTest": 3
+        },
+        "log_sha256": "de8b6e246580b4a9435f56895d05243ee80f2707afed44678745286051f2a11a"
+      },
+      "scope": "Synthetic official metadata, injected browser callbacks and random fixture preferences; no production login, download or VPN connection."
+    },
+    "device_cleanup": {
+      "owned_debug_app_and_test_absent": true,
+      "normal_candidate_sha256": "b23a10ffcd6ab205b8ce935be99e1956f2761e10a7aa568a2e9abfa3ddd0425a",
+      "normal_candidate_matches_last_delivery": true,
+      "normal_candidate_not_installed_uninstalled_or_cleared": true,
+      "display_settings_not_changed": true
+    }
+  },
+  "remaining": [
+    "Corrected commit complete CI, especially Linux packaging and full runtime tests",
+    "Formal signing identity and custody",
+    "Signed APK identity, OPPO install/connection and upgrade acceptance",
+    "Final corresponding source bundle and public website APK/source distribution"
+  ],
+  "production_changes": {
+    "release_created": false,
+    "website_deployed": false,
+    "formal_key_created_or_read": false,
+    "normal_candidate_reinstalled_or_cleared": false
+  }
+}

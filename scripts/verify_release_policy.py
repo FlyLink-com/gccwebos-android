@@ -39,6 +39,11 @@ def verify_configuration(source: str) -> None:
     assert len(fields) == len(FLAGS) and dict(fields) == FLAGS, "Release flags differ from the stable policy"
     assert re.search(r'isDebuggable\s*=\s*false\b', release), "Release must not be debuggable"
     assert not re.search(r'\b(signingConfig|applicationIdSuffix|versionNameSuffix)\s*=', release), "Release identity/signing must not inherit a debug override"
+    keep = list(re.finditer(r'packaging\.jniLibs\.keepDebugSymbols\s*\+=\s*"([^"]+)"', source))
+    assert len(keep) == 1 and keep[0].group(1) == '**/libgccmihomo.so', "Preserve only the already-verified VPN native library bytes"
+    assert source.count('keepDebugSymbols') == 1, "Additional native stripping exceptions are not allowed"
+    before_keep = re.sub(r'//[^\n]*|"(?:\\.|[^"\\])*"', '', source[:keep[0].start()])
+    assert before_keep.count('{') - before_keep.count('}') == 1, "Native byte preservation must apply to every Android variant"
     gate = re.search(r'val verifiedConnectionLibraries = tasks\.register\("verifyConnectionLibraries"\)\s*\{', source)
     assert gate, "Native verification must be registered independently of candidate properties"
     before_gate = re.sub(r'//[^\n]*|"(?:\\.|[^"\\])*"', '', source[:gate.start()])

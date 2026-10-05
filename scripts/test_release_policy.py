@@ -50,6 +50,24 @@ class ReleasePolicyTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             policy.verify_configuration(conditional)
 
+    def test_native_byte_preservation_is_required(self):
+        line = '    packaging.jniLibs.keepDebugSymbols += "**/libgccmihomo.so"\n'
+        with self.assertRaises(AssertionError):
+            policy.verify_configuration(self.source.replace(line, ''))
+
+    def test_native_byte_preservation_cannot_expand_to_other_libraries(self):
+        for pattern in ('**/*.so', '**/*', '**/libgcc*.so', '*'):
+            with self.subTest(pattern=pattern), self.assertRaises(AssertionError):
+                policy.verify_configuration(self.source.replace('"**/libgccmihomo.so"', f'"{pattern}"'))
+        with self.assertRaises(AssertionError):
+            policy.verify_configuration(self.source + '\npackaging.jniLibs.keepDebugSymbols += "**/another.so"')
+
+    def test_native_byte_preservation_cannot_be_variant_or_property_conditional(self):
+        line = 'packaging.jniLibs.keepDebugSymbols += "**/libgccmihomo.so"'
+        for wrapper in ('buildTypes.getByName("release")', 'if (providers.gradleProperty("connectionCandidate").orNull == "true")'):
+            with self.subTest(wrapper=wrapper), self.assertRaises(AssertionError):
+                policy.verify_configuration(self.source.replace(line, wrapper + ' {\n' + line + '\n}'))
+
     def test_ordinary_debug_is_not_made_native_dependent(self):
         with self.assertRaises(AssertionError):
             policy.verify_configuration(self.source + '\ntasks.named("preBuild").configure { dependsOn(verifiedConnectionLibraries) }')

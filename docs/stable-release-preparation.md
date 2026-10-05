@@ -31,7 +31,7 @@ Android GitHub 仓库当前为 private；私有 Release 附件不是公开官网
 
 只读盘点时官网 master 为 `8d1ed3e4141128f6df11845dfbb638088d471ab1`，双域名正常，stable.json 返回 404。正式站项目为 `proxy-gateway-minimal`；当前部署 `dpl_8MPS65uDCxxEsQqgvMdbn9fCm8iD` 可作为回滚锚点，执行前仍须复核未漂移。大文件托管与可重复部署方案需要在最终 APK/源码大小确定后验收，当前未上传资产、未切换清单或域名。
 
-## 本轮准备验证
+## 首轮准备验证
 
 - 定向更新 JVM 37 项、发布门禁脚本 18 项通过，均 0 失败 / 0 跳过。release dry-run 包含原生校验依赖，实际原生校验任务通过。
 - `assembleRelease`、`lintRelease`、`assembleDebug`、`assembleDebugAndroidTest` 通过。release Lint 0 error / 27 warning / 6 hint，包含 KTX 风格建议；未声称零警告。
@@ -39,6 +39,20 @@ Android GitHub 仓库当前为 private；私有 Release 附件不是公开官网
 - 独立只读复核通过；新增自动更新代码处理已发现的持久化版本上界、Home 返回去重和生命周期类型问题。首轮构建的 lifecycle 类型错误保留为失败记录，不计入通过结果。
 - OPPO 只读检查显示锁屏，本轮未安装新包、未改变现有 candidate 或其数据。8 项新增 Android 测试与既有更新 UI 回归待解锁执行；新提交完整 CI 尚待完成。
 - 结构化记录见 [validation.json](evidence/stable-release/2026-10-05/validation.json)，本地原始日志在 `.build-output/stable-release/`。
+
+## cc3c1e5 CI 修正与实机回归
+
+[M0 run 37360418624](https://github.com/gccwebos-com/gccwebos-android/actions/runs/37360418624) 的构建/JVM/Lint 通过，主 UI 批次报告 318 项、6 次失败。实际是三个新增存储用例分别在 `@Before` 和 `@After` 失败，测试体未进入；logcat 显示测试 APK 的 `shared_prefs` 目录创建返回 ENOENT。不是六个不同业务用例失败，也没有证明账户存储故障。fixture 改用 target UID 下的 UUID 文件名，保留成功提交断言和精确清理，生产存储代码未改。
+
+[Native run 37360418454](https://github.com/gccwebos-com/gccwebos-android/actions/runs/37360418454) 的原生输入哈希、编译及 1124 项 JVM 通过；失败于 release APK 内核字节摘要校验，后续 JNI/UI/Real TUN 未运行。Linux 日志确实执行 NDK strip，本地 Windows 则原样打包。已取得的 Linux debug APK 两个 ABI 均与原始输入等长、可执行段一致，但 `.shstrtab` 及 ELF 索引元数据发生变化，完整 SHA-256 随之改变；旧 artifact 未保留 release APK，其具体改写路径是由共同打包步骤推断，直接观察到的是 release 摘要不符。
+
+按 [AGP 9.2 原生库打包 API](https://developer.android.com/reference/tools/gradle-api/9.2/com/android/build/api/dsl/JniLibsPackaging)，仅为已由 Go `-s -w` 处理的 `**/libgccmihomo.so` 禁用 AGP 二次 strip，各 variant 保留固定原始字节。不扩大到其他库、不改变 release 可调试标志，也不放宽原始/包内摘要、许可或 ELF 门禁。
+
+- OPPO 旧包 RED：3 个存储 case / 6 个 hook 失败；修正后存储 3、自动 UI 5、原手动更新 UI 3，共 **11 项通过，0 失败 / 0 跳过**。
+- 发布门禁新增缺失/扩大/条件化 strip 例外边界，RED 后 **21 项通过**；独立只读复核及源码/diff 检查通过。
+- release/debug/test APK 与 release Lint 再构建通过，Lint 0 error / 27 warning / 6 hint。未签名 release 和普通 debug APK 在本地均与修正前字节一致，测试 APK 更新；release 实际 flags、双 ABI 摘要及 ZIP/ELF 对齐重新核验。
+- 自有 debug app/test 已卸载并确认不存在；普通 candidate 仍匹配既有交付 SHA-256，未重装、清数据或修改显示设置。该合成 UI 批次不算正式签名产物安装或升级验收。
+- 原始日志、CI artifact 对比和设备结果位于 `.build-output/ci-cc3c1e5/`，摘要见 [ci-fix-validation.json](evidence/stable-release/2026-10-05/ci-fix-validation.json)。新的完整 CI 仍须验证 Linux 打包与全部运行时用例。
 
 ## 发布验证与回滚
 

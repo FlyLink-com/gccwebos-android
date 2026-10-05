@@ -2,6 +2,8 @@ package com.gccwebos.android.update
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.SharedPreferences
+import android.os.Process
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -10,19 +12,31 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import java.util.UUID
 
-/** Preferences belong to the isolated instrumentation APK, never the target application's data. */
+/** Instrumentation runs as the target UID; only a unique test-owned preference name is writable. */
 class AndroidAutomaticUpdateStoreTest {
-    private val context = object : ContextWrapper(InstrumentationRegistry.getInstrumentation().context) {
+    private val target = InstrumentationRegistry.getInstrumentation().targetContext
+    private val fixtureName = "test-official-update-${UUID.randomUUID()}"
+    private val context = object : ContextWrapper(target) {
         override fun getApplicationContext(): Context = this
+        override fun getSharedPreferences(name: String, mode: Int): SharedPreferences {
+            require(name == AndroidAutomaticUpdateStore.PREFERENCES && mode == Context.MODE_PRIVATE)
+            return target.getSharedPreferences(fixtureName, Context.MODE_PRIVATE)
+        }
     }
     private val preferences get() = context.getSharedPreferences(AndroidAutomaticUpdateStore.PREFERENCES, Context.MODE_PRIVATE)
     @Before fun clearBefore() {
-        assertEquals(InstrumentationRegistry.getInstrumentation().context.packageName, context.packageName)
-        assertNotEquals(InstrumentationRegistry.getInstrumentation().targetContext.packageName, context.packageName)
+        assertEquals(Process.myUid(), target.applicationInfo.uid)
+        assertSame(context, context.applicationContext)
+        assertNotEquals(AndroidAutomaticUpdateStore.PREFERENCES, fixtureName)
+        assertSame(target.getSharedPreferences(fixtureName, Context.MODE_PRIVATE), preferences)
         assertTrue(preferences.edit().clear().commit())
     }
-    @After fun clearAfter() { assertTrue(preferences.edit().clear().commit()) }
+    @After fun clearAfter() {
+        assertTrue(preferences.edit().clear().commit())
+        assertTrue(target.deleteSharedPreferences(fixtureName))
+    }
 
     @Test fun attemptsAndHighestPromptedVersionSurviveStoreRecreation() = runBlocking {
         withContext(Dispatchers.IO) {

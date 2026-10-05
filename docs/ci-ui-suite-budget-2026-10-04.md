@@ -95,3 +95,8 @@ generic CaptureActivity. It does not permit arbitrary extra permissions or remov
 VPN/service boundaries. `python scripts/verify_source.py` and `git diff --check` pass locally.
 Only the source gate and this record change; the tested app/test APK inputs are unchanged.
 The two failed runs remain failures. Hosted validation must be assessed on the follow-up head.
+
+That follow-up (`fcddaa9`) passed source/build/JVM checks but failed in both device
+jobs. The [next CI record](ci-import-fixture-isolation-2026-10-05.md) distinguishes
+the pre-install API36 SystemUI ANR from the API33 fresh-storage fixture conflict,
+records 1001/1001 hosted JVM results, and describes the bounded suite partition.

@@ -2,8 +2,10 @@
 # Disposable Android emulator only. Optional explicitly authorized synthetic app-only real TUN; no backend/signing credentials.
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
+source scripts/instrumentation-batches.sh
 OUT="$PWD/.build-output/runtime-api33/device"
 mkdir -p "$OUT"
+python3 scripts/test_instrumentation_batches.py 2>&1 | tee "$OUT/instrumentation-offline-tests.log"
 SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 : "${SDK_ROOT:?Android SDK is required}"
 SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
@@ -105,7 +107,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # Offline adb commands must not wait indefinitely, including inside cleanup.
-adb() { timeout 45 "$ADB" -s emulator-5554 "$@"; }
+adb() { instrumentation_timeout 45 "$ADB" -s emulator-5554 "$@"; }
 sleep 1
 kill -0 "$EMU_PID" || { cat "$OUT/emulator.log"; exit 1; }
 log 'Waiting for emulator transport'
@@ -138,11 +140,19 @@ timeout 180 "$ADB" -s emulator-5554 install -r "$APK" | tee "$OUT/install-app.lo
 grep -q 'Success' "$OUT/install-app.log"
 timeout 180 "$ADB" -s emulator-5554 install -r "$TEST_APK" | tee "$OUT/install-test.log"
 grep -q 'Success' "$OUT/install-test.log"
+# Preserve the v1 fixture's absolute private-store absence guard. Ordinary
+# startup below will initialize its separate, empty manual-source selector.
+instrumentation_begin
+log 'Running exactly two fresh-store recreation tests before ordinary app startup'
+instrumentation_batch fresh -e class "$FRESH_STORE_CLASS"
+python3 scripts/verify_instrumentation_batches.py "$OUT/instrumentation-fresh.log" \
+  | tee "$OUT/instrumentation-fresh-result.json"
 log 'Launching application'
+adb logcat -b main -b system -b events -b crash -d > "$OUT/fresh-store-logcat.log"
 adb logcat -c
 adb shell am start -W -n "$ACTIVITY" | tee "$OUT/launch.log"
 grep -q 'Status: ok' "$OUT/launch.log"
-sleep 3
+instrumentation_timeout 45 sleep 3
 adb shell pidof "$APP_ID" | tee "$OUT/app-pid.log"
 test -s "$OUT/app-pid.log"
 adb exec-out screencap -p > "$OUT/launch.png"
@@ -170,14 +180,19 @@ adb pull /sdcard/m0-window.xml "$OUT/window.xml"
 verify_ui_xml "$OUT/window.xml"
 log 'Running instrumented tests'
 # At eed8ed2, all 254 API33 cases took 1054.569s, leaving only 25s of the
-# former 1080s budget. Allow 1800s for the expanded suite; condition waits,
+# former 1080s budget. Both batches and the intervening launch share 1800s;
+# the fresh batch started this deadline immediately after installation. Condition waits,
 # ANR/boot gates, the separate 360s TUN budget and the 90-minute job limit stay unchanged.
 # Evidence and remaining CI failures: docs/ci-ui-suite-budget-2026-10-04.md.
-timeout 1800 "$ADB" -s emulator-5554 shell am instrument -w -r -e notClass "$REAL_TUN_CLASS" "$TEST_RUNNER" \
-  | tee "$OUT/instrumentation.log"
+MAIN_EXCLUSIONS=$(instrumentation_exclusions "$REAL_TUN_CLASS")
+instrumentation_batch main -e notClass "$MAIN_EXCLUSIONS"
 grep -Eq 'OK \([1-9][0-9]* tests?\)' "$OUT/instrumentation.log"
 if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' "$OUT/instrumentation.log"; then exit 1; fi
 if [ "${REQUIRE_NATIVE_JNI:-false}" = true ]; then python3 scripts/verify_native_instrumentation.py "$OUT/instrumentation.log"; fi
+python3 scripts/verify_instrumentation_batches.py "$OUT/instrumentation-fresh.log" \
+  --main-log "$OUT/instrumentation.log" --excluded "$MAIN_EXCLUSIONS" \
+  | tee "$OUT/instrumentation-summary.json"
+instrumentation_finish
 if [ "${REQUIRE_REAL_TUN:-false}" = true ]; then
   log 'Authorized real-TUN acceptance: app-only synthetic /32 routes and ephemeral loopback fixture'
   timeout 360 "$ADB" -s emulator-5554 shell am instrument -w -r \

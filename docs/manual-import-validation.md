@@ -118,3 +118,9 @@ The first implementation push also exposed an outdated CAMERA permission allowli
 source checker before any hosted compilation. The linked CI note records that failure and
 the strict allowlist/scanner-boundary correction. This checker-only follow-up does not change
 the application or test source inputs used for the final APK validation.
+
+The subsequent `fcddaa9` hosted run passed all 1001 JVM tests on Linux. Its device
+failures and the test-only suite partition/no-engine fixture follow-up are recorded
+in [ci-import-fixture-isolation-2026-10-05.md](ci-import-fixture-isolation-2026-10-05.md).
+The prior OPPO receipts remain attached to their tested artifacts; they are not
+presented as reruns of the amended test fixture.

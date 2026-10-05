@@ -252,13 +252,20 @@ class SelectedNodeActivityRecreationTest {
                     node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == label } == true
             } == true
         }
-        if (connectable) {
-            compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
-        } else {
-            compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
-            // The glass signed-out CTA opens the account choice, not a VPN command.
-        }
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").assertTextEquals(label).assertIsEnabled()
+        if (!connectable) {
+            // A valid cached selection cannot turn an engine-less package's account CTA into a VPN command.
+            compose.onNodeWithTag("usage-guest-guidance").assertDoesNotExist()
+            compose.onNodeWithTag("vpn-connect").performScrollTo().performClick()
+            compose.onNodeWithTag("usage-guest-guidance").assertIsDisplayed()
+            compose.onNodeWithTag("usage-guest-login").assertIsEnabled()
+            compose.onNodeWithTag("usage-guest-register").assertIsEnabled()
+            compose.onNodeWithTag("login-screen").assertDoesNotExist()
+            compose.onNodeWithText("取消").performClick()
+            compose.onNodeWithTag("usage-guest-guidance").assertDoesNotExist()
+            compose.onNodeWithTag("connection-power").assertDoesNotExist()
+        }
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
 

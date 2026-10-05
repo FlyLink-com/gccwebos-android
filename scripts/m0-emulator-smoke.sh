@@ -2,8 +2,10 @@
 # Disposable Android emulator only. No real VPN, backend or signing credentials.
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
+source scripts/instrumentation-batches.sh
 OUT="$PWD/.build-output/device"
 mkdir -p "$OUT"
+python3 scripts/test_instrumentation_batches.py 2>&1 | tee "$OUT/instrumentation-offline-tests.log"
 SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 : "${SDK_ROOT:?Android SDK is required}"
 SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
@@ -100,7 +102,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # Offline adb commands must not wait indefinitely, including inside cleanup.
-adb() { timeout 45 "$ADB" -s emulator-5554 "$@"; }
+adb() { instrumentation_timeout 45 "$ADB" -s emulator-5554 "$@"; }
 verify_renderer() {
   local label="$1"
   adb shell getprop ro.build.version.sdk > "$OUT/$label-api.log"
@@ -191,11 +193,19 @@ timeout 180 "$ADB" -s emulator-5554 install -r "$APK" | tee "$OUT/install-app.lo
 grep -q 'Success' "$OUT/install-app.log"
 timeout 180 "$ADB" -s emulator-5554 install -r "$TEST_APK" | tee "$OUT/install-test.log"
 grep -q 'Success' "$OUT/install-test.log"
+# These two v1 fixtures require absolute absence of all private stores. Run them
+# before ordinary startup creates the legitimate empty manual-source selector.
+instrumentation_begin
+log 'Running exactly two fresh-store recreation tests before ordinary app startup'
+instrumentation_batch fresh -e class "$FRESH_STORE_CLASS"
+python3 scripts/verify_instrumentation_batches.py "$OUT/instrumentation-fresh.log" \
+  | tee "$OUT/instrumentation-fresh-result.json"
 log 'Launching application'
+adb logcat -b main -b system -b events -b crash -d > "$OUT/fresh-store-logcat.log"
 adb logcat -c
 adb shell am start -W -n "$ACTIVITY" | tee "$OUT/launch.log"
 grep -q 'Status: ok' "$OUT/launch.log"
-sleep 3
+instrumentation_timeout 45 sleep 3
 adb shell pidof "$APP_ID" | tee "$OUT/app-pid.log"
 test -s "$OUT/app-pid.log"
 adb exec-out screencap -p > "$OUT/launch.png"
@@ -223,14 +233,19 @@ adb pull /sdcard/m0-window.xml "$OUT/window.xml"
 verify_ui_xml "$OUT/window.xml"
 log 'Running instrumented tests'
 # At eed8ed2, API36 reached case 161/254 at the 720s suite deadline; the
-# complete API33 suite took 1054.569s. Allow 1800s for the expanded API36 suite.
+# complete API33 suite took 1054.569s. Both batches and the intervening launch
+# share the same 1800s deadline started immediately after APK installation.
 # Per-test/boot deadlines, ANR gates and the 45-minute workflow limit stay unchanged.
 # Evidence and remaining CI failures: docs/ci-ui-suite-budget-2026-10-04.md.
-timeout 1800 "$ADB" -s emulator-5554 shell am instrument -w -r "$TEST_RUNNER" \
-  | tee "$OUT/instrumentation.log"
+MAIN_EXCLUSIONS=$(instrumentation_exclusions)
+instrumentation_batch main -e notClass "$MAIN_EXCLUSIONS"
 grep -Eq 'OK \([1-9][0-9]* tests?\)' "$OUT/instrumentation.log"
 if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' "$OUT/instrumentation.log"; then exit 1; fi
 if [ "${REQUIRE_NATIVE_JNI:-false}" = true ]; then python3 scripts/verify_native_instrumentation.py "$OUT/instrumentation.log"; fi
+python3 scripts/verify_instrumentation_batches.py "$OUT/instrumentation-fresh.log" \
+  --main-log "$OUT/instrumentation.log" --excluded "$MAIN_EXCLUSIONS" \
+  | tee "$OUT/instrumentation-summary.json"
+instrumentation_finish
 log 'Relaunching after tests'
 adb shell am start -W -n "$ACTIVITY" > "$OUT/relaunch.log"
 sleep 2

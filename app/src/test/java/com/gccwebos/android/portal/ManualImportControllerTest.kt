@@ -116,6 +116,47 @@ class ManualImportControllerTest {
         }
     }
 
+    @Test fun unsupportedRemoteLinksHaveSpecificCaptionWithoutDownloadOrSourceMutation() = runTest {
+        for (kind in ManualImportInputKind.entries) {
+            for (input in listOf("https://third-party.invalid/api/v1/client/subscribe?token=synthetic",
+                "https://third-party.invalid/sub/a/synthetic",
+                "https://sub.invalid/sub/a/synthetic?token=synthetic")) {
+                val f = Fixture(this); f.local()
+                val revision = f.revision(); val saves = f.saves
+                val selected = f.manager.nodeSelectionSnapshot().choices.single().selection
+                val bytes = input.toByteArray()
+                f.controller.submit(f.ticket(), bytes, kind); runCurrent()
+                assertEquals("暂不支持此订阅链接", f.controller.error)
+                assertEquals(0, f.reads); assertEquals(saves, f.saves); assertEquals(0, f.fenceCalls)
+                assertEquals(revision, f.revision())
+                assertSame(selected, f.manager.nodeSelectionSnapshot().choices.single().selection)
+                assertTrue(bytes.all { it == 0.toByte() }); assertTrue(f.snapshots.isEmpty())
+                assertFalse(f.controller.busy); assertTrue(f.controller.visible)
+            }
+        }
+    }
+
+    @Test fun scanAndDocumentOfficialUrlsUseRemoteImport() = runTest {
+        for (kind in listOf(ManualImportInputKind.Scan, ManualImportInputKind.Document)) {
+            val f = Fixture(this); val bytes = url()
+            f.controller.submit(f.ticket(), bytes, kind); runCurrent()
+            assertNull(f.controller.error); assertFalse(f.controller.visible)
+            assertEquals(1, f.reads); assertEquals(1, f.saves); assertEquals(1, f.fenceCalls)
+            assertEquals(ManualSourceKind.ImportedRemote, f.snapshots.single().sourceKind)
+            assertTrue(bytes.all { it == 0.toByte() })
+        }
+    }
+
+    @Test fun serverRejectionIsNotMisreportedAsAnUnsupportedInputLink() = runTest {
+        val f = Fixture(this); f.local(); val revision = f.revision(); val saves = f.saves
+        f.response = { throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_REVOKED) }
+        f.controller.submit(f.ticket(), url(), ManualImportInputKind.Scan); runCurrent()
+        assertNotNull(f.controller.error)
+        assertNotEquals("暂不支持此订阅链接", f.controller.error)
+        assertEquals(1, f.reads); assertEquals(saves, f.saves); assertEquals(0, f.fenceCalls)
+        assertEquals(revision, f.revision()); assertTrue(f.snapshots.isEmpty())
+    }
+
     @Test fun cancellationBeforeDispatchWipesInputAndNeverWritesOrPublishes() = runTest {
         val f = Fixture(this); val ticket = f.ticket(); val bytes = yaml()
         f.controller.submit(ticket, bytes, ManualImportInputKind.Document)

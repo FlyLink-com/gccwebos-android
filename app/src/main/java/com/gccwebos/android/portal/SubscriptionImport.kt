@@ -17,3 +17,6 @@ fun interface SubscriptionSource {
     suspend fun download(url: Secret): ByteArray
     suspend fun read(url: Secret): SubscriptionRead = SubscriptionRead(download(url))
 }
+
+/** Input policy rejection is distinct from a server revoking an accepted subscription URL. */
+internal class UnsupportedManualSubscriptionLink : Exception("Unsupported manual subscription link")

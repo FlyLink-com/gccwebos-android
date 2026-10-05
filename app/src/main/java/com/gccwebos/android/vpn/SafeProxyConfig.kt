@@ -35,7 +35,11 @@ object SafeProxyConfig {
     private val settings = LoadSettings.builder().setAllowDuplicateKeys(false)
         .setAllowRecursiveKeys(false).setMaxAliasesForCollections(0)
         .setCodePointLimit(MAX_BYTES).setUseMarks(false).setSchema(JsonSchema()).build()
-    private val rootKeys = setOf("proxies", "proxy-groups", "rules", "mode", "dns", "port", "socks-port", "mixed-port", "allow-lan", "log-level", "ipv6", "unified-delay", "tcp-concurrent", "global-client-fingerprint", "profile")
+    // Recognized subscription application settings remain bounded inert metadata. Only inline
+    // proxies are imported; none of these settings, providers, paths or URLs enters the native DTO.
+    private val inertApplicationKeys = setOf("external-controller", "find-process-mode", "geo-auto-update",
+        "geox-url", "keep-alive-idle", "keep-alive-interval", "ntp", "rule-providers", "sniffer", "tun")
+    private val rootKeys = setOf("proxies", "proxy-groups", "rules", "mode", "dns", "port", "socks-port", "mixed-port", "allow-lan", "log-level", "ipv6", "unified-delay", "tcp-concurrent", "global-client-fingerprint", "profile") + inertApplicationKeys
     private val baseKeys = setOf("name", "type", "server", "port")
     // Fixed public categories, ordered independently of input order. Values are never inspected.
     private val nodeOptionReasons = linkedMapOf(
@@ -166,7 +170,7 @@ object SafeProxyConfig {
         val type = string(p, "type", RejectionReason.Protocol)
         val specific = when (type) {
             "ss" -> setOf("cipher", "password", "udp")
-            "vless" -> setOf("uuid", "udp", "tls", "network", "servername", "client-fingerprint", "flow", "packet-encoding", "reality-opts") + tlsKeys
+            "vless" -> setOf("uuid", "udp", "tls", "network", "servername", "client-fingerprint", "flow", "packet-encoding", "reality-opts", "encryption") + tlsKeys
             "hysteria2" -> setOf("password", "sni", "alpn", "up", "down", "obfs", "obfs-password", "bbr-profile") + tlsKeys
             "tuic" -> setOf("uuid", "password", "sni", "alpn", "congestion-controller", "udp-relay-mode", "bbr-profile", "request-timeout") + tlsKeys + tuicDefaultFalseKeys + tuicDefaultIntegers.keys
             else -> throw UnsafeProxyConfiguration(RejectionReason.Protocol)
@@ -185,6 +189,9 @@ object SafeProxyConfig {
             }
             "vless" -> {
                 require(p["tls"] == true)
+                // Pinned Mihomo transport/vless/encryption.NewClient treats only "" and "none"
+                // as the omitted default. Normalize those strings out; never ignore a new mode.
+                if ("encryption" in p) require(string(p, "encryption") in setOf("", "none"))
                 // Missing network is Mihomo's TCP default, explicitly normalized in the DTO.
                 require("network" !in p || p["network"] == "tcp")
                 out.put("uuid", uuid(p)).put("tls", true).put("network", "tcp")

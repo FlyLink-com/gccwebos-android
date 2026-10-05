@@ -30,9 +30,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private val sessions: SessionStore = MemorySessionStore(),
     profiles: LocalProfileStore = MemoryLocalProfileStore(),
     private val allowHostnamePreparation: Boolean = false,
-    manualSources: ManualSourceStore? = null) {
+    manualSources: ManualSourceStore? = null,
+    externalSubscription: SubscriptionSource = ManualSubscriptionTransport()) {
     val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now,
-        allowHostnamePreparation = allowHostnamePreparation, manualSources = manualSources)
+        allowHostnamePreparation = allowHostnamePreparation, manualSources = manualSources, externalSource = externalSubscription)
     private val mutex = Mutex()
     private val generation = AtomicLong()
     private val activationLock = Any()

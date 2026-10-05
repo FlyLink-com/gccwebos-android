@@ -73,8 +73,15 @@ internal fun connectionOverviewPresentation(
         snapshot.validUntil?.let { it <= now } == true) LocalSubscriptionStatus.EXPIRED else snapshot.status
     val localValidity = snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ImportedLocal &&
         snapshot.validity == com.gccwebos.android.portal.LocalSourceValidity.LocalNoServerExpiry && snapshot.validUntil == null
+    val externalSource = snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ExternalRemote
+    val externalValidity = externalSource && when (val validity = snapshot.validity) {
+        com.gccwebos.android.portal.LocalSourceValidity.ExternalUnreported -> snapshot.validUntil == null
+        is com.gccwebos.android.portal.LocalSourceValidity.ExternalExpiry ->
+            validity.until == snapshot.validUntil && validity.until > now
+        else -> false
+    }
     val confirmedReady = status == LocalSubscriptionStatus.READY && snapshot.hasProfile && snapshot.hasCapability &&
-        (localValidity || snapshot.validUntil?.let { it > now } == true)
+        (if (externalSource) externalValidity else localValidity || snapshot.validUntil?.let { it > now } == true)
     val localError = status in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.RETRY_REQUIRED,
         LocalSubscriptionStatus.INVALID_LINK, LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)
     val connectionText = when (control.phase) {
@@ -102,6 +109,7 @@ internal fun connectionOverviewPresentation(
         !confirmedReady -> "订阅待确认"
         control.phase == ConnectionPhase.Unavailable -> "连接暂不可用"
         localValidity -> "本地配置"
+        externalSource -> "第三方订阅"
         else -> ""
     }
     val tone = when {
@@ -112,6 +120,7 @@ internal fun connectionOverviewPresentation(
     }
     val countdown = when {
         status == LocalSubscriptionStatus.EXPIRED -> "已到期"
+        confirmedReady && externalSource && snapshot.validUntil == null -> "未提供有效期"
         confirmedReady -> snapshot.validUntil?.let { remainingValidity(it, now) }
         else -> null
     }
@@ -285,7 +294,7 @@ internal fun ConnectionOverview(
     // Keep service control authoritative without interpreting an idle preparation capability as local readiness.
     val controlMode = showsConnectionCommand(local, control)
     val manualSource = snapshot.sourceKind in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
-        com.gccwebos.android.portal.ManualSourceKind.ImportedRemote)
+        com.gccwebos.android.portal.ManualSourceKind.ImportedRemote, com.gccwebos.android.portal.ManualSourceKind.ExternalRemote)
     val usageRecovery = !manualSource && account.authenticated && (usage.error != null ||
         display.state in setOf(AccountUsageState.Unknown, AccountUsageState.Reconciliation))
     val recoverBeforeConnect = controlMode && local.action == ConnectionPowerAction.Connect && usageRecovery
@@ -409,6 +418,8 @@ internal fun ConnectionOverview(
                                 Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
                                 if (snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ImportedLocal)
                                     Text("本地配置", color = Brand.Cyan, fontSize = 10.sp, modifier = Modifier.testTag("connection-local-source"))
+                                if (snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ExternalRemote)
+                                    Text("第三方订阅", color = Brand.Cyan, fontSize = 10.sp, modifier = Modifier.testTag("connection-external-source"))
                                 Text(displayedNode?.name ?: "未选择",
                                     color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                                     modifier = Modifier.testTag("connection-node-name"))

@@ -5,11 +5,14 @@ import android.content.ContextWrapper
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.io.IOException
+import java.nio.ByteBuffer
 import java.time.Instant
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -17,6 +20,123 @@ import org.junit.Test
 class EncryptedManualSourceStoreTest {
     private val until = Instant.parse("2099-01-01T00:00:00Z")
     private val url = Secret("https://sub.invalid/sub/a/synthetic-encrypted-manual")
+    private val externalUrl = Secret("https://subscriptions.example.net/client?token=synthetic-encrypted-external%2Fonly")
+
+    @Test fun externalV2KnownAndUnreportedExpiryRestoreAsWholeEncryptedEnvelopes() = fixture { context ->
+        val key = syntheticKey()
+        for (expiry in listOf(null, until)) {
+            for (status in listOf(null, LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.INVALID_LINK)) {
+                external(expiry, status = status).use { record ->
+                    testStore(context, key).save(record)
+                    assertEnvelopeVersion(context, key, 2)
+                    val disk = sourceFile(context).readBytes()
+                    try {
+                        val searchable = disk.toString(Charsets.ISO_8859_1)
+                        assertFalse(searchable.contains("synthetic-encrypted-external"))
+                        assertFalse(searchable.contains("synthetic-raw-material"))
+                        assertFalse(searchable.contains(record.revision))
+                    } finally { disk.fill(0) }
+                    testStore(context, key).read()!!.use { restored ->
+                        assertTrue(record.sameEnvelope(restored))
+                        assertEquals(ManualSourceKind.ExternalRemote, restored.kind)
+                        assertEquals(expiry, restored.validUntil)
+                        assertEquals(status, restored.observedStatus)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun readingExistingV1DoesNotRewriteItBeforeExplicitExternalAdoption() = fixture { context ->
+        val key = syntheticKey()
+        remote().use { old ->
+            testStore(context, key).save(old)
+            val baseline = sourceFile(context).readBytes()
+            try {
+                assertEnvelopeVersion(context, key, 1)
+                repeat(2) {
+                    testStore(context, key).read()!!.use { assertTrue(old.sameEnvelope(it)) }
+                    assertArrayEquals(baseline, sourceFile(context).readBytes())
+                }
+                external(null).use { replacement ->
+                    testStore(context, key).save(replacement)
+                    assertEnvelopeVersion(context, key, 2)
+                    testStore(context, key).read()!!.use { assertTrue(replacement.sameEnvelope(it)) }
+                }
+            } finally { baseline.fill(0) }
+        }
+    }
+
+    @Test fun externalV2AtomicFaultsPreserveOldOrNewWholeEnvelopeIncludingValidity() = fixture { context ->
+        val key = syntheticKey()
+        val old = ManualSourceRecord(kind = ManualSourceKind.ImportedLocal, bytes = "synthetic-v1-before-external".toByteArray())
+        val unreported = external(null)
+        val known = external(until, revision = unreported.revision)
+        try {
+            for ((before, replacement) in listOf(old to unreported, old to known, unreported to known)) {
+                for (phase in ManualSourceWritePhase.entries) {
+                    testStore(context, key).save(before)
+                    val failing = testStore(context, key) { if (it == phase) throw IOException("synthetic-external-fault") }
+                    storageFailure { failing.save(replacement) }
+                    val committed = phase != ManualSourceWritePhase.BeforeSync && phase != ManualSourceWritePhase.BeforeFinish
+                    val expected = if (committed) replacement else before
+                    testStore(context, key).read()!!.use { restored ->
+                        assertTrue(expected.sameEnvelope(restored))
+                        assertFalse((if (committed) before else replacement).sameEnvelope(restored))
+                    }
+                    assertEnvelopeVersion(context, key, if (expected.kind == ManualSourceKind.ExternalRemote) 2 else 1)
+                }
+            }
+        } finally { old.close(); unreported.close(); known.close() }
+    }
+
+    @Test fun externalV2ReadbackRejectsOnlyExpiryChangedWithSameIdentityAndMaterial() = fixture { context ->
+        val key = syntheticKey()
+        external(until).use { wanted ->
+            external(null, revision = wanted.revision).use { substituteRecord ->
+                assertEquals(wanted.contentIdentity, substituteRecord.contentIdentity)
+                val substitute = encrypt(ManualSourceCodec.encode(substituteRecord), key)
+                try {
+                    val store = testStore(context, key) { phase ->
+                        if (phase == ManualSourceWritePhase.BeforeReadback) sourceFile(context).writeBytes(substitute)
+                    }
+                    storageFailure { store.save(wanted) }
+                    testStore(context, key).read()!!.use { assertTrue(substituteRecord.sameEnvelope(it)) }
+                } finally { substitute.fill(0) }
+            }
+        }
+    }
+
+    @Test fun explicitExternalRemovalOrAccountChoiceReturnsToV1WithoutImplicitAccountRead() = fixture { context ->
+        val key = syntheticKey()
+        val delivery = object : DeliveryStore {
+            override fun read(): DeliveryRecord? = error("Selector conversion must not read account delivery")
+            override fun save(record: DeliveryRecord) = error("Selector conversion must not write account delivery")
+            override fun clear() = error("Selector conversion must not clear account delivery")
+        }
+        for (target in listOf(ManualSourceKind.None, ManualSourceKind.LegacyRemote)) {
+            external(null).use { original ->
+                testStore(context, key).save(original)
+                assertEnvelopeVersion(context, key, 2)
+                val manager = LocalSubscriptionManager(delivery, MemoryLocalProfileStore(),
+                    SubscriptionSource { error("Selector conversion must not download") },
+                    OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")),
+                    { Instant.parse("2026-10-05T00:00:00Z") }, LocalSubscriptionAuthority(), manualSources = testStore(context, key))
+                runBlocking {
+                    if (target == ManualSourceKind.None) manager.removeManualSource { it() }
+                    else manager.useAccountSource { it() }
+                }
+                assertEnvelopeVersion(context, key, 1)
+                testStore(context, key).read()!!.use { converted ->
+                    assertEquals(target, converted.kind)
+                    assertNotEquals(original.revision, converted.revision)
+                    assertFalse(converted.clearPending)
+                    assertNull(converted.copyBytes()); assertNull(converted.url)
+                    assertNull(converted.validUntil); assertNull(converted.contentIdentity)
+                }
+            }
+        }
+    }
 
     @Test fun encryptedWholeEnvelopeRestoresAndTombstoneErasesSelectedMaterial() = fixture { context ->
         val store = EncryptedManualSourceStore(context)
@@ -51,6 +171,8 @@ class EncryptedManualSourceStoreTest {
             val states = listOf(
                 ManualSourceRecord(kind = ManualSourceKind.LegacyRemote),
                 remote(),
+                external(null),
+                external(until),
                 ManualSourceRecord(kind = ManualSourceKind.ImportedLocal, bytes = "synthetic-local-material".toByteArray()),
                 ManualSourceRecord(kind = ManualSourceKind.None)
             )
@@ -202,6 +324,21 @@ class EncryptedManualSourceStoreTest {
     private fun remote() = ManualSourceRecord(kind = ManualSourceKind.ImportedRemote,
         bytes = "synthetic-raw-material".toByteArray(), url = url, validUntil = until,
         observedStatus = LocalSubscriptionStatus.EXPIRED)
+
+    private fun external(expiry: Instant?, revision: String = UUID.randomUUID().toString(),
+        status: LocalSubscriptionStatus? = null) = ManualSourceRecord(revision, ManualSourceKind.ExternalRemote,
+        bytes = "synthetic-raw-material".toByteArray(), url = externalUrl, validUntil = expiry, observedStatus = status)
+
+    private fun assertEnvelopeVersion(context: Context, key: SecretKey, expected: Int) {
+        val encrypted = sourceFile(context).readBytes()
+        try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, encrypted.copyOfRange(0, 12)))
+            cipher.updateAAD(EncryptedManualSourceStore.AAD.toByteArray(Charsets.US_ASCII))
+            val plain = cipher.doFinal(encrypted, 12, encrypted.size - 12)
+            try { assertEquals(expected, ByteBuffer.wrap(plain).getInt(4)) } finally { plain.fill(0) }
+        } finally { encrypted.fill(0) }
+    }
 
     private fun syntheticKey(): SecretKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
 

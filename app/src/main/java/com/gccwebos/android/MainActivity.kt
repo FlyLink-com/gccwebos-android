@@ -422,7 +422,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         error = importer.error,
                         canUseAccount = source != com.gccwebos.android.portal.ManualSourceKind.LegacyRemote,
                         canRemove = source in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
-                            com.gccwebos.android.portal.ManualSourceKind.ImportedRemote),
+                            com.gccwebos.android.portal.ManualSourceKind.ImportedRemote,
+                            com.gccwebos.android.portal.ManualSourceKind.ExternalRemote),
                         onDismiss = importer::cancel, onBegin = importer::begin, onSubmit = importer::submit,
                         onCancel = importer::cancel, onFailure = importer::failure,
                         onUseAccount = importer::useAccount, onRemove = importer::remove)

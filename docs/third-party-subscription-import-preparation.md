@@ -1,16 +1,15 @@
-# 第三方订阅导入：A 档准备与待批准方案
+# 第三方订阅导入：A 档方案与实施记录
 
 日期：2026-10-05。只读代码基线：`df81bc9b48c8eed0683939c0e942aa8ae96877af`。
 
-**状态：准备方案，等待 operator 批准第三方来源权限与存储扩展后实施。第三方订阅当前尚不支持。**
-本文件不改变现有权限边界，不代表 APK、迁移、真实订阅下载或 VPN 连通验收已经完成。
-本轮可独立完成的 B 档修复是准确区分“不支持的订阅链接”等错误，不能把错误文案修正称为第三方导入已修好。
+**状态：2026-10-05 用户明确要求“咱们支持解析第三方的配置”，已批准继续实施第三方来源支持。**
+本轮已实现独立第三方下载路径、显式未知期限和手工来源 v2 存储，并根据真实响应补充受限 YAML 兼容。
+真实响应解析、322 项定向 JVM 回归、候选 APK 构建和 Lint 已通过。Android staging、同签名升级/降级和真实 VPN 连通尚未完成，不能用历史发布或旧 CI 结果替代。
 
-## 已证实的原因与证据边界
+## 基线原因与本轮真实响应诊断
 
 用户提交的二维码可以正常解码，其内容属于带查询参数的第三方 HTTPS 订阅链接。
-本地只检查了输入形状，没有请求真实订阅端点，没有保存或输出解码内容。
-因此，当前不能判断服务器响应格式、协议、到期元数据、重定向行为或连接可用性。
+最初的 B 档诊断只检查输入形状，未请求真实订阅端点；下表记录的是该阶段基线，不代表本轮已修改代码的行为。
 
 | 代码位置（基线） | 已验证行为 |
 | --- | --- |
@@ -26,33 +25,51 @@
 既有 [手工导入计划](manual-config-import-plan.md) 明确限定官方链接；
 [历史实测](manual-import-validation.md) 的扫码网络结果来自合成输入与注入下载器，不证明第三方 HTTP 或真实隧道可用。
 
-## 已完成的 B 档诊断修复
+本轮授权后，对用户二维码对应端点进行了内存内读取和脱敏检查，仅记录状态、大小、格式、协议计数与期限是否有效等汇总，不保存或输出订阅 URL、响应正文、节点地址、凭证或实际到期值。
+诊断中原客户端请求形状返回 `403` / HTML，候选客户端请求形状返回 `200` / YAML。后者为 **20,791 字节、31 个 VLESS 节点**；`Subscription-Userinfo` 提供了有效且尚未到期的期限，未发现 `X-Subscription-Valid-Until`。
+这证明该次响应包含 inline Clash YAML，不证明节点可连接或 APK 已成功导入。
 
-手工 URL 在下载前未通过现有策略时，抛出无输入参数、固定消息的 `UnsupportedManualSubscriptionLink`，
-界面显示“暂不支持此订阅链接”。服务器对已接受 URL 的拒绝仍走原服务器错误处理；没有放宽任何来源或存储规则。
+元数据检查进一步定位到 10 个原先不接受的应用设置根键，以及 31 个节点上的显式 `encryption: none`。
+所有 VLESS 节点的已检查选项为 TCP、TLS 和 Vision。修复后将新的真实响应仅经 stdin 送入实际编译的 `SafeProxyConfig`：完整解析接受 31 个节点，逐节点生成受控配置 31 次全部成功；没有用字段计数或内容类型代替解析验证。
+诊断证据位于本地 `.build-output/external-import/probe-*-metadata.json`；原始输入与配置未作为测试 fixture 或发布附件。
+最终静态解析回执为 `real-subscription-kotlin-validation.json`，只记录白名单汇总。投影使用合成解析地址，不解析实际节点域名、不启动隧道；该结果不能代替 Android 下载或真实 VPN 连通测试。
+
+本机系统 DNS 返回了非公网的 fake-IP，独立公网 DNS 诊断用于取得上述响应；这属于诊断环境差异。
+生产 `ManualSubscriptionTransport` 仍使用经过公网地址检查的系统解析结果，没有隐式公共 DNS 兜底或允许私网开关。Android 端 DNS 与真实下载仍需单独验收。
+
+## 历史 B 档诊断修复
+
+该阶段只修正文案：手工 URL 在下载前未通过当时的官方策略时，抛出无输入参数、固定消息的 `UnsupportedManualSubscriptionLink`，
+界面显示“暂不支持此订阅链接”。服务器对已接受 URL 的拒绝仍走原服务器错误处理；当时没有放宽来源或存储规则。
 
 本地 TDD：先运行 `ManualImportControllerTest`，15 项中新增用例失败 1 项，复现原来的笼统文案；
 修改后运行 `ManualImportControllerTest`、`ManualSourceAuthorityTest` 和 `SingleQrDecoderTest`，共 50 项全部通过、零跳过。
 新增覆盖三入口的第三方/query URL 拒绝、零下载/零提交且保留原来源与节点、扫码/文件官方 URL 成功及服务器拒绝分类。
 `scripts/verify_source.py` 和 `git diff --check` 通过。证据在本地 `.build-output/qr-import-diagnosis/`。
-这些是当前工作树的 JVM/源代码检查；未构建安装新 APK，未运行设备、实际订阅 HTTP 或 VPN 测试，也未发布新的 Release。
+这些是 B 档阶段的 JVM/源代码检查，不包含第三方成功导入。本轮真实 HTTP 诊断、后续第三方实现及其验证另行记录，不将这 50 项旧结果计作新功能验收。
 
-## 待批准的首期功能
+## 已批准的首期功能
 
 三个入口继续共用显式导入事务：扫码、文件读取和链接输入只暂存内容，点击“导入”后才下载、校验、提交；导入不自动启动 VPN。
-新增的 `ExternalRemote` 是用户主动选择的手工第三方来源，不能伪装成账户交付、官方 capability 或本地文件。
+已新增 `ManualSourceKind.ExternalRemote`，表示用户主动选择的手工第三方来源，不复用账户交付、官方 capability 或本地文件身份。
 
 首期接受一条 HTTPS URL，允许真实订阅常用的路径与查询参数；下载结果必须是当前 `SafeProxyConfig` 能完整验证的 inline Clash YAML。
 现有 `ss`、`vless`、`hysteria2`、`tuic` 仍只支持代码已经定义的选项子集。保持严格 UTF-8、64 KiB 解压后内容上限、128 个节点上限以及所有节点完整校验；任何不支持节点都不能被静默丢弃。
 
-首期不解析 Base64 URI 列表、`ss://` 等单节点分享、`clash://` 等安装包装链接、VMess/Trojan 新协议、provider 引用或任意脚本。
+首期不解析 Base64 URI 列表、`ss://` 等单节点分享、`clash://` 等安装包装链接、VMess/Trojan 新协议，也不解析或执行 provider 引用及任意脚本。
 不得按域名猜订阅协议、偷偷追加 `target=clash` 等参数、调用第三方转换服务或用内容类型/文件扩展名代替解析验证。
 不支持的内容只返回固定分类错误，保留原来源与节点；需要扩大格式时另交具体投影与测试变更。
-在取到并安全检查真实响应以前，不保证该用户订阅属于首期格式。
+本轮新增以下兼容处理，限于不改变既有内核投影语义的输入默认项：
+
+- `external-controller`、`find-process-mode`、`geo-auto-update`、`geox-url`、`keep-alive-idle`、`keep-alive-interval`、`ntp`、`rule-providers`、`sniffer`、`tun` 作为有界输入元数据接受并忽略。不会读取其中 URL、创建监听器、加载规则 provider、修改 TUN 或向内核转发这些设置。
+- VLESS 的 `encryption` 缺省、空字符串和 `none` 与锁定 Mihomo 的默认行为一致；空字符串/`none` 在投影时移除。其他加密模式和错误类型仍拒绝，不能静默丢弃不支持的模式。
+
+只从已验证的 inline `proxies` 生成受控的单节点 DTO 和固定规则；未知根键、未知节点选项及不支持节点仍拒绝整个导入。
+64 KiB、128 节点、单 YAML 文档、最多 8 层嵌套和 8,192 个解析事件等边界保留；不放开重复键、锚点、别名或显式标签。
 
 ## 独立 URL 与下载边界
 
-增加独立的 `ManualSubscriptionUrlPolicy` 和 `ManualSubscriptionTransport`，只由显式手工第三方来源使用。
+已增加独立的 `ManualSubscriptionUrlPolicy` 和 `ManualSubscriptionTransport`，只由显式手工第三方来源使用。
 账户 `OriginPolicy.subscription()`、官方 `SubscriptionTransport`、Portal 会话、账户交付与 ACK 的现有规则不变。
 旧 `ImportedRemote` 继续表示已有官方手工来源，不通过新策略扩大其能力。
 
@@ -62,38 +79,42 @@ URL 全体按秘密处理；异常、日志、截图、UI 和测试回执不含 
 
 下载使用独立无账户凭证客户端：不继承 Portal headers、CookieJar、Authenticator、HTTP cache、系统 HTTP 代理或分析拦截器，不携带 Referer。
 用户在 URL query 中主动提供的订阅凭证仅发送到该次验证后的目标；不附加账户 token。
-保留正常系统 TLS 信任和主机名验证，不增加信任所有证书选项。固定非秘密 User-Agent/Accept，不能冒充另一客户端以隐式改变响应协议。
+保留正常系统 TLS 信任和主机名验证，不增加信任所有证书选项。
+生产请求使用固定、自描述的 `User-Agent: FeilianVPN/0.4 (Mihomo-compatible)` 和 YAML/plain-text `Accept`，声明本客户端支持的格式，不冒充其他产品。
+服务端可能依据这些头决定响应格式或是否接受请求，因此不能假设更换请求头不影响响应；本客户端仍独立校验返回的完整内容，不按头部或扩展名直接信任。
 
 首期不跟随任何重定向；3xx 返回独立错误，后续如需支持必须设计逐跳 URL、DNS、目标与凭证规则。
 公网目标校验在实际建连路径执行：拒绝 localhost、回环、私网、链路本地、组播、未指定、保留范围及其 IPv4-mapped IPv6 变体。
 域名解析结果逐个检查，混合公网/非公网结果整体拒绝；校验后的地址列表直接用于同一次连接，不能再独立解析造成检查与连接目标不一致。
 客户端只连接已校验地址，仍按原主机执行 TLS/SNI。测试通过注入解析器/连接适配器验证边界，不给生产代码增加“允许私网”开关。
 
-保留有限 connect/read/总请求超时；首期可沿用现有 15/20/30 秒预算。
-读取流按解压后大小限流，错误响应也有上限；到达上限立即关闭，不能先完整读入再判定。
+已配置 connect/read/call 的 15/20/30 秒超时，并以协程 30 秒总预算处理晚到回调。
+成功响应读取流按解压后大小限流；错误响应正文不读取。拒绝或取消时先取消 call 再关闭响应，避免为复用连接而继续排空恶意正文；不能先完整读入再判定大小。
 取消必须关闭当前请求/响应，擦除持有的可变字节。网络失败不重试为其他源、不使用缓存冒充新下载。
 
 ## 有效期与账户权益语义
 
-新增有区分度的 `ExternalRemoteValidity.KnownExpiry` 与 `ExternalRemoteValidity.Unreported`，不能借用 `LocalNoServerExpiry`。
-缺少到期元数据的第三方订阅允许作为用户明确导入的来源；UI 只表达“未提供到期时间”，不能显示“永久有效”、官方套餐或账户剩余权益。
+实际类型为 `LocalSourceValidity.ExternalExpiry(until)` 与 `LocalSourceValidity.ExternalUnreported`，只用于 `ExternalRemote`，不借用 `LocalSourceValidity.LocalNoServerExpiry`。
+缺少到期元数据的第三方订阅允许作为用户明确导入的来源；UI 显示“第三方订阅”和“未提供有效期”，不显示“永久有效”，也不从其头部推导官方套餐或账户剩余权益。
 允许连接的依据是用户显式选中该来源、当次成功下载与完整配置校验，不能是伪造未来日期。
 不得使用导入时间、文件时间、`Instant.MAX` 或账户到期日填补未知期限。
 
-拟支持的到期元数据为响应 `Subscription-Userinfo` 中的 `expire` Unix 秒值，及独立解析的 `X-Subscription-Valid-Until`。
-这里只是解析方案，不声称用户端点会返回这些头。限制头长度、字段数量和数字范围；重复或冲突字段拒绝，格式错误和字段缺失分开处理。
+已实现解析响应 `Subscription-Userinfo` 中的 `expire` Unix 秒值，及独立解析 `X-Subscription-Valid-Until`。
+单个相关头最多 1,024 字符，userinfo 最多 16 个字段，期限限定至公元 9999 年；重复头、重复字段、非法数字与格式错误拒绝，和字段缺失分别处理。
 两个有效到期值同时存在时取更早者；明确已过期时拒绝导入/连接。`expire=0` 仅表示未提供可用期限，不推断永久有效。
-首次没有有效到期值时保存 `Unreported`。同一确切 URL 曾记录真实期限后，后续缺失/零值不能把它升级为无限期：保留已知期限并继续到期拦截。
+首次没有有效到期值时保存显式未报告状态，对应 `ExternalUnreported`。同一确切 URL 曾记录真实期限后，后续缺失/零值不能把它升级为无限期：保留已知期限并继续到期拦截。
 换 URL 不借用前一个来源期限；不从这些头推导官方账号身份或套餐。首期不新增未验证的流量余额计算。
 
 官方账户与旧官方手工来源仍要求它们原有的有效期条件。
-所有来源仍有有限的连接准备期限、一次性 activation 和运行期已知期限检查；只有资源有效期字段可为明确的 `Unreported`。
-实现前用 contract tests 验证这一类型可跨 gateway、prepared artifact、service admission 传递；如现有边界无法区分未知来源类型，停止该实现并修订本方案，不能放宽所有远程来源。
+所有来源仍有有限的连接准备期限、一次性 activation 和运行期已知期限检查；第三方的资源有效期可为明确的 `ExternalUnreported`。
+实现采用现有 manager 授权委托：类型在 snapshot/来源存储中明确区分，`AuthorizedConfig` 的一次性 activation 闭包继续校验真实来源类型、revision、内容摘要、epoch 与期限；gateway/服务仍传既有 nullable expiry（IPC 中为 0）。
+没有新增 Binder 类型或把类型传播到 service，也没有放宽官方来源的未知期限接纳。服务已有有限 admission deadline 和一次性启动约束保持；回归验证官方缺期限拒绝、第三方明确未知期限通过，以及期限变化后旧准备对象失效、零文件写入。
 
 ## 存储兼容与原子提交方案
 
 保持 `portal-profile.bin`、账户凭证、delivery receipt 的格式、key、AAD 和内容不变。
-扩展现有 `manual-source.bin` 的严格 codec 为可读 v1/v2；新的 `ExternalRemote` 和有效期来源类型只编码为 v2。
+已扩展 `manual-source.bin` 的严格 codec 为可读 v1/v2；仅新的 `ExternalRemote` 编码为 v2，类型码为 4。
+v2 额外保存明确的已知/未报告期限标记，并强制与 `validUntil` 是否存在一致；v1 拒绝第三方类型，v2 拒绝旧四类或未知类型，不因解码版本升级赋予旧来源更多权限。
 继续使用现有独立手工存储 key/AAD 与 `AtomicFile`，版本号位于已认证密文内；不新增独立 selector 文件或明文 URL 索引。
 key/AAD 字符串中现有的 `v1` 是既定加密域标识，不因增加内层 codec v2 擅自更名或迁移密钥。
 
@@ -122,6 +143,20 @@ v2 整体 envelope 保存来源类型、随机 revision、确切秘密 URL、受
 
 ## 批准后的验证与预备 APK
 
+截至本记录已确认的本轮结果：
+
+- 第三方来源、下载边界、存储 codec、authority 与 UI 等定向 JVM 回归 **114 项全部通过**，证据为 `.build-output/external-import/green-focused-final.log` 与 `focused-green-xml/`。该轮通过发生在随后补充 YAML 兼容之前，不能代表包含解析器新改动的最终构建通过。
+- `SafeProxyExternalCompatibilityTest` 的 TDD RED 为 **8 项中 3 项失败**，分别复现新增应用根设置、显式默认 VLESS encryption 及两者组合的拒绝；证据为 `red-parser.log` 与 `red-parser.xml`。
+- 包含解析兼容、第三方来源及 core 启动/取消边界的新一轮 JVM GREEN 为 **320 项通过，零失败、零跳过**，证据为 `green-integration.log` 与 `integration-green-xml/`。
+- 交叉审查后再补 2 项回归：持久失效来源缺失期限重导入不能清除已知期限，以及 `PortalRepository` 第三方入口不调用账户下载器/会话。候选构建 flags 下最终 **322 项通过，零失败、零跳过**，证据为 `green-candidate-final.log` 与 `candidate-green-xml/`。
+- 真实响应通过实际 Kotlin 完整解析与全部 31 次节点投影，配置只在内存中处理；此项为解析验证，不是 Android HTTP 或 VPN 转发验收。
+- 离线 `assembleDebug`、`lintDebug`、`assembleDebugAndroidTest` 通过；Lint 为 0 error/fatal、23 warning、6 hint。构建日志为 `candidate-build.log`，该次报告为 `candidate-lint.xml`。Android 的独立合成存储测试已补充 v2 已知/未知期限、v1 不改写、AtomicFile 各故障点、readback 不一致与显式转换回 v1，并已编译；编译不等于设备验证通过。
+- 当前 ADB 无连接设备，也没有运行中的 Android 模拟器。未完成本轮 Android staging、同签名升级/降级或真实 VPN 连通；不得把真实 HTTP 200、JVM GREEN 或旧版 OPPO 结果写成这些阶段通过。
+
+候选为 `com.gccwebos.android.candidate`、versionCode 6，开启 connection candidate 与 hostname preparation，关闭 connection/storage synthetic、native lab 和 native TUN acceptance。
+本轮 native 源码未改；候选使用与基线源码相同且摘要经核对的 arm64-v8a/x86_64 库，不声称本机重新编译 native。
+预备 APK 为本地 `.build-output/external-import/feilian-vpn-third-party-import-candidate.apk`；提交与包摘要、签名、ABI、开关及静态校验结果以该目录生成的 `candidate-static-validation.json` 为准。未发布新的 Release。
+
 | 阶段 | 必须取得的证据 |
 | --- | --- |
 | TDD RED | 合成第三方 HTTPS query 从 Scan/Link/URL 文件到 manager 的失败，官方来源旧约束仍通过；当前 bug 不使用真实订阅作为 fixture。 |
@@ -133,7 +168,7 @@ v2 整体 envelope 保存来源类型、随机 revision、确切秘密 URL、受
 | APK 与回滚 | 精确提交、构建 flags、appId、versionCode、签名、APK/native SHA-256；同签名升级/回退、旧 v1 合成资料保留与不隐式采用来源。 |
 
 先构建独立测试 appId 的基线与候选 APK，记录上述身份；普通候选 APK 必须关闭 lab/TUN/synthetic 注入开关。
-设备安装与 VPN 测试已有用户一般授权，不应重复索取该授权；本文件等待的是新增第三方权限与存储语义这一 A 档实现批准。
+设备安装与 VPN 测试已有用户一般授权，不应重复索取该授权；新增第三方权限与存储语义的 A 档实现批准已由本轮用户指令给出。
 独立测试仅使用合成或明确拥有的材料。不得为验证而复制现有普通应用的凭证、导出用户订阅、卸载普通应用或清除其数据。
 新 APK 的构建、静态检查、设备测试和真实第三方响应验收分别记录，既有 CI/OPPO 结果不复用为新实现通过证据；B2 未解决问题也不随导入改动自动关闭。
 
@@ -147,7 +182,7 @@ v2 整体 envelope 保存来源类型、随机 revision、确切秘密 URL、受
 
 ## Operator 批准点
 
-待批准的具体范围为：上述独立公网 HTTPS 手工来源、受限 inline YAML、第三方未知期限类型、手工 sidecar v2 兼容编码、对应自动测试/预备 APK/受控测试及同签名回滚。
+用户已批准的具体范围为：上述独立公网 HTTPS 手工来源、受限 inline YAML、第三方未知期限类型、手工 sidecar v2 兼容编码、对应自动测试/预备 APK/受控测试及同签名回滚。
 批准后先完成代码与离线验证，再进入受控 staging；验收通过也不自动意味着发布或稳定版签名完成。
 这不包含后台/生产部署、账户 origin 放宽、Portal auth 改造、生产节点改造、协议/JNI 扩展或新的外部转换服务。
-本文件到此仅是可审批方案；批准记录、实现 commit、构建产物和各阶段验收应在实际发生后补记，不能预填“已通过”。
+实施批准已记录；实现 commit、构建产物和各阶段验收应在实际发生后补记，不能预填“已通过”。

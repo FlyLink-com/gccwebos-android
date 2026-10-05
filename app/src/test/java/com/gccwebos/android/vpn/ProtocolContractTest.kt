@@ -86,7 +86,8 @@ class ProtocolContractTest {
         assertEquals(1, result.getInt("schemaVersion"))
         assertEquals("MATCH,GCC_SELECTED_PROXY", result.getJSONArray("rules").getString(0))
         for (secret in listOf("gstatic", "GLOBAL", "url-test", "store-selected", "mixed-port")) assertFalse(result.toString().contains(secret))
-        for (field in listOf("proxy-providers", "rule-providers", "external-controller", "external-ui", "listeners", "tun", "script")) reject(yaml("ss-minimal") + "\n$field: {}\n")
+        // Known inert application settings are covered by exact DTO-equivalence tests.
+        for (field in listOf("proxy-providers", "external-ui", "listeners", "script")) reject(yaml("ss-minimal") + "\n$field: {}\n")
         reject(yaml("ss-minimal") + "\nprofile: {store-selected: true, path: /tmp/unsafe}\n")
         reject(yaml("ss-minimal") + "\nprofile: {store-selected: 1}\n")
     }

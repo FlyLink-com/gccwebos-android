@@ -23,8 +23,9 @@ class SafeProxyConfigTest {
         assertEquals("GCC_SELECTED_PROXY", value.getJSONArray("proxies").getJSONObject(0).getString("name"))
         assertFalse(value.toString().contains("evil.example"))
     }
-    @Test fun rejectsProviderControllerScriptAndFileDirectives() {
-        for (key in listOf("proxy-providers", "rule-providers", "external-controller", "external-ui", "external-ui-url", "geox-url", "script", "listeners", "tun", "secret")) {
+    @Test fun rejectsUnrecognizedProviderScriptAndFileDirectives() {
+        // Known inert application settings are covered by exact DTO-equivalence tests.
+        for (key in listOf("proxy-providers", "external-ui", "external-ui-url", "script", "listeners", "secret")) {
             invalid(fixture + "\n$key: {}")
         }
     }

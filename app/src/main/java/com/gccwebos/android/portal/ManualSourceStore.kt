@@ -13,7 +13,7 @@ import java.time.Instant
 import java.util.UUID
 
 /** Selection and selected material always belong to one atomic envelope. */
-enum class ManualSourceKind { LegacyRemote, ImportedRemote, ImportedLocal, None }
+enum class ManualSourceKind { LegacyRemote, ImportedRemote, ImportedLocal, None, ExternalRemote }
 
 /** This record owns its bytes; it does not grant connection authority or validate YAML. */
 class ManualSourceRecord(
@@ -44,6 +44,13 @@ class ManualSourceRecord(
             ManualSourceKind.ImportedRemote -> {
                 require(bytes != null && url != null && validUntil != null)
                 validateUrlShape(url.value)
+            }
+            ManualSourceKind.ExternalRemote -> {
+                require(bytes != null && url != null)
+                val validated = try { ManualSubscriptionUrlPolicy.validate(url.value) }
+                    catch (_: UnsupportedManualSubscriptionLink) { throw IllegalArgumentException() }
+                require(validated == url.value)
+                // Only this explicit source kind may have an unreported remote expiry.
             }
         }
         material = bytes?.copyOf()
@@ -115,28 +122,36 @@ class MemoryManualSourceStore(initial: ManualSourceRecord? = ManualSourceRecord(
     }
 }
 
-/** Fixed, bounded binary schema. Any extra field, short input or unknown code is rejected. */
+/** Strict v1/v2 envelopes; only an explicit ExternalRemote is encoded as v2. */
 internal object ManualSourceCodec {
     const val MAX_ENCODED_BYTES = SafeProxyConfig.MAX_BYTES * 2 + 256
     private const val MAGIC = 0x474d5331
-    private const val VERSION = 1
+    private const val LEGACY_VERSION = 1
+    private const val EXTERNAL_VERSION = 2
+    private const val UNREPORTED_EXPIRY = 0
+    private const val KNOWN_EXPIRY = 1
 
     fun encode(record: ManualSourceRecord): ByteArray {
         val raw = record.copyBytes()
         val buffer = WipingOutput()
         try {
             DataOutputStream(buffer).use { output ->
-                output.writeInt(MAGIC); output.writeInt(VERSION)
+                output.writeInt(MAGIC)
+                output.writeInt(if (record.kind == ManualSourceKind.ExternalRemote) EXTERNAL_VERSION else LEGACY_VERSION)
                 writeString(output, record.revision, 36)
                 output.writeInt(when (record.kind) {
                     ManualSourceKind.LegacyRemote -> 0
                     ManualSourceKind.ImportedRemote -> 1
                     ManualSourceKind.ImportedLocal -> 2
                     ManualSourceKind.None -> 3
+                    ManualSourceKind.ExternalRemote -> 4
                 })
                 output.writeInt(raw?.size ?: -1)
                 if (raw != null) output.write(raw)
                 writeString(output, record.url?.value, SafeProxyConfig.MAX_BYTES)
+                if (record.kind == ManualSourceKind.ExternalRemote) {
+                    output.writeInt(if (record.validUntil == null) UNREPORTED_EXPIRY else KNOWN_EXPIRY)
+                }
                 output.writeBoolean(record.validUntil != null)
                 record.validUntil?.let { output.writeLong(it.epochSecond); output.writeInt(it.nano) }
                 output.writeInt(when (record.observedStatus) {
@@ -158,20 +173,27 @@ internal object ManualSourceCodec {
         var raw: ByteArray? = null
         try {
             val input = DataInputStream(ByteArrayInputStream(plain))
-            require(input.readInt() == MAGIC && input.readInt() == VERSION)
+            require(input.readInt() == MAGIC)
+            val version = input.readInt().also { require(it == LEGACY_VERSION || it == EXTERNAL_VERSION) }
             val revision = requireNotNull(readString(input, 36))
             val kind = when (input.readInt()) {
                 0 -> ManualSourceKind.LegacyRemote
                 1 -> ManualSourceKind.ImportedRemote
                 2 -> ManualSourceKind.ImportedLocal
                 3 -> ManualSourceKind.None
+                4 -> ManualSourceKind.ExternalRemote
                 else -> throw IllegalArgumentException()
             }
+            require((version == EXTERNAL_VERSION) == (kind == ManualSourceKind.ExternalRemote))
             val length = input.readInt()
             require(length == -1 || length in 1..SafeProxyConfig.MAX_BYTES)
             if (length != -1) raw = ByteArray(length).also { input.readFully(it) }
             val url = readString(input, SafeProxyConfig.MAX_BYTES)?.let(::Secret)
+            val externalExpiry = if (kind == ManualSourceKind.ExternalRemote) {
+                input.readInt().also { require(it == UNREPORTED_EXPIRY || it == KNOWN_EXPIRY) }
+            } else null
             val hasExpiry = input.readUnsignedByte().also { require(it in 0..1) } == 1
+            if (externalExpiry != null) require(hasExpiry == (externalExpiry == KNOWN_EXPIRY))
             val expiry = if (hasExpiry) {
                 val seconds = input.readLong(); val nanos = input.readInt()
                 require(nanos in 0..999_999_999)

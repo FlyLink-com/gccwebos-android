@@ -8,6 +8,28 @@ import org.junit.Test
 import java.time.Instant
 
 class ConnectionOverviewTest {
+    @Test fun externalUnreportedExpiryRequiresItsOwnTypedSourceAndNeverClaimsPermanentValidity() {
+        val clock = Instant.parse("2026-10-05T00:00:00Z")
+        val control = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)
+        val external = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true, hasCapability = true,
+            sourceKind = com.gccwebos.android.portal.ManualSourceKind.ExternalRemote,
+            validity = com.gccwebos.android.portal.LocalSourceValidity.ExternalUnreported)
+        val result = connectionOverviewPresentation(external, clock, control)
+        assertEquals(ConnectionPowerAction.Connect, result.action)
+        assertEquals("第三方订阅", result.title); assertEquals("未提供有效期", result.countdown)
+        for (invalid in listOf(external.copy(sourceKind = com.gccwebos.android.portal.ManualSourceKind.LegacyRemote),
+            external.copy(sourceKind = com.gccwebos.android.portal.ManualSourceKind.ImportedRemote),
+            external.copy(validity = com.gccwebos.android.portal.LocalSourceValidity.LocalNoServerExpiry),
+            external.copy(validity = com.gccwebos.android.portal.LocalSourceValidity.RemoteExpiry(null)),
+            external.copy(validUntil = clock.plusSeconds(60)), external.copy(hasCapability = false))) {
+            assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(invalid, clock, control).action)
+        }
+        val until = clock.plusSeconds(60)
+        val known = external.copy(validUntil = until,
+            validity = com.gccwebos.android.portal.LocalSourceValidity.ExternalExpiry(until))
+        assertEquals(ConnectionPowerAction.Connect, connectionOverviewPresentation(known, clock, control).action)
+        assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(known, until, control).action)
+    }
     @Test fun onlyTypedLocalSourceCanConnectWithoutServerExpiry() {
         val clock = Instant.parse("2026-10-04T00:00:00Z")
         val control = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)

@@ -119,6 +119,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         setContent {
+            com.gccwebos.android.update.AutomaticUpdateHost {
             val current = owner
             if (current == null) {
                 GccTheme {
@@ -139,6 +140,7 @@ class MainActivity : ComponentActivity() {
                     nodeLatencyProbe = nodeProbe,
                     sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,
                     onConnectionPowerAction = { action -> current.power(action) })
+            }
             }
         }
         bound = try { bindService(Intent(this, ConnectionOwnerService::class.java), ownerConnection, Context.BIND_AUTO_CREATE) }

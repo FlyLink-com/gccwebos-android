@@ -46,8 +46,8 @@ QUIC 请求和回包结构依据 [RFC 9000 §6.3](https://www.rfc-editor.org/rfc
 | JVM：QUIC 包格式、完整端点提取、端口／协议／transport 绑定、TTL 与失败重试 | 80 项定向 JVM 测试通过，0 失败 / 0 跳过。 |
 | Android：实际应用 TCP／UDP 自有环回、错误回包拒绝、关闭／取消／网络变化 | OPPO 9 项 TCP／QUIC 与 5 项 ICMP 测试通过，共 14 项。 |
 | 节点 UI：短状态、无障碍、闪电重测及既有布局 | OPPO 延迟 UI、配置库 UI／流程共 19 项通过。 |
-| 最终构建、Lint、源码与 APK 哈希 | 普通候选和隔离包构建通过；Lint 0 error / 23 warning / 6 hint；source verifier 与 diff 检查通过。普通 APK 哈希及安装记录待补。 |
-| 普通 OPPO 应用的真实节点数值 | 待独立记录；不得用环回成功代替。 |
+| 最终构建、Lint、源码与 APK 哈希 | 普通候选和隔离包构建通过；Lint 0 error / 23 warning / 6 hint；source verifier 与 diff 检查通过。普通 APK 同签名覆盖安装且设备字节哈希核对一致，详见下文。 |
+| 普通 OPPO 应用的真实节点数值 | 6 条节点实测：VLESS、Hysteria2、TUIC 各 1 条显示数值，另外 3 条出现超时；VPN 连接状态下也观察到更新后的数值。 |
 
 生产源码入口已切换到 `AndroidNodeLatencyProbe`，`MainActivity` 不含临时 `GccLatencyDiag` 日志；构建和合成验收不等于普通 APK 已安装或真实 RTT 验收。最终普通包与隔离测试包分别记录哈希、安装和结果，不输出账号、订阅链接、配置正文或目标地址。
 
@@ -60,3 +60,11 @@ QUIC 请求和回包结构依据 [RFC 9000 §6.3](https://www.rfc-editor.org/rfc
 首批隔离测试曾失败。固定枚举定位样本确认租约已取得，绑定物理网络 socket 返回 `SocketException / errno=1（EPERM）`，结果为 `Unavailable`；当时普通 candidate 的 VPN 已连接。隔离 fixture 使用另一 UID，可见物理网络不等于允许绕过 VPN；此样本不解释所有旧 ICMP 失败，也不证明节点对端无回应。第一次 UI 断开操作后未证实 VPN 已停止，该失败批次保留为无效前置状态记录。随后停止并重新打开普通 candidate，确认连接页不再显示已连接，再复测 TCP 单项和完整 14 项，均通过。未清数据、未卸载普通应用，未修改 `allowBypass` 或共享网络租约门禁。
 
 最后通过批次为 `oppo-ui.log`（19 项）和 `oppo-probes-final.log`（14 项）；早期失败、前台规则补充、20 秒测试期限及 UDP responder 清理过程均独立保留，不累加重复测试。普通应用所属 UID 下的真实节点及 VPN 开启时结果另行记录。
+
+### 普通应用安装和真实节点
+
+已同签名覆盖安装 `70bac49d40cd9ad0540624d0b40b8a8c8df10223`，APK SHA-256 为 `b23a10ffcd6ab205b8ce935be99e1956f2761e10a7aa568a2e9abfa3ddd0425a`，安装后读取的 APK 字节与交付包一致。交付路径 `D:\Downloads\feilian-vpn-node-latency-70bac49.apk`。未卸载普通应用、未清登录或配置；合成/lab 开关全部关闭，原生库哈希保持不变，签名与 16 KiB 对齐已核验。
+
+普通节点页实测得到 VLESS / Hysteria2 / TUIC 各一条有效数值，初次快照为 120 / 161 / 120 ms，闪电重测后数值改变。其余三条本轮多次超时，不推断对端禁 Ping或不可连接。之后连接页确认“已连接”、`:vpn` 进程存在，再进入节点页并重测，观察到更新后的 167 / 122 / 120 ms；这些只属于端点传输探测，不计作真实 VPN 转发或完整代理认证验收。连接状态切换过程中曾短暂显示不可测，后续自动重试恢复数值。
+
+本次自有 fixture app/test 已卸载并核对不存在，普通 candidate 保留。展示设置的最终读数与测试前相同。最终逐项结果见 [验收摘要](evidence/node-latency/2026-10-05/validation.json)，原始本地构建与合成日志位于 `.build-output/node-latency/`；未保存节点名称、地址、订阅链接或账号信息。

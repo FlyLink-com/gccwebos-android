@@ -368,6 +368,21 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     fun invalidateNodeSelection() = synchronized(lock) {
         revision++; invalidateSelections(); authority.selectionRequiresRefresh = true; Unit
     }
+    /** UI-only clock/registry observation. This does not read stores or grant selection/admission. */
+    internal fun nodeSelectionDisplaySnapshot(): NodeSelectionSnapshot = synchronized(lock) {
+        if (authority.manualStorageBlocked || authority.incompleteClear)
+            return@synchronized NodeSelectionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
+                validUntil = state.validUntil, sourceKind = authority.selectionSourceKind,
+                validity = sourceValidity(authority.selectionSourceKind, state.validUntil))
+        val observed = authority.selectionStatus ?: state.status
+        val until = if (authority.selectionStatus != null) authority.selectionUntil else state.validUntil
+        val status = if (observed == LocalSubscriptionStatus.READY && until?.let { it <= now() } == true)
+            LocalSubscriptionStatus.EXPIRED else observed
+        val ready = status == LocalSubscriptionStatus.READY
+        NodeSelectionSnapshot(status, if (ready) authority.choices.toList() else emptyList(),
+            if (ready) authority.selected else null, until, authority.selectionSourceKind,
+            sourceValidity(authority.selectionSourceKind, until))
+    }
     fun nodeSelectionSnapshot(): NodeSelectionSnapshot = synchronized(lock) {
         fun result(status: LocalSubscriptionStatus, choices: List<ConnectionChoice> = emptyList(),
             selected: ConnectionSelection? = null, until: Instant? = null) = NodeSelectionSnapshot(status, choices,

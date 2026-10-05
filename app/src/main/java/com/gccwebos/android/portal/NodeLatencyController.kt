@@ -94,6 +94,9 @@ internal class NodeLatencyController(
         }
     }
 
+    /** UI clock tick: only expire memory evidence, never parse or decrypt configuration. */
+    fun pruneExpired() = prune()
+
     /** Revalidates cached display evidence without starting any network measurement. */
     fun sync() {
         prune()

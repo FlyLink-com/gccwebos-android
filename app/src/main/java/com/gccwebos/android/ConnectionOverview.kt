@@ -257,7 +257,7 @@ internal fun ConnectionOverview(
     }
     var synchronizedNodeGeneration by remember(account) { mutableStateOf<Long?>(null) }
     LaunchedEffect(account, account.authSessionGeneration, snapshot, now) {
-        account.nodeSelection.sync() // Local validity only. No configuration import or HTTP.
+        account.nodeSelection.expireIfNeeded() // Memory display only; admission still validates the source.
         account.nodeLatency.prune()
         synchronizedNodeGeneration = account.authSessionGeneration
     }
@@ -271,7 +271,7 @@ internal fun ConnectionOverview(
         account.foregroundCheckPending, account.nodeLatency.foreground) {
         if (selectedNode != null && account.nodeLatency.foreground && !account.busy && !account.restoring &&
             !account.foregroundCheckPending && !account.clearing) while (true) {
-            account.nodeLatency.sync()
+            account.nodeLatency.pruneExpired()
             account.nodeLatency.ensureMeasured(selectedNode.selection)
             delay(1_000)
         }

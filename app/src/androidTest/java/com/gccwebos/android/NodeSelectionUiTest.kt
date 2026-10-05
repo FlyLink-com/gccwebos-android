@@ -221,11 +221,43 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("nodes-selected-name").assertTextEquals("未选择")
         compose.onNodeWithTag("nodes-search").assertDoesNotExist()
         compose.onNodeWithTag("nodes-filter-all").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-count").assertTextEquals("3 条")
+        compose.onNodeWithTag("nodes-count", useUnmergedTree = true).assertTextEquals("3 条")
         compose.onNodeWithTag("node-choice-2").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("nodes-selected-name").assertTextEquals("Fixture Alpha")
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(third, state.snapshot.selected); assertEquals(1, reads.get()) }
+    }
+
+    @Test fun collapsingTheConfigurationPreservesSelectionWithoutReadingOrNavigating() {
+        launch()
+        val second = state.snapshot.choices[1].selection
+        compose.onNodeWithTag("node-choice-1").performClick()
+        compose.onNodeWithTag("nodes-group-toggle").assertContentDescriptionEquals("收起配置节点").performClick()
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.onNodeWithTag("node-choice-1").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-count", useUnmergedTree = true).assertTextEquals("2 条")
+        compose.runOnIdle {
+            assertSame(second, state.snapshot.selected)
+            assertEquals(1, reads.get()); assertEquals(1, navigationCalls.get())
+        }
+        compose.onNodeWithTag("nodes-group-toggle").assertContentDescriptionEquals("展开配置节点").performClick()
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
+        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("重复节点")
+        compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
+    }
+
+    @Test fun ordinaryRowsUseTwoCompactLinesAndKeepLongNamesInsideTheViewport() {
+        bytes = bytes.toString(Charsets.UTF_8).replace("重复节点", "Synthetic long node name with a protocol and region label").toByteArray()
+        launch(width = 320)
+        val host = compose.onNodeWithTag("nodes-fixture-host").fetchSemanticsNode().boundsInRoot
+        val row = compose.onNodeWithTag("node-choice-1").performScrollTo().assertIsDisplayed()
+        row.assertHeightIsAtLeast(48.dp)
+        val unclipped = row.getUnclippedBoundsInRoot()
+        assertTrue(unclipped.bottom - unclipped.top <= 64.dp)
+        val bounds = row.fetchSemanticsNode().boundsInRoot
+        assertTrue(bounds.left >= host.left); assertTrue(bounds.right <= host.right)
+        row.performClick().assertIsSelected()
+        compose.runOnIdle { assertEquals(1, reads.get()); assertEquals(1, navigationCalls.get()) }
     }
 
     private fun appendVlessNode() {

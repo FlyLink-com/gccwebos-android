@@ -224,7 +224,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
     LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
         account.restoring, account.foregroundCheckPending, account.clearing) {
-        account.nodeSelection.sync()
+        account.nodeSelection.expireIfNeeded()
         account.nodeLatency.sync()
     }
     // Keep an accepted power command outside keyed destinations. Navigation cannot replay it
@@ -258,6 +258,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     var navigationRequest by remember { mutableStateOf(0) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
     val catalogDock = remember { CatalogDockState() }
+    val catalogDisplayCache = remember(account, account.commerceSessionIdentity) {
+        com.gccwebos.android.commerce.CatalogDisplayCache(account.commerceSessionIdentity)
+    }
     BackHandler(enabled = selected != Destination.Connect) {
         if (selected == Destination.Profile && shouldCancelLoginOnBack(account)) account.cancelAuthentication()
         else { selectedName = Destination.Connect.name; navigationRequest++ }
@@ -320,7 +323,8 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         openRegistration = { startRegistration = true; navigationRequest++; selectedName = Destination.Profile.name },
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
                         loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
-                        plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages) }
+                        plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages,
+                        catalogDisplayCache = catalogDisplayCache) }
                 }
                 }
 
@@ -358,7 +362,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   openRegistration: () -> Unit, startRegistration: Boolean,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
                   registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
-                  autoRefreshPages: Boolean) {
+                  autoRefreshPages: Boolean,
+                  catalogDisplayCache: com.gccwebos.android.commerce.CatalogDisplayCache) {
     val latestControl by rememberUpdatedState(connectionControlState)
     DisposableEffect(account, destination) {
         onDispose { if (destination == Destination.Lines) account.manualImport.cancel() }
@@ -377,7 +382,10 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)) {
                 // Navigation reads never claim or acknowledge a delivery. Those recovery
                 // transactions stay behind the existing explicit connection/import actions.
-                if (account.localSubscription.hasCapability) account.nodeSelection.refresh()
+                if (account.localSubscription.hasCapability) account.nodeSelection.refreshIfNeeded {
+                    !latestControl.commandPending && latestControl.phase !in
+                        setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
+                }
                 else if (account.authenticated) account.refreshAccountUsage()
                 snapshotFlow { !account.busy && !account.nodeSelection.busy }.first { it }
                 account.nodeLatency.refresh()
@@ -406,7 +414,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         onConnectionPowerAction, openRegistration)
                 }
                 Destination.Lines -> {
-                    LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
+                    LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.expireIfNeeded() }
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
@@ -443,7 +451,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         }
                     } else {
                         CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce,
-                            onRecharge = openAccount, defaultSelectionRequest = plansVisit, refreshRequest = navigationRequest)
+                            onRecharge = openAccount, defaultSelectionRequest = plansVisit, refreshRequest = navigationRequest,
+                            catalogDisplayCache = catalogDisplayCache)
                     }
                 }
                 Destination.Orders -> {

@@ -150,6 +150,7 @@ class NodeRegionLatencyUiTest {
         compose.waitUntil(5000) { measurements.get() == 2 }
         badge(1).assertTextEquals("— ms")
         compose.runOnIdle { assertTrue(latency.busy) }
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         val selected = state.snapshot.choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().assertIsEnabled().performClick()
         compose.runOnIdle { assertSame(selected, state.snapshot.selected); gate.complete(Unit) }
@@ -170,7 +171,7 @@ class NodeRegionLatencyUiTest {
         capture("node-region-320-font100")
     }
 
-    @Test fun noReplyRemainsSelectableAndControllerRemeasureDoesNotReloadConfig() {
+    @Test fun lightningRemeasuresWithoutReloadingConfigOrChangingSelection() {
         response = { NodeLatencyObservation.NoReply }
         launch()
         awaitObservation(0)
@@ -184,7 +185,10 @@ class NodeRegionLatencyUiTest {
             elapsed.addAndGet(30_000L) // Explicit refresh cooldown has elapsed on this fake clock.
             response = { NodeLatencyObservation.Success(19L, 7L) }
         }
-        compose.runOnIdle { latency.refresh() }
+        compose.onNodeWithTag("nodes-latency-refresh")
+            .assertContentDescriptionEquals("测试节点延迟")
+            .assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
+            .assertIsEnabled().performClick()
         compose.waitUntil(5000) {
             latency.reading(selected) == NodeLatencyObservation.Success(19L, 7L) && !latency.busy
         }
@@ -193,6 +197,11 @@ class NodeRegionLatencyUiTest {
             assertSame(selected, state.snapshot.selected)
             assertEquals(4, measurements.get()); assertEquals(1, reads.get())
         }
+        // A second click during the controller cooldown cannot multiply probes.
+        compose.onNodeWithTag("nodes-latency-refresh").performClick()
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(4, measurements.get()); assertEquals(1, reads.get()) }
+        compose.onNodeWithText("测试节点延迟").assertDoesNotExist()
     }
 
     @Test fun accountBusyCancelsPendingMeasurementsWithoutTurningPingIntoSelectionAuthorization() {
@@ -202,7 +211,7 @@ class NodeRegionLatencyUiTest {
         compose.waitUntil(5000) { measurements.get() == 2 }
         compose.runOnIdle { accountBusy = true }
         compose.waitUntil(5000) { !latency.busy }
-        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         compose.onNodeWithTag("node-choice-0").assertIsNotEnabled()
         compose.runOnIdle { gate.complete(Unit) }
         badge(0).assertTextEquals("— ms")
@@ -245,7 +254,7 @@ class NodeRegionLatencyUiTest {
         compose.waitUntil(5000) { !latency.busy }
         compose.runOnIdle { accountBusy = true }
         compose.runOnIdle { accountBusy = false }
-        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         badge(0).assertTextEquals("— ms")
         compose.runOnIdle { assertEquals(2, measurements.get()); latency.setForeground(true) }
         compose.waitUntil(5000) { measurements.get() == 4 }
@@ -262,7 +271,7 @@ class NodeRegionLatencyUiTest {
             .assertContentDescriptionEquals("节点标注地区：日本")
         compose.onNodeWithTag("subscription-node-latency-0", useUnmergedTree = true).assertTextEquals("— ms")
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         compose.runOnIdle {
             assertEquals(LocalSubscriptionStatus.UNSUPPORTED, state.snapshot.status)
             assertTrue(state.snapshot.choices.isEmpty())
@@ -283,7 +292,7 @@ class NodeRegionLatencyUiTest {
         }
         badge(1).assertTextEquals("27 ms")
         row.performClick().assertIsSelected()
-        compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
         compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, reads.get()); assertEquals(2, measurements.get()) }
         capture("node-region-320-font200")

@@ -36,11 +36,13 @@ class NodeSelectionControllerTest {
     }
     private class Profiles : LocalProfileStore {
         private val memory = MemoryLocalProfileStore()
+        var reads = 0
         var saves = 0
         var failSave = false
         var failRead = false
         var failReadsRemaining = 0
         override fun read(): CachedSubscription? {
+            reads++
             if (failRead || failReadsRemaining > 0) {
                 if (failReadsRemaining > 0) failReadsRemaining--
                 throw PortalFailure(PortalFailure.Reason.STORAGE)
@@ -71,7 +73,8 @@ class NodeSelectionControllerTest {
         val authority = LocalSubscriptionAuthority()
         val manager = LocalSubscriptionManager(delivery, profiles, source,
             OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { time }, authority)
-        val controller = NodeSelectionController(manager, scope, { auth }, { allowed }) { published++ }
+        val controller = NodeSelectionController(manager, scope, { auth }, { allowed },
+            ioDispatcher = scope.coroutineContext[kotlin.coroutines.ContinuationInterceptor] as CoroutineDispatcher) { published++ }
         fun selected() = controller.snapshot.selected
         fun selectSecond() { controller.select(controller.snapshot.choices[1].selection) }
     }
@@ -91,6 +94,41 @@ class NodeSelectionControllerTest {
         try { val copy = cached.copyBytes(); try { assertArrayEquals(f.bytes, copy) } finally { copy.fill(0) } }
         finally { cached.close() }
         assertFalse(selected.toString().contains("fixture"))
+    }
+
+    @Test fun displayClockTicksNeverReadStoresOrDownloadAndExpireOnTime() = runTest {
+        val f = Fixture(this)
+        f.controller.refresh(); runCurrent(); f.selectSecond()
+        val selected = f.selected()
+        val before = f.profiles.reads
+        repeat(60) { f.controller.expireIfNeeded() }
+        assertEquals(before, f.profiles.reads)
+        assertEquals(1, f.reads); assertSame(selected, f.selected())
+        f.time = requireNotNull(f.until)
+        f.controller.expireIfNeeded()
+        assertEquals(LocalSubscriptionStatus.EXPIRED, f.controller.snapshot.status)
+        assertTrue(f.controller.snapshot.choices.isEmpty()); assertNull(f.selected())
+        assertEquals(before, f.profiles.reads)
+    }
+
+    @Test fun visitingAlreadyReadyNodesRevalidatesLocallyWithoutDownloadingOrLosingSelection() = runTest {
+        val f = Fixture(this)
+        f.controller.refresh(); runCurrent(); f.selectSecond()
+        val selected = f.selected()
+        repeat(3) { f.controller.refreshIfNeeded(); runCurrent() }
+        assertEquals(1, f.reads); assertSame(selected, f.selected())
+        assertEquals(LocalSubscriptionStatus.READY, f.controller.snapshot.status)
+    }
+
+    @Test fun leavingDuringLocalReadPreservesRegistryAndDoesNotForceNetworkNextVisit() = runTest {
+        val f = Fixture(this)
+        f.controller.refresh(); runCurrent(); f.selectSecond()
+        val selected = f.selected()
+        f.controller.refreshIfNeeded()
+        assertTrue(f.controller.busy)
+        f.controller.cancel()
+        f.controller.refreshIfNeeded(); runCurrent()
+        assertEquals(1, f.reads); assertSame(selected, f.selected())
     }
 
     @Test fun identicalFreshReadsKeepSelectionButEveryContentChangeRequiresReselection() = runTest {

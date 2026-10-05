@@ -8,6 +8,9 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.manualimport.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -23,11 +26,12 @@ class ManualImportHostUiTest {
     private val failures = mutableListOf<ManualImportFailure>()
     private var accountActions = 0
     private var removeActions = 0
+    private var beginAction: suspend () -> Any? = { Any().also(tickets::add) }
     @androidx.compose.runtime.Composable
     private fun Content() {
         GccTheme {
             ManualImportHost(visible, busy, null, canUseAccount = true, canRemove = true,
-                onDismiss = { visible = false }, onBegin = { Any().also(tickets::add) },
+                onDismiss = { visible = false }, onBegin = { beginAction() },
                 onSubmit = { ticket, bytes, kind ->
                     assertSame(tickets.last(), ticket)
                     assertTrue(bytes.isNotEmpty())
@@ -44,9 +48,73 @@ class ManualImportHostUiTest {
         val callbacks = mutableListOf<(ManualInputResult) -> Unit>()
         var cancels = 0
         override fun launch(kind: ManualImportInputKind, result: (ManualInputResult) -> Unit): ManualInputCancellation {
+            assertSame(android.os.Looper.getMainLooper(), android.os.Looper.myLooper())
             starts += kind; callbacks += result
             return ManualInputCancellation { cancels++ }
         }
+    }
+    @Test fun preparingDisablesDuplicateLaunchAndCallsPlatformOnlyAfterMainThreadTicketPublication() {
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        var starts = 0
+        beginAction = {
+            starts++; entered.complete(Unit); release.await()
+            assertSame(android.os.Looper.getMainLooper(), android.os.Looper.myLooper())
+            Any().also(tickets::add)
+        }
+        launch()
+        try {
+            compose.onNodeWithTag("manual-import-scan").performClick()
+            compose.waitUntil(5000) { entered.isCompleted }
+            listOf("scan", "document", "link").forEach {
+                compose.onNodeWithTag("manual-import-$it").assertIsNotEnabled()
+            }
+            compose.runOnIdle { assertEquals(1, starts); assertTrue(platform.starts.isEmpty()); assertTrue(tickets.isEmpty()) }
+            compose.runOnIdle { release.complete(Unit) }
+            compose.waitUntil(5000) { platform.starts.size == 1 }
+            compose.runOnIdle { assertEquals(listOf(ManualImportInputKind.Scan), platform.starts); assertEquals(1, tickets.size) }
+        } finally { release.complete(Unit) }
+    }
+
+    @Test fun dismissWhilePreparingDoesNotLaunchPlatformOrAdoptLateUncooperativeTicket() {
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        beginAction = {
+            entered.complete(Unit)
+            withContext(NonCancellable) { release.await(); Any().also(tickets::add) }
+        }
+        launch()
+        try {
+            compose.onNodeWithTag("manual-import-scan").performClick()
+            compose.waitUntil(5000) { entered.isCompleted }
+            compose.onNodeWithTag("manual-import-cancel").performClick()
+            compose.runOnIdle { release.complete(Unit) }
+            compose.waitForIdle()
+            compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+            compose.runOnIdle {
+                assertTrue(platform.starts.isEmpty()); assertTrue(submissions.isEmpty())
+                assertTrue(tickets.all { ticket -> canceled.any { it === ticket } })
+            }
+        } finally { release.complete(Unit) }
+    }
+
+    @Test fun removingHostWhilePreparingCannotLaunchPlatformAfterTheHostHasClosed() {
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        beginAction = {
+            entered.complete(Unit)
+            withContext(NonCancellable) { release.await(); Any().also(tickets::add) }
+        }
+        launch()
+        try {
+            compose.onNodeWithTag("manual-import-document").performClick()
+            compose.waitUntil(5000) { entered.isCompleted }
+            compose.runOnIdle { visible = false }
+            compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+            compose.runOnIdle { release.complete(Unit) }
+            compose.waitForIdle()
+            compose.runOnIdle {
+                assertTrue(platform.starts.isEmpty()); assertTrue(submissions.isEmpty())
+                assertTrue(tickets.all { ticket -> canceled.any { it === ticket } })
+            }
+        } finally { release.complete(Unit) }
     }
     @Test fun allThreeEntriesAreExplicitAndLinkSubmitsOnlyOnceWithTheIssuedTicket() {
         launch()

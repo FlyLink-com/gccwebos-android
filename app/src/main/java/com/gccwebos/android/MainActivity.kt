@@ -60,6 +60,7 @@ import com.gccwebos.android.portal.AccountPanel
 import com.gccwebos.android.portal.RegistrationController
 import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.NodeSelectionPanel
+import com.gccwebos.android.portal.ConfigurationLibraryPanel
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.productionRepository
 import com.gccwebos.android.vpn.ActivityVpnPermission
@@ -227,6 +228,11 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
         account.nodeSelection.expireIfNeeded()
         account.nodeLatency.sync()
     }
+    LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
+        account.restoring, account.foregroundCheckPending, account.clearing,
+        account.manualImport.busy, account.nodeSelection.busy) {
+        account.configurationLibrary.refresh()
+    }
     // Keep an accepted power command outside keyed destinations. Navigation cannot replay it
     // while the controller is still publishing acceptance/rejection. A new snapshot/revision is the ack.
     var acceptedConnectionCommand by remember(connectionControlState, account) { mutableStateOf(false) }
@@ -250,7 +256,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     DisposableEffect(account, lifecycle) {
         val observer = AccountForegroundObserver(account)
         lifecycle?.addObserver(observer)
-        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel(); account.manualImport.cancel() }
+        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel(); account.manualImport.cancel(); account.configurationLibrary.cancel() }
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
@@ -373,7 +379,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
     val nodesOwnerGeneration = account.authSessionGeneration.takeIf { destination == Destination.Lines }
     LaunchedEffect(account, destination, navigationRequest, autoRefreshPages, nodesOwnerGeneration) {
         if (!autoRefreshPages || (navigationRequest == 0 && destination != Destination.Lines)) return@LaunchedEffect
-        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing && !account.manualImport.busy }.first { it }
+        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing &&
+            !account.manualImport.busy && !account.configurationLibrary.busy }.first { it }
         if (destination == Destination.Profile && !account.authenticated && !startRegistration) {
             account.restoreAccount()
         } else if (destination == Destination.Lines) {
@@ -415,24 +422,21 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 }
                 Destination.Lines -> {
                     LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.expireIfNeeded() }
-                    NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
+                    ConfigurationLibraryPanel(account.configurationLibrary, account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
                         onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency,
-                        onImport = account.manualImport::open)
+                        onImport = account.manualImport::open, onReplace = account.manualImport::openForReplacement)
                     val importer = account.manualImport
-                    val source = account.localSubscription.sourceKind
                     val importUsage by account.accountUsage.state.collectAsState()
                     com.gccwebos.android.manualimport.ManualImportHost(
                         visible = importer.visible,
                         busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
                             account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
                         error = importer.error,
-                        canUseAccount = source != com.gccwebos.android.portal.ManualSourceKind.LegacyRemote,
-                        canRemove = source in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
-                            com.gccwebos.android.portal.ManualSourceKind.ImportedRemote,
-                            com.gccwebos.android.portal.ManualSourceKind.ExternalRemote),
-                        onDismiss = importer::cancel, onBegin = importer::begin, onSubmit = importer::submit,
+                        canUseAccount = false,
+                        canRemove = false,
+                        onDismiss = importer::cancel, onBegin = importer::beginAsync, onSubmit = importer::submit,
                         onCancel = importer::cancel, onFailure = importer::failure,
                         onUseAccount = importer::useAccount, onRemove = importer::remove)
                 }

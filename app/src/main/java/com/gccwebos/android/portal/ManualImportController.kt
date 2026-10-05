@@ -7,10 +7,14 @@ import com.gccwebos.android.manualimport.ManualImportFailure
 import com.gccwebos.android.manualimport.ManualImportInputKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Owns pending input by identity. UI state contains no configuration, URL or file URI. */
 internal class ManualImportController(
@@ -20,21 +24,46 @@ internal class ManualImportController(
     private val commitFence: ((() -> Unit) -> Unit),
     private val onSnapshot: (LocalSubscriptionSnapshot) -> Unit,
     private val onSettled: () -> Unit = {},
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
-    class Ticket internal constructor(internal val source: ManualSourceVersion)
+    class Ticket internal constructor(internal val source: ManualSourceVersion,
+        internal val replacement: ConfigurationHandle? = null)
     var visible by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
     private var ticket: Ticket? = null
     private var task: Job? = null
     private var operation = 0L
+    private var replacement: ConfigurationHandle? = null
 
     fun open() { if (!busy) { cancel(); visible = true } }
+    fun openForReplacement(handle: ConfigurationHandle) {
+        if (!busy) { cancel(); replacement = handle; visible = true }
+    }
     fun begin(): Ticket? {
         if (!visible || busy || !allowed()) return null
+        operation++; ticket = null
         return try {
-            Ticket(manager.captureManualSourceVersion()).also { ticket = it; error = null }
+            Ticket(manager.captureManualSourceVersion(), replacement).also { ticket = it; error = null }
         } catch (_: Exception) { error = "本地配置暂不可用"; null }
+    }
+    /** Production launch preparation reads encrypted storage on IO, then publishes on its caller. */
+    suspend fun beginAsync(): Ticket? {
+        if (!visible || busy || !allowed()) return null
+        val request = ++operation
+        val target = replacement
+        ticket = null
+        return try {
+            val source = withContext(ioDispatcher) { manager.captureManualSourceVersion() }
+            currentCoroutineContext().ensureActive()
+            if (request != operation || !visible || busy || !allowed() || replacement !== target ||
+                source.clearVersion != manager.captureClearVersion()) null
+            else Ticket(source, target).also { ticket = it; error = null }
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) {
+            if (request == operation && visible && !busy && allowed()) error = "本地配置暂不可用"
+            null
+        }
     }
     fun failure(value: Ticket, failure: ManualImportFailure) {
         if (ticket === value) error = failure.caption
@@ -43,7 +72,7 @@ internal class ManualImportController(
     fun cancel() {
         val previous = task
         operation++
-        ticket = null; task = null
+        ticket = null; task = null; replacement = null
         busy = false; visible = false; error = null
         previous?.cancel()
         if (previous != null) onSettled()
@@ -60,7 +89,8 @@ internal class ManualImportController(
         val owned = bytes.copyOf(); bytes.fill(0)
         run(value, onComplete = { owned.fill(0) }) {
             // All three surfaces pass through exactly the same bounded parser and authority.
-            manager.importManual(owned, value.source, guardedFence(value))
+            if (value.replacement == null) manager.importManual(owned, value.source, guardedFence(value))
+            else manager.replaceConfiguration(owned, value.replacement, value.source, guardedFence(value))
         }
     }
     fun useAccount() = changeSource { fence -> manager.useAccountSource(fence); manager.refresh() }
@@ -83,8 +113,7 @@ internal class ManualImportController(
         // Assign ownership before execution, including an already-cancelled parent/immediate scope.
         val work = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                checkCurrent(value)
-                val result = action()
+                val result = withContext(ioDispatcher) { checkCurrent(value); action() }
                 coroutineContext.ensureActive()
                 if (ticket === value && current == operation) {
                     onSnapshot(result)

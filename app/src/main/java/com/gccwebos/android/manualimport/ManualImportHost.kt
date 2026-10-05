@@ -15,6 +15,10 @@ import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.BrandButton
 import com.gccwebos.android.design.GlassSurface
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 
 /** Ticket validation and source commit belong exclusively to the caller's coordinator.
  * onSubmit transfers byte ownership; the caller must consume/copy synchronously and wipe in finally.
@@ -27,7 +31,7 @@ internal fun <T : Any> ManualImportHost(
     canUseAccount: Boolean = false,
     canRemove: Boolean = false,
     onDismiss: () -> Unit,
-    onBegin: () -> T?,
+    onBegin: suspend () -> T?,
     onSubmit: (T, ByteArray, ManualImportInputKind) -> Unit,
     onCancel: (T) -> Unit,
     onUseAccount: () -> Unit,
@@ -37,6 +41,9 @@ internal fun <T : Any> ManualImportHost(
 ) {
     if (!visible) return
     val platform = platformOverride ?: rememberManualImportPlatform()
+    val scope = rememberCoroutineScope()
+    val beginLatest by rememberUpdatedState(onBegin)
+    val busyLatest by rememberUpdatedState(busy)
     val cancelLatest by rememberUpdatedState(onCancel)
     val failureLatest by rememberUpdatedState(onFailure)
     val owner = remember { ManualHostOwner<T> { cancelLatest(it) } }
@@ -45,6 +52,7 @@ internal fun <T : Any> ManualImportHost(
     var failure by remember { mutableStateOf<ManualImportFailure?>(null) }
     var staged by remember { mutableStateOf(false) }
     var submitted by remember { mutableStateOf(false) }
+    var preparing by remember { mutableStateOf(false) }
     DisposableEffect(owner) { onDispose { link = ""; owner.close() } }
     fun dismiss() { link = ""; owner.close(); onDismiss() }
     fun fail(ticket: T, reason: ManualImportFailure) {
@@ -52,27 +60,44 @@ internal fun <T : Any> ManualImportHost(
         failureLatest(ticket, reason)
     }
     fun begin(kind: ManualImportInputKind) {
-        if (busy || owner.ticket != null) return
-        val ticket = onBegin() ?: return
-        owner.ticket = ticket
-        owner.kind = kind
-        failure = null
-        if (kind == ManualImportInputKind.Link) mode = ManualHostMode.Link else {
-            mode = ManualHostMode.External
-            owner.external = platform.launch(kind) { result ->
-                if (!owner.accepts(ticket)) {
-                    (result as? ManualInputResult.Content)?.bytes?.fill(0)
-                } else when (result) {
-                    is ManualInputResult.Content -> {
-                        owner.payload?.fill(0)
-                        owner.payload = result.bytes
-                        staged = true
-                        mode = ManualHostMode.Confirm
+        if (busyLatest || preparing || owner.closed || owner.ticket != null) return
+        preparing = true
+        val work = scope.launch(start = CoroutineStart.LAZY) {
+            var acquired: T? = null
+            var adopted = false
+            try {
+                val ticket = beginLatest() ?: return@launch
+                acquired = ticket
+                coroutineContext.ensureActive()
+                if (owner.closed || busyLatest || owner.ticket != null) return@launch
+                owner.ticket = ticket
+                adopted = true
+                owner.kind = kind
+                failure = null
+                if (kind == ManualImportInputKind.Link) mode = ManualHostMode.Link else {
+                    mode = ManualHostMode.External
+                    owner.external = platform.launch(kind) { result ->
+                        if (!owner.accepts(ticket)) {
+                            (result as? ManualInputResult.Content)?.bytes?.fill(0)
+                        } else when (result) {
+                            is ManualInputResult.Content -> {
+                                owner.payload?.fill(0)
+                                owner.payload = result.bytes
+                                staged = true
+                                mode = ManualHostMode.Confirm
+                            }
+                            is ManualInputResult.Failure -> fail(ticket, result.reason)
+                        }
                     }
-                    is ManualInputResult.Failure -> fail(ticket, result.reason)
                 }
+            } finally {
+                if (!adopted) acquired?.let { cancelLatest(it) }
+                owner.preparation = null
+                preparing = false
             }
         }
+        owner.preparation = work
+        work.start()
     }
     fun submit() {
         val ticket = owner.ticket ?: return
@@ -99,16 +124,16 @@ internal fun <T : Any> ManualImportHost(
                     else -> "导入配置"
                 }, style = MaterialTheme.typography.titleMedium)
                 if (mode == ManualHostMode.Menu) {
-                    BrandButton("扫描二维码", { begin(ManualImportInputKind.Scan) }, enabled = !busy,
+                    BrandButton("扫描二维码", { begin(ManualImportInputKind.Scan) }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-scan"))
-                    BrandButton("导入配置文件", { begin(ManualImportInputKind.Document) }, enabled = !busy,
+                    BrandButton("导入配置文件", { begin(ManualImportInputKind.Document) }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-document"))
-                    BrandButton("导入订阅链接", { begin(ManualImportInputKind.Link) }, enabled = !busy,
+                    BrandButton("导入订阅链接", { begin(ManualImportInputKind.Link) }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-link"))
                     if (canUseAccount || canRemove) HorizontalDivider(color = Brand.RowDivider)
-                    if (canUseAccount) TextButton({ if (!busy) onUseAccount() }, enabled = !busy,
+                    if (canUseAccount) TextButton({ if (!busy && !preparing) onUseAccount() }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-use-account")) { Text("使用账户订阅") }
-                    if (canRemove) TextButton({ mode = ManualHostMode.Remove }, enabled = !busy,
+                    if (canRemove) TextButton({ if (!busy && !preparing) mode = ManualHostMode.Remove }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-remove")) { Text("移除导入配置") }
                 } else if (mode == ManualHostMode.Remove) {
                     BrandButton("确认移除", { if (!busy) onRemove() }, enabled = !busy,
@@ -139,11 +164,14 @@ private class ManualHostOwner<T : Any>(private val cancel: (T) -> Unit) {
     var kind: ManualImportInputKind? = null
     var payload: ByteArray? = null
     var external: ManualInputCancellation? = null
-    private var closed = false
+    var preparation: Job? = null
+    var closed = false
+        private set
     fun accepts(value: T) = !closed && ticket === value
     fun close() {
         if (closed) return
         closed = true
+        preparation?.cancel(); preparation = null
         external?.cancel(); external = null
         payload?.fill(0); payload = null
         ticket?.let(cancel); ticket = null

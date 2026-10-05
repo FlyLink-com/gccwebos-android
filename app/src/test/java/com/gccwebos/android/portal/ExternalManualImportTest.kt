@@ -186,7 +186,8 @@ class ExternalManualImportTest {
     @Test fun controllerScanLinkAndDocumentUseIndependentExternalSource() = runTest {
         for (kind in com.gccwebos.android.manualimport.ManualImportInputKind.entries) {
             val f = Fixture(); val snapshots = mutableListOf<LocalSubscriptionSnapshot>()
-            val controller = ManualImportController(f.manager, this, { true }, { it() }, { snapshots += it })
+            val controller = ManualImportController(f.manager, this, { true }, { it() }, { snapshots += it },
+                ioDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
             controller.open(); val bytes = url.toByteArray()
             controller.submit(requireNotNull(controller.begin()), bytes, kind); runCurrent()
             assertNull(controller.error); assertFalse(controller.visible)

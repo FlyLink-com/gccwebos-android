@@ -22,6 +22,146 @@ class EncryptedManualSourceStoreTest {
     private val url = Secret("https://sub.invalid/sub/a/synthetic-encrypted-manual")
     private val externalUrl = Secret("https://subscriptions.example.net/client?token=synthetic-encrypted-external%2Fonly")
 
+    @Test fun legacyLibraryReadsDoNotMigrateAndExplicitV3PreservesOriginalProfileBytes() = fixture { context ->
+        val key = syntheticKey()
+        val retained = "synthetic-account-profile-untouched".toByteArray()
+        val profile = File(context.noBackupFilesDir, "portal-profile.bin")
+        profile.writeBytes(retained)
+        external(null).use { old ->
+            testStore(context, key).save(old)
+            val baseline = sourceFile(context).readBytes()
+            try {
+                repeat(2) { testStore(context, key).readLibrary()!!.use { normalized ->
+                    assertEquals(old.revision, normalized.entries.single().id)
+                    normalized.activeSource().use { assertTrue(old.sameEnvelope(it)) }
+                    assertArrayEquals(baseline, sourceFile(context).readBytes())
+                } }
+                testStore(context, key).readLibrary()!!.use { testStore(context, key).saveLibrary(it) }
+                assertEnvelopeVersion(context, key, 3)
+                testStore(context, key).read()!!.use { assertTrue(old.sameEnvelope(it)) }
+                assertArrayEquals(retained, profile.readBytes())
+            } finally { baseline.fill(0) }
+        }
+        retained.fill(0)
+    }
+
+    @Test fun v3EncryptedRoundTripAndCompatibilitySaveRetainInactiveEntries() = fixture { context ->
+        val key = syntheticKey()
+        syntheticLibrary().use { initial ->
+            testStore(context, key).saveLibrary(initial)
+            assertEnvelopeVersion(context, key, 3)
+            val disk = sourceFile(context).readBytes()
+            try {
+                val searchable = disk.toString(Charsets.ISO_8859_1)
+                for (secret in listOf("synthetic-library-name", "synthetic-raw-material", initial.revision, externalUrl.value))
+                    assertFalse(searchable.contains(secret))
+            } finally { disk.fill(0) }
+            testStore(context, key).readLibrary()!!.use { assertTrue(initial.sameEnvelope(it)) }
+            val inactiveId = initial.entries.last().id
+            initial.activeSource().use { source ->
+                val raw = source.copyBytes()!!
+                try { ManualSourceRecord(source.revision, source.kind, raw, source.url, until).use {
+                    testStore(context, key).save(it)
+                } } finally { raw.fill(0) }
+            }
+            testStore(context, key).readLibrary()!!.use { updated ->
+                assertEquals(2, updated.entries.size); assertEquals(inactiveId, updated.entries.last().id)
+                assertEquals(initial.entries.first().name, updated.entries.first().name)
+                updated.activeSource().use { assertEquals(until, it.validUntil) }
+            }
+            ManualSourceRecord(kind = ManualSourceKind.None).use { testStore(context, key).save(it) }
+            testStore(context, key).readLibrary()!!.use { deselected ->
+                assertEquals(ConfigurationSelector.None, deselected.selector); assertEquals(2, deselected.entries.size)
+            }
+            assertEnvelopeVersion(context, key, 3)
+        }
+    }
+
+    @Test fun v3AtomicFaultsNeverMixSelectorAndEntriesAcrossMigrationOrReplacement() = fixture { context ->
+        val key = syntheticKey()
+        external(null).use { legacy ->
+            syntheticLibrary().use { replacement ->
+                for (phase in ManualSourceWritePhase.entries) {
+                    // An explicit synthetic legacy ciphertext fixture; no real app data is touched.
+                    sourceFile(context).writeBytes(encrypt(ManualSourceCodec.encode(legacy), key))
+                    val failing = testStore(context, key) { if (it == phase) throw IOException("synthetic-v3-migration-fault") }
+                    storageFailure { failing.saveLibrary(replacement) }
+                    val committed = phase !in listOf(ManualSourceWritePhase.BeforeSync, ManualSourceWritePhase.BeforeFinish)
+                    testStore(context, key).readLibrary()!!.use { restored ->
+                        if (committed) assertTrue(replacement.sameEnvelope(restored))
+                        else ConfigurationLibrary.fromLegacy(legacy).use { assertTrue(it.sameEnvelope(restored)) }
+                    }
+                    assertEnvelopeVersion(context, key, if (committed) 3 else 2)
+                }
+                syntheticLibrary().use { old ->
+                    for (phase in ManualSourceWritePhase.entries) {
+                        testStore(context, key).saveLibrary(old)
+                        val failing = testStore(context, key) { if (it == phase) throw IOException("synthetic-v3-replacement-fault") }
+                        storageFailure { failing.saveLibrary(replacement) }
+                        val expected = if (phase in listOf(ManualSourceWritePhase.BeforeSync, ManualSourceWritePhase.BeforeFinish)) old else replacement
+                        testStore(context, key).readLibrary()!!.use { assertTrue(expected.sameEnvelope(it)) }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun v3ReadbackRejectsChangedInactiveNameEvenWhenActiveSourceIsIdentical() = fixture { context ->
+        val key = syntheticKey()
+        syntheticLibrary().use { wanted ->
+            val inactive = wanted.entries.last()
+            inactive.copySource().use { source ->
+                ConfigurationEntry(inactive.id, "synthetic-renamed-inactive", source).use { replacement ->
+                    ConfigurationLibrary(wanted.revision, listOf(wanted.entries.first(), replacement), wanted.selector,
+                        wanted.selectedEntryId, wanted.selectorRevision).use { changed ->
+                        wanted.activeSource().use { expected -> changed.activeSource().use { assertTrue(expected.sameEnvelope(it)) } }
+                        val substituted = encrypt(ConfigurationLibraryCodec.encode(changed), key)
+                        try {
+                            val failing = testStore(context, key) { phase ->
+                                if (phase == ManualSourceWritePhase.BeforeReadback) sourceFile(context).writeBytes(substituted)
+                            }
+                            storageFailure { failing.saveLibrary(wanted) }
+                            testStore(context, key).readLibrary()!!.use { assertTrue(changed.sameEnvelope(it)) }
+                        } finally { substituted.fill(0) }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun v3EmptyPendingAndCompletedClearStayAtomicAndNeverRestoreAnEntry() = fixture { context ->
+        val key = syntheticKey()
+        ConfigurationLibrary(selector = ConfigurationSelector.None, clearPending = true).use { pending ->
+            ConfigurationLibrary(selector = ConfigurationSelector.None).use { completed ->
+                for (phase in ManualSourceWritePhase.entries) {
+                    testStore(context, key).saveLibrary(pending)
+                    val failing = testStore(context, key) { if (it == phase) throw IOException("synthetic-v3-clear-fault") }
+                    storageFailure { failing.saveLibrary(completed) }
+                    val before = phase in listOf(ManualSourceWritePhase.BeforeSync, ManualSourceWritePhase.BeforeFinish)
+                    testStore(context, key).readLibrary()!!.use {
+                        assertTrue((if (before) pending else completed).sameEnvelope(it))
+                        assertTrue(it.entries.isEmpty()); assertEquals(before, it.clearPending)
+                        it.activeSource().use { source -> assertEquals(ManualSourceKind.None, source.kind); assertNull(source.copyBytes()) }
+                    }
+                    assertEnvelopeVersion(context, key, 3)
+                }
+            }
+        }
+    }
+
+    private fun syntheticLibrary(): ConfigurationLibrary {
+        external(null).use { active ->
+            remote().use { inactive ->
+                ConfigurationEntry(active.revision, "synthetic-library-name", active).use { one ->
+                    ConfigurationEntry(inactive.revision, "synthetic-library-name", inactive).use { two ->
+                        return ConfigurationLibrary(entries = listOf(one, two), selector = ConfigurationSelector.Entry,
+                            selectedEntryId = one.id, selectorRevision = one.sourceRevision)
+                    }
+                }
+            }
+        }
+    }
+
     @Test fun externalV2KnownAndUnreportedExpiryRestoreAsWholeEncryptedEnvelopes() = fixture { context ->
         val key = syntheticKey()
         for (expiry in listOf(null, until)) {
@@ -107,32 +247,61 @@ class EncryptedManualSourceStoreTest {
         }
     }
 
-    @Test fun explicitExternalRemovalOrAccountChoiceReturnsToV1WithoutImplicitAccountRead() = fixture { context ->
-        val key = syntheticKey()
-        val delivery = object : DeliveryStore {
-            override fun read(): DeliveryRecord? = error("Selector conversion must not read account delivery")
-            override fun save(record: DeliveryRecord) = error("Selector conversion must not write account delivery")
-            override fun clear() = error("Selector conversion must not clear account delivery")
-        }
+    @Test fun explicitExternalRemovalOrAccountChoiceCreatesV3WithoutImplicitAccountAccess() {
         for (target in listOf(ManualSourceKind.None, ManualSourceKind.LegacyRemote)) {
-            external(null).use { original ->
-                testStore(context, key).save(original)
-                assertEnvelopeVersion(context, key, 2)
-                val manager = LocalSubscriptionManager(delivery, MemoryLocalProfileStore(),
-                    SubscriptionSource { error("Selector conversion must not download") },
-                    OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")),
-                    { Instant.parse("2026-10-05T00:00:00Z") }, LocalSubscriptionAuthority(), manualSources = testStore(context, key))
-                runBlocking {
-                    if (target == ManualSourceKind.None) manager.removeManualSource { it() }
-                    else manager.useAccountSource { it() }
+            // Both branches start with their own real v2 ciphertext, not the prior branch's v3.
+            fixture { context ->
+                val key = syntheticKey()
+                var deliveryAccess = 0
+                var profileAccess = 0
+                var downloads = 0
+                val delivery = object : DeliveryStore {
+                    override fun read(): DeliveryRecord? { deliveryAccess++; error("No account delivery read") }
+                    override fun save(record: DeliveryRecord) { deliveryAccess++; error("No account delivery write") }
+                    override fun clear() { deliveryAccess++; error("No account delivery clear") }
                 }
-                assertEnvelopeVersion(context, key, 1)
-                testStore(context, key).read()!!.use { converted ->
-                    assertEquals(target, converted.kind)
-                    assertNotEquals(original.revision, converted.revision)
-                    assertFalse(converted.clearPending)
-                    assertNull(converted.copyBytes()); assertNull(converted.url)
-                    assertNull(converted.validUntil); assertNull(converted.contentIdentity)
+                val profiles = object : LocalProfileStore {
+                    override fun read(): CachedSubscription? { profileAccess++; error("No account profile read") }
+                    override fun save(value: CachedSubscription) { profileAccess++; error("No account profile write") }
+                    override fun clear() { profileAccess++; error("No account profile clear") }
+                }
+                val noDownload = SubscriptionSource { downloads++; error("Selector conversion must not download") }
+                external(null).use { original ->
+                    testStore(context, key).save(original)
+                    assertEnvelopeVersion(context, key, 2)
+                    val manager = LocalSubscriptionManager(delivery, profiles, noDownload,
+                        OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")),
+                        { Instant.parse("2026-10-05T00:00:00Z") }, LocalSubscriptionAuthority(),
+                        manualSources = testStore(context, key), externalSource = noDownload)
+                    runBlocking {
+                        if (target == ManualSourceKind.None) manager.removeManualSource { it() }
+                        else manager.useAccountSource { it() }
+                    }
+                    assertEnvelopeVersion(context, key, 3)
+                    testStore(context, key).readLibrary()!!.use { library ->
+                        assertNull(library.selectedEntryId)
+                        assertFalse(library.clearPending)
+                        if (target == ManualSourceKind.None) {
+                            assertEquals(ConfigurationSelector.None, library.selector)
+                            assertTrue("Explicit removal must delete the entry, not leave an inactive ghost", library.entries.isEmpty())
+                        } else {
+                            assertEquals(ConfigurationSelector.Account, library.selector)
+                            val retained = library.entries.single()
+                            assertEquals(original.revision, retained.id)
+                            retained.copySource().use { assertTrue(original.sameEnvelope(it)) }
+                        }
+                        library.activeSource().use { converted ->
+                            assertEquals(target, converted.kind)
+                            assertEquals(library.selectorRevision, converted.revision)
+                            assertNotEquals(original.revision, converted.revision)
+                            assertFalse(converted.clearPending)
+                            assertNull(converted.copyBytes()); assertNull(converted.url)
+                            assertNull(converted.validUntil); assertNull(converted.contentIdentity)
+                            testStore(context, key).read()!!.use { assertTrue(converted.sameEnvelope(it)) }
+                        }
+                    }
+                    // Counters catch an inappropriate read even if a UI-summary helper swallowed its failure.
+                    assertEquals(0, deliveryAccess); assertEquals(0, profileAccess); assertEquals(0, downloads)
                 }
             }
         }

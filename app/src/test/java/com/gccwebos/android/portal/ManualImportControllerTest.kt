@@ -24,11 +24,13 @@ class ManualImportControllerTest {
         override fun save(record: DeliveryRecord) = error("Import must not claim a delivery")
         override fun clear() = Unit
     }
-    private inner class Fixture(scope: CoroutineScope) {
+    private inner class Fixture(scope: CoroutineScope, dispatcher: CoroutineDispatcher? = null) {
         val memory = MemoryManualSourceStore()
         var saves = 0
+        var onStoreRead: () -> Unit = {}
+        var onSnapshot: () -> Unit = {}
         val store = object : ManualSourceStore {
-            override fun read() = memory.read()
+            override fun read() = memory.read().also { onStoreRead() }
             override fun save(record: ManualSourceRecord) { saves++; memory.save(record) }
         }
         var reads = 0
@@ -47,7 +49,8 @@ class ManualImportControllerTest {
         }, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { now },
             LocalSubscriptionAuthority(), manualSources = store)
         val controller = ManualImportController(manager, scope, { allowed },
-            { action -> fenceCalls++; fence(action) }, { snapshots += it }, onSettled = { settled++ })
+            { action -> fenceCalls++; fence(action) }, { snapshots += it; onSnapshot() }, onSettled = { settled++ },
+            ioDispatcher = dispatcher ?: scope.coroutineContext[kotlin.coroutines.ContinuationInterceptor] as CoroutineDispatcher)
         fun ticket(): ManualImportController.Ticket {
             controller.open(); return requireNotNull(controller.begin())
         }
@@ -56,6 +59,77 @@ class ManualImportControllerTest {
             val bytes = yaml(host)
             try { manager.importManual(bytes) { it() } } finally { bytes.fill(0) }
         }
+    }
+
+    private class GatedDispatcher(private val delegate: CoroutineDispatcher) : CoroutineDispatcher() {
+        private val waiting = ArrayDeque<Pair<kotlin.coroutines.CoroutineContext, Runnable>>()
+        private var held = true
+        override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+            if (held) waiting.addLast(context to block) else delegate.dispatch(context, block)
+        }
+        fun release() {
+            held = false
+            while (waiting.isNotEmpty()) waiting.removeFirst().let { (context, block) -> delegate.dispatch(context, block) }
+        }
+    }
+
+    @Test fun asyncTicketAndSubmitStorageChecksRunOnIoWhilePublicationUsesTheOwnerDispatcher() = runTest {
+        val marker = ThreadLocal.withInitial { false }
+        val io = object : CoroutineDispatcher() {
+            private val delegate = StandardTestDispatcher(testScheduler)
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) =
+                delegate.dispatch(context) {
+                    marker.set(true)
+                    try { block.run() } finally { marker.set(false) }
+                }
+        }
+        val f = Fixture(this, io)
+        var storageReads = 0
+        f.onStoreRead = { assertTrue("Encrypted-source reads must use IO", marker.get()); storageReads++ }
+        f.onSnapshot = { assertFalse("UI publication must return to the owner dispatcher", marker.get()) }
+        f.controller.open()
+        val starting = async { f.controller.beginAsync() }
+        runCurrent()
+        val ticket = requireNotNull(starting.await())
+        assertTrue(storageReads > 0)
+        val readsBeforeSubmit = storageReads
+        f.controller.submit(ticket, yaml(), ManualImportInputKind.Document)
+        runCurrent()
+        assertTrue(storageReads > readsBeforeSubmit); assertEquals(1, f.snapshots.size)
+        assertEquals(1, f.fenceCalls); assertFalse(f.controller.busy)
+    }
+
+    @Test fun canceledAsyncCaptureCannotIssueATicketOrReplaceTheNextOpenOwner() = runTest {
+        val gate = GatedDispatcher(StandardTestDispatcher(testScheduler))
+        val f = Fixture(this, gate); f.controller.open()
+        val old = async { f.controller.beginAsync() }
+        runCurrent()
+        f.controller.cancel()
+        val current = f.ticket()
+        gate.release(); runCurrent()
+        assertNull(old.await()); assertTrue(f.controller.visible)
+        f.controller.submit(current, yaml(), ManualImportInputKind.Document); runCurrent()
+        assertEquals(1, f.snapshots.size); assertEquals(1, f.fenceCalls)
+    }
+
+    @Test fun canceledCallerDuringAsyncCaptureNeverPublishesALateTicket() = runTest {
+        val gate = GatedDispatcher(StandardTestDispatcher(testScheduler))
+        val f = Fixture(this, gate); f.controller.open()
+        val old = async { f.controller.beginAsync() }
+        runCurrent(); old.cancel(); gate.release(); runCurrent()
+        assertTrue(old.isCancelled); assertEquals(0, f.fenceCalls); assertTrue(f.snapshots.isEmpty())
+        val current = requireNotNull(f.controller.beginAsync())
+        f.controller.submit(current, yaml(), ManualImportInputKind.Document); runCurrent()
+        assertEquals(1, f.snapshots.size)
+    }
+
+    @Test fun admissionLostBeforeAsyncCaptureReturnsDoesNotIssueATicket() = runTest {
+        val gate = GatedDispatcher(StandardTestDispatcher(testScheduler))
+        val f = Fixture(this, gate); f.controller.open()
+        val pending = async { f.controller.beginAsync() }
+        runCurrent(); f.allowed = false; gate.release(); runCurrent()
+        assertNull(pending.await()); assertNull(f.controller.error)
+        assertEquals(0, f.fenceCalls); assertEquals(0, f.saves); assertTrue(f.snapshots.isEmpty())
     }
 
     @Test fun useAccountWithExistingV1FreshlyReloadsSelectableNodesInTheSameOperation() = runTest {

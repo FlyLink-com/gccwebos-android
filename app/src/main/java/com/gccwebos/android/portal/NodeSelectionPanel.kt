@@ -52,6 +52,9 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     latency: NodeLatencyController? = null,
     onImport: (() -> Unit)? = null,
     groupTitle: String? = null,
+    showTools: Boolean = true,
+    showAccountAction: Boolean = true,
+    headerActions: @Composable RowScope.() -> Unit = {},
     openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.expireIfNeeded() }
     val latestAccountBusy by rememberUpdatedState(accountBusy)
@@ -90,7 +93,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
         if (canMeasure) latency?.ensureMeasured() else latency?.cancel()
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (!hasCapability) TextButton(onClick = openAccount, enabled = !accountBusy,
+        if (showAccountAction && !hasCapability) TextButton(onClick = openAccount, enabled = !accountBusy,
             modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-account")) {
             Text(if (authenticated) "订阅" else "登录")
         }
@@ -121,19 +124,20 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 modifier = Modifier.testTag("nodes-count"))
                         }
                     }
-                    if (latency != null) IconButton(onClick = { latency.refresh() },
+                    if (showTools && latency != null) IconButton(onClick = { latency.refresh() },
                         enabled = canMeasure && !latency.busy,
                         modifier = Modifier.size(48.dp).testTag("nodes-latency-refresh")) {
                         Icon(painterResource(R.drawable.brand_lightning), contentDescription = "测试节点延迟",
                             modifier = Modifier.size(21.dp),
                             tint = if (canMeasure && !latency.busy) Brand.Cyan else Brand.Muted)
                     }
-                    onImport?.let { action ->
+                    onImport?.takeIf { showTools }?.let { action ->
                         IconButton(action, modifier = Modifier.size(48.dp).testTag("nodes-import")) {
                             Icon(painterResource(R.drawable.brand_receipt), contentDescription = "导入订阅",
                                 tint = Brand.Cyan, modifier = Modifier.size(21.dp))
                         }
                     }
+                    headerActions()
                 }
                 if (expanded) {
                     Row(Modifier.fillMaxWidth().testTag("nodes-selection-summary")
@@ -179,7 +183,7 @@ private fun nodeProtocolLabel(protocol: String): String = when (protocol) {
 }
 
 @Composable
-private fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, chosen: Boolean?,
+internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, chosen: Boolean?,
     observation: NodeLatencyObservation? = null, regionTag: String, latencyTag: String,
     modifier: Modifier = Modifier, inspectionIndex: Int? = null) {
     Row(modifier.fillMaxWidth().heightIn(min = 56.dp)

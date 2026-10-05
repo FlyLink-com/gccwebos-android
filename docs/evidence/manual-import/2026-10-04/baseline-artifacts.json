@@ -1,0 +1,22 @@
+{
+  "stage": "baseline",
+  "package": "com.gccwebos.android.candidate.acceptance.manual20261004",
+  "signer": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+  "versionCode": 6,
+  "sourceHead": "eed8ed295b9e4f878b01de12a6b0586a48a76051",
+  "sourceTrackedDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "native": {
+    "arm64-v8a": "30a35588e2605bb5343fcb43300b2ef53217646858e848a60e2aa892fcfdda47",
+    "x86_64": "98e668e0343fc9a11b37c72d4a9ee36dbb1aeecb4eee52634c4379f3db649020"
+  },
+  "sourceInputCount": 261,
+  "sourceInputsSha256": "f90048a042d5abaa1dec32c8fd73b01f0bb0e4803e63c72dde842f034e2addca",
+  "app": {
+    "file": "baseline-app.apk",
+    "sha256": "c1cf558d0efd2bd77572ad0a38af2e2531f1e433182b0af5d8865038f2f2222e"
+  },
+  "test": {
+    "file": "baseline-test.apk",
+    "sha256": "90efa91edcdf935527c088f120bfc2364bf4d05a0bef476b0f1f93bd1295b9b8"
+  }
+}

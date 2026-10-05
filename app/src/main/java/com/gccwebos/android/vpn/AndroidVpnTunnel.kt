@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.gccwebos.android.BuildConfig
 import com.gccwebos.android.core.AuthorizedConfig
+import com.gccwebos.android.core.ConnectionTransportLease
 import com.gccwebos.android.core.LifecycleTunnel
 import com.gccwebos.android.core.TrafficProbe
 import com.gccwebos.android.core.TunnelPreparation
@@ -55,7 +56,8 @@ internal class AndroidVpnTunnel(private val context: Context, private val ownerI
     private var endpoint: Endpoint? = null
     private var sequence = 0L
 
-    private inner class Endpoint {
+    private inner class Endpoint(val lease: ConnectionTransportLease?) {
+        val pin = VpnTransportPin(lease?.networkHandle ?: 0, lease?.validUntilElapsedMillis ?: 0)
         val receipt = VpnTransportReceipt<IBinder>()
         val ready get() = receipt.ready
         val dead get() = receipt.dead
@@ -100,18 +102,34 @@ internal class AndroidVpnTunnel(private val context: Context, private val ownerI
     }
 
     /** Called after consent, outside authority/command fences and before synchronous accept. */
-    override suspend fun prepareTransport(): Boolean {
+    override suspend fun prepareTransport(): Boolean = preparePinnedTransport(null)
+    override suspend fun prepareTransport(config: AuthorizedConfig): Boolean = preparePinnedTransport(config.transportLease)
+    private suspend fun preparePinnedTransport(lease: ConnectionTransportLease?): Boolean {
+        if (lease == null && BuildConfig.CONNECTION_ENDPOINT_HOSTNAME && !BuildConfig.CONNECTION_SYNTHETIC_ACCEPTANCE) return false
+        if (lease != null && (!lease.isCurrent() || !VpnTransportPin(lease.networkHandle,
+                lease.validUntilElapsedMillis).permitsStart(SystemClock.elapsedRealtime()))) return false
         val next = synchronized(lock) {
             check(endpoint == null) { "Previous VPN incarnation requires cleanup" }
-            Endpoint().also { endpoint = it }
+            Endpoint(lease).also { endpoint = it }
         }
         return try {
             withContext(Dispatchers.Main.immediate) {
-                next.bound = context.bindService(Intent(context, ProductionVpnService::class.java)
-                    .setAction(VpnControl.ACTION_BIND), next.connection, Context.BIND_AUTO_CREATE)
+                val intent = Intent(context, ProductionVpnService::class.java).setAction(VpnControl.ACTION_BIND)
+                lease?.let {
+                    intent.putExtra(VpnControl.EXTRA_NETWORK_HANDLE, next.pin.networkHandle)
+                    intent.putExtra(VpnControl.EXTRA_LEASE_DEADLINE, next.pin.validUntilElapsedMillis)
+                }
+                next.bound = context.bindService(intent, next.connection, Context.BIND_AUTO_CREATE)
                 check(next.bound)
             }
             withTimeout(5_000) { next.ready.await() }
+            check(lease?.isCurrent() != false && next.pin.permitsStart(SystemClock.elapsedRealtime()))
+            val state = withContext(Dispatchers.IO) {
+                val stateCall = BoundedVpnCall { transact(next, VpnControl.STATE) }
+                synchronized(lock) { next.calls.add(stateCall) }
+                stateCall.await(500)
+            }
+            check(state == VpnControl.STARTING)
             true
         } catch (_: Exception) {
             // A partial binding is a real resource, even though no TUN was accepted yet.
@@ -125,6 +143,8 @@ internal class AndroidVpnTunnel(private val context: Context, private val ownerI
         val generation: Long
         synchronized(lock) {
             next = endpoint ?: return false
+            if (next.lease !== config.transportLease || next.lease?.isCurrent() == false ||
+                !next.pin.permitsStart(SystemClock.elapsedRealtime())) return false
             if (!next.receipt.admit()) { trace("sender-admission-rejected"); return false }
             next.terminal = terminal
             next.expiry = config.validUntil
@@ -140,13 +160,17 @@ internal class AndroidVpnTunnel(private val context: Context, private val ownerI
                     writeLong(config.validUntil?.toEpochMilli() ?: 0)
                     writeLong(admissionDeadline)
                     writeByteArray(material)
+                    if (next.pin.leased) {
+                        writeLong(next.pin.networkHandle)
+                        writeLong(next.pin.validUntilElapsedMillis)
+                    }
                 } == 1
             } finally { material.fill(0) }
         }
         synchronized(lock) { next.calls.add(call) }
         return try {
             call.await(1_500) && synchronized(lock) {
-                endpoint === next && next.receipt.isCurrent()
+                endpoint === next && next.receipt.isCurrent() && next.lease?.isCurrent() != false
             }
         } catch (failure: Exception) { trace("sender-copy-failed-${failure.javaClass.simpleName}-${failure.cause?.javaClass?.simpleName ?: "none"}"); false }
     }

@@ -10,14 +10,14 @@ import subprocess
 import sys
 from zipfile import ZipFile
 
-SOURCE = 'b3bb94fe73aa39e03fd25e4b7fc7ef4ba5ab7987'
-ARTIFACT_ID = 11114730030
-RUN_ID = 36746157076
-ZIP_SHA = 'b50311e89d1a2a8a438f3ef4c6ea85bb7d2b3fdc8019d6356249c5f623890efc'
-NATIVE_TREE = '1d19e7c69ec3e0b8b9450a404c80d97d17831f25'
+SOURCE = '98ffd6bae926e3d5f7c2a60b2b21af1278874436'
+ARTIFACT_ID = 11306235582
+RUN_ID = 37206973354
+ZIP_SHA = '070f3bde1da1812c69b895991db807447fada99e96b63c7222333d5cfa435568'
+NATIVE_TREE = '6ed53e315bec8516d08d7f6432aa7b24a58492fe'
 LIBRARIES = {
-    'arm64-v8a': 'efe638604b4f54f76fbba85649027f6b72f67b0dab5d5c18d248a1de7e5920bb',
-    'x86_64': 'c2099755603a7784f1c935fc8151b418a5f6859dc8427daa65fd3021add8fe2b',
+    'arm64-v8a': '2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463',
+    'x86_64': '6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8',
 }
 BOUNDARIES = ['native', 'app/src/main/java/com/gccwebos/android/vpn/SafeProxyConfig.kt',
               'app/src/main/java/com/gccwebos/android/vpn/MihomoNative.kt',
@@ -42,7 +42,7 @@ def digest(stream):
 
 def verify_metadata(metadata):
     assert metadata['id'] == ARTIFACT_ID and not metadata['expired']
-    assert metadata['size_in_bytes'] == 105666028 and metadata['digest'] == 'sha256:' + ZIP_SHA
+    assert metadata['size_in_bytes'] == 209736015 and metadata['digest'] == 'sha256:' + ZIP_SHA
     assert metadata['workflow_run']['id'] == RUN_ID and metadata['workflow_run']['head_sha'] == SOURCE
     assert metadata['workflow_run']['repository_id'] == 1393547812
 

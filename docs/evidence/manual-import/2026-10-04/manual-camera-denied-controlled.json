@@ -1,0 +1,28 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportDeviceFlowTest#realCameraPermissionDenialReturnsFixedFailureWithoutImport"
+  ],
+  "expected": 1,
+  "started": 1,
+  "passed": 0,
+  "negativeCodes": [
+    -2
+  ],
+  "ok": [],
+  "timedOut": false,
+  "success": false,
+  "sanitizedExceptionTypes": [
+    "java.lang.AssertionError"
+  ],
+  "sanitizedStackFrames": [
+    "org.junit.Assert.fail(Assert.java:89)",
+    "org.junit.Assert.assertTrue(Assert.java:42)",
+    "com.gccwebos.android.ManualImportDeviceFlowTest.exercise(ManualImportDeviceFlowTest.kt:117)",
+    "com.gccwebos.android.ManualImportDeviceFlowTest.realCameraPermissionDenialReturnsFixedFailureWithoutImport(ManualImportDeviceFlowTest.kt:41)"
+  ],
+  "fixedDeviceStatus": {
+    "manualDeviceWaiting": [
+      "camera-permission-denial"
+    ]
+  }
+}

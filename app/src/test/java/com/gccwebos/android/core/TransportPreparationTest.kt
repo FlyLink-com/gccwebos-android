@@ -6,6 +6,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TransportPreparationTest {
+    @Test fun configOwnsLeaseAndRevokedTransportCannotActivate() {
+        var current = true
+        var closes = 0
+        val lease = object : ConnectionTransportLease {
+            override val networkHandle = 123L
+            override val validUntilElapsedMillis = 456L
+            override fun isCurrent() = current
+            override fun close() { closes++; current = false }
+        }
+        val config = AuthorizedConfig("synthetic", byteArrayOf(7), transportLease = lease)
+        assertTrue(config.hasPreparedIdentity(byteArrayOf(7)))
+        assertFalse(config.hasPreparedIdentity(byteArrayOf(8)))
+        assertSame(lease, config.transportLease)
+        assertEquals("AuthorizedConfig(material=<redacted>)", config.toString())
+        current = false
+        var accepted = false
+        try { config.activate { accepted = true; true }; fail("Revoked transport must reject") }
+        catch (failure: PreparationRejected) { assertEquals(PreparationFailure.STALE, failure.reason) }
+        assertFalse(accepted)
+        config.close(); config.close()
+        assertEquals(1, closes)
+        assertFalse(config.hasPreparedIdentity(byteArrayOf(7)))
+    }
+
     @Test fun cancelAfterSuccessfulTransportBeforeAcceptanceCleansAndAllowsFreshAdmission() = runTest {
         var freshReads = 0
         var activations = 0
@@ -25,6 +49,10 @@ class TransportPreparationTest {
             override fun observeClear(onClear: () -> Unit) = Closeable { }
         }
         val tunnel = object : LifecycleTunnel, TunnelPreparation {
+            override suspend fun prepareTransport(config: AuthorizedConfig): Boolean {
+                assertEquals("synthetic", config.lineId)
+                return prepareTransport()
+            }
             override suspend fun prepareTransport(): Boolean {
                 transports++; allocated = true
                 afterPreparation?.invoke()

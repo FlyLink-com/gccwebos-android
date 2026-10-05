@@ -50,8 +50,11 @@ data class AccessDecision(val block: BusinessBlock? = null)
  */
 class AuthorizedConfig(val lineId: String, material: ByteArray,
     val validUntil: Instant? = null,
+    val transportLease: ConnectionTransportLease? = null,
     private val activationGuard: (((() -> Boolean)) -> Boolean)? = null) : Closeable {
     private val bytes = material.copyOf()
+    // This identity belongs only to prepared engine bytes. It never identifies a raw subscription.
+    private val preparedDigest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
     private var closed = false
 
     init { require(lineId.isNotBlank()) { "A non-empty authorized line is required" } }
@@ -62,18 +65,25 @@ class AuthorizedConfig(val lineId: String, material: ByteArray,
         return bytes.copyOf()
     }
 
+    @Synchronized
+    internal fun hasPreparedIdentity(candidate: ByteArray): Boolean = !closed &&
+        java.security.MessageDigest.isEqual(preparedDigest,
+            java.security.MessageDigest.getInstance("SHA-256").digest(candidate))
+
     val requiresAtomicActivation: Boolean get() = activationGuard != null
 
     /** Fresh production-shaped material can only cross a synchronous, fenced handoff. */
     fun activate(action: () -> Boolean): Boolean {
         synchronized(this) { check(!closed) { "Configuration is closed" } }
+        if (transportLease?.isCurrent() == false) throw PreparationRejected(PreparationFailure.STALE)
         return activationGuard?.invoke(action) ?: action()
     }
 
-    @Synchronized
     override fun close() {
-        bytes.fill(0)
-        closed = true
+        val release = synchronized(this) {
+            if (closed) false else { bytes.fill(0); preparedDigest.fill(0); closed = true; true }
+        }
+        if (release) transportLease?.close()
     }
 
     override fun toString(): String = "AuthorizedConfig(material=<redacted>)"
@@ -153,6 +163,7 @@ class ConnectionCoordinator(
     private var sequence = 0L
     private var current: Ticket? = null
     private var closed = false
+    private var sourceChangeInProgress = false
     private var retirement: Ticket? = null
     @Volatile private var retirementAdmissionFailed = false
     private var lastRequestedLine: String? = null
@@ -224,6 +235,32 @@ class ConnectionCoordinator(
     fun restart(): Command = command(submit(null, Operation.RECONNECT))
     fun stop(): Command = command(submit(null, Operation.CONNECT, disconnect = true))
 
+    /** A terminal state can be published before its worker releases the lifecycle mutex. */
+    suspend fun stopAndAwaitClean() {
+        val ticket = submit(null, Operation.CONNECT, disconnect = true)
+        ticket.job.join()
+        check(ticket.result.await() == ConnectionState.Disconnected) { "Connection cleanup failed" }
+        withIdleSourceChange { }
+    }
+
+    /** Source persistence must serialize with command submission, not a lagging UI snapshot.
+     * No network work may run in this callback. The caller stages first, then takes its
+     * source authority lock inside this fence, in the same order as ordinary admission.
+     * Terminal errors qualify only after their worker and all cleanup have actually ended.
+     */
+    fun withIdleSourceChange(action: () -> Unit) = synchronized(commandLock) {
+        val terminal = when (val currentState = mutableState.value) {
+            ConnectionState.Disconnected, is ConnectionState.Blocked -> true
+            is ConnectionState.Failed -> currentState.reason != Failure.CLEANUP_FAILED
+            else -> false
+        }
+        check(!closed && owner.isActive && !sourceChangeInProgress && !retirementAdmissionFailed &&
+            terminal && current?.job?.isCompleted != false && !lifecycle.isLocked &&
+            !tunnelMayBeRunning && !preparedMaterialMayExist) { "Connection owner is not idle" }
+        sourceChangeInProgress = true
+        try { action() } finally { sourceChangeInProgress = false }
+    }
+
     suspend fun connect(lineId: String? = null): ConnectionState = await(submit(lineId, Operation.CONNECT))
 
     suspend fun switchLine(lineId: String): ConnectionState {
@@ -277,7 +314,7 @@ class ConnectionCoordinator(
     private fun submit(lineId: String?, operation: Operation, disconnect: Boolean = false,
         selection: SelectionIntent? = null): Ticket {
         val ticket = synchronized(commandLock) {
-            check(!closed && owner.isActive) { "Connection coordinator is closed" }
+            check(!closed && owner.isActive && !sourceChangeInProgress) { "Connection coordinator is unavailable" }
             val previous = current
             val connected = mutableState.value as? ConnectionState.Connected
             // Only identical active ordinary connects are coalesced. Switch/reconnect are explicit.
@@ -400,7 +437,7 @@ class ConnectionCoordinator(
                 val started = step(Step.TUNNEL) {
                     ownsNewTunnel = true
                     tunnelMayBeRunning = true // start may partially allocate, even when it fails.
-                    if (tunnel is TunnelPreparation && !tunnel.prepareTransport()) {
+                    if (tunnel is TunnelPreparation && !tunnel.prepareTransport(authorized)) {
                         throw Abort(ConnectionState.Failed(Failure.TUNNEL_FAILED))
                     }
                     checkpoint(ticket)

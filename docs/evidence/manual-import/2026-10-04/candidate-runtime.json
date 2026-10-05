@@ -1,0 +1,9 @@
+{
+  "stage": "candidate",
+  "tests": 1,
+  "success": true,
+  "manualV1Sha256": "f145e1ef57858102362ae7358ee8c8a2aba4c6884824e7d247965f1f775733d2",
+  "manualSidecarSha256": "645ba57aaf4a24a5fa5edab5df9c7fb29e1b815e96e8ae948c21f933eca0c7df",
+  "manualClearPending": "false",
+  "manualCandidate": "verified-preserved-v1-empty-tombstone-no-http-no-vpn"
+}

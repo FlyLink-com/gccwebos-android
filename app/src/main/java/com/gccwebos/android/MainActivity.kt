@@ -23,28 +23,38 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.*
 import com.gccwebos.android.commerce.CommerceMode
 import com.gccwebos.android.commerce.CommercePanel
+import com.gccwebos.android.commerce.CatalogDockState
+import com.gccwebos.android.commerce.CatalogPurchaseDock
+import com.gccwebos.android.commerce.LocalCatalogPurchaseDock
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.AccountPanel
 import com.gccwebos.android.portal.RegistrationController
@@ -52,13 +62,13 @@ import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.NodeSelectionPanel
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.productionRepository
-import com.gccwebos.android.update.UpdatePanel
 import com.gccwebos.android.vpn.ActivityVpnPermission
 import com.gccwebos.android.vpn.ConnectionOwnerService
 import java.time.Instant
 import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     private data class ConsentAttachment(
@@ -114,15 +124,19 @@ class MainActivity : ComponentActivity() {
                     Surface(Modifier.fillMaxSize(), color = Brand.Background) {
                         Column(Modifier.fillMaxSize().testTag(if (bindingFailure) "connection-owner-unavailable" else "connection-owner-initializing"),
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            if (!bindingFailure) CircularProgressIndicator(color = Brand.Cyan)
-                            Text(if (bindingFailure) "连接服务暂不可用" else "正在初始化连接服务",
+                            if (!bindingFailure) Image(painterResource(R.drawable.brand_robot_avatar), null,
+                                modifier = Modifier.size(52.dp))
+                            Text(if (bindingFailure) "连接服务暂不可用" else "飞连vpn",
                                 modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
             } else {
                 val control by current.control.collectAsState()
+                val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodePingProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
+                    nodeLatencyProbe = nodeProbe,
+                    sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,
                     onConnectionPowerAction = { action -> current.power(action) })
             }
         }
@@ -165,12 +179,21 @@ private val primaryDestinations = listOf(Destination.Connect, Destination.Lines,
 internal class AccountForegroundObserver(private val account: AccountController) : LifecycleEventObserver {
     private var leftForeground = false
     override fun onStateChanged(source: androidx.lifecycle.LifecycleOwner, event: Lifecycle.Event) {
-        if (event == Lifecycle.Event.ON_STOP) leftForeground = true
+        if (event == Lifecycle.Event.ON_STOP) {
+            leftForeground = true
+            account.nodeLatency.setForeground(false)
+        }
+        if (event == Lifecycle.Event.ON_RESUME) account.nodeLatency.setForeground(true)
         if (event == Lifecycle.Event.ON_RESUME && leftForeground) {
             leftForeground = false; account.onForeground()
         }
     }
 }
+
+/** Back cancels new sign-in work; saved-session verification and authenticated reads only navigate. */
+internal fun shouldCancelLoginOnBack(account: AccountController): Boolean =
+    !account.authenticated && !account.restoring && !account.foregroundCheckPending &&
+        !account.restorationPending && (account.factorReference != null || account.busy)
 
 @Composable
 internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommerce: Boolean = true,
@@ -181,18 +204,29 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     paymentOpenerOverride: ((String) -> Unit)? = null,
     connectionControlState: ConnectionControlState = ConnectionControlState(),
     onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
-    repositoryOverride: PortalRepository? = null) {
+    repositoryOverride: PortalRepository? = null,
+    glassMode: GlassMode? = null,
+    nodeLatencyProbe: com.gccwebos.android.portal.NodeLatencyProbe? = null,
+    autoRefreshPages: Boolean = autoLoadCommerce,
+    sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
+    clearLocalData: (suspend () -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
         val scope = rememberCoroutineScope()
-        remember(accountOverride, repositoryOverride) {
-            accountOverride ?: AccountController(repositoryOverride ?: productionRepository(context), scope)
+        remember(accountOverride, repositoryOverride, nodeLatencyProbe) {
+            val repository = repositoryOverride ?: productionRepository(context)
+            accountOverride ?: AccountController(repository, scope,
+                nodeLatencyProbe = nodeLatencyProbe, sourceCommitFence = sourceCommitFence,
+                clearLocalData = clearLocalData ?: { repository.clearLocalData() })
         }
     }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
     LaunchedEffect(account, account.authSessionGeneration, account.localSubscription, account.busy,
-        account.restoring, account.foregroundCheckPending, account.clearing) { account.nodeSelection.sync() }
+        account.restoring, account.foregroundCheckPending, account.clearing) {
+        account.nodeSelection.sync()
+        account.nodeLatency.sync()
+    }
     // Keep an accepted power command outside keyed destinations. Navigation cannot replay it
     // while the controller is still publishing acceptance/rejection. A new snapshot/revision is the ack.
     var acceptedConnectionCommand by remember(connectionControlState, account) { mutableStateOf(false) }
@@ -216,61 +250,81 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     DisposableEffect(account, lifecycle) {
         val observer = AccountForegroundObserver(account)
         lifecycle?.addObserver(observer)
-        onDispose { lifecycle?.removeObserver(observer) }
+        onDispose { lifecycle?.removeObserver(observer); account.nodeLatency.cancel(); account.manualImport.cancel() }
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
+    var startRegistration by rememberSaveable { mutableStateOf(false) }
+    var plansVisit by remember { mutableStateOf(0) }
+    var navigationRequest by remember { mutableStateOf(0) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
+    val catalogDock = remember { CatalogDockState() }
     BackHandler(enabled = selected != Destination.Connect) {
-        if (selected == Destination.Profile && !account.authenticated &&
-            (account.factorReference != null || account.busy)) account.cancelAuthentication()
-        else selectedName = Destination.Connect.name
+        if (selected == Destination.Profile && shouldCancelLoginOnBack(account)) account.cancelAuthentication()
+        else { selectedName = Destination.Connect.name; navigationRequest++ }
     }
-    // Guidance belongs to the authenticated lifecycle, outside the keyed destination composition.
-    var guidance by remember { mutableStateOf(ResourceGuidanceState()) }
-    val currentGuidance = guidance.reconcile(
-        authenticated = account.authenticated,
-        accountKey = account.authenticatedAccountId ?: if (accountOverride != null) account.account.trim() else "",
-        sessionGeneration = account.authSessionGeneration,
-        resource = account.resource,
-        busy = account.busy,
-        error = account.error,
-        onConnectionPage = selected == Destination.Connect,
-    )
-    SideEffect { if (guidance != currentGuidance) guidance = currentGuidance }
-    GccTheme {
+    GccTheme(materialMode = glassMode) {
         Surface(Modifier.fillMaxSize(), color = Brand.Background) {
-            Scaffold(containerColor = Brand.Background, bottomBar = {
-                Surface(color = Brand.Background) {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        NavigationBar(Modifier.widthIn(max = 760.dp).fillMaxWidth()
-                            .heightIn(min = if (LocalDensity.current.fontScale > 1.3f) 112.dp else 80.dp),
-                            containerColor = Brand.Surface, tonalElevation = 0.dp) {
-                            primaryDestinations.forEach { destination ->
-                                val title = stringResource(destination.title)
-                                NavigationBarItem(
-                                    modifier = Modifier.testTag("nav-${destination.name}"),
-                                    selected = destination == selected,
-                                    onClick = { selectedName = destination.name },
-                                    icon = { Icon(painterResource(destination.icon), contentDescription = null) },
-                                    label = { Text(title) },
-                                    colors = NavigationBarItemDefaults.colors(selectedIconColor = Brand.Cyan,
-                                        selectedTextColor = Brand.Cyan, indicatorColor = Brand.SurfaceRaised,
-                                        unselectedIconColor = Brand.Muted, unselectedTextColor = Brand.Muted),
-                                )
+            // One continuous backdrop also remains visible behind the floating navigation bar.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                val loginPage = selected == Destination.Profile && !account.authenticated && !account.retainingCommerceSession
+                val backdropModifier = if (loginPage) Modifier.fillMaxSize() else Modifier.widthIn(max = 680.dp).fillMaxSize()
+                BrandBackdrop(backdropModifier, loginPage = loginPage)
+                CompositionLocalProvider(LocalCatalogPurchaseDock provides catalogDock) {
+                Scaffold(containerColor = Color.Transparent, bottomBar = {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding()
+                        .padding(start = 12.dp, end = 12.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (selected == Destination.Plans) catalogDock.summary?.let { summary ->
+                            Column(Modifier.widthIn(max = 680.dp).fillMaxWidth().heightIn(max = 240.dp)
+                                .verticalScroll(rememberScrollState())) {
+                                CatalogPurchaseDock(summary, catalogDock::continuePurchase)
+                            }
+                        }
+                        GlassSurface(Modifier.widthIn(max = 760.dp).fillMaxWidth().testTag("glass-navigation"),
+                            shape = RoundedCornerShape(20.dp), kind = GlassSurfaceKind.Navigation) {
+                            // A minimum, not a fixed height: wrapped or enlarged labels grow this row.
+                            Row(Modifier.fillMaxWidth().selectableGroup().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                primaryDestinations.forEach { destination ->
+                                    val title = stringResource(destination.title)
+                                    val chosen = destination == selected
+                                    Column(Modifier.weight(1f).heightIn(min = 48.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(if (chosen) Brand.Cyan.copy(alpha = .15f) else Color.Transparent)
+                                        .testTag("nav-${destination.name}")
+                                        .selectable(selected = chosen, onClick = {
+                                            if (destination == Destination.Profile) startRegistration = false
+                                            if (destination == Destination.Plans) plansVisit++
+                                            navigationRequest++
+                                            selectedName = destination.name
+                                        }, role = Role.Tab)
+                                        .padding(2.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Icon(painterResource(destination.icon), contentDescription = null,
+                                            tint = if (chosen) Brand.Cyan else Brand.Muted, modifier = Modifier.size(20.dp))
+                                        Text(title, color = if (chosen) Brand.Cyan else Brand.Muted,
+                                            style = MaterialTheme.typography.labelMedium, fontSize = 11.sp, textAlign = TextAlign.Center)
+                                    }
+                                }
                             }
                         }
                     }
+                }) { padding ->
+                    // Scaffold measures the entire bar, its gap and system inset for content clearance.
+                    key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
+                        commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
+                        openAccount = { startRegistration = false; navigationRequest++; selectedName = Destination.Profile.name },
+                        openPlans = { plansVisit++; navigationRequest++; selectedName = Destination.Plans.name },
+                        openConnect = { navigationRequest++; selectedName = Destination.Connect.name },
+                        openNodes = { navigationRequest++; selectedName = Destination.Lines.name },
+                        openRegistration = { startRegistration = true; navigationRequest++; selectedName = Destination.Profile.name },
+                        startRegistration = startRegistration, registrationOpener = registrationOpener,
+                        loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
+                        plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages) }
                 }
-             }) { padding -> key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
-                 commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
-                 openAccount = { selectedName = Destination.Profile.name }, openPlans = { selectedName = Destination.Plans.name },
-                 openNodes = { selectedName = Destination.Lines.name }, registrationOpener = registrationOpener,
-                 loginStartupReady = loginStartupReady, registrationOverride = registrationOverride) } }
-            if (currentGuidance.visible) NoResourceGuidance(
-                onDismiss = { guidance = currentGuidance.dismiss() },
-                openPlans = { guidance = currentGuidance.dismiss(); selectedName = Destination.Plans.name },
-                openWallet = { guidance = currentGuidance.dismiss(); selectedName = Destination.Profile.name },
-            )
+                }
+
+            }
         }
     }
 }
@@ -278,30 +332,18 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
 @Composable
 private fun LoginScreen(account: AccountController, registrationOpener: ((String) -> Unit)?,
                          loginStartupReady: Boolean, registrationOverride: RegistrationController?,
-                         padding: PaddingValues) {
+                         padding: PaddingValues, startRegistration: Boolean) {
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
-        Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize())
-        Box(Modifier.fillMaxSize().background(Brand.Background.copy(alpha = .86f)))
         Column(Modifier.widthIn(max = 520.dp).fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp).testTag("login-screen"),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            .padding(horizontal = 16.dp, vertical = 12.dp).testTag("login-screen"),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
             BrandHeader()
             if (account.restoring || account.foregroundCheckPending) Column(Modifier.testTag("session-checking"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator(color = Brand.Cyan)
-                Text("正在验证已保存登录", style = MaterialTheme.typography.titleLarge)
-                SupportingText("验证后显示账户资源。")
-                TextButton(onClick = account::cancelAuthentication) { Text("取消并返回登录") }
+                Image(painterResource(R.drawable.brand_robot_avatar), null, modifier = Modifier.size(52.dp))
             } else {
-                if (account.localSubscription.hasCapability) Column(Modifier.testTag("local-subscription-notice"),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("发现已保存的订阅交付", style = MaterialTheme.typography.titleMedium)
-                    SupportingText("本地配置尚未就绪。可仅使用已保存的订阅链接重新读取，不需要重新领取或登录。")
-                    BrandButton("重新读取本地订阅", account::restoreLocal, enabled = !account.busy, modifier = Modifier.testTag("local-subscription-retry"))
-                }
                 AccountPanel(account, compactLogin = true, registrationOpener = registrationOpener,
-                    loginStartupReady = loginStartupReady, registrationOverride = registrationOverride)
+                    loginStartupReady = loginStartupReady, registrationOverride = registrationOverride, startRegistration = startRegistration)
             }
         }
     }
@@ -312,42 +354,80 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   autoLoadCommerce: Boolean, commerceOverride: com.gccwebos.android.commerce.CommerceController?,
                   commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery?, paymentOpenerOverride: ((String) -> Unit)?,
                   connectionControlState: ConnectionControlState, onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)?,
-                  openAccount: () -> Unit, openPlans: () -> Unit, openNodes: () -> Unit,
+                  openAccount: () -> Unit, openPlans: () -> Unit, openConnect: () -> Unit, openNodes: () -> Unit,
+                  openRegistration: () -> Unit, startRegistration: Boolean,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
-                  registrationOverride: RegistrationController?) {
+                  registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
+                  autoRefreshPages: Boolean) {
+    val latestControl by rememberUpdatedState(connectionControlState)
+    DisposableEffect(account, destination) {
+        onDispose { if (destination == Destination.Lines) account.manualImport.cancel() }
+    }
+    // Verified authentication revokes old opaque node handles. A mounted Nodes page must
+    // rebuild them with a fresh read; other pages do not gain another navigation refresh.
+    val nodesOwnerGeneration = account.authSessionGeneration.takeIf { destination == Destination.Lines }
+    LaunchedEffect(account, destination, navigationRequest, autoRefreshPages, nodesOwnerGeneration) {
+        if (!autoRefreshPages || (navigationRequest == 0 && destination != Destination.Lines)) return@LaunchedEffect
+        snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing && !account.manualImport.busy }.first { it }
+        if (destination == Destination.Profile && !account.authenticated && !startRegistration) {
+            account.restoreAccount()
+        } else if (destination == Destination.Lines) {
+            // An ordinary page visit cannot invalidate an accepted connection preparation.
+            if (!account.nodeSelection.busy && !latestControl.commandPending && latestControl.phase !in
+                setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)) {
+                // Navigation reads never claim or acknowledge a delivery. Those recovery
+                // transactions stay behind the existing explicit connection/import actions.
+                if (account.localSubscription.hasCapability) account.nodeSelection.refresh()
+                else if (account.authenticated) account.refreshAccountUsage()
+                snapshotFlow { !account.busy && !account.nodeSelection.busy }.first { it }
+                account.nodeLatency.refresh()
+            }
+        } else if (destination == Destination.Connect || destination == Destination.Profile) {
+            if (account.authenticated) account.refreshAccountUsage()
+        }
+    }
     if (destination == Destination.Profile) {
-        LaunchedEffect(account) { if (!account.authenticated && account.localSubscription.hasProfile) account.restoreAccount() }
         if (!account.authenticated && !account.retainingCommerceSession) {
-            LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride, padding)
+            LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride, padding, startRegistration)
             return
         }
     }
     val compact = destination == Destination.Connect || destination == Destination.Lines || destination == Destination.Plans || destination == Destination.Orders || destination == Destination.Profile
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
-        Image(painterResource(R.drawable.brand_lounge), null, contentScale = ContentScale.Crop,
-            modifier = Modifier.widthIn(max = 680.dp).fillMaxSize())
-        Box(Modifier.widthIn(max = 680.dp).fillMaxSize().background(Brand.Background.copy(alpha = .30f)))
         // Readable line lengths on tablets; no fixed-height account forms or data cards.
         Column(Modifier.widthIn(max = 680.dp).fillMaxSize()
-            .verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = if (compact) 16.dp else 20.dp)
+            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = if (compact) 12.dp else 16.dp)
             .testTag("page-${destination.name}"),
-            verticalArrangement = Arrangement.spacedBy(if (compact) 12.dp else 18.dp)) {
+            verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp)) {
             BrandHeader()
             when (destination) {
                 Destination.Connect -> {
                     ConnectionOverview(account, openAccount, openPlans, openNodes, connectionControlState,
-                        onConnectionPowerAction)
+                        onConnectionPowerAction, openRegistration)
                 }
                 Destination.Lines -> {
-                    Text("订阅节点", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     LaunchedEffect(account.authSessionGeneration, account.authenticated) { account.nodeSelection.sync() }
                     NodeSelectionPanel(account.nodeSelection, account.nodes, account.resource,
-                        account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending,
+                        account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
-                        openAccount = openAccount)
+                        onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency,
+                        onImport = account.manualImport::open)
+                    val importer = account.manualImport
+                    val source = account.localSubscription.sourceKind
+                    val importUsage by account.accountUsage.state.collectAsState()
+                    com.gccwebos.android.manualimport.ManualImportHost(
+                        visible = importer.visible,
+                        busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
+                            account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
+                        error = importer.error,
+                        canUseAccount = source != com.gccwebos.android.portal.ManualSourceKind.LegacyRemote,
+                        canRemove = source in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
+                            com.gccwebos.android.portal.ManualSourceKind.ImportedRemote),
+                        onDismiss = importer::cancel, onBegin = importer::begin, onSubmit = importer::submit,
+                        onCancel = importer::cancel, onFailure = importer::failure,
+                        onUseAccount = importer::useAccount, onRemove = importer::remove)
                 }
                 Destination.Plans -> {
-                    Text("套餐", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     if (!account.authenticated && !account.retainingCommerceSession) {
                         BrandCard(Modifier.testTag("commerce-signed-out")) {
                             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
@@ -355,15 +435,14 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                                 Text("∞", color = Brand.Cyan, style = MaterialTheme.typography.displayLarge,
                                     modifier = Modifier.clearAndSetSemantics {})
                                 Text("选择适合你的套餐", style = MaterialTheme.typography.titleLarge)
-                                SupportingText(if (account.restoring || account.foregroundCheckPending) "正在确认账户" else "当前套餐尚未加载")
                                 BrandButton("登录查看当前套餐", openAccount,
                                     enabled = !account.busy && !account.restoring && !account.foregroundCheckPending,
                                     modifier = Modifier.testTag("anonymous-plans-login"))
                             }
                         }
                     } else {
-                        CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce, onRecharge = openAccount)
-                        if (account.authenticated) ResourceCard(account)
+                        CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce,
+                            onRecharge = openAccount, defaultSelectionRequest = plansVisit, refreshRequest = navigationRequest)
                     }
                 }
                 Destination.Orders -> {
@@ -372,19 +451,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 }
                 Destination.Profile -> {
                     com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans,
-                        recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride)
-                    var details by remember(account.authSessionGeneration) { mutableStateOf(false) }
-                    TextButton(onClick = { details = !details }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-more")) { Text(if (details) "收起更多" else "更多") }
-                    if (details) {
-                    BrandCard(Modifier.testTag("permissions-status")) {
-                        Text("连接权限与后台运行", style = MaterialTheme.typography.titleMedium)
-                        SupportingText("生产 VPN 仍未开放。后续连接会按需申请系统 VPN 授权与通知权限，后台状态由前台服务通知展示。")
-                        SupportingText("当前不宣称已经完成锁屏、网络切换或系统回收后的连接恢复。主动停止、撤销授权或强制停止都应结束连接。")
-                        SupportingText("无需位置、电话或广泛存储权限；不会自动修改电池优化设置。")
-                    }
-                    BrandCard { UpdatePanel() }
-                    if (BuildConfig.DEBUG) BrandCard { DebugBuildPanel() }
-                    }
+                        recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride,
+                        refreshRequest = navigationRequest)
                 }
             }
             if (!compact) Text(stringResource(R.string.build_stage), color = Brand.Muted,
@@ -395,14 +463,14 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
 
 @Composable
 private fun BrandHeader() {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Image(painterResource(R.drawable.brand_robot_avatar), contentDescription = null,
-            modifier = Modifier.size(42.dp), contentScale = ContentScale.Fit)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("飞连vpn", style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.size(34.dp), contentScale = ContentScale.Fit)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text("飞连vpn", style = MaterialTheme.typography.titleLarge, fontSize = 21.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag("brand-name"))
-            Box(Modifier.width(112.dp).height(3.dp).background(Brush.horizontalGradient(
+            Box(Modifier.width(94.dp).height(2.dp).background(Brush.horizontalGradient(
                 listOf(androidx.compose.ui.graphics.Color(0xFFFF27DF), Brand.Blue, Brand.Cyan))))
         }
     }
@@ -431,24 +499,21 @@ private fun CompactNodeList(nodes: List<com.gccwebos.android.vpn.SafeProxyConfig
 }
 
 @Composable
-private fun PageTitle(title: String, detail: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        SupportingText(detail)
-    }
-}
-
-@Composable
-internal fun ResourceCard(state: AccountController, showOperationState: Boolean = true) {
-    val countdownEnabled = state.authenticated && !state.busy && state.error == null && state.resource is Resource.Available
-    val now by produceState(initialValue = Instant.now(), countdownEnabled, state.resource) {
+internal fun ResourceCard(state: AccountController, showOperationState: Boolean = true, showReadProgress: Boolean = true) {
+    val usage by state.accountUsage.state.collectAsState()
+    val verified = state.authenticated && !state.restoring && !state.foregroundCheckPending && !state.clearing &&
+        !usage.verifying
+    val resource = if (showReadProgress) state.resource else if (verified)
+        state.resource ?: usage.resource.takeIf { usage.authenticated } else null
+    val countdownEnabled = verified && !state.busy && state.error == null && resource is Resource.Available
+    val now by produceState(initialValue = Instant.now(), countdownEnabled, resource) {
         value = Instant.now()
         while (countdownEnabled) {
             delay(1_000)
             value = Instant.now()
         }
     }
-    val display = resourcePresentation(state.authenticated, state.resource, state.busy, state.error, now)
+    val display = resourcePresentation(state.authenticated, resource, state.busy && showReadProgress, state.error, now)
     BrandCard(Modifier.testTag("resource-card")) {
         Eyebrow("当前资源")
         Text(display.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
@@ -467,7 +532,6 @@ internal fun ResourceCard(state: AccountController, showOperationState: Boolean 
                 Text(value, style = MaterialTheme.typography.bodyLarge)
             }
         }
-        if (showOperationState && state.busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Brand.Cyan)
         if (showOperationState) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error,
             modifier = Modifier.testTag("resource-error").semantics { liveRegion = LiveRegionMode.Polite }) }
     }
@@ -505,27 +569,4 @@ private fun InfoCard(title: String, detail: String) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         SupportingText(detail)
     }
-}
-
-
-@Composable
-private fun NoResourceGuidance(onDismiss: () -> Unit, openPlans: () -> Unit, openWallet: () -> Unit) {
-    AlertDialog(
-        modifier = Modifier.testTag("no-resource-guidance"),
-        onDismissRequest = onDismiss,
-        title = { Text("还没有订阅资源") },
-        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            Text("服务器已确认当前账号暂无资源。可以查看套餐购买，或先到钱包充值；到账与资源发放以服务器确认为准。")
-        } },
-        confirmButton = { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(onClick = openPlans, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .testTag("guidance-plans")) { Text("查看套餐") }
-            TextButton(onClick = openWallet, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .testTag("guidance-wallet")) { Text("前往钱包充值") }
-            // Keep all three actions in one measured column. Separate AlertDialog action slots
-            // can overlap a full-width multi-row confirm slot at real system font_scale=2.0.
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .testTag("guidance-dismiss")) { Text("稍后再说") }
-        } },
-    )
 }

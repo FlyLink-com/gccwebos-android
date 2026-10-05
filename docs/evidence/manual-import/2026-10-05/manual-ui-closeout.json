@@ -1,0 +1,18 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportHostUiTest",
+    "com.gccwebos.android.ManualImportAccountUiTest"
+  ],
+  "expected": 7,
+  "started": 7,
+  "passed": 7,
+  "negativeCodes": [],
+  "ok": [
+    7
+  ],
+  "timedOut": false,
+  "success": true,
+  "sanitizedExceptionTypes": [],
+  "sanitizedStackFrames": [],
+  "fixedDeviceStatus": {}
+}

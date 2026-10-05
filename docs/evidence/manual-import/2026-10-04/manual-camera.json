@@ -1,0 +1,29 @@
+{
+  "selectors": [
+    "com.gccwebos.android.ManualImportDeviceFlowTest#realCameraStagesSyntheticQrThenExplicitConfirmationImportsRemote"
+  ],
+  "expected": 1,
+  "started": 1,
+  "passed": 0,
+  "negativeCodes": [
+    -2
+  ],
+  "ok": [],
+  "timedOut": false,
+  "success": false,
+  "sanitizedExceptionTypes": [
+    "java.lang.AssertionError"
+  ],
+  "sanitizedStackFrames": [
+    "org.junit.Assert.fail(Assert.java:89)",
+    "org.junit.Assert.assertTrue(Assert.java:42)",
+    "org.junit.Assert.assertFalse(Assert.java:65)",
+    "com.gccwebos.android.ManualImportDeviceFlowTest.exercise(ManualImportDeviceFlowTest.kt:145)",
+    "com.gccwebos.android.ManualImportDeviceFlowTest.realCameraStagesSyntheticQrThenExplicitConfirmationImportsRemote(ManualImportDeviceFlowTest.kt:32)"
+  ],
+  "fixedDeviceStatus": {
+    "manualDeviceWaiting": [
+      "physical-camera-synthetic-qr"
+    ]
+  }
+}

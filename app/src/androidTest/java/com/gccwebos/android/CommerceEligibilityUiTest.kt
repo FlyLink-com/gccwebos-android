@@ -132,7 +132,7 @@ class CommerceEligibilityUiTest {
             assertTrue(account.authenticated); assertTrue(account.busy)
             assertFalse(commerce.busy); assertTrue(commerceReads.isEmpty())
         }
-        if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-status").assertTextEquals("商品尚未读取")
+        if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-status").assertDoesNotExist()
         else compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
     }
 
@@ -146,7 +146,7 @@ class CommerceEligibilityUiTest {
         compose.waitUntil(5000) {
             !account.busy && !commerce.busy && if (mode == CommerceMode.Plans) commerce.catalogLoaded else commerce.walletLoaded
         }
-        if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        if (mode == CommerceMode.Plans) compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购套餐")
         else compose.onNodeWithTag("wallet-balance").assertTextEquals("$units Coins")
         if (mode == CommerceMode.Wallet && !commerce.pendingRecharge) compose.onNodeWithTag("recharge-offers-empty").assertExists()
     }
@@ -166,6 +166,22 @@ class CommerceEligibilityUiTest {
     @Test fun totpLoginDefersMineUntilResourceSuccess() = assertSingleInitialRead(CommerceMode.Mine, true)
     @Test fun totpLoginDefersWalletUntilResourceSuccess() = assertSingleInitialRead(CommerceMode.Wallet, true)
     @Test fun totpLoginDefersPlansUntilResourceSuccess() = assertSingleInitialRead(CommerceMode.Plans, true)
+
+    @Test fun selectingTheCurrentPlansTabStartsOneNewReadWithoutCheckout() {
+        launch(); openWhileResourcePending(CommerceMode.Plans)
+        compose.runOnIdle { resourceReply.complete(noResource) }
+        assertLoaded(CommerceMode.Plans)
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.waitUntil(5000) { !commerce.busy && commerceReads.size == expectedReads(CommerceMode.Plans).size * 2 }
+        assertLoaded(CommerceMode.Plans)
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(expectedReads(CommerceMode.Plans) + expectedReads(CommerceMode.Plans), commerceReads.map { it.first })
+            assertNull(commerce.quote); assertNull(commerce.purchase); assertNull(commerce.recharge)
+            assertFalse(commerce.pendingPurchase); assertFalse(commerce.pendingRecharge)
+        }
+    }
 
     @Test fun transientResourceFailureStillLoadsTheAuthenticatedWalletOnce() {
         launch(); openWhileResourcePending(CommerceMode.Wallet)
@@ -220,11 +236,20 @@ class CommerceEligibilityUiTest {
         val delayedWallet = CompletableDeferred<WireResponse>()
         compose.runOnIdle { walletReply = delayedWallet; resourceReply.complete(noResource) }
         compose.waitUntil(5000) { commerce.busy && commerceReads.size == 1 }
-        compose.runOnIdle { resourceReply = CompletableDeferred(); account.refresh() }
+        // Profile navigation may already have completed its own narrow overview GET.
+        // Count this explicit refresh from that settled baseline, while still rejecting duplicates.
+        compose.waitUntil(5000) { !account.accountUsage.state.value.busy }
+        val expectedResourceReads = compose.runOnIdle {
+            assertFalse(account.accountUsage.state.value.busy)
+            val expected = resourceRequests + 1
+            resourceReply = CompletableDeferred(); account.refresh()
+            expected
+        }
         compose.waitUntil(5000) { account.busy && !commerce.busy }
         compose.runOnIdle { assertNull(commerce.wallet); delayedWallet.complete(wallet(999)) }
-        compose.waitUntil(5000) { resourceRequests == 2 && walletResponses == 1 }
+        compose.waitUntil(5000) { resourceRequests >= expectedResourceReads && walletResponses == 1 }
         compose.runOnIdle {
+            assertEquals(expectedResourceReads, resourceRequests)
             assertNull(commerce.wallet); assertFalse(commerce.walletLoaded)
             assertEquals(1, commerceReads.size); resourceReply.complete(noResource)
         }
@@ -240,7 +265,11 @@ class CommerceEligibilityUiTest {
             resourceReply.complete(noResource)
         }
         compose.waitUntil(5000) { !account.busy && !commerce.busy && commerce.walletError != null }
-        compose.onNodeWithTag("wallet-error").assertExists()
+        compose.runOnIdle {
+            assertNotNull(commerce.walletError); assertNull(commerce.wallet); assertFalse(commerce.walletLoaded)
+        }
+        compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.mainClock.advanceTimeBy(1000); compose.waitForIdle()
         compose.runOnIdle { assertEquals(listOf(walletPath), commerceReads.map { it.first }) }
     }
@@ -250,9 +279,16 @@ class CommerceEligibilityUiTest {
         val pending = PendingCommerce("recharge", null, "eligibility_offer", "eligibility_unknown_key")
         compose.runOnIdle { recovery.pending = pending; resourceReply.complete(noResource) }
         assertLoaded(CommerceMode.Wallet)
-        compose.runOnIdle { resourceReply = CompletableDeferred(); account.refresh() }
-        compose.waitUntil(5000) { account.busy && resourceRequests == 2 }
+        compose.waitUntil(5000) { !account.accountUsage.state.value.busy }
+        val expectedResourceReads = compose.runOnIdle {
+            assertFalse(account.accountUsage.state.value.busy)
+            val expected = resourceRequests + 1
+            resourceReply = CompletableDeferred(); account.refresh()
+            expected
+        }
+        compose.waitUntil(5000) { account.busy && resourceRequests >= expectedResourceReads }
         compose.runOnIdle {
+            assertEquals(expectedResourceReads, resourceRequests)
             assertSame(pending, recovery.pending); assertNull(commerce.recharge)
             resourceReply.complete(noResource)
         }

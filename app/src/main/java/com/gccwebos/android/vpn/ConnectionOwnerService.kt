@@ -22,6 +22,7 @@ import com.gccwebos.android.core.LocalConfigGateway
 import com.gccwebos.android.core.SelectionIntent
 import com.gccwebos.android.portal.AtomicPreparedConfigStore
 import com.gccwebos.android.portal.OneClickConfigGateway
+import com.gccwebos.android.portal.LiteralConfigAddressPreparer
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.PortalFailure
 import java.io.File
@@ -43,6 +44,7 @@ internal class ConnectionOwnerService : Service() {
     private lateinit var permission: ActivityVpnPermission
     private lateinit var tunnel: AndroidVpnTunnel
     private lateinit var handoff: ConnectionOwnerHandoff
+    private lateinit var preparedFiles: AtomicPreparedConfigStore
     private var expiryTask: Job? = null
     private val publication = Any()
     private var revision = 0L
@@ -57,6 +59,36 @@ internal class ConnectionOwnerService : Service() {
         val permission: ActivityVpnPermission get() = this@ConnectionOwnerService.permission
         val control: StateFlow<ConnectionControlState> get() = controls
         fun power(action: ConnectionPowerAction) = submit(action)
+        suspend fun clearLocalData() = repository.clearLocalData(cleanup = {
+            val coordinator = synchronized(publication) {
+                check(!destroyed) { "Connection owner is unavailable" }
+                (handoff.state.value as? ConnectionOwnerAvailability.Ready)?.owner
+                    ?: error("Connection owner is unavailable")
+            }
+            try { coordinator.stopAndAwaitClean() }
+            catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
+        }, commitFence = ::commitSourceChange)
+        fun commitSourceChange(action: () -> Unit) = synchronized(publication) {
+            check(!destroyed && !materialClearFailed && scope.coroutineContext[Job]?.isActive == true) {
+                "Connection owner is unavailable"
+            }
+            val coordinator = (handoff.state.value as? ConnectionOwnerAvailability.Ready)?.owner
+                ?: error("Connection owner is unavailable")
+            coordinator.withIdleSourceChange {
+                // A prior process may have died after writing scratch. In-memory idle alone
+                // cannot attest disk absence; only this claimed owner may clear its writer.
+                try { preparedFiles.clear() }
+                catch (_: Exception) {
+                    materialClearFailed = true
+                    controls.value = connectionControls(ConnectionState.Failed(Failure.CLEANUP_FAILED), ++revision)
+                    throw PortalFailure(PortalFailure.Reason.STORAGE)
+                }
+                action()
+                commandEpoch++
+                expiryTask?.cancel(); expiryTask = null
+                controls.value = controls.value.copy(revision = ++revision)
+            }
+        }
     }
 
     override fun onCreate() {
@@ -66,8 +98,11 @@ internal class ConnectionOwnerService : Service() {
         val directory = File(noBackupFilesDir, "connection-preparation")
         check(directory.isDirectory || directory.mkdirs())
         val files = AtomicPreparedConfigStore(directory)
+        preparedFiles = files
         tunnel = AndroidVpnTunnel(applicationContext, binder, connectionNetworkProbe(), files::clear)
-        val gateway = OneClickConfigGateway(repository.localSubscriptions, files)
+        val addresses = if (BuildConfig.CONNECTION_ENDPOINT_HOSTNAME) AndroidConfigAddressPreparer(applicationContext)
+            else LiteralConfigAddressPreparer
+        val gateway = OneClickConfigGateway(repository.localSubscriptions, files, addresses)
         val ownedGateway = object : LocalConfigGateway {
             override suspend fun prepare(intent: SelectionIntent): ConfigPreparation {
                 val epoch = synchronized(publication) { commandEpoch }

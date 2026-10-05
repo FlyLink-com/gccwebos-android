@@ -1,0 +1,39 @@
+mixed-port: 7897
+allow-lan: false
+mode: global
+proxies:
+  - name: "Synthetic TUIC zero tuple"
+    type: tuic
+    server: "192.0.2.10"
+    port: 443
+    uuid: "22222222-2222-4222-8222-222222222222"
+    password: "synthetic-only"
+    sni: "fixture.example.invalid"
+    disable-sni: false
+    reduce-rtt: false
+    heartbeat-interval: 0
+    max-udp-relay-packet-size: 0
+    fast-open: false
+    skip-cert-verify: false
+    max-open-streams: 0
+proxy-groups:
+  - name: AUTO
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic TUIC zero tuple"
+  - name: FALLBACK
+    type: fallback
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    proxies:
+      - "Synthetic TUIC zero tuple"
+  - name: GLOBAL
+    type: select
+    proxies:
+      - AUTO
+      - FALLBACK
+      - "Synthetic TUIC zero tuple"
+rules:
+  - MATCH,GLOBAL

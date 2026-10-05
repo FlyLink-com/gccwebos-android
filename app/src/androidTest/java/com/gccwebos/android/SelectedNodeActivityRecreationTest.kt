@@ -1,15 +1,20 @@
 package com.gccwebos.android
 
 import android.graphics.Bitmap
+import android.content.Intent
 import android.os.Build
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.test.platform.app.InstrumentationRegistry
 import com.gccwebos.android.core.ConnectionSelection
 import com.gccwebos.android.portal.*
+import com.gccwebos.android.vpn.ConnectionOwnerService
+import com.gccwebos.android.vpn.ConnectionRuntimeOverrides
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -21,11 +26,12 @@ import java.io.File
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Unmodified MainActivity and its default account/repository restore a synthetic encrypted cache.
- * No Activity content replacement or restore call manufactures a post-recreation result. Test-side
- * managers only inspect the legitimate process authority after recreation. This is configuration
- * recreation, not process death or a production Portal E2E test. Only Connect/Nodes/radio are used:
- * a valid cached profile and absent session/delivery keep both production HTTP paths unreachable.
+/** Unmodified MainActivity/service restore a synthetic encrypted v1 cache. The debug-only, process-local
+ * repository seam supplies a synthetic subscription response for quiet navigation refreshes; no real
+ * Portal/subscription HTTP is reachable. No Activity content replacement or restore call manufactures
+ * a post-recreation result. Inspectors only observe the actual shared authority after recreation.
+ * This covers legacy v1 configuration recreation, not process death or production Portal E2E. Only
+ * Connect/Nodes/radio are used; the manual sidecar is outside this legacy fixture's scope.
  * Run only on a fresh isolated candidate, never against a user's installed account/configuration.
  */
 class SelectedNodeActivityRecreationTest {
@@ -36,6 +42,7 @@ class SelectedNodeActivityRecreationTest {
     private val url = Secret("https://sub.gccwebos.com/sub/a/activity-recreation-fixture")
     private val expiry = Instant.now().plusSeconds(3600)
     private val subscriptionReads = AtomicInteger()
+    private val navigationReads = AtomicInteger()
     private val policy = OriginPolicy("https://portal.gccwebos.com", setOf("https://sub.gccwebos.com"))
     private val delivery = object : DeliveryStore {
         override fun read(): DeliveryRecord? = null
@@ -70,7 +77,8 @@ class SelectedNodeActivityRecreationTest {
                 val context = instrumentation.targetContext
                 // Check before the Activity rule can launch the default production content.
                 // Never delete or overwrite an existing encrypted account/profile/delivery.
-                listOf("portal-session.bin", "portal-profile.bin", "portal-delivery.bin").forEach { name ->
+                listOf("portal-session.bin", "portal-profile.bin", "portal-delivery.bin", "local-profile.bin",
+                    "portal-legacy-recovery.bin", "manual-source.bin").forEach { name ->
                     listOf("", ".bak", ".new").forEach { suffix ->
                         assertFalse("Requires a fresh candidate without private stores: $name$suffix",
                             File(context.noBackupFilesDir, name + suffix).exists())
@@ -81,7 +89,26 @@ class SelectedNodeActivityRecreationTest {
                 val seed = manager()
                 inspector = seed
                 var writeStarted = false
+                assertNull("A previous fixture must release its repository override", ConnectionRuntimeOverrides.repositoryFactory)
                 try {
+                    // Each navigation still performs the real manager's fresh-read path. This
+                    // owned fixture models that response locally so UI waiting cannot hit a cloud URL.
+                    ConnectionRuntimeOverrides.repositoryFactory = {
+                        PortalRepository(object : PortalTransport {
+                            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse =
+                                throw AssertionError("No Portal HTTP in encrypted recreation fixture")
+                        }, delivery, policy, { 0L }, { Instant.now() }, subscription = object : SubscriptionSource {
+                            override suspend fun download(url: Secret) = read(url).bytes
+                            override suspend fun read(url: Secret): SubscriptionRead {
+                                assertTrue("Only the owned synthetic source may be read",
+                                    this@SelectedNodeActivityRecreationTest.url.value == url.value)
+                                navigationReads.incrementAndGet()
+                                val cached = requireNotNull(profiles.read())
+                                return try { SubscriptionRead(cached.copyBytes(), cached.validUntil) }
+                                finally { cached.close() }
+                            }
+                        }, profiles = profiles)
+                    }
                     instrumentation.runOnMainSync {
                         writeStarted = true
                         seed.unlink() // Fresh guarded fixture only; reset prior suite registry state.
@@ -89,13 +116,25 @@ class SelectedNodeActivityRecreationTest {
                         assertEquals(LocalSubscriptionStatus.READY, seed.remember(bytes, url, expiry).status)
                         assertEquals(LocalSubscriptionStatus.READY, runBlocking { seed.restore() }.status)
                     }
-                    base.evaluate() // Default MainActivity creates/restores its own real owners.
+                    base.evaluate() // MainActivity creates/restores its own real service/controller owners.
                     assertEquals("Inspector subscription source was never used", 0, subscriptionReads.get())
+                    assertTrue("Quiet navigation exercised the injected fresh read", navigationReads.get() > 0)
                     assertPrivateAccountStoresAbsent()
                 } finally {
                     // Inner Compose/Activity rule has already disposed and destroyed its Activity.
                     // A guard failure never reaches this block and never clears an existing store.
-                    if (writeStarted) instrumentation.runOnMainSync { seed.unlink() }
+                    try {
+                        if (writeStarted) {
+                            context.stopService(Intent(context, ConnectionOwnerService::class.java))
+                            runBlocking { withTimeout(15_000) { seed.awaitConnectionOwner { Unit } } }
+                            instrumentation.runOnMainSync { seed.unlink() }
+                            assertPrivateAccountStoresAbsent()
+                            listOf("", ".bak", ".new").forEach { suffix ->
+                                assertFalse("Owned v1 fixture must be removed after owner cleanup",
+                                    File(context.noBackupFilesDir, "portal-profile.bin$suffix").exists())
+                            }
+                        }
+                    } finally { ConnectionRuntimeOverrides.repositoryFactory = null }
                 }
             }
         }
@@ -105,7 +144,8 @@ class SelectedNodeActivityRecreationTest {
 
     private fun assertPrivateAccountStoresAbsent() {
         val directory = InstrumentationRegistry.getInstrumentation().targetContext.noBackupFilesDir
-        listOf("portal-session.bin", "portal-delivery.bin").forEach { name ->
+        listOf("portal-session.bin", "portal-delivery.bin", "local-profile.bin", "portal-legacy-recovery.bin",
+            "manual-source.bin").forEach { name ->
             listOf("", ".bak", ".new").forEach { suffix ->
                 assertFalse("No account or delivery created: $name$suffix", File(directory, name + suffix).exists())
             }
@@ -126,16 +166,23 @@ class SelectedNodeActivityRecreationTest {
 
     private fun selectSecondAndNavigate(): ConnectionSelection {
         waitForReadyNodes()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("nav-Lines").fetchSemanticsNodes().size == 1 }
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        waitForSelectableNodes()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
         val selected = inspector.nodeSelectionSnapshot().choices[1].selection
-        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
+        compose.onNodeWithTag("nav-Lines").performClick()
+        waitForSelectableNodes()
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         repeat(2) {
             compose.onNodeWithTag("nav-Connect").performClick()
             assertSelectedConnection()
             compose.onNodeWithTag("nav-Lines").performClick()
+            waitForSelectableNodes()
             compose.onNodeWithTag("node-choice-1").assertIsSelected()
             compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         }
@@ -143,38 +190,43 @@ class SelectedNodeActivityRecreationTest {
         return selected
     }
 
+    private fun assertNodeSelectionReturnedToConnection() {
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("page-Connect").fetchSemanticsNodes().size == 1 }
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("nav-Connect").assertIsSelected()
+        compose.onNodeWithTag("page-Lines").assertDoesNotExist()
+        assertSelectedConnection()
+    }
+
+    private fun waitForSelectableNodes() {
+        compose.waitUntil(5000) {
+            val registry = inspector.nodeSelectionSnapshot()
+            val row = compose.onAllNodesWithTag("node-choice-1").fetchSemanticsNodes().singleOrNull()
+            registry.status == LocalSubscriptionStatus.READY && registry.choices.size == 2 &&
+                row != null && SemanticsProperties.Disabled !in row.config
+        }
+        compose.onNodeWithTag("node-choice-1").assertIsEnabled()
+    }
+
     private fun assertSelectedConnection() {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("同名节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
         assertIdleConnectionControl()
-    }
-
-    private fun assertIdleConnectionControl() {
-        // Match the real owner's packaged-engine/API gate; never infer readiness from cached nodes.
-        val connectable = BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithTag("vpn-connect").fetchSemanticsNodes().singleOrNull()?.let { node ->
-                (SemanticsProperties.Disabled !in node.config) == connectable
-            } ?: false
-        }
-        if (connectable) {
-            compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
-            compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("连接").assertIsEnabled()
-        } else {
-            compose.onNodeWithTag("local-subscription-title").assertTextEquals("连接暂不可用")
-            compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
-        }
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
 
     private fun recreateDefaultActivityAndVerify() {
         val oldActivity = compose.activity
         val oldInspector = inspector
+        val priorReads = navigationReads.get()
         compose.activityRule.scenario.recreate()
         // Constructor/observations only. No restore/remember/refresh/select manufactures recovery.
         inspector = manager()
         assertNotSame(oldInspector, inspector)
         waitForReadyNodes()
+        compose.waitUntil(5000) { navigationReads.get() > priorReads }
+        waitForSelectableNodes()
         compose.activityRule.scenario.onActivity { current ->
             assertNotSame(oldActivity, current)
             assertEquals(Lifecycle.State.DESTROYED, oldActivity.lifecycle.currentState)
@@ -186,8 +238,35 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
         compose.onNodeWithTag("page-Lines").assertExists()
         compose.onNodeWithTag("nav-Lines").assertIsSelected()
-        compose.onNodeWithTag("nodes-refresh").assertExists().assertIsEnabled()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-account").assertDoesNotExist()
+    }
+
+    private fun assertIdleConnectionControl() {
+        // The actual package flag defines availability, never the fixture's valid cache.
+        val connectable = BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30
+        val label = if (connectable) "一键连接" else "开通飞连vpn"
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("vpn-connect").fetchSemanticsNodes().singleOrNull()?.let { node ->
+                SemanticsProperties.Disabled !in node.config &&
+                    node.config.getOrNull(SemanticsProperties.Text)?.any { it.text == label } == true
+            } == true
+        }
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals(label).assertIsEnabled()
+        if (!connectable) {
+            // A valid cached selection cannot turn an engine-less package's account CTA into a VPN command.
+            compose.onNodeWithTag("usage-guest-guidance").assertDoesNotExist()
+            compose.onNodeWithTag("vpn-connect").performScrollTo().performClick()
+            compose.onNodeWithTag("usage-guest-guidance").assertIsDisplayed()
+            compose.onNodeWithTag("usage-guest-login").assertIsEnabled()
+            compose.onNodeWithTag("usage-guest-register").assertIsEnabled()
+            compose.onNodeWithTag("login-screen").assertDoesNotExist()
+            compose.onNodeWithText("取消").performClick()
+            compose.onNodeWithTag("usage-guest-guidance").assertDoesNotExist()
+            compose.onNodeWithTag("connection-power").assertDoesNotExist()
+        }
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
     }
 
     private fun screenshot(name: String) {
@@ -248,15 +327,22 @@ class SelectedNodeActivityRecreationTest {
         }
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("请选择节点")
+        compose.onNodeWithTag("node-selection-status").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("未选择")
         screenshot("changed-cache-after-real-activity-recreation-nodes-unselected")
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertDoesNotExist()
         assertIdleConnectionControl()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
         screenshot("changed-cache-after-real-activity-recreation-unselected")
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("node-choice-1").performScrollTo().performClick()
+        assertNodeSelectionReturnedToConnection()
+        compose.onNodeWithTag("nav-Lines").performClick()
+        waitForSelectableNodes()
+        compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle {
             assertSame(inspector.nodeSelectionSnapshot().choices[1].selection, inspector.nodeSelectionSnapshot().selected)

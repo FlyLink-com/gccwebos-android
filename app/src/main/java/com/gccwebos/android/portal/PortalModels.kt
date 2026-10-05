@@ -24,8 +24,12 @@ sealed interface Resource {
                          val durationDays: Long? = null, val monthlyTrafficGb: Double? = null) : Resource
 }
 data class Usage(val totalBytes: Long, val usedBytes: Long?, val remainingBytes: Long?,
-                 val status: String, val updatedAt: Instant?) {
+                 val status: String, val updatedAt: Instant?,
+                 // Older in-memory fixtures have no period. Wire reads must supply both.
+                 val cycleStartedAt: Instant? = null, val cycleEndsAt: Instant? = null) {
     init {
+        require((cycleStartedAt == null) == (cycleEndsAt == null))
+        if (cycleStartedAt != null) require(cycleStartedAt < requireNotNull(cycleEndsAt))
         require(totalBytes in 0..MAX_SAFE && (usedBytes == null || usedBytes in 0..MAX_SAFE))
         require(status in setOf("pending", "measured_zero", "measured", "stale"))
         if (status == "pending") require(usedBytes == null && remainingBytes == null && updatedAt == null)
@@ -42,7 +46,9 @@ class DeliveryRecord(val accountId: String, val sessionBinding: String, val reso
                      val handoff: Secret? = null, val pendingAck: Boolean = false) {
     override fun toString() = "DeliveryRecord([REDACTED])"
 }
-class PortalFailure(val reason: Reason) : Exception(reason.name) {
+class PortalFailure(val reason: Reason, val recoveryCause: RecoveryCause? = null) : Exception(reason.name) {
+    /** No account, resource, session or delivery material is included in this UI-safe cause. */
+    enum class RecoveryCause { RESOURCE_CHANGED, SESSION_PENDING, MODEL_CHANGED, JOURNAL_CONFLICT }
     enum class Reason { NETWORK, PROTOCOL, LOGIN_FAILED, SESSION_EXPIRED, RECONCILIATION,
         UNAVAILABLE, RATE_LIMITED, STORAGE, RECOVERY_REQUIRED, SUBSCRIPTION_UNAVAILABLE, SUBSCRIPTION_REVOKED, SUBSCRIPTION_EXPIRED }
 }
@@ -74,7 +80,8 @@ class OriginPolicy(apiOrigin: String, subscriptionOrigins: Set<String>) {
         val uri = URI(url)
         require(uri.scheme == "https" && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null)
         require(origin("https://${uri.rawAuthority}") in subscriptions)
-        require(Regex("/sub/a/[A-Za-z0-9_-]+").matches(uri.rawPath))
+        // The backend issues .yaml artifact paths; retain legacy bare capabilities unchanged.
+        require(Regex("/sub/a/[A-Za-z0-9_-]+(?:\\.yaml)?").matches(uri.rawPath))
         return uri.toASCIIString()
     }
     private fun origin(value: String): URI {

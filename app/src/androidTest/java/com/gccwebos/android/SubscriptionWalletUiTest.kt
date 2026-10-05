@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -45,6 +46,72 @@ class SubscriptionWalletUiTest {
     private lateinit var commerce: CommerceController
     private val future = Instant.parse("2099-09-30T00:00:00Z")
     private val collected = Instant.parse("2026-09-30T00:00:00Z")
+    private val verifiedOverviewReads = AtomicInteger()
+    private var verifiedOverviewBody = """{"resource":{"state":"none"}}"""
+    private var verifiedOverviewFailure: PortalFailure.Reason? = null
+
+    /** Server-validated synthetic native session; an editable email is never its account binding. */
+    private fun launchVerifiedOverviewShell(fontScale: Float = 1f,
+        onPowerAction: ((ConnectionPowerAction) -> Unit)? = null) {
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val controller = remember {
+                val now = Instant.now()
+                val token = Secret("fixture_usage_native_session")
+                val sessions = MemorySessionStore().apply {
+                    save(SavedSession.capture(Session(token, "fixture_usage_stable_account",
+                        now.plusSeconds(600), 600_000, 0), now, 0))
+                }
+                val wire = object : PortalTransport {
+                    override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                        if (path != "/api/portal/resources/current/overview") {
+                            requests.incrementAndGet()
+                            throw AssertionError("Verified overview fixture refuses every other route")
+                        }
+                        assertNull(body)
+                        assertEquals(token.value, requireNotNull(session).value)
+                        verifiedOverviewReads.incrementAndGet()
+                        verifiedOverviewFailure?.let { throw PortalFailure(it) }
+                        return WireResponse(200, verifiedOverviewBody)
+                    }
+                    override suspend fun commerce(path: String, body: String?, session: Secret, key: String?): WireResponse {
+                        requests.incrementAndGet()
+                        throw AssertionError("Verified overview fixture refuses commerce")
+                    }
+                }
+                val delivery = object : DeliveryStore {
+                    override fun read(): DeliveryRecord? = null
+                    override fun save(record: DeliveryRecord) = throw AssertionError("No fixture delivery writes")
+                    override fun clear() = Unit
+                }
+                AccountController(PortalRepository(wire, delivery,
+                    OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L }, { now },
+                    subscription = SubscriptionSource { throw AssertionError("No fixture subscription download") },
+                    sessions = sessions, profiles = MemoryLocalProfileStore()), scope)
+            }
+            account = controller
+            LaunchedEffect(controller) { controller.restoreAccount() }
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                AppShell(accountOverride = controller, autoLoadCommerce = false,
+                    onConnectionPowerAction = onPowerAction)
+            }
+        }
+        compose.waitUntil(5_000) { ::account.isInitialized && !account.busy && account.authenticated &&
+            account.authenticatedAccountId == "fixture_usage_stable_account" &&
+            account.accountUsage.state.value.authenticated && account.accountUsage.state.value.resource === Resource.None }
+        compose.runOnIdle {
+            assertEquals(2, verifiedOverviewReads.get()) // restore validation + typed current overview.
+            assertTrue(account.account.isBlank()) // No fabricated display email or accountId from input text.
+        }
+    }
+
+    private fun verifiedAvailableBody(days: Long = 30) = """{"resource":{"state":"available",
+        "resourceRef":"resource_${"a".repeat(64)}","plan":{"id":"fixture_usage_plan","durationDays":$days,"monthlyTrafficGb":50},
+        "validUntil":"2099-09-30T00:00:00.000Z","setupAvailable":false,"usage":{"totalBytes":4294967296,
+        "usedBytes":1073741824,"remainingBytes":3221225472,"collectionStatus":"measured",
+        "updatedAt":"2026-10-02T00:00:00.000Z","cycleStartedAt":"2026-10-01T00:00:00.000Z",
+        "cycleEndsAt":"2026-11-01T00:00:00.000Z"}}}"""
 
     private fun accountFixture(scope: CoroutineScope, allowLoginChallenge: Boolean = false): AccountController {
         val wire = object : PortalTransport {
@@ -84,7 +151,7 @@ class SubscriptionWalletUiTest {
         }
     }
 
-    private fun launchShell(fontScale: Float = 1f, allowLoginChallenge: Boolean = false,
+    private fun launchShell(fontScale: Float = 1f, allowLoginChallenge: Boolean = false, catalog: List<Offer>? = null,
         setup: AccountController.() -> Unit = {}) {
         // Permitting an offline question does not mount the private login page.
         // Anonymous launch stays on Connect; only an explicit My action requests it.
@@ -93,15 +160,26 @@ class SubscriptionWalletUiTest {
             val scope = rememberCoroutineScope()
             val controller = remember { accountFixture(scope, allowLoginChallenge).apply(setup) }
             account = controller
+            val catalogState = remember(controller) { catalog?.let { fixtures ->
+                CommerceController(controller, scope, object : CommerceRecovery {
+                    override fun read(binding: String, kind: String): PendingCommerce? =
+                        throw AssertionError("Catalog rendering must not read recovery storage")
+                    override fun save(binding: String, value: PendingCommerce) =
+                        throw AssertionError("Catalog rendering must not create an order")
+                    override fun clear(binding: String, kind: String) =
+                        throw AssertionError("Catalog rendering must not clear recovery storage")
+                }).apply { offers = fixtures; catalogLoaded = true; commerceModel = CommerceModel.LEGACY }
+            } }
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                AppShell(accountOverride = controller, autoLoadCommerce = false)
+                AppShell(accountOverride = controller, autoLoadCommerce = false, commerceOverride = catalogState)
             }
         }
     }
 
     private fun launchCommerce(mode: CommerceMode, fontScale: Float = 1f,
         setup: CommerceController.() -> Unit = {}) {
+        var stagedQuote: Quote? = null
         compose.setContent {
             val scope = rememberCoroutineScope()
             val owner = remember { accountFixture(scope) }
@@ -120,6 +198,14 @@ class SubscriptionWalletUiTest {
                 CommerceController(owner, scope, recovery).apply(setup).apply {
                     if (wallet != null) walletLoaded = true
                     if (rechargeOffers.isNotEmpty()) rechargeOffersLoaded = true
+                    // A confirmation fixture includes the matching current server catalog;
+                    // a retained quote without an admitted selection must never be payable.
+                    quote?.let { value ->
+                        catalogLoaded = true
+                        offers = listOf(value.offer)
+                        if (commerceModel == null) commerceModel = CommerceModel.LEGACY
+                        if (mode == CommerceMode.Plans) { stagedQuote = value; quote = null }
+                    }
                 }
             }
             commerce = state
@@ -133,6 +219,13 @@ class SubscriptionWalletUiTest {
                     }
                 }
             }
+        }
+        compose.waitForIdle()
+        // Production visits discard old quotes. Admit the fixture only after an explicit
+        // current-catalog selection, as a synthetic response to that selected offer.
+        stagedQuote?.let { value ->
+            compose.onNodeWithTag("plan-offer-${value.offer.offerRef}").performScrollTo().performClick()
+            compose.runOnIdle { commerce.quote = value }
         }
     }
 
@@ -187,93 +280,140 @@ class SubscriptionWalletUiTest {
         capture("exact-brand-name")
     }
 
-    @Test fun signedOutLoadingErrorAndUnknownNeverShowNoSubscriptionModal() {
+    @Test fun signedOutLegacyNoneNeverBecomesConfirmedPlanAndLoginRequiresExplicitChoice() {
         launchShell(allowLoginChallenge = true) { authenticated = false; resource = Resource.None }
         compose.onNodeWithTag("page-Connect").assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").assertIsDisplayed()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        // An unowned legacy None must never become a confirmed no-plan result.
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("account-usage-no-plan").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, loginChallengeRequests.get()) }
+        compose.onNodeWithTag("vpn-connect").performClick()
+        compose.onNodeWithTag("usage-guest-guidance").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, loginChallengeRequests.get()) }
         expectedLoginChallengeRequests = 1
-        compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("usage-guest-login").performClick()
         compose.onNodeWithTag("login-screen").assertIsDisplayed()
         compose.onNodeWithTag("login-account").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { assertEquals(1, loginChallengeRequests.get()) }
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.runOnIdle { account.authenticated = true; account.busy = true }
         compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
-        compose.onNodeWithTag("local-subscription-sync").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.onNodeWithTag("nav-Plans").performClick()
-        compose.onNodeWithText("正在读取资源").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.runOnIdle { account.busy = false; account.error = "离线同步失败" }
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.onNodeWithTag("nav-Plans").performClick()
-        compose.onNodeWithText("资源暂时无法确认").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("resource-error").performScrollTo().assertTextEquals("离线同步失败")
-        capture("resource-error")
-        compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.runOnIdle { account.error = null; account.resource = null }
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.onNodeWithTag("nav-Plans").performClick()
-        compose.onNodeWithText("等待读取资源").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.runOnIdle { account.resource = Resource.Reconciliation }
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.onNodeWithTag("nav-Plans").performClick()
-        compose.onNodeWithText("资源正在对账").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("account-usage-no-plan").assertDoesNotExist()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
     }
 
-    @Test fun noneGuidanceDismissalSurvivesRefreshAndRepeatedNavigation() {
-        launchShell { resource = Resource.None }
-        compose.onNodeWithTag("no-resource-guidance").assertIsDisplayed()
-        capture("none-guidance")
-        compose.onNodeWithTag("guidance-dismiss").performClick()
+    @Test fun verifiedNoneKeepsInlineOpeningAcrossRefreshAndNavigationWithoutAutomaticModal() {
+        launchVerifiedOverviewShell()
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        capture("none-inline-opening")
         repeat(2) {
             listOf("Lines", "Plans", "Profile", "Connect").forEach {
                 compose.onNodeWithTag("nav-$it").performClick()
                 compose.onNodeWithTag("page-$it").assertIsDisplayed()
                 compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
             }
-            compose.runOnIdle { account.busy = true }
-            compose.runOnIdle { account.busy = false; account.resource = Resource.None }
+            compose.runOnIdle { account.refreshAccountUsage() }
+            compose.waitUntil(5_000) { !account.accountUsage.state.value.busy }
             compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+            compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
         }
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
-        // A fresh same-account authentication is a new lifecycle, even without a signed-out frame.
-        compose.runOnIdle { account.authSessionGeneration++ }
-        compose.onNodeWithTag("no-resource-guidance").assertIsDisplayed()
-        compose.onNodeWithTag("guidance-dismiss").performClick()
+        // Real same-session revalidation must not automatically open business guidance.
+        compose.runOnIdle { account.onForeground() }
+        compose.waitUntil(5_000) { !account.busy && !account.foregroundCheckPending && account.authenticated }
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
     }
 
-    @Test fun noneGuidanceNavigatesToPlansAndWalletWithoutReappearing() {
-        launchShell { resource = Resource.None }
-        compose.onNodeWithTag("guidance-plans").performClick()
+    @Test fun verifiedNoneInlineOpeningRoutesToPlansAndWalletStaysAnExplicitNavigation() {
+        launchVerifiedOverviewShell()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").performClick()
         compose.onNodeWithTag("page-Plans").assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.runOnIdle { account.authSessionGeneration++ }
-        compose.onNodeWithTag("guidance-wallet").performClick()
+        compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
+        compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("page-Profile").assertIsDisplayed()
         compose.onNodeWithTag("wallet-card").assertExists()
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2, verifiedOverviewReads.get()) }
     }
 
-    @Test fun activeResourceHasDurationCountdownAndTruthfulTrafficStates() {
-        launchShell { resource = available() }
+    @Test fun oneClickAfterOverviewFailureOnlyRefreshesTheReadWithoutStartingVpnOrOpeningAPlan() {
+        val powerActions = mutableListOf<ConnectionPowerAction>()
+        launchVerifiedOverviewShell(onPowerAction = { powerActions += it })
+        compose.runOnIdle { verifiedOverviewFailure = PortalFailure.Reason.NETWORK; account.refreshAccountUsage() }
+        compose.waitUntil(5_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.error != null }
+        compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
+        compose.onNodeWithTag("connection-read-error").performScrollTo().assertTextEquals("账户信息暂未更新")
+        compose.onNodeWithTag("account-usage-no-plan").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsEnabled()
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(3, verifiedOverviewReads.get()); assertTrue(powerActions.isEmpty())
+            verifiedOverviewFailure = null
+        }
+        compose.onNodeWithTag("vpn-connect").performClick()
+        compose.waitUntil(5_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.error == null }
+        compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn")
+        compose.onNodeWithTag("page-Connect").assertExists()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.runOnIdle { assertEquals(4, verifiedOverviewReads.get()); assertTrue(powerActions.isEmpty()) }
+    }
+
+    @Test fun plansShowServerCatalogWithoutRepeatingResourceAndKeepLocalExpirySeparate() {
+        val fixtures = offers()
+        launchShell(catalog = fixtures) { resource = available() }
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("resource-card").assertDoesNotExist()
+        compose.onNodeWithTag("resource-countdown").assertDoesNotExist()
+        compose.onNodeWithTag("plan-title-${fixtures.first().offerRef}", useUnmergedTree = true)
+            .performScrollTo().assertTextEquals("30天")
+        compose.onNodeWithTag("plan-traffic-${fixtures.first().offerRef}", useUnmergedTree = true)
+            .assertTextEquals("10 GB / 月")
+        compose.onNodeWithTag("plan-price-${fixtures.first().offerRef}", useUnmergedTree = true)
+            .assertTextEquals("20 Coins")
+        capture("plans-with-active-resource")
+        compose.runOnIdle { account.resource = available().copy(validUntil = Instant.EPOCH) }
+        compose.onNodeWithTag("nav-Connect").performClick()
+        // Portal resource expiry cannot establish the separate local configuration's validity.
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
+        compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
+        compose.runOnIdle {
+            account.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.EXPIRED,
+                hasProfile = true, hasCapability = true, validUntil = Instant.EPOCH)
+        }
+        compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.EXPIRED, account.localSubscription.status)
+            assertEquals(Instant.EPOCH, account.localSubscription.validUntil)
+        }
+        compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
+        compose.onNodeWithTag("resource-card").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${fixtures.first().offerRef}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+    }
+
+    @Test fun resourceComponentRetainsDurationCountdownAndTruthfulUnknownStaleAndExpiredTraffic() {
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val owner = remember { accountFixture(scope).apply { resource = available() } }
+            account = owner
+            GccTheme { Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
+                ResourceCard(owner)
+            } }
+        }
         compose.onNodeWithText("30天").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextContains("剩余", substring = true)
         compose.onNodeWithText("1.0 KiB").performScrollTo().assertIsDisplayed()
@@ -290,40 +430,46 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithText("768 B · 数据已过期").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { account.resource = available().copy(validUntil = Instant.EPOCH) }
         compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextEquals("已到期")
-        compose.onNodeWithTag("nav-Connect").performClick()
-        // Portal resource expiry cannot establish the separate local configuration's validity.
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("未配置")
-        compose.onNodeWithTag("expired-subscription-renew").assertDoesNotExist()
-        compose.onNodeWithTag("portal-expired-renew").assertDoesNotExist()
-        compose.runOnIdle {
-            account.localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.EXPIRED,
-                hasProfile = true, hasCapability = true, validUntil = Instant.EPOCH)
-        }
-        compose.onNodeWithTag("local-subscription-title").performScrollTo().assertTextEquals("订阅已过期")
-        compose.onNodeWithTag("expired-subscription-renew").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
-        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
-        compose.onNodeWithTag("resource-countdown").performScrollTo().assertTextEquals("已到期")
-        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
     }
 
     @Test fun largeFontGuidanceAndResourcesKeepActionsReachable() {
-        launchShell(fontScale = 2f) { resource = Resource.None }
-        compose.onNodeWithTag("guidance-plans").assertIsDisplayed()
-        compose.onNodeWithTag("guidance-wallet").assertIsDisplayed()
-        compose.onNodeWithTag("guidance-dismiss").assertIsDisplayed()
-        val actions = listOf("guidance-plans", "guidance-wallet", "guidance-dismiss")
-            .map { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
-        assertTrue("Plan and wallet action bounds must not overlap", actions[0].bottom <= actions[1].top)
-        assertTrue("Wallet and dismiss action bounds must not overlap", actions[1].bottom <= actions[2].top)
-        capture("none-font-200")
-        compose.onNodeWithTag("guidance-dismiss").performClick()
-        compose.runOnIdle { account.resource = available(days = 365) }
-        compose.onNodeWithTag("nav-Plans").performClick()
-        compose.onNodeWithTag("brand-name").performScrollTo().assertTextEquals("飞连vpn")
-        compose.onNodeWithTag("resource-countdown").performScrollTo().assertIsDisplayed()
-        capture("countdown-font-200")
+        val powerActions = mutableListOf<ConnectionPowerAction>()
+        launchVerifiedOverviewShell(fontScale = 2f, onPowerAction = { powerActions += it })
+        compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        capture("none-inline-font-200")
+        compose.onNodeWithTag("vpn-connect").performClick()
+        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(2, verifiedOverviewReads.get()); assertTrue(powerActions.isEmpty()) }
+        compose.runOnIdle { verifiedOverviewBody = verifiedAvailableBody(days = 365); account.refreshAccountUsage() }
+        compose.waitUntil(5_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.resource is Resource.Available }
+        compose.onNodeWithTag("account-usage-plan").performScrollTo().assertTextEquals("365天套餐")
+        compose.onNodeWithTag("account-usage-remaining").performScrollTo().assertTextEquals("3 GB")
+        compose.onNodeWithTag("account-usage-cycle").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("account-usage-expiry").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("account-usage-refresh").assertDoesNotExist()
+        // The one-click action can prepare MISSING local material. Merely rendering or returning
+        // to this page must not prepare it or admit a VPN connection.
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("一键连接").assertIsEnabled()
+        compose.onNodeWithTag("account-usage-primary-hint").assertDoesNotExist()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
+        compose.onNodeWithTag("connection-prepare-cancel").assertDoesNotExist()
+        capture("usage-available-font-200")
+        compose.onNodeWithTag("nav-Plans").performClick()
+        compose.onNodeWithTag("page-Plans").assertIsDisplayed()
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsEnabled()
+        compose.runOnIdle {
+            assertEquals(3, verifiedOverviewReads.get())
+            assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+            assertFalse(account.localSubscription.hasProfile)
+            assertFalse(account.localSubscription.hasCapability)
+            assertTrue(powerActions.isEmpty())
+            assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(account.localSubscription,
+                Instant.now(), ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)).action)
+        }
     }
 
     private fun offers() = listOf(
@@ -372,16 +518,64 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
     }
 
-    @Test fun threeServerShapedOffersHaveDurationOnlyHeadingsAtLargeFont() {
+    @Test fun serverOffersKeepExactDurationPriceAndTrafficWithinMonthAndYearFiltersAtLargeFont() {
         val fixtures = offers()
         launchCommerce(CommerceMode.Plans, fontScale = 2f) { offers = fixtures; catalogLoaded = true; commerceModel = CommerceModel.LEGACY }
+        compose.onNodeWithTag("catalog-other").assertDoesNotExist()
         fixtures.forEach { offer ->
-            compose.onNodeWithTag("plan-title-${offer.offerRef}").performScrollTo()
+            compose.onNodeWithTag(if (offer.durationDays == 365L) "catalog-yearly" else "catalog-plans")
+                .performScrollTo().performClick()
+            compose.onNodeWithTag("plan-title-${offer.offerRef}", useUnmergedTree = true).performScrollTo()
                 .assertTextEquals("${offer.durationDays}天")
-            compose.onNodeWithTag("plan-price-${offer.offerRef}").performScrollTo().assertTextEquals(formatCoins(offer.baseCoinUnits))
-            compose.onNodeWithTag("plan-quote-${offer.offerRef}").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("plan-price-${offer.offerRef}", useUnmergedTree = true).performScrollTo().assertTextEquals(formatCoins(offer.baseCoinUnits))
+            compose.onNodeWithTag("plan-traffic-${offer.offerRef}", useUnmergedTree = true)
+                .performScrollTo().assertTextEquals("${offer.monthlyTrafficGb} GB / 月")
+            compose.onNodeWithTag("plan-offer-${offer.offerRef}").performScrollTo().performClick().assertIsSelected()
+            compose.onNodeWithTag("plan-continue").performScrollTo().assertIsDisplayed().assertIsEnabled()
         }
         capture("offers-font-200")
+    }
+
+    @Test fun periodAndCategoryChangesKeepNonstandardOffersAndRejectOldSelectionsAndLateQuotes() {
+        val monthly = offers().first()
+        val yearly = offers().last()
+        val other = offer("offline_47_days", 47, 17, 73)
+        val secondOther = offer("offline_83_days", 83, 29, 91)
+        val pack = monthly.copy(offerRef = "offline_data_pack", offerVersionRef = "offline_data_pack_v1",
+            category = "data_pack", durationDays = null, monthlyTrafficGb = null,
+            discountBasisPoints = null, trafficGb = 23)
+        launchCommerce(CommerceMode.Plans) {
+            offers = listOf(monthly, yearly, other, secondOther, pack)
+            catalogLoaded = true; commerceModel = CommerceModel.LEGACY
+        }
+        compose.onNodeWithTag("catalog-plans").assertIsSelected()
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertExists()
+        listOf(yearly, other, secondOther, pack).forEach {
+            compose.onNodeWithTag("plan-offer-${it.offerRef}").assertDoesNotExist()
+        }
+        compose.onNodeWithTag("catalog-other").performScrollTo().performClick()
+        listOf(other, secondOther).forEach {
+            compose.onNodeWithTag("plan-title-${it.offerRef}", useUnmergedTree = true)
+                .performScrollTo().assertTextEquals("${it.durationDays}天")
+        }
+        compose.onNodeWithTag("plan-offer-${monthly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${other.offerRef}").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("catalog-yearly").performScrollTo().performClick()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").assertIsNotSelected()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { commerce.quote = quote(other) }
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertNull(commerce.quote) }
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("catalog-data-packs").performScrollTo().performClick()
+        compose.onNodeWithTag("plan-offer-${yearly.offerRef}").assertDoesNotExist()
+        compose.onNodeWithTag("plan-offer-${pack.offerRef}").assertIsNotSelected()
+        compose.onNodeWithTag("plan-traffic-${pack.offerRef}", useUnmergedTree = true).assertTextEquals("23 GB")
+        compose.runOnIdle { commerce.quote = quote(yearly) }
+        compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { assertNull(commerce.quote); assertNull(commerce.purchase); assertFalse(commerce.pendingPurchase) }
     }
 
     @Test fun quoteDialogCanBeCancelledRepeatedlyWithoutPurchase() {
@@ -444,8 +638,12 @@ class SubscriptionWalletUiTest {
                 CommercePanel(owner, CommerceMode.Plans, stateOverride = state, autoLoad = true)
             } }
         }
-        compose.onNodeWithTag("commerce-signed-out").assertExists()
+        compose.onNodeWithTag("commerce-signed-out").assertDoesNotExist()
+        listOf("wallet-card", "plan-options", "catalog-empty", "purchase-result", "purchase-confirm")
+            .forEach { compose.onNodeWithTag(it).assertDoesNotExist() }
         compose.runOnIdle {
+            assertTrue(account.restoring)
+            assertFalse(commerce.canOperate())
             assertTrue(paths.isEmpty())
             assertFalse(commerce.busy)
             // Admit a real, deferred read before the eligible catalog effect recomposes.
@@ -453,15 +651,15 @@ class SubscriptionWalletUiTest {
             account.restoring = false
             commerce.loadBalance()
         }
-        compose.onNodeWithTag("catalog-loading").assertExists()
-        compose.onNodeWithTag("commerce-refresh").assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(listOf(walletPath), paths)
             assertFalse(commerce.catalogLoaded)
             initialBalance.complete(Unit)
         }
         compose.waitUntil(5_000) { walletReads.get() == 2 }
-        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(listOf(walletPath, walletPath), paths)
             assertFalse(commerce.catalogLoaded)
@@ -469,41 +667,48 @@ class SubscriptionWalletUiTest {
         }
         compose.waitUntil(5_000) { commerce.catalogLoaded && !commerce.busy }
         compose.waitForIdle()
-        compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购套餐")
         // Completing another explicit balance read must not restart the loaded catalog.
         compose.runOnIdle { commerce.loadBalance() }
-        compose.onNodeWithTag("catalog-loading").assertExists()
+        compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
         compose.runOnIdle {
             assertTrue(commerce.catalogLoaded)
             assertEquals(3, walletReads.get())
             laterBalance.complete(Unit)
         }
         compose.waitUntil(5_000) { !commerce.busy }
-        compose.onNodeWithTag("catalog-status").assertTextEquals("已读取 0 款商品")
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购套餐")
         compose.runOnIdle {
             assertEquals(listOf(walletPath, walletPath, "/api/portal/coins/recharge/offers",
                 "/api/portal/commerce/model", "/api/portal/commerce/deferred/offers", walletPath), paths)
         }
     }
 
-    @Test fun catalogStatesKeepServerDurationCoinsAndTrafficInDetails() {
+    @Test fun catalogStatesKeepServerDurationCoinsAndTrafficOnCardsAndInDetails() {
         val fixture = offers().first().copy(durationDays = 47, baseCoinUnits = 73, monthlyTrafficGb = 17)
         launchCommerce(CommerceMode.Plans) { error = "合成目录读取失败" }
-        compose.onNodeWithTag("catalog-status").assertTextEquals("商品尚未读取")
+        compose.onNodeWithTag("catalog-status").assertDoesNotExist()
+        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         compose.onNodeWithTag("commerce-error").assertTextEquals("合成目录读取失败")
         compose.onNodeWithTag("plan-offer-${fixture.offerRef}").assertDoesNotExist()
         compose.runOnIdle {
             commerce.error = null; commerce.catalogLoaded = true; commerce.commerceModel = CommerceModel.LEGACY
             commerce.offers = listOf(fixture)
         }
-        compose.onNodeWithTag("plan-title-${fixture.offerRef}").performScrollTo().assertTextEquals("47天")
-        compose.onNodeWithTag("plan-price-${fixture.offerRef}").assertTextEquals("73 Coins")
-        compose.onNodeWithText("每月流量 17 GB").assertDoesNotExist()
-        compose.onNodeWithTag("plan-details-${fixture.offerRef}").performScrollTo().performClick()
-        compose.onNodeWithText("每月流量 17 GB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("plan-title-${fixture.offerRef}", useUnmergedTree = true).performScrollTo().assertTextEquals("47天")
+        compose.onNodeWithTag("plan-price-${fixture.offerRef}", useUnmergedTree = true).assertTextEquals("73 Coins")
+        compose.onNodeWithTag("catalog-other").assertIsSelected()
+        compose.onNodeWithTag("plan-traffic-${fixture.offerRef}", useUnmergedTree = true).assertTextEquals("17 GB / 月")
+        compose.onNodeWithTag("plan-offer-${fixture.offerRef}").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("plan-benefits").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("17 GB").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { commerce.busy = true }
-        compose.onNodeWithTag("plan-quote-${fixture.offerRef}").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("catalog-plans").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-yearly").assertIsNotEnabled()
+        compose.onNodeWithTag("catalog-other").assertIsNotEnabled()
         compose.onNodeWithTag("catalog-data-packs").assertIsNotEnabled()
     }
 
@@ -632,7 +837,8 @@ class SubscriptionWalletUiTest {
         launchCommerce(CommerceMode.Plans) { offers = fixtures; pendingPurchase = true }
         compose.onNodeWithTag("purchase-result").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("上次提交结果待核对，不要重复购买。").assertExists()
-        offers().forEach { compose.onNodeWithTag("plan-quote-${it.offerRef}").assertDoesNotExist() }
+        compose.onNodeWithTag("plan-continue").assertDoesNotExist()
+        fixtures.forEach { compose.onNodeWithTag("plan-offer-${it.offerRef}").assertDoesNotExist() }
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
     }
 }

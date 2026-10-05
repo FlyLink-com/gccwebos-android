@@ -28,13 +28,23 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private val now: () -> Instant = Instant::now,
     private val subscription: SubscriptionSource = SubscriptionTransport(policy),
     private val sessions: SessionStore = MemorySessionStore(),
-    profiles: LocalProfileStore = MemoryLocalProfileStore()) {
-    val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now)
+    profiles: LocalProfileStore = MemoryLocalProfileStore(),
+    private val allowHostnamePreparation: Boolean = false,
+    manualSources: ManualSourceStore? = null) {
+    val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now,
+        allowHostnamePreparation = allowHostnamePreparation, manualSources = manualSources)
     private val mutex = Mutex()
     private val generation = AtomicLong()
     private val activationLock = Any()
     private var configurationGeneration = 0L
     @Volatile private var session: Session? = null
+    // Memory-only evidence of actual parsed reads, including the legacy import path.
+    private var overviewRevision = 0L
+    private var overviewIssuedSequence = 0L
+    private var overviewAcceptedSequence = 0L
+    private var overviewIdentity: AccountUsageResourceIdentity? = null
+    private class OverviewReadLease(val session: Session, val epoch: Long, val issuedSequence: Long,
+        val resourceRevision: Long)
     private var imported: AuthorizedConfig? = null
     private var importedUntil: Instant? = null
     private var importedGeneration: Long? = null
@@ -109,9 +119,11 @@ class PortalRepository(private val transport: PortalTransport, private val store
         invalidateImport()
         val value = PortalJson.session(JSONObject(body), elapsed())
         require(value.valid(now(), elapsed()))
-        val prior = store.read()
-        context.ensureActive()
-        if (prior != null && prior.accountId != value.accountId) { store.clear() }
+        localSubscriptions.whenLegacySource {
+            val prior = store.read()
+            context.ensureActive()
+            if (prior != null && prior.accountId != value.accountId) { store.clear() }
+        }
         context.ensureActive()
         totpExpiry = null
         try {
@@ -136,12 +148,15 @@ class PortalRepository(private val transport: PortalTransport, private val store
             synchronized(activationLock) {
                 checkGeneration(epoch)
                 if (!value.valid(now(), elapsed())) { sessions.clear(); throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED) }
-                val prior = store.read()
-                if (prior != null && prior.accountId != value.accountId) { store.clear() }
+                localSubscriptions.whenLegacySource {
+                    val prior = store.read()
+                    if (prior != null && prior.accountId != value.accountId) { store.clear() }
+                }
                 try {
                     sessions.save(SavedSession.capture(value, now(), elapsed()))
-                    context.ensureActive(); checkGeneration(epoch)
                 } catch (failure: Throwable) { sessions.clear(); throw failure }
+                // A cancelled UI owner must not delete an already saved, still-valid session.
+                context.ensureActive(); checkGeneration(epoch)
                 session = value
             }
             value
@@ -155,18 +170,71 @@ class PortalRepository(private val transport: PortalTransport, private val store
         PortalJson.security(response.body)
     } }
     suspend fun refresh(): Resource = mutex.withLock { guarded { refreshLocked() } }
-    private suspend fun refreshLocked(epoch: Long = generation.get()): Resource {
+    private suspend fun refreshLocked(epoch: Long = generation.get()): Resource = refreshOverviewLocked(epoch).resource
+    /** Existing import refresh semantics, now carrying the identity of that exact read. */
+    internal suspend fun refreshWithObservation(): BoundAccountOverview = mutex.withLock { guarded { refreshOverviewLocked() } }
+    private suspend fun refreshOverviewLocked(epoch: Long = generation.get()): BoundAccountOverview {
         // Failed or superseded refreshes must not leave an old profile eligible for use.
         synchronized(activationLock) { configurationGeneration++; invalidateImport() }
-        checkGeneration(epoch); val active = activeSession()
-        val response = transport.request("/api/portal/resources/current/overview", session = active.token)
-        expectCurrent(response, setOf(200), epoch); checkGeneration(epoch); activeSession()
-        return PortalJson.resource(response.body)
+        val lease = captureOverviewRead(expectedEpoch = epoch)
+        val response = transport.request("/api/portal/resources/current/overview", session = lease.session.token)
+        return acceptOverviewResponse(response, lease)
+    }
+
+    /** Only an overview GET. HTTP awaits outside the mutex so logout/new login can proceed. */
+    internal suspend fun readAccountOverview(expectedOwner: AccountUsageOwner,
+        expectedRepositoryEpoch: Long? = null): BoundAccountOverview = guarded {
+        val captured = mutex.withLock {
+            captureOverviewRead(expectedOwner, expectedRepositoryEpoch)
+        }
+        val response = transport.request("/api/portal/resources/current/overview", session = captured.session.token)
+        mutex.withLock { acceptOverviewResponse(response, captured) }
+    }
+
+    /** Atomic authentication context only: no HTTP, resource inference or access credentials. */
+    internal suspend fun captureAccountUsageAuthentication(expectedOwner: AccountUsageOwner): AccountUsageAuthentication = mutex.withLock { guarded {
+        synchronized(activationLock) {
+            val epoch = generation.get(); val active = activeSession()
+            if (AccountUsageOwner.fromSession(active) != expectedOwner) throw CancellationException("Overview owner changed")
+            AccountUsageAuthentication(expectedOwner, epoch)
+        }
+    } }
+
+    private fun captureOverviewRead(expectedOwner: AccountUsageOwner? = null, expectedEpoch: Long? = null): OverviewReadLease = synchronized(activationLock) {
+        val epoch = generation.get(); val active = activeSession()
+        if (expectedEpoch != null && expectedEpoch != epoch) throw CancellationException("Overview authentication changed")
+        if (expectedOwner != null && AccountUsageOwner.fromSession(active) != expectedOwner) throw CancellationException("Overview owner changed")
+        OverviewReadLease(active, epoch, ++overviewIssuedSequence, overviewRevision)
+    }
+
+    private fun checkOverviewOwner(captured: Session, epoch: Long, expected: AccountUsageOwner) = synchronized(activationLock) {
+        checkGeneration(epoch)
+        val current = activeSession()
+        if (AccountUsageOwner.fromSession(current) != expected || AccountUsageOwner.fromSession(captured) != expected)
+            throw CancellationException("Overview owner changed")
+    }
+
+    private fun acceptOverviewResponse(response: WireResponse, lease: OverviewReadLease): BoundAccountOverview = synchronized(activationLock) {
+        val owner = AccountUsageOwner.fromSession(lease.session)
+        checkOverviewOwner(lease.session, lease.epoch, owner)
+        // Both fences are captured at request start. Failures never advance the accepted fence.
+        if (lease.issuedSequence < overviewAcceptedSequence || lease.resourceRevision != overviewRevision)
+            throw CancellationException("Overview read superseded")
+        expectCurrent(response, setOf(200), lease.epoch)
+        val resource = PortalJson.resource(response.body)
+        checkOverviewOwner(lease.session, lease.epoch, owner)
+        val identity = AccountUsageResourceIdentity.of(resource)
+        if (overviewIdentity != identity) { overviewIdentity = identity; overviewRevision++ }
+        overviewAcceptedSequence = lease.issuedSequence
+        BoundAccountOverview(AccountUsageReadContext(owner, lease.epoch, overviewRevision, lease.issuedSequence), resource)
     }
 
     /** Called after sign-in and on explicit refresh. No production connection or VPN permission. */
     suspend fun refreshAndImport(onResource: (Resource) -> Unit = {},
         onDeliveryReceived: () -> Unit = {}): ImportSnapshot = importFresh(onResource, onDeliveryReceived)
+
+    internal suspend fun refreshAndImportObserved(onOverview: (BoundAccountOverview) -> Unit,
+        onDeliveryReceived: () -> Unit = {}): ImportSnapshot = importFresh(onDeliveryReceived = onDeliveryReceived, onOverview = onOverview)
 
     internal suspend fun prepareFreshConnection(requested: String?, resolver: ConnectionLineResolver,
         files: AtomicPreparedConfigStore): AuthorizedConfig? {
@@ -202,11 +270,15 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private suspend fun importFresh(onResource: (Resource) -> Unit = {}, onDeliveryReceived: () -> Unit = {},
         selection: ((Resource.Available) -> ResolvedConnectionLine?)? = null,
         onPrepared: ((Resource.Available, ResolvedConnectionLine, ByteArray, Long, Long) -> Unit)? = null,
-    ): ImportSnapshot = mutex.withLock {
+        onOverview: (BoundAccountOverview) -> Unit = {},
+    ): ImportSnapshot = mutex.withLock { localSubscriptions.withLegacySource {
         guarded {
             val epoch = generation.get()
-            val resource = refreshLocked(epoch)
+            val clearVersion = localSubscriptions.captureClearVersion()
+            val overview = refreshOverviewLocked(epoch)
+            val resource = overview.resource
             onResource(resource)
+            onOverview(overview)
             checkGeneration(epoch)
             val inactive = when {
                 resource == Resource.None -> ImportStatus.NO_RESOURCE
@@ -221,7 +293,8 @@ class PortalRepository(private val transport: PortalTransport, private val store
             val selected = if (selection != null) selection(resource)
                 ?: return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION)
                 else ResolvedConnectionLine(resource.reference + ":offline-preview-index-0", 0)
-            val record = (if (onPrepared != null) acquireFreshLocked(resource, epoch) else acquireLocked(resource, epoch))
+            val recovery = if (onPrepared == null) acquireForImportLocked(resource, overview, epoch, clearVersion) else null
+            val record = (if (onPrepared != null) acquireFreshLocked(resource, epoch) else recovery?.record)
                 ?: return@guarded ImportSnapshot(resource, ImportStatus.WAITING_DELIVERY)
             checkGeneration(epoch); activeSession()
             onDeliveryReceived()
@@ -232,27 +305,45 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 // Offline compatibility preview only: list order is not a stable line ID or
                 // server recommendation. Production has no gateway/service consuming this profile.
                 // Every node is validated even though only index 0 is retained for this preview.
-                val nodes = try { SafeProxyConfig.inspect(raw) }
-                    catch (_: UnsafeProxyConfiguration) { return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION) }
+                val nodes = try {
+                    if (allowHostnamePreparation && onPrepared == null) SafeProxyConfig.validateForPreparation(raw)
+                    else SafeProxyConfig.inspect(raw)
+                }
+                    catch (failure: UnsafeProxyConfiguration) {
+                        return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, rejection = failure.reason)
+                    }
                 val projected = try { SafeProxyConfig.project(raw, selected.index) }
-                    catch (_: UnsafeProxyConfiguration) { return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, nodes) }
+                    catch (failure: UnsafeProxyConfiguration) {
+                        if (allowHostnamePreparation && onPrepared == null &&
+                            failure.reason == SafeProxyConfig.RejectionReason.EndpointHostname) null
+                        else return@guarded ImportSnapshot(resource, ImportStatus.UNSUPPORTED_CONFIGURATION, nodes, failure.reason)
+                    }
                 try {
-                    checkGeneration(epoch); activeSession(); currentCoroutineContext().ensureActive()
+                    val context = currentCoroutineContext()
+                    checkGeneration(epoch); activeSession(); context.ensureActive()
                     synchronized(activationLock) {
                         checkGeneration(epoch)
-                        if (onPrepared != null) onPrepared(resource, selected, projected, epoch, configurationGeneration)
+                        if (onPrepared != null) onPrepared(resource, selected, requireNotNull(projected), epoch, configurationGeneration)
                         else {
-                            localSubscriptions.remember(raw, requireNotNull(record.url), resource.validUntil)
-                            imported = AuthorizedConfig(selected.lineId, projected)
+                            checkImportObservation(overview, epoch, clearVersion)
+                            if (recovery?.journal != null) {
+                                localSubscriptions.rememberRecoveredLegacy(raw, recovery.journal, resource.validUntil) {
+                                    context.ensureActive(); checkImportObservation(overview, epoch, clearVersion)
+                                }
+                            } else localSubscriptions.remember(raw, requireNotNull(record.url), resource.validUntil)
+                            invalidateImport()
+                            // Hostname profiles remain original artifacts. Resolution belongs only
+                            // to the fresh physical-network connection attempt, never this preview.
+                            imported = projected?.let { AuthorizedConfig(selected.lineId, it) }
                             importedUntil = resource.validUntil
                             importedGeneration = epoch
                         }
                     }
-                } finally { projected.fill(0) }
+                } finally { projected?.fill(0) }
                 ImportSnapshot(resource, ImportStatus.IMPORTED, nodes)
             } finally { raw.fill(0) }
         }
-    }
+    } }
 
     /** Cached offline preview only. NEVER use as a fresh connect/reconnect/switch source.
      * Not evidence that a tunnel was started or traffic verified.
@@ -305,7 +396,107 @@ class PortalRepository(private val transport: PortalTransport, private val store
         sessionBinding(Secret(activeSession().accountId))
     }
     suspend fun acquire(resource: Resource.Available): Unit = mutex.withLock {
-        guarded { acquireLocked(resource); Unit }
+        localSubscriptions.withLegacySource { guarded { acquireLocked(resource); Unit } }
+    }
+    /** A partial profile write must not make the account UI bypass authenticated recovery. */
+    internal fun hasPendingLegacyRecovery(): Boolean = synchronized(activationLock) {
+        store.readLegacyRecovery() != null
+    }
+    private class ImportDelivery(val record: DeliveryRecord, val journal: LegacyRecoveryJournal? = null)
+
+    private fun checkImportObservation(overview: BoundAccountOverview, epoch: Long, clearVersion: Long) = synchronized(activationLock) {
+        checkGeneration(epoch)
+        localSubscriptions.withClearVersion(clearVersion) { Unit }
+        val current = activeSession()
+        if (overview.context.owner != AccountUsageOwner.fromSession(current) ||
+            overview.context.repositoryEpoch != epoch || overview.context.resourceRevision != overviewRevision ||
+            overview.context.readSequence != overviewAcceptedSequence)
+            throw CancellationException("Import observation changed")
+        if ((overview.resource as? Resource.Available)?.validUntil?.let { it <= now() } != false)
+            throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_EXPIRED)
+    }
+
+    /** A verified legacy reveal is repeatable; wallet-first receipts remain one-time and session-bound. */
+    private suspend fun acquireForImportLocked(resource: Resource.Available, overview: BoundAccountOverview,
+        epoch: Long, clearVersion: Long): ImportDelivery? {
+        checkImportObservation(overview, epoch, clearVersion)
+        val active = activeSession()
+        val response = transport.commerce("/api/portal/commerce/model", null, active.token, null)
+        expectCurrent(response, setOf(200), epoch)
+        currentCoroutineContext().ensureActive(); checkImportObservation(overview, epoch, clearVersion)
+        return when (CommerceJson.model(response.body)) {
+            CommerceModel.WALLET_FIRST -> {
+                if (store.readLegacyRecovery() != null)
+                    throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED, PortalFailure.RecoveryCause.MODEL_CHANGED)
+                acquireLocked(resource, epoch)?.let { ImportDelivery(it) }
+            }
+            CommerceModel.LEGACY -> acquireLegacyImportLocked(resource, overview, epoch, active, clearVersion)
+        }
+    }
+
+    private suspend fun acquireLegacyImportLocked(resource: Resource.Available, overview: BoundAccountOverview,
+        epoch: Long, active: Session, clearVersion: Long): ImportDelivery? {
+        var journal = store.readLegacyRecovery()
+        val binding = sessionBinding(active.token)
+        val main = store.read()
+        if (main != null && main.accountId != active.accountId)
+            throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED, PortalFailure.RecoveryCause.JOURNAL_CONFLICT)
+        if (journal != null && !sameDeliveryRecord(main, journal.original) && !sameDeliveryRecord(main, journal.candidate))
+            throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED, PortalFailure.RecoveryCause.JOURNAL_CONFLICT)
+        val reusable = journal?.candidate?.let {
+            it.accountId == active.accountId && it.sessionBinding == binding && it.resource == resource.reference
+        } == true
+        if (!reusable) {
+            if (!resource.setupAvailable) return null
+            journal = LegacyRecoveryJournal(main, DeliveryRecord(active.accountId, binding, resource.reference,
+                UUID.randomUUID().toString()), LegacyRecoveryPhase.ATTEMPT)
+            synchronized(activationLock) {
+                localSubscriptions.withClearVersion(clearVersion) {
+                    checkImportObservation(overview, epoch, clearVersion); store.saveLegacyRecovery(journal)
+                }
+            }
+        }
+        var staged = requireNotNull(journal)
+        fun checkStage() {
+            checkImportObservation(overview, epoch, clearVersion)
+            val current = store.readLegacyRecovery()
+            if (current == null || !sameDeliveryRecord(current.original, staged.original) ||
+                !sameDeliveryRecord(current.candidate, staged.candidate) || current.phase != staged.phase)
+                throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED, PortalFailure.RecoveryCause.JOURNAL_CONFLICT)
+        }
+        if (staged.candidate.url == null) {
+            val reveal = transport.request("/api/portal/resources/current/setup",
+                JSONObject().put("idempotencyKey", staged.candidate.operationKey).toString(), active.token)
+            expectCurrent(reveal, setOf(200), epoch)
+            currentCoroutineContext().ensureActive()
+            val received = PortalJson.delivery(reveal.body, staged.candidate, policy)
+            synchronized(activationLock) {
+                localSubscriptions.withClearVersion(clearVersion) {
+                    checkStage()
+                    staged = LegacyRecoveryJournal(staged.original, received, LegacyRecoveryPhase.REVEALED)
+                    store.saveLegacyRecovery(staged)
+                }
+            }
+        }
+        if (staged.candidate.pendingAck) {
+            synchronized(activationLock) { checkStage() }
+            val ack = transport.request("/api/portal/resources/current/setup/ack",
+                JSONObject().put("handoffRef", requireNotNull(staged.candidate.handoff).value).toString(), active.token)
+            expectCurrent(ack, setOf(204), epoch)
+            currentCoroutineContext().ensureActive()
+            synchronized(activationLock) {
+                localSubscriptions.withClearVersion(clearVersion) {
+                    checkStage()
+                    val candidate = staged.candidate
+                    staged = LegacyRecoveryJournal(staged.original, DeliveryRecord(candidate.accountId,
+                        candidate.sessionBinding, candidate.resource, candidate.operationKey, candidate.url, candidate.handoff,
+                        false), LegacyRecoveryPhase.ACKNOWLEDGED)
+                    store.saveLegacyRecovery(staged)
+                }
+            }
+        }
+        synchronized(activationLock) { checkStage() }
+        return ImportDelivery(staged.candidate, staged)
     }
     /** Current model is authoritative; do not infer it from setupAvailable or an opaque ID. */
     private suspend fun acquireFreshLocked(resource: Resource.Available, epoch: Long): DeliveryRecord? {
@@ -345,11 +536,12 @@ class PortalRepository(private val transport: PortalTransport, private val store
             if (record != null && record.resource != resource.reference) {
                 // A renewal can change resourceRef without issuing new delivery material.
                 // Preserve the receipt; no verified stable delivery identity permits rebinding it.
-                throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED)
+                throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED, PortalFailure.RecoveryCause.RESOURCE_CHANGED)
             }
             if (record != null && record.sessionBinding != sessionBinding(active.token)) {
                 // Ack is session-bound. Do not silently create a second claim or lose recoverable material.
-                if (record.pendingAck || record.url == null) throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED)
+                if (record.pendingAck || record.url == null) throw PortalFailure(PortalFailure.Reason.RECOVERY_REQUIRED,
+                    PortalFailure.RecoveryCause.SESSION_PENDING)
                 policy.subscription(requireNotNull(record.url).value)
                 return record // Existing acknowledged material is retained for this same account/resource.
             }
@@ -389,15 +581,23 @@ class PortalRepository(private val transport: PortalTransport, private val store
         }
     }
     /** Local sign-out only. There is no verified native server revocation endpoint. */
-    suspend fun clearLocalData() {
+    suspend fun clearLocalData(cleanup: suspend () -> Unit = {},
+        commitFence: ((() -> Unit) -> Unit) = { it() }) {
         synchronized(activationLock) {
             generation.incrementAndGet(); session = null; totpExpiry = null; invalidateImport()
-            try { sessions.clear() } finally { localSubscriptions.unlink() }
+            // Revoke the saved session before waiting for an admitted network read to drain.
+            // A failed first attempt must still tombstone the source and stop its owner;
+            // the final store attempt below remains mandatory and propagates failure.
+            try { sessions.clear() } catch (_: Exception) { }
         }
         // Finish admitted local cleanup even if the Activity scope is disposed while IO is draining.
         // HTTPS operations holding the mutex have the transport's bounded timeout.
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-            mutex.withLock { invalidateImport(); session = null; totpExpiry = null; try { sessions.clear() } finally { localSubscriptions.unlink() } }
+            localSubscriptions.unlinkAndAwait(cleanup = {
+                try { mutex.withLock {
+                    invalidateImport(); session = null; totpExpiry = null; sessions.clear()
+                } } finally { cleanup() }
+            }, commitFence = commitFence)
         }
     }
     /** Account logout does not unlink a previously acknowledged local subscription capability. */

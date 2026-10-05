@@ -59,6 +59,22 @@ rejected. The proxy name and routing policy are fixed. Versioned protocol shapes
 are limited to SS AEAD, VLESS TCP TLS/Reality, Hysteria2 and TUIC v5; see
 [the strict field and unsupported-shape matrix](../docs/offline-protocol-contract.md).
 Explicit SS/VLESS UDP=false is preserved; HY2/TUIC have intrinsic UDP support.
+Optional `bbr-profile` is limited to Hysteria2/TUIC and the exact strings
+`conservative`, `standard`, or `aggressive`; missing stays absent. Null, empty,
+unknown, mistyped, case-alias, duplicate and cross-protocol inputs are rejected.
+The pinned [HY2 adapter](https://github.com/MetaCubeX/mihomo/blob/ab405bad5beeeac8b003bb01f60f134f6df54471/adapter/outbound/hysteria2.go#L232)
+supplies the profile to its BBR callback. The [TUIC controller dispatch](https://github.com/MetaCubeX/mihomo/blob/ab405bad5beeeac8b003bb01f60f134f6df54471/transport/tuic/common/congestion.go#L16)
+uses the profile only for BBR; this bridge preserves an omitted or explicit TUIC
+congestion controller and never switches it to BBR. Arbitrary congestion/window
+tuning, TLS/authentication changes and other unsupported fields remain rejected.
+TUIC v5 also accepts optional `request-timeout` as a strict integer from 0 to
+30000 milliseconds, preserving an explicit zero and omitting a missing value.
+This bound is client compatibility policy. The pinned
+[adapter](https://github.com/MetaCubeX/mihomo/blob/ab405bad5beeeac8b003bb01f60f134f6df54471/adapter/outbound/tuic.go#L271)
+only passes this option to its v4 client; its v5 client does not consume it.
+Accepting this field does not add a v5 timeout feature or allow v4 authentication.
+Null, strings, floats, booleans, negative/out-of-range values, duplicate/alias
+keys and use on SS, VLESS or Hysteria2 remain rejected.
 Parsing support alone does not prove endpoint interoperability. Example:
 
 ```json

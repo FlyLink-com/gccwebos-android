@@ -25,7 +25,9 @@ Source: MetaCubeX/mihomo ab405bad5beeeac8b003bb01f60f134f6df54471, inspected loc
 - adapter/outbound/reality.go requires raw URL-base64 public key decoding to 32 bytes; short-id is even-length hex, up to 8 bytes, and may be empty. Missing public key returns nil config rather than rejecting, so validate Reality dependencies before invoking core.
 - adapter/outbound/vless.go truncates long flow strings to 16 characters and defaults unknown packet-encoding to XUDP. Strict projectors should reject unsupported flow/encoding instead of depending on these permissive behaviors.
 - common/utils/mbps.go accepts integer strings as Mbps, otherwise `^(\\d+)\\s*([KMGT]?)([Bb])ps$`. Units are decimal; bits divide by 8. Invalid strings silently yield zero. Validate syntax, positive values and multiplication overflow rather than silently disabling the limit.
-- TUIC default request timeout 8000 milliseconds, heartbeat interval 10000 milliseconds, max-open-streams 100, ALPN h3, max UDP relay packet size 1252 before internal overhead/clamping. HY2/TUIC support UDP inherently. These core defaults are not renderer-emitted fields.
+- TUIC default request timeout 8000 milliseconds, heartbeat interval 10000 milliseconds, max-open-streams 100, ALPN h3, max UDP relay packet size 1252 before internal overhead/clamping. HY2/TUIC support UDP inherently. The renderer emits these optional fields when explicitly supplied; it does not inject the core defaults into every subscription.
+
+The default-only normalization fixtures use false for disable-sni/reduce-rtt/fast-open and either zero or the exact numeric defaults above. Kotlin validates those six values and omits them from the native DTO; native still rejects their direct insertion. The existing `tuic-v5-options` fixture is accepted under this bounded contract. Other options/default/token/provider fixtures retain their individual rejection expectations. Shared golden count is 56; the preceding 48 bytes remain unchanged.
 
 ## Suggested synthetic negative additions
 

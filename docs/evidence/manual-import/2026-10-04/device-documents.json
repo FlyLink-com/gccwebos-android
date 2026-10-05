@@ -1,0 +1,18 @@
+[
+  {
+    "remote": "/sdcard/Download/gcc-manual-import-owned-oct4.yaml",
+    "sha256": "ad732ededf8c2d8a6eae1066b28c78eb965bf5b72f0c840c60d2473037b9b41c",
+    "freshAbsenceVerified": true,
+    "pushed": true,
+    "hashVerifiedBeforeRemoval": true,
+    "removedAndAbsenceVerified": true
+  },
+  {
+    "remote": "/sdcard/Download/gcc-manual-import-owned-oct4-url.txt",
+    "sha256": "975ee4656940ea87087e7ef49fec27b601c5a1a985feb8019c8cb0561f298d3a",
+    "freshAbsenceVerified": true,
+    "pushed": true,
+    "hashVerifiedBeforeRemoval": true,
+    "removedAndAbsenceVerified": true
+  }
+]

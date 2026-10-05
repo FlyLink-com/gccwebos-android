@@ -8,6 +8,22 @@ import org.junit.Test
 import java.time.Instant
 
 class ConnectionOverviewTest {
+    @Test fun onlyTypedLocalSourceCanConnectWithoutServerExpiry() {
+        val clock = Instant.parse("2026-10-04T00:00:00Z")
+        val control = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)
+        val local = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true, hasCapability = true,
+            sourceKind = com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
+            validity = com.gccwebos.android.portal.LocalSourceValidity.LocalNoServerExpiry)
+        val result = connectionOverviewPresentation(local, clock, control)
+        assertEquals(ConnectionPowerAction.Connect, result.action)
+        assertEquals("本地配置", result.title)
+        assertEquals(null, result.countdown)
+        for (invalid in listOf(local.copy(sourceKind = com.gccwebos.android.portal.ManualSourceKind.ImportedRemote),
+            local.copy(validity = com.gccwebos.android.portal.LocalSourceValidity.RemoteExpiry(null)),
+            local.copy(hasCapability = false), local.copy(status = LocalSubscriptionStatus.STORAGE_ERROR))) {
+            assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(invalid, clock, control).action)
+        }
+    }
     private val now = Instant.parse("2026-10-01T00:00:00Z")
     private val ready = LocalSubscriptionSnapshot(LocalSubscriptionStatus.READY, hasProfile = true,
         hasCapability = true, validUntil = now.plusSeconds(90))

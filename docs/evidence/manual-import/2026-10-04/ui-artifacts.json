@@ -1,0 +1,28 @@
+{
+  "package": "com.gccwebos.android.candidate.acceptance.manualui20261004",
+  "signer": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+  "versionCode": 6,
+  "hiddenLauncher": true,
+  "flags": {
+    "VPN_ENGINE_PACKAGED": true,
+    "CONNECTION_ENDPOINT_HOSTNAME": true,
+    "CONNECTION_SYNTHETIC_ACCEPTANCE": false,
+    "STORAGE_SYNTHETIC_ACCEPTANCE": false,
+    "NATIVE_VPN_LAB": false,
+    "NATIVE_TUN_ACCEPTANCE": false
+  },
+  "native": {
+    "arm64-v8a": "30a35588e2605bb5343fcb43300b2ef53217646858e848a60e2aa892fcfdda47",
+    "x86_64": "98e668e0343fc9a11b37c72d4a9ee36dbb1aeecb4eee52634c4379f3db649020"
+  },
+  "app": {
+    "file": "ui-app.apk",
+    "package": "com.gccwebos.android.candidate.acceptance.manualui20261004",
+    "sha256": "6635324bd3c0394c015c6d92de0c2e46d8a3b2f42b48bb58fc9feaa227834457"
+  },
+  "test": {
+    "file": "ui-test.apk",
+    "package": "com.gccwebos.android.candidate.acceptance.manualui20261004.test",
+    "sha256": "d619a2f2eadda43210e527c9a62d1f3a246596f272da395d37fe9f1c31571d47"
+  }
+}

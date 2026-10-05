@@ -9,9 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -65,7 +63,7 @@ internal fun RegistrationPanel(state: RegistrationController, documentOpener: ((
                 TextButton(onClick = state::requestEmailVerification,
                     enabled = !state.busy && !state.pendingUnknown,
                     modifier = Modifier.heightIn(min = 48.dp).testTag("registration-send-code")) {
-                    Text(if (state.verificationLoading) "发送中…" else "获取")
+                    Text("获取")
                 }
             }
             if (state.verificationRemainingSeconds > 0) {
@@ -77,7 +75,7 @@ internal fun RegistrationPanel(state: RegistrationController, documentOpener: ((
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = state.legalAccepted, onCheckedChange = { state.legalAccepted = it },
                     enabled = state.legalAvailable && !state.busy, modifier = Modifier.testTag("registration-legal"))
-                Text(if (state.legalAvailable) "同意服务条款与隐私政策" else "条款与隐私政策待配置",
+                Text(if (state.legalAvailable) "同意服务条款与隐私政策" else "服务条款暂不可用",
                     style = MaterialTheme.typography.bodySmall, color = Brand.Muted, modifier = Modifier.weight(1f))
             }
             state.legalPolicy?.takeIf { it.configured }?.let { policy ->
@@ -93,13 +91,12 @@ internal fun RegistrationPanel(state: RegistrationController, documentOpener: ((
                     TextButton(onClick = { openDocument(policy.privacyUrl) }, enabled = !state.busy) { Text("隐私政策") }
                 }
             }
-            if (state.busy) CircularProgressIndicator(Modifier.size(24.dp).testTag("registration-loading"), color = Brand.Cyan)
             state.error?.let { message ->
                 Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("registration-error").semantics { liveRegion = LiveRegionMode.Polite })
             }
-            if (documentError) SupportingText("无法打开条款，请检查浏览器。")
-            BrandButton(if (state.registering) "提交中…" else "注册", state::register,
+            if (documentError) SupportingText("无法打开条款")
+            BrandButton("注册", state::register,
                 enabled = !state.busy && !state.pendingUnknown, modifier = Modifier.testTag("registration-submit"))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

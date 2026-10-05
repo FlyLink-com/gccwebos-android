@@ -173,6 +173,36 @@ func TestNativeProtocolPositiveVariants(t *testing.T) {
 	}
 }
 
+// Default-equivalent renderer fields are validated and omitted by Kotlin. Even
+// their exact defaults must remain unknown to the native DTO, for every protocol.
+func TestNativeTuicClientOnlyDefaultsStayOutsideDto(t *testing.T) {
+	beforeProtected, beforeRejected := protectedSockets.Load(), rejectedSockets.Load()
+	fields := []struct {
+		key   string
+		value any
+	}{
+		{"disable-sni", false},
+		{"reduce-rtt", false},
+		{"fast-open", false},
+		{"heartbeat-interval", 10000},
+		{"max-udp-relay-packet-size", 1252},
+		{"max-open-streams", 100},
+		{"heartbeat-interval", 0},
+		{"max-udp-relay-packet-size", 0},
+		{"max-open-streams", 0},
+	}
+	for _, kind := range []string{"ss", "vless", "hysteria2", "tuic"} {
+		for _, field := range fields {
+			t.Run(kind+"/"+field.key, func(t *testing.T) {
+				assertRejected(t, changedProxy(t, kind, field.key, field.value, false))
+			})
+		}
+	}
+	if protectedSockets.Load() != beforeProtected || rejectedSockets.Load() != beforeRejected || active.Load() {
+		t.Fatal("client-only field validation attempted a socket or activated the engine")
+	}
+}
+
 func TestNativeProtocolStrictRejections(t *testing.T) {
 	tests := []struct {
 		name, kind, key string

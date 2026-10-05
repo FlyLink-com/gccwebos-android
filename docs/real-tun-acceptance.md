@@ -66,7 +66,7 @@ be distributed as a consumer feature. Platform references: [VpnService](https://
 
 ## Evidence and remaining gates
 
-`real-tun-runtime-api33.sh` runs the ordinary 40-case JNI/UI suite separately, then explicitly
+`real-tun-runtime-api33.sh` runs the ordinary JNI/UI suite separately, then explicitly
 selects the real-TUN test with its opt-in argument. A missing, skipped or failed test is a hard
 failure. `verify_real_tun_acceptance.py` also requires the matching packet/lifecycle JSON proof.
 Screenshots, instrumentation output, source/APK hashes, routes and sanitized counters are
@@ -80,13 +80,23 @@ No client/device limit or automatic backend reset is introduced.
 
 ## Cost-bounded source-identical JNI reuse
 
-Harness-only iterations may reuse the two native libraries from immutable artifact11114730030,
-source b3bb94fe73aa39e03fd25e4b7fc7ef4ba5ab7987. The archive digest, repository/run identity,
+Source-identical iterations may reuse the two native libraries from immutable artifact11306235582,
+source 98ffd6bae926e3d5f7c2a60b2b21af1278874436, run37206973354. Its archive SHA256 is
+070f3bde1da1812c69b895991db807447fada99e96b63c7222333d5cfa435568 and size is 209736015 bytes.
+Independent archive verification passed all 56 Kotlin projections, host success/deny packet tests,
+both native ABIs, 841 JVM tests with zero failures/errors/skips, all 185 API33 device tests including
+JNI, and one real-TUN traffic/lifecycle test. These are synthetic CI results; actual-account
+import and endpoint interoperability remain separate gates, tracked in the [import diagnosis](subscription-import-diagnosis.md). The archive digest, repository/run identity,
 entire native Git tree, Kotlin projector/JNI contract sources, and both raw library hashes must
 match before extraction. Only explicit library/header/notice entries are copied; no old APK is
 used. Every current app/test APK is rebuilt and its packaging, signatures, release exclusion,
 JNI execution and actual TUN tests still run. The receipt separately names native source and
-application source. Prior runtime failure is retained and never relabeled successful.
+application source. Historical failures remain separate from this source's successful run.
+
+The source-88fc API36 UI workflow separately failed after its 720-second suite budget: 136 passes,
+one native-bridge assumption skip in the UI-only package, and 48 incomplete cases out of 185.
+The final started case had at most 7.199 seconds before timeout cleanup, so this does not establish
+an individual test hang. The failed API36 gate and real-account OPPO interoperability remain separate.
 
 Changed native/projector inputs or an expired/missing artifact trigger the full original native
 build/test path; corrupt or contradictory provenance fails closed. Prior host packet-path proof

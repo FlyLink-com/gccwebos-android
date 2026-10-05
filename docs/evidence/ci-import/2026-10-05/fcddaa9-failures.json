@@ -1,0 +1,69 @@
+{
+  "head": "fcddaa9c646dd02b16769f4812ab01032e46f519",
+  "m0": {
+    "run": 37268485149,
+    "job": 111630240159,
+    "conclusion": "failure",
+    "jvm": {
+      "tests": 1001,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "failureStage": "API36 pre-install warm-boot SystemUI ANR gate",
+    "apkInstalled": false,
+    "instrumentationStarted": false,
+    "hostCpuCount": 2,
+    "guestCpuCount": 2,
+    "guestMemoryMb": 3072
+  },
+  "native": {
+    "run": 37268485142,
+    "job": 111630240251,
+    "conclusion": "failure",
+    "instrumentationTotal": 278,
+    "passed": 271,
+    "skipped": 5,
+    "failed": 2,
+    "nonPassing": [
+      {
+        "class": "com.gccwebos.android.ManualImportDeviceFlowTest",
+        "test": "realCameraPermissionDenialReturnsFixedFailureWithoutImport",
+        "code": -4
+      },
+      {
+        "class": "com.gccwebos.android.ManualImportDeviceFlowTest",
+        "test": "realDocumentPickerStagesOwnedYamlThenExplicitConfirmationImportsLocal",
+        "code": -4
+      },
+      {
+        "class": "com.gccwebos.android.ManualImportDeviceFlowTest",
+        "test": "realDocumentPickerStagesOwnedLinkThenExplicitConfirmationImportsRemote",
+        "code": -4
+      },
+      {
+        "class": "com.gccwebos.android.ManualImportDeviceFlowTest",
+        "test": "realCameraStagesSyntheticQrThenExplicitConfirmationImportsRemote",
+        "code": -4
+      },
+      {
+        "class": "com.gccwebos.android.SelectedNodeActivityRecreationTest",
+        "test": "changedSameNameCachedContentClearsSelectionDuringRealActivityRecreationAndRejectsOldOpaque",
+        "code": -2
+      },
+      {
+        "class": "com.gccwebos.android.SelectedNodeActivityRecreationTest",
+        "test": "selectedSameNameSecondNodeSurvivesRealActivityRecreationWithTheSameOpaqueIdentity",
+        "code": -2
+      },
+      {
+        "class": "com.gccwebos.android.portal.ManualImportUpgradeTest",
+        "test": "verifyUpgradeAndPrepareRollback",
+        "code": -4
+      }
+    ],
+    "jniLoadTestsPassed": true,
+    "realTunPhaseExecuted": false
+  },
+  "plan": "Preserve private-store and ANR guards; run fresh-store cases before app launch; partition explicit physical/upgrade fixtures; share existing 1800-second budget."
+}

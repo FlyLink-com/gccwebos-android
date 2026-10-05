@@ -7,6 +7,8 @@ import java.nio.charset.CodingErrorAction
  * COPY_START fields: owner Binder, generation long, resource expiry epoch millis (0 unknown),
  * mandatory admission deadline elapsed millis, byte[]. Deadline validation and worker take are
  * bounded admission checks, not a promise that JNI starts before the caller receives its reply.
+ * Lease bindings additionally require two trailing longs after byte[]: physical network handle
+ * and the original preparation deadline. Legacy bindings require the old exact payload.
  * Every response starts with writeNoException; COPY_START writes 1/0, STOP writes 1, STATE an int.
  */
 object VpnControl {
@@ -22,10 +24,27 @@ object VpnControl {
     const val FAILED = 4
     const val MAX_CONFIG_BYTES = 64 * 1024
     const val MAX_ADMISSION_MILLIS = 1_500L
+    const val MAX_TRANSPORT_LEASE_MILLIS = 30_000L
+    const val EXTRA_NETWORK_HANDLE = "com.gccwebos.android.vpn.NETWORK_HANDLE"
+    const val EXTRA_LEASE_DEADLINE = "com.gccwebos.android.vpn.LEASE_DEADLINE"
 
     private const val BINDER_FLAG_ONEWAY = 0x01 // Android IBinder.FLAG_ONEWAY protocol bit.
     internal fun isSynchronousCall(hasReply: Boolean, flags: Int): Boolean =
         hasReply && (flags and BINDER_FLAG_ONEWAY) == 0
+}
+
+/** Binding identity only; the deadline limits admission and start, never a running session. */
+internal class VpnTransportPin(val networkHandle: Long, val validUntilElapsedMillis: Long) {
+    val leased: Boolean get() = networkHandle > 0 && validUntilElapsedMillis > 0
+    fun permitsCopy(hasFields: Boolean, handle: Long, deadline: Long, now: Long): Boolean =
+        if (networkHandle == 0L && validUntilElapsedMillis == 0L)
+            !hasFields && handle == 0L && deadline == 0L && now >= 0
+        else leased && hasFields && handle == networkHandle && deadline == validUntilElapsedMillis && permitsStart(now)
+    fun permitsStart(now: Long): Boolean = now >= 0 &&
+        if (networkHandle == 0L && validUntilElapsedMillis == 0L) true
+        else leased && validUntilElapsedMillis > now &&
+            validUntilElapsedMillis - now <= VpnControl.MAX_TRANSPORT_LEASE_MILLIS
+    override fun toString() = "VpnTransportPin(<opaque>)"
 }
 
 /** One process, one admission; owned pending bytes can be revoked before any native work. */

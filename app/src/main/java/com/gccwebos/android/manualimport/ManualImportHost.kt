@@ -1,0 +1,151 @@
+package com.gccwebos.android.manualimport
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.SecureFlagPolicy
+import com.gccwebos.android.design.Brand
+import com.gccwebos.android.design.BrandButton
+import com.gccwebos.android.design.GlassSurface
+
+/** Ticket validation and source commit belong exclusively to the caller's coordinator.
+ * onSubmit transfers byte ownership; the caller must consume/copy synchronously and wipe in finally.
+ * No input, payload or pending ticket is saveable. A recreated host starts with an empty menu. */
+@Composable
+internal fun <T : Any> ManualImportHost(
+    visible: Boolean,
+    busy: Boolean,
+    error: String?,
+    canUseAccount: Boolean = false,
+    canRemove: Boolean = false,
+    onDismiss: () -> Unit,
+    onBegin: () -> T?,
+    onSubmit: (T, ByteArray, ManualImportInputKind) -> Unit,
+    onCancel: (T) -> Unit,
+    onUseAccount: () -> Unit,
+    onRemove: () -> Unit,
+    onFailure: (T, ManualImportFailure) -> Unit = { _, _ -> },
+    platformOverride: ManualImportPlatform? = null,
+) {
+    if (!visible) return
+    val platform = platformOverride ?: rememberManualImportPlatform()
+    val cancelLatest by rememberUpdatedState(onCancel)
+    val failureLatest by rememberUpdatedState(onFailure)
+    val owner = remember { ManualHostOwner<T> { cancelLatest(it) } }
+    var mode by remember { mutableStateOf(ManualHostMode.Menu) }
+    var link by remember { mutableStateOf("") }
+    var failure by remember { mutableStateOf<ManualImportFailure?>(null) }
+    var staged by remember { mutableStateOf(false) }
+    var submitted by remember { mutableStateOf(false) }
+    DisposableEffect(owner) { onDispose { link = ""; owner.close() } }
+    fun dismiss() { link = ""; owner.close(); onDismiss() }
+    fun fail(ticket: T, reason: ManualImportFailure) {
+        failure = reason
+        failureLatest(ticket, reason)
+    }
+    fun begin(kind: ManualImportInputKind) {
+        if (busy || owner.ticket != null) return
+        val ticket = onBegin() ?: return
+        owner.ticket = ticket
+        owner.kind = kind
+        failure = null
+        if (kind == ManualImportInputKind.Link) mode = ManualHostMode.Link else {
+            mode = ManualHostMode.External
+            owner.external = platform.launch(kind) { result ->
+                if (!owner.accepts(ticket)) {
+                    (result as? ManualInputResult.Content)?.bytes?.fill(0)
+                } else when (result) {
+                    is ManualInputResult.Content -> {
+                        owner.payload?.fill(0)
+                        owner.payload = result.bytes
+                        staged = true
+                        mode = ManualHostMode.Confirm
+                    }
+                    is ManualInputResult.Failure -> fail(ticket, result.reason)
+                }
+            }
+        }
+    }
+    fun submit() {
+        val ticket = owner.ticket ?: return
+        if (busy || submitted || !owner.accepts(ticket)) return
+        val bytes = try {
+            if (mode == ManualHostMode.Link) ManualInputBytes.fromText(link)
+            else owner.payload?.also { owner.payload = null } ?: return
+        } catch (invalid: ManualInputException) { fail(ticket, invalid.failure); return }
+        link = ""; staged = false; submitted = true
+        try { onSubmit(ticket, bytes, requireNotNull(owner.kind)) }
+        catch (_: Exception) {
+            bytes.fill(0)
+            fail(ticket, ManualImportFailure.InvalidInput)
+        }
+    }
+    Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(
+        securePolicy = SecureFlagPolicy.SecureOn, usePlatformDefaultWidth = false)) {
+        GlassSurface(Modifier.padding(20.dp).widthIn(max = 420.dp).fillMaxWidth().testTag("manual-import-host")) {
+            Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(when (mode) {
+                    ManualHostMode.Menu -> "导入配置"
+                    ManualHostMode.Link -> "订阅链接"
+                    ManualHostMode.Remove -> "移除导入配置？"
+                    else -> "导入配置"
+                }, style = MaterialTheme.typography.titleMedium)
+                if (mode == ManualHostMode.Menu) {
+                    BrandButton("扫描二维码", { begin(ManualImportInputKind.Scan) }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-import-scan"))
+                    BrandButton("导入配置文件", { begin(ManualImportInputKind.Document) }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-import-document"))
+                    BrandButton("导入订阅链接", { begin(ManualImportInputKind.Link) }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-import-link"))
+                    if (canUseAccount || canRemove) HorizontalDivider(color = Brand.RowDivider)
+                    if (canUseAccount) TextButton({ if (!busy) onUseAccount() }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-use-account")) { Text("使用账户订阅") }
+                    if (canRemove) TextButton({ mode = ManualHostMode.Remove }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-remove")) { Text("移除导入配置") }
+                } else if (mode == ManualHostMode.Remove) {
+                    BrandButton("确认移除", { if (!busy) onRemove() }, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
+                } else {
+                    if (mode == ManualHostMode.Link) OutlinedTextField(link, { value ->
+                        if (value.length <= ManualInputBytes.Limit) { link = value; failure = null }
+                        else owner.ticket?.let { fail(it, ManualImportFailure.TooLarge) }
+                    }, label = { Text("订阅链接") }, singleLine = true, enabled = !busy && !submitted,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth().testTag("manual-link-input"))
+                    if (mode != ManualHostMode.External) BrandButton("导入", ::submit,
+                        enabled = !busy && !submitted && (staged || (mode == ManualHostMode.Link && link.isNotBlank())),
+                        modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
+                }
+                (failure?.caption ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("manual-import-error")) }
+                TextButton(::dismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .testTag("manual-import-cancel")) { Text("取消") }
+            }
+        }
+    }
+}
+
+private enum class ManualHostMode { Menu, Link, External, Confirm, Remove }
+private class ManualHostOwner<T : Any>(private val cancel: (T) -> Unit) {
+    var ticket: T? = null
+    var kind: ManualImportInputKind? = null
+    var payload: ByteArray? = null
+    var external: ManualInputCancellation? = null
+    private var closed = false
+    fun accepts(value: T) = !closed && ticket === value
+    fun close() {
+        if (closed) return
+        closed = true
+        external?.cancel(); external = null
+        payload?.fill(0); payload = null
+        ticket?.let(cancel); ticket = null
+    }
+}

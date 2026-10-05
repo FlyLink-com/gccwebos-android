@@ -2,6 +2,10 @@ package com.gccwebos.android
 
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import com.gccwebos.android.portal.LocalSubscriptionSnapshot
+import com.gccwebos.android.portal.LocalSubscriptionStatus
+import java.time.Instant
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -17,6 +21,21 @@ class AppShellActivityRecreationTest {
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
     }
 
+    private fun assertSignedOutGuidanceDoesNotAdmitProductionConnect() {
+        // This enabled AccountChoice entry is guidance, not a production power command.
+        // Do not enter the private account form or request a configuration in this real Activity.
+        compose.onNodeWithTag("vpn-connect").performScrollTo()
+            .assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
+        compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
+        compose.onNodeWithTag("connection-power").assertDoesNotExist()
+        compose.onNodeWithTag("connection-prepare-cancel").assertDoesNotExist()
+        // Missing local material cannot issue Connect even when the packed owner is operable.
+        assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(
+            LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING), Instant.now(),
+            ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)).action)
+    }
+
     @Test fun signedOutRealActivityRecreationKeepsDefaultConnectionAndDisabledProductionPower() {
         compose.onNodeWithTag("page-Connect").assertExists()
         assertFourTabs()
@@ -25,7 +44,7 @@ class AppShellActivityRecreationTest {
         assertFourTabs()
         compose.onNodeWithTag("page-Connect").assertExists()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        assertSignedOutGuidanceDoesNotAdmitProductionConnect()
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
     }
 
@@ -42,6 +61,6 @@ class AppShellActivityRecreationTest {
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("page-Connect").assertExists()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
-        compose.onNodeWithTag("vpn-connect").assertIsNotEnabled()
+        assertSignedOutGuidanceDoesNotAdmitProductionConnect()
     }
 }

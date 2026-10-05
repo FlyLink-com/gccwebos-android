@@ -1,15 +1,20 @@
 package com.gccwebos.android
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.gccwebos.android.design.GccTheme
+import com.gccwebos.android.design.GlassMode
 import com.gccwebos.android.portal.*
+import com.gccwebos.android.vpn.SafeProxyConfig
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.*
 import org.junit.Rule
@@ -43,7 +48,10 @@ class NodeSelectionUiTest {
     private var resource by mutableStateOf<Resource?>(null)
     private var hasCapability by mutableStateOf(true)
     private var connectionControl by mutableStateOf(ConnectionControlState())
-    private fun launch() {
+    private var inspectedNodes by mutableStateOf<List<SafeProxyConfig.NodeSummary>>(emptyList())
+    private var selectionAllowed = true
+    private val navigationCalls = AtomicInteger()
+    private fun launch(initialRead: Boolean = true, width: Int = 360, fontScale: Float = 1f) {
         compose.setContent {
             val scope = rememberCoroutineScope()
             val owner = remember {
@@ -62,17 +70,39 @@ class NodeSelectionUiTest {
                 }
                 manager = LocalSubscriptionManager(receipt, MemoryLocalProfileStore(), source,
                     OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { time }, LocalSubscriptionAuthority())
-                NodeSelectionController(manager, scope, { 0L }).also { state = it }
+                NodeSelectionController(manager, scope, { 0L }, allowed = { selectionAllowed }, onSnapshot = { inspectedNodes = it.nodes })
+                    .also { state = it }
             }
-            LaunchedEffect(owner) { owner.refresh() } // Explicit synthetic fixture setup only.
-            GccTheme {
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                    NodeSelectionPanel(owner, manager.snapshot().nodes, resource, hasCapability, false,
-                        connectionControl = connectionControl) {}
+            LaunchedEffect(owner) { if (initialRead) owner.refresh() } // Explicit synthetic fixture setup only.
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                GccTheme(materialMode = GlassMode.Solid) {
+                    Column(Modifier.width(width.dp).fillMaxHeight().testTag("nodes-fixture-host")
+                        .verticalScroll(rememberScrollState())) {
+                        NodeSelectionPanel(owner, inspectedNodes, resource, hasCapability, false,
+                            connectionControl = connectionControl, onSelected = { navigationCalls.incrementAndGet() }) {}
+                    }
                 }
             }
         }
-        compose.waitUntil(5000) { ::state.isInitialized && !state.busy && reads.get() > 0 }
+        compose.waitUntil(5000) { ::state.isInitialized && !state.busy && (!initialRead || reads.get() > 0) }
+    }
+
+    @Test fun acceptedSelectionReturnsToConnectOnlyAfterControllerAcceptedIt() {
+        launch()
+        val second = state.snapshot.choices[1].selection
+        compose.onNodeWithTag("node-choice-1").performClick()
+        compose.runOnIdle {
+            assertSame(second, state.snapshot.selected)
+            assertEquals(1, navigationCalls.get())
+            assertEquals(1, reads.get())
+            selectionAllowed = false
+        }
+        compose.onNodeWithTag("node-choice-1").performClick()
+        compose.runOnIdle {
+            assertEquals(1, navigationCalls.get())
+            assertEquals(1, reads.get())
+        }
     }
 
     @Test fun duplicateChoicesStartUnselectedAndClickUsesTheCorrectOpaqueObjectWithoutReading() {
@@ -83,50 +113,147 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
-        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-connection-status").assertTextEquals("连接暂不可用")
-    }
-
-    @Test fun nodeConnectionCaptionFollowsOnlyTheActualOwnerPhaseWithoutSelectingOrReadingAgain() {
-        connectionControl = ConnectionControlState(phase = ConnectionPhase.Disconnected, canConnect = true)
-        launch()
-        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
         compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
-        listOf(ConnectionPhase.Connecting to "连接中", ConnectionPhase.Connected to "已连接",
-            ConnectionPhase.Disconnecting to "断开中", ConnectionPhase.Failed to "未连接").forEach { (phase, text) ->
-            compose.runOnIdle { connectionControl = ConnectionControlState(phase = phase) }
-            compose.onNodeWithTag("nodes-connection-status").assertTextEquals(text)
-        }
-        compose.runOnIdle { assertNull(state.snapshot.selected); assertEquals(1, reads.get()) }
     }
 
-    @Test fun busyRefreshDisablesSelectionAndCancelIsReachableWithoutAuthenticationActions() {
+    @Test fun busyRefreshDisablesSelectionAndControllerCancellationRevokesOldChoices() {
         launch()
-        compose.runOnIdle { pending = CompletableDeferred() }
-        compose.onNodeWithTag("nodes-refresh").performClick()
-        compose.waitUntil(5000) { state.busy }
+        // A normal ready list has no manual reload button. Prepare only the synthetic busy state.
+        compose.runOnIdle { pending = CompletableDeferred(); state.refresh() }
+        compose.waitUntil(5000) { state.busy && reads.get() == 2 }
         compose.onNodeWithTag("node-choice-0").assertIsNotEnabled()
-        compose.onNodeWithTag("nodes-cancel").performScrollTo().performClick()
+        compose.runOnIdle { state.cancel() }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-cancel").assertDoesNotExist()
         compose.runOnIdle { assertFalse(state.busy); assertNull(state.snapshot.selected); pending!!.complete(Unit) }
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2, reads.get()); assertEquals(0, navigationCalls.get()) }
     }
 
     @Test fun unsupportedMixedArtifactAndExpiryExposeNoSelectableRows() {
         launch()
-        compose.runOnIdle { bytes = bytes.toString(Charsets.UTF_8).replaceFirst("type: ss", "type: vmess").toByteArray() }
-        compose.onNodeWithTag("nodes-refresh").performClick()
+        val original = state.snapshot.choices[0].selection
+        compose.runOnIdle {
+            bytes = bytes.toString(Charsets.UTF_8).replaceFirst("type: ss", "type: vmess").toByteArray()
+            state.refresh() // Explicit fixture state setup, never an automatic production reload.
+        }
         compose.waitUntil(5000) { !state.busy && state.snapshot.status == LocalSubscriptionStatus.UNSUPPORTED }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("配置暂不受支持")
-        compose.runOnIdle { bytes = bytes.toString(Charsets.UTF_8).replace("type: vmess", "type: ss").toByteArray() }
-        compose.onNodeWithTag("nodes-refresh").performClick()
+        compose.onNodeWithTag("node-choice-1").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-node-0").assertHasNoClickAction()
+        compose.onNodeWithTag("subscription-node-1").assertHasNoClickAction()
+        compose.runOnIdle {
+            assertTrue(state.snapshot.choices.isEmpty())
+            assertFalse(state.select(original))
+            bytes = bytes.toString(Charsets.UTF_8).replace("type: vmess", "type: ss").toByteArray()
+            state.refresh()
+        }
         compose.waitUntil(5000) { !state.busy && state.snapshot.status == LocalSubscriptionStatus.READY }
-        compose.runOnIdle { time = expiry; state.sync() }
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        val restored = state.snapshot.choices[0].selection
+        compose.runOnIdle { assertTrue(state.select(restored)); time = expiry; state.sync() }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("订阅已到期")
+        compose.onNodeWithTag("node-choice-1").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.EXPIRED, state.snapshot.status)
+            assertNull(state.snapshot.selected)
+            assertFalse(state.select(restored))
+        }
         compose.runOnIdle { manager.unlink(); resource = Resource.None; hasCapability = false; state.sync() }
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("node-selection-status").assertTextEquals("暂无套餐")
+        compose.onNodeWithTag("nodes-account").assertIsEnabled()
         compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.MISSING, state.snapshot.status)
+            assertTrue(state.snapshot.choices.isEmpty())
+            assertEquals(3, reads.get()); assertEquals(0, navigationCalls.get())
+        }
+    }
+
+    @Test fun firstControllerReadAndCancellationKeepThePageQuietWithoutSelectingOrReloading() {
+        launch(initialRead = false, width = 320, fontScale = 2f)
+        compose.onNodeWithTag("node-selection-status").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(LocalSubscriptionStatus.MISSING, state.snapshot.status)
+            assertEquals(0, reads.get()); pending = CompletableDeferred(); state.refresh()
+        }
+        compose.waitUntil(5000) { state.busy && reads.get() == 1 }
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle { state.cancel() }
+        compose.onNodeWithTag("nodes-cancel").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.runOnIdle { assertFalse(state.busy); assertNull(state.snapshot.selected); pending!!.complete(Unit) }
+        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, reads.get()); state.refresh() }
+        compose.waitUntil(5000) { !state.busy && state.snapshot.status == LocalSubscriptionStatus.READY }
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.runOnIdle { assertEquals(2, reads.get()); assertNull(state.snapshot.selected); assertEquals(0, navigationCalls.get()) }
+    }
+
+    @Test fun doubledFontNarrowGlassChoicesKeepOpaqueIdentityAndDoNotReloadOnSelection() {
+        launch(width = 320, fontScale = 2f)
+        val second = state.snapshot.choices[1].selection
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        val host = compose.onNodeWithTag("nodes-fixture-host").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithTag("nodes-search").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-filter-all").assertDoesNotExist()
+        val row = compose.onNodeWithTag("node-choice-1")
+        row.performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(64.dp)
+        val bounds = row.fetchSemanticsNode().boundsInRoot
+        assertTrue(bounds.left >= host.left); assertTrue(bounds.right <= host.right)
+        row.performClick().assertIsSelected()
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
+        compose.onNodeWithTag("nodes-refresh").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+    }
+
+    @Test fun selectionSummaryTracksTheOriginalChoiceWithoutSearchFiltersOrAnotherRead() {
+        appendVlessNode()
+        launch()
+        val third = state.snapshot.choices[2].selection
+        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("未选择")
+        compose.onNodeWithTag("nodes-search").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-filter-all").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-count").assertTextEquals("3 条")
+        compose.onNodeWithTag("node-choice-2").performScrollTo().performClick().assertIsSelected()
+        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("Fixture Alpha")
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.runOnIdle { assertSame(third, state.snapshot.selected); assertEquals(1, reads.get()) }
+    }
+
+    private fun appendVlessNode() {
+        bytes += """  - name: Fixture Alpha
+    type: vless
+    server: 192.0.2.12
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+    servername: tls.fixture.invalid
+""".toByteArray()
+    }
+
+    @Test fun ownerStateChangesKeepTheNodePageQuietWithoutStartingAConnectionOrReloading() {
+        connectionControl = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)
+        launch()
+        compose.onNodeWithTag("nodes-unavailable").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Connecting, canCancel = true) }
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true) }
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Disconnecting) }
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.runOnIdle { connectionControl = ConnectionControlState(ConnectionPhase.Failed, canConnect = true) }
+        compose.onNodeWithTag("nodes-connection-status").assertDoesNotExist()
+        compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
+        compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
+        compose.runOnIdle { assertEquals(1, reads.get()); assertNull(state.snapshot.selected); assertEquals(0, navigationCalls.get()) }
     }
 }

@@ -28,10 +28,19 @@ android {
     buildTypes {
         debug {
             val candidate = providers.gradleProperty("connectionCandidate").orNull == "true"
+            val endpointHostname = candidate && providers.gradleProperty("connectionEndpointHostname").orNull != "false"
+            buildConfigField("boolean", "CONNECTION_ENDPOINT_HOSTNAME", endpointHostname.toString())
             val synthetic = providers.gradleProperty("connectionSyntheticAcceptance").orNull == "true"
             require(!synthetic || candidate) { "Synthetic connection acceptance requires a separate candidate package" }
             buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", synthetic.toString())
-            applicationIdSuffix = if (candidate) ".candidate" else ".debug"
+            val storageSynthetic = providers.gradleProperty("storageSyntheticAcceptance").orNull == "true"
+            require(!storageSynthetic || candidate) { "Synthetic storage acceptance requires a separate candidate package" }
+            buildConfigField("boolean", "STORAGE_SYNTHETIC_ACCEPTANCE", storageSynthetic.toString())
+            applicationIdSuffix = when {
+                storageSynthetic -> ".candidate.acceptance.session20261004"
+                candidate -> ".candidate"
+                else -> ".debug"
+            }
             versionNameSuffix = if (candidate) "-connection-candidate" else "-debug"
             if (candidate) manifestPlaceholders["connectionAppLabel"] = "飞连 VPN 测试"
             val nativeLab = providers.gradleProperty("nativeVpnLab").orNull == "true"
@@ -42,7 +51,9 @@ android {
             manifestPlaceholders["nativeVpnLabEnabled"] = nativeLab.toString()
         }
         release {
+            buildConfigField("boolean", "CONNECTION_ENDPOINT_HOSTNAME", "false")
             buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", "false")
+            buildConfigField("boolean", "STORAGE_SYNTHETIC_ACCEPTANCE", "false")
             buildConfigField("boolean", "NATIVE_VPN_LAB", "false")
             buildConfigField("boolean", "NATIVE_TUN_ACCEPTANCE", "false")
             isMinifyEnabled = false
@@ -69,6 +80,9 @@ android {
     if (providers.gradleProperty("connectionSyntheticAcceptance").orNull == "true") {
         sourceSets.getByName("androidTest").kotlin.directories.addAll(listOf("src/connectionAcceptanceTest/java", "src/acceptanceFixtures/java"))
     }
+    if (providers.gradleProperty("storageSyntheticAcceptance").orNull == "true") {
+        sourceSets.getByName("androidTest").kotlin.directories.add("src/storageAcceptanceTest/java")
+    }
 }
 
 // A device candidate must contain both verified ABIs, never a UI-only APK.
@@ -76,8 +90,8 @@ if (providers.gradleProperty("connectionCandidate").orNull == "true") {
     tasks.register("verifyConnectionCandidateLibraries") {
         doLast {
             val expected = mapOf(
-                "arm64-v8a" to "efe638604b4f54f76fbba85649027f6b72f67b0dab5d5c18d248a1de7e5920bb",
-                "x86_64" to "c2099755603a7784f1c935fc8151b418a5f6859dc8427daa65fd3021add8fe2b")
+                "arm64-v8a" to "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+                "x86_64" to "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8")
             expected.forEach { (abi, digest) ->
                 val file = rootProject.file("native/build/jniLibs/$abi/libgccmihomo.so")
                 check(file.isFile) { "Materialize verified native libraries before building a connection candidate" }
@@ -105,6 +119,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.snakeyaml:snakeyaml-engine:2.9")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.google.zxing:core:3.4.1")
     testImplementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

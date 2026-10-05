@@ -104,12 +104,16 @@ class OneClickVpnInstrumentedTest {
     @Before fun injectSyntheticRepositoryBeforeLaunchingActualActivity() {
         assertTrue("Requires the opt-in packaged-engine candidate", BuildConfig.DEBUG &&
             BuildConfig.VPN_ENGINE_PACKAGED && BuildConfig.CONNECTION_SYNTHETIC_ACCEPTANCE)
-        assertEquals("com.gccwebos.android.candidate", context.packageName)
+        assertTrue("Requires an explicitly owned synthetic candidate package", context.packageName in setOf(
+            "com.gccwebos.android.candidate.acceptance.address20261004v2",
+            "com.gccwebos.android.candidate.acceptance.bbr20261004",
+            "com.gccwebos.android.candidate.acceptance.oneclick20261004v4"))
         assertFalse("This test exercises the production service", BuildConfig.NATIVE_VPN_LAB)
         assertTrue("Requires an idle candidate; never replace another VPN", vpnNetworks().isEmpty())
         assertFalse("Requires an idle candidate engine", engineProcessExists())
         assertFalse("Requires an idle candidate owner", ownerServiceExists())
-        listOf("portal-session.bin", "portal-profile.bin", "portal-delivery.bin", "local-profile.bin").forEach { name ->
+        listOf("portal-session.bin", "portal-profile.bin", "portal-delivery.bin", "local-profile.bin",
+            "portal-legacy-recovery.bin").forEach { name ->
             listOf("", ".new", ".bak").forEach { suffix ->
                 assertFalse("Requires a fresh candidate without private stores",
                     File(context.noBackupFilesDir, name + suffix).exists())
@@ -165,7 +169,10 @@ class OneClickVpnInstrumentedTest {
         var primaryFailure: Throwable? = null
         try {
             scenario = ActivityScenario.launch(MainActivity::class.java)
-            await("configuration restored and actual power enabled") { powerIs("连接") }
+            await("configuration restored and actual power enabled") {
+                acceptSystemConsentIfVisible()
+                powerIs("一键连接")
+            }
             ownerControls = withExistingService(ConnectionOwnerService::class.java) {
                 (it as ConnectionOwnerService.LocalBinder).control
             }
@@ -185,7 +192,7 @@ class OneClickVpnInstrumentedTest {
             compose.onNodeWithTag("nav-Connect").performClick()
             compose.onNodeWithTag("connection-status").assertTextEquals("已连接")
             requireNotNull(scenario).recreate()
-            await("same connection published by recreated Activity") { powerIs("断开连接") }
+            await("same connection published by recreated Activity") { powerIs("断开") }
             assertFalse("Activity recreation must not stop the accepted remote", firstEngine.dead.get())
             assertTrue("Original remote remains alive", firstEngine.binder.isBinderAlive)
             assertTrue("Original VPN Network remains present", firstNetwork in vpnNetworks())
@@ -233,18 +240,18 @@ class OneClickVpnInstrumentedTest {
                 if (state.phase == ConnectionPhase.Failed)
                     throw AssertionError("Actual owner rejected connection: ${state.failure}")
             }
-            powerIs("断开连接")
+            powerIs("断开")
         }
         compose.onNodeWithTag("connection-status").assertTextEquals("已连接")
-        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("断开连接").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").assertContentDescriptionEquals("断开").assertIsEnabled()
         assertTrue("Connected requires a completed real network probe", probes.get() > 0 && probeFailures.get() == 0)
     }
 
     private fun disconnectAndAwait(engine: EngineWitness) {
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertContentDescriptionEquals("断开连接")
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertContentDescriptionEquals("断开")
             .assertIsEnabled().performClick()
         await("exact remote death, TUN removal and cleanup acknowledgement") {
-            engine.dead.get() && vpnNetworks().isEmpty() && !engineProcessExists() && powerIs("连接")
+            engine.dead.get() && vpnNetworks().isEmpty() && !engineProcessExists() && powerIs("一键连接")
         }
         assertPreparationFileAbsent()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
@@ -259,7 +266,7 @@ class OneClickVpnInstrumentedTest {
         val root = automation.rootInActiveWindow ?: return
         // Do not traverse, save or interact with another application's UI.
         if (root.packageName?.toString() == "com.oplus.securitypermission" &&
-            root.findAccessibilityNodeInfosByText("com.gccwebos.android.candidate.test").isNotEmpty()) {
+            root.findAccessibilityNodeInfosByText(context.packageName + ".test").isNotEmpty()) {
             root.findAccessibilityNodeInfosByText("打开").filter { it.isClickable && it.isEnabled }
                 .singleOrNull()?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             return

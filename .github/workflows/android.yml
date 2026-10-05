@@ -53,9 +53,17 @@ jobs:
           retention-days: 14
   validate:
     if: "!startsWith(github.head_ref || github.ref_name, 'codex/lucky-e2b-')"
-    runs-on: ubuntu-24.04
+    runs-on: gcc-android-api36-4core
     timeout-minutes: 45
     steps:
+      - name: Verify dedicated API36 runner capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          test "$(uname -m)" = x86_64
+          test "$(getconf _NPROCESSORS_ONLN)" -ge 4
+          test -c /dev/kvm
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false

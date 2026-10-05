@@ -10,10 +10,14 @@ import unittest
 CHECK = Path(__file__).with_name('verify-m0-renderer.sh')
 BASH = os.environ.get('M0_TEST_BASH') or shutil.which('bash')
 HOST = ("DEBUG | [FeatureControl] Feature 'Vulkan' (7) state set to disabled\n"
-        'INFO | Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)\n'
-        'INFO | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader)\n')
+        'INFO | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swangle\n'
+        'INFO | Graphics Adapter Android Emulator OpenGL ES Translator '
+        '(ANGLE (Google, Vulkan 1.2.0 (SwiftShader Device (Subzero) (0x0000C0DE)), '
+        'SwiftShader driver-5.0.0))\n'
+        'INFO | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.1.0 '
+        '(ANGLE 2.1.17841 git hash: 5fa2e61da947))\n')
 VALUES = {'api': '36', 'size': 'Physical size: 1080x2400', 'density': 'Physical density: 420',
-          'boot-vulkan': '', 'vulkan': '', 'hwui': 'skiagl', 'gles': '196608'}
+          'boot-vulkan': '', 'vulkan': '', 'hwui': 'skiagl', 'gles': '196609'}
 
 
 class RendererTests(unittest.TestCase):
@@ -34,6 +38,38 @@ class RendererTests(unittest.TestCase):
         host = HOST.replace("DEBUG | [FeatureControl] Feature 'Vulkan' (7) state set to disabled",
                             "INFO | Feature 'Vulkan' (21) is overridden to 'disabled'")
         self.assertEqual(self.check(host=host), 0)
+
+    def test_gles3_minor_versions_require_matching_host_and_guest(self):
+        for minor in (0, 1, 2):
+            values = VALUES.copy()
+            values['gles'] = str(196608 + minor)
+            with self.subTest(minor=minor):
+                self.assertEqual(self.check(values, HOST.replace('OpenGL ES 3.1.0',
+                                                                 f'OpenGL ES 3.{minor}.0')), 0)
+
+    def test_gles_mismatch_unknown_minor_and_later_version_change_are_rejected(self):
+        for guest, host in (('196608', HOST), ('196610', HOST),
+                            ('196611', HOST.replace('OpenGL ES 3.1.0', 'OpenGL ES 3.3.0')),
+                            ('196609', HOST.replace('OpenGL ES 3.1.0', 'OpenGL ES 3.0.0')),
+                            ('196609', HOST + 'INFO | Graphics API Version OpenGL ES 2.0\n')):
+            values = VALUES.copy()
+            values['gles'] = guest
+            with self.subTest(guest=guest, host=host):
+                self.assertNotEqual(self.check(values, host), 0)
+
+    def test_translator_wrapper_malformed_or_non_angle_versions_are_rejected(self):
+        version = ('OpenGL ES 3.0 (OpenGL ES 3.1.0 '
+                   '(ANGLE 2.1.17841 git hash: 5fa2e61da947))')
+        for wrong in ('OpenGL ES 3.1 (ANGLE)',
+                      'OpenGL ES 3.1 (OpenGL ES 2.0 (ANGLE 2.1))',
+                      'OpenGL ES 2.0 (OpenGL ES 3.1.0 (ANGLE 2.1))',
+                      'OpenGL ES 3.0 (OpenGL ES 3.1.0 (Other 2.1))',
+                      'OpenGL ES 3.0 (OpenGL ES 3.10.0 (ANGLE 2.1))',
+                      'OpenGL ES 3.0 (OpenGL ES 3.1.0 (ANGLE 2.1)',
+                      version + ' unexpected',
+                      version + '\nINFO | Graphics API Version OpenGL ES 3.1 (ANGLE)'):
+            with self.subTest(wrong=wrong):
+                self.assertNotEqual(self.check(host=HOST.replace(version, wrong)), 0)
 
     def test_each_wrong_guest_readback_is_rejected(self):
         for name, value in {'api': '33', 'size': 'Physical size: 540x1200',
@@ -71,6 +107,22 @@ class RendererTests(unittest.TestCase):
         for marker in ('Graphics Adapter', 'Graphics API Version'):
             with self.subTest(marker=marker):
                 self.assertNotEqual(self.check(host=HOST.replace(marker, 'Missing')), 0)
+
+    def test_other_backends_missing_identity_and_later_fallback_are_rejected(self):
+        selection = ('INFO | emuglConfig_init: vulkan_mode_selected:swiftshader '
+                     'gles_mode_selected:swangle\n')
+        old_adapter = ('INFO | Graphics Adapter Android Emulator OpenGL ES Translator '
+                       '(Google SwiftShader)\n')
+        for host in (HOST.replace(selection, ''),
+                     HOST.replace('gles_mode_selected:swangle', 'gles_mode_selected:swiftshader'),
+                     HOST.replace('vulkan_mode_selected:swiftshader', 'vulkan_mode_selected:host'),
+                     HOST + selection.replace('gles_mode_selected:swangle', 'gles_mode_selected:host'),
+                     HOST.replace('ANGLE (Google', 'Other (Google'),
+                     HOST.replace('SwiftShader', 'Hardware GPU'),
+                     HOST.replace('OpenGL ES 3.1.0', 'OpenGL ES 2.0.0'),
+                     HOST + old_adapter):
+            with self.subTest(host=host):
+                self.assertNotEqual(self.check(host=host), 0)
 
 
 if __name__ == '__main__':

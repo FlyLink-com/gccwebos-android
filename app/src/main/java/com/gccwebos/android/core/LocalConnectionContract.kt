@@ -43,6 +43,14 @@ interface LifecycleTunnel : AtomicActivationTunnel {
  */
 interface TunnelPreparation {
     suspend fun prepareTransport(): Boolean
+    suspend fun prepareTransport(config: AuthorizedConfig): Boolean = prepareTransport()
+}
+
+/** One attempt's physical transport, separate from resource expiry and DNS TTL. */
+interface ConnectionTransportLease : java.io.Closeable {
+    val networkHandle: Long
+    val validUntilElapsedMillis: Long
+    fun isCurrent(): Boolean
 }
 
 /** Safe typed activation failure; never carries raw response/configuration details. */

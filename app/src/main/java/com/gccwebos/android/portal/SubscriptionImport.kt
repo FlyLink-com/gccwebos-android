@@ -6,7 +6,8 @@ enum class ImportStatus {
     UNSUPPORTED_CONFIGURATION, IMPORTED,
 }
 data class ImportSnapshot(val resource: Resource, val status: ImportStatus,
-    val nodes: List<com.gccwebos.android.vpn.SafeProxyConfig.NodeSummary> = emptyList())
+    val nodes: List<com.gccwebos.android.vpn.SafeProxyConfig.NodeSummary> = emptyList(),
+    val rejection: com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason? = null)
 
 /** Separate credential-free transport boundary. Caller owns and wipes returned bytes. */
 class SubscriptionRead(val bytes: ByteArray, val validUntil: java.time.Instant? = null) {

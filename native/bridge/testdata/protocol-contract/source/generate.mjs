@@ -16,6 +16,22 @@ const fixtures = {
   'tuic-token-ambiguous': {...common,name:'Synthetic legacy TUIC',protocol:'tuic',uuid:'22222222-2222-4222-8222-222222222222',password:'synthetic-only',token:'synthetic-legacy-token',disableSni:true},
   'ss-hostname': {...common,name:'Synthetic hostname',host:'node.example.invalid',protocol:'ss',method:'aes-128-gcm',password:'synthetic-only'},
 };
+for (const profile of ['conservative', 'standard', 'aggressive']) {
+  fixtures[`hysteria2-bbr-${profile}`] = {...fixtures['hysteria2-minimal'],name:`Synthetic HY2 BBR ${profile}`,bbrProfile:profile};
+  fixtures[`tuic-v5-bbr-${profile}`] = {...fixtures['tuic-v5-minimal'],name:`Synthetic TUIC BBR ${profile}`,congestionController:'bbr',bbrProfile:profile};
+}
+fixtures['tuic-v5-cubic-bbr-profile'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC cubic BBR profile',congestionController:'cubic',bbrProfile:'aggressive'};
+fixtures['tuic-v5-default-bbr-profile'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC default BBR profile',bbrProfile:'standard'};
+// Compatibility integers only: the pinned TUIC v5 core does not consume request-timeout.
+for (const timeout of [0, 1, 8000, 30000]) {
+  fixtures[`tuic-v5-request-timeout-${timeout}`] = {...fixtures['tuic-v5-minimal'],name:`Synthetic TUIC request timeout ${timeout}`,requestTimeout:timeout};
+}
+// These six explicit values equal the pinned core's omitted defaults. Kotlin
+// validates them before omission; the native DTO never accepts these keys.
+const tuicDefaultFlags = {disableSni:false,reduceRtt:false,fastOpen:false};
+fixtures['tuic-v5-default-tuple'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC default tuple',...tuicDefaultFlags,heartbeatInterval:10000,maxUdpRelayPacketSize:1252,maxOpenStreams:100};
+fixtures['tuic-v5-zero-tuple'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC zero tuple',...tuicDefaultFlags,heartbeatInterval:0,maxUdpRelayPacketSize:0,maxOpenStreams:0};
+fixtures['tuic-v5-mixed-default-tuple'] = {...fixtures['tuic-v5-minimal'],name:'Synthetic TUIC mixed default tuple',...tuicDefaultFlags,heartbeatInterval:0,maxUdpRelayPacketSize:1252,maxOpenStreams:0};
 fs.mkdirSync(new URL('../renderer/',import.meta.url),{recursive:true});
 for(const [name,server] of Object.entries(fixtures)) {
   const input={servers:[server]};

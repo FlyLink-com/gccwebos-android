@@ -2,6 +2,7 @@ package com.gccwebos.android.portal
 
 import android.content.Context
 import android.os.SystemClock
+import com.gccwebos.android.BuildConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -24,10 +26,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -69,13 +74,19 @@ import kotlinx.coroutines.flow.first
 /** Source-confirmed origins; constructing a client does not contact production. */
 internal fun productionRepository(context: Context): PortalRepository {
     val policy = OriginPolicy("https://portal.gccwebos.com", setOf("https://sub.gccwebos.com"))
-    return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime, sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context))
+    return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime,
+        sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context),
+        allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME,
+        manualSources = EncryptedManualSourceStore(context))
 }
 
 /** Process-local ownership only; identity contains no account label or bearer data. */
 internal class CommerceSessionIdentity
 
-internal class AccountController(private val repository: PortalRepository, private val scope: CoroutineScope) {
+internal class AccountController(private val repository: PortalRepository, private val scope: CoroutineScope,
+    nodeLatencyProbe: NodeLatencyProbe? = null,
+    sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
+    private val clearLocalData: suspend () -> Unit = { repository.clearLocalData() }) {
     var account by mutableStateOf("")
     var password by mutableStateOf("")
     var answer by mutableStateOf("")
@@ -97,6 +108,8 @@ internal class AccountController(private val repository: PortalRepository, priva
         (restoring || foregroundCheckPending)
     var authenticated by mutableStateOf(false)
     var busy by mutableStateOf(false)
+    var authenticationSubmitting by mutableStateOf(false)
+        private set
     var clearing by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var purchaseReturnRef by mutableStateOf<String?>(null)
@@ -104,6 +117,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     var resource by mutableStateOf<Resource?>(null)
     var deliveryReceived by mutableStateOf(false)
     var importStatus by mutableStateOf<ImportStatus?>(null)
+    var importRejection by mutableStateOf<com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason?>(null)
     var nodes by mutableStateOf<List<com.gccwebos.android.vpn.SafeProxyConfig.NodeSummary>>(emptyList())
     var restoring by mutableStateOf(false)
     var restorationPending by mutableStateOf(false)
@@ -112,6 +126,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     private var acceptedAccountId by mutableStateOf<String?>(null)
     val authenticatedAccountId: String? get() = acceptedAccountId?.takeIf { authenticated }
     private var acceptedSessionBinding: String? = null
+    private var usageAuthentication: AccountUsageAuthentication? = null
     /** Survives page disposal and exact same-session foreground validation, never another identity. */
     internal var referralGenerationGuard by mutableStateOf(ReferralGenerationGuard())
         private set
@@ -126,6 +141,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     private var task: Job? = null
     private var expiryTask: Job? = null
     private var operation = 0L
+    private var connectionPreparationOperation: Long? = null
     private var loginFormGeneration = 0L
     private var loginFormLease: Long? = null
     private var automaticQuestionLease: Long? = null
@@ -133,28 +149,61 @@ internal class AccountController(private val repository: PortalRepository, priva
     private var questionJob: Job? = null
     private var questionExpiryJob: Job? = null
     private var automaticQuestionJob: Job? = null
-    val nodeSelection = NodeSelectionController(repository.localSubscriptions, scope,
+    val nodeSelection: NodeSelectionController = NodeSelectionController(repository.localSubscriptions, scope,
         authGeneration = { authSessionGeneration },
-        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing },
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy },
         onSnapshot = { localSubscription = it; nodes = it.nodes })
+    val accountUsage = AccountUsageController(scope,
+        reader = { owner, epoch -> repository.readAccountOverview(owner, epoch) },
+        onSessionExpired = { commerceSessionExpired() })
+    val nodeLatency: NodeLatencyController = NodeLatencyController(repository.localSubscriptions, scope, nodeLatencyProbe,
+        authGeneration = { authSessionGeneration },
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy })
+    val manualImport: ManualImportController = ManualImportController(repository.localSubscriptions, scope,
+        allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !nodeSelection.busy &&
+            !accountUsage.state.value.busy && !accountUsage.state.value.verifying },
+        commitFence = sourceCommitFence,
+        onSnapshot = {
+            nodeLatency.cancel()
+            localSubscription = it; nodes = it.nodes; nodeSelection.sync()
+        }, onSettled = { scope.launch {
+            if (foregroundCheckPending && authenticated && !busy && !manualImport.busy && !clearing) revalidateAccount()
+        } })
+    fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
+    fun cancelAccountUsageUpdate() = accountUsage.cancel()
+    private fun clearAccountUsage() {
+        usageAuthentication = null
+        accountUsage.bind(null, null, authSessionGeneration)
+    }
+    internal fun acceptAccountOverviewObservation(overview: BoundAccountOverview,
+        expectedAuthentication: AccountUsageAuthentication, expectedAuthEpoch: Long): Boolean {
+        if (!authenticated || expectedAuthEpoch != authSessionGeneration || expectedAuthentication != usageAuthentication ||
+            overview.context.owner != expectedAuthentication.owner || overview.context.repositoryEpoch != expectedAuthentication.repositoryEpoch)
+            return false
+        if (!accountUsage.observeExternal(overview, expectedAuthEpoch)) return false
+        resource = overview.resource
+        return true
+    }
     fun onForeground() {
         // Handler delays can pause during sleep; the repository's elapsed clock cannot.
         expireLoginChallengeIfNeeded()
         // Authenticator app round trips must retain the still-bounded TOTP ticket.
         if (factorReference != null || !authenticated) return
+        accountUsage.suspendForVerification()
         foregroundCheckPending = true
-        if (!busy) revalidateAccount()
+        if (!busy && !manualImport.busy) revalidateAccount()
     }
     fun restore() {
-        if (busy) return
+        if (busy || manualImport.busy) return
+        clearAccountUsage()
         expiryTask?.cancel()
-        authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null
+        authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null; importRejection = null
         restoring = true; restorationPending = true
         run {
             try {
                 localSubscription = repository.localSubscriptions.restore()
                 nodes = localSubscription.nodes
-                if (localSubscription.hasProfile) { restorationPending = false; return@run }
+                // Cached connection state and a saved account must both restore on a fresh launch.
                 val saved = repository.restoreSession()
                 restorationPending = false
                 if (saved != null) {
@@ -167,7 +216,8 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun restoreAccount() = checkAccount(force = false)
     private fun revalidateAccount() = checkAccount(force = true)
     private fun checkAccount(force: Boolean) {
-        if (busy || factorReference != null || (authenticated && !force)) return
+        if (busy || manualImport.busy || factorReference != null || (authenticated && !force)) return
+        accountUsage.suspendForVerification()
         val checkOperation = operation + 1
         expiryTask?.cancel(); authenticated = false; security = null
         restoring = true; restorationPending = true
@@ -180,14 +230,20 @@ internal class AccountController(private val repository: PortalRepository, priva
                 if (saved != null) { acceptAuthenticated(saved); loadResource() }
             } finally {
                 if (operation == checkOperation) {
-                    if (!authenticated) commerceSessionIdentity = null
+                    if (!authenticated) { commerceSessionIdentity = null; clearAccountUsage() }
                     restoring = false; foregroundCheckPending = false
                 }
             }
         }
     }
     fun readSecurity() = run { security = null; security = repository.security() }
-    fun refreshSubscription() = nodeSelection.refresh()
+    fun refreshSubscription() {
+        if (busy || manualImport.busy || restoring || foregroundCheckPending || clearing) return
+        val recoveryPending = try { authenticated && repository.hasPendingLegacyRecovery() }
+        catch (failure: PortalFailure) { run { throw failure }; return }
+        if (recoveryPending) run { loadResource() }
+        else nodeSelection.refresh()
+    }
     /** Attaching the form must not race AppShell's initial saved-session restoration. */
     fun enterLoginForm(): Long {
         cancelLoginQuestionWork()
@@ -290,7 +346,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         val submittedAnswer = answer; answer = ""
         // A submitted challenge may be consumed even when the response is lost or rejected.
         cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
-        run {
+        run(authenticationSubmission = true) {
             when(val result = repository.login(submittedAccount, submittedPassword, human, submittedAnswer)) {
                 is LoginResult.Authenticated -> { acceptAuthenticated(result.session, submittedEmail); challenge = null; loadResource() }
                 is LoginResult.TotpRequired -> { secondFactorEmail = result.reference to submittedEmail; factorReference = result.reference; challenge = null }
@@ -302,13 +358,14 @@ internal class AccountController(private val repository: PortalRepository, priva
         val reference = factorReference ?: return
         val submittedEmail = secondFactorEmail?.takeIf { it.first == reference }?.second
         val submitted = code; code = ""
-        run {
+        run(authenticationSubmission = true) {
             val result = repository.totp(reference, submitted)
             factorReference = null; secondFactorEmail = null; acceptAuthenticated(result.session, submittedEmail); loadResource()
         }
     }
     private suspend fun acceptAuthenticated(value: Session, submittedEmail: String? = null) {
         val remaining = repository.remainingSessionMillis()
+        val usageIdentity = repository.captureAccountUsageAuthentication(AccountUsageOwner.fromSession(value))
         kotlinx.coroutines.currentCoroutineContext().ensureActive()
         if (acceptedAccountId != value.accountId) purchaseReturnRef = null
         val binding = sessionBinding(value.token)
@@ -320,6 +377,8 @@ internal class AccountController(private val repository: PortalRepository, priva
         acceptedAccountId = value.accountId; acceptedSessionBinding = binding
         nodeSelection.invalidate()
         security = null; account = email.orEmpty(); authenticated = true; authSessionGeneration++
+        usageAuthentication = usageIdentity
+        accountUsage.bind(usageIdentity.owner, usageIdentity.repositoryEpoch, authSessionGeneration)
         nodeSelection.sync()
         emailHint = email?.let { EmailHint(value.accountId, binding, authSessionGeneration, it) }
         localSubscription = repository.localSubscriptions.snapshot(); nodes = localSubscription.nodes
@@ -328,11 +387,12 @@ internal class AccountController(private val repository: PortalRepository, priva
         expiryTask = scope.launch {
             kotlinx.coroutines.delay(remaining)
             if (authSessionGeneration == authEpoch && authenticated) {
+                clearAccountUsage()
                 nodeSelection.invalidate()
                 account = displayEmail.orEmpty()
                 referralGenerationGuard = ReferralGenerationGuard()
                 commerceSessionIdentity = null
-                authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
+                authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
                 emailHint = null; secondFactorEmail = null
                 restoring = false; restorationPending = false; foregroundCheckPending = false
                 error = "登录已到期，请重新登录"
@@ -345,23 +405,85 @@ internal class AccountController(private val repository: PortalRepository, priva
             localSubscription = repository.localSubscriptions.refresh(); nodes = localSubscription.nodes
         }
     }
+    /** One explicit connection intent may prepare existing entitlement before the UI dispatches.
+     * This callback belongs only to this operation/auth generation; it does not start a VPN.
+     * busy remains true during callback, so callers must validate the request rather than waive
+     * the general busy guard for another action.
+     */
+    fun prepareForConnection(onPrepared: () -> Unit): Long? {
+        if (!authenticated || busy || restoring || foregroundCheckPending || clearing) return null
+        val expectedAuth = authSessionGeneration
+        val expectedAccount = acceptedAccountId
+        val expectedSession = acceptedSessionBinding
+        val expectedOperation = operation + 1
+        connectionPreparationOperation = expectedOperation
+        run {
+            try {
+                var acceptedOverview: BoundAccountOverview? = null
+                loadResource { acceptedOverview = it }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val preparedOverview = acceptedOverview ?: return@run
+                val currentUsage = accountUsage.state.value
+                if (preparedOverview.resource !is Resource.Available || resource !== preparedOverview.resource ||
+                    !accountUsage.isCurrentAcceptedObservation(preparedOverview, expectedAuth) || !currentUsage.authenticated ||
+                    currentUsage.verifying || currentUsage.error != null) return@run
+                if (operation != expectedOperation || !authenticated || authSessionGeneration != expectedAuth ||
+                    acceptedAccountId != expectedAccount || acceptedSessionBinding != expectedSession ||
+                    restoring || foregroundCheckPending || clearing) return@run
+                val current = localSubscription
+                if (current.status == LocalSubscriptionStatus.READY && current.hasProfile && current.hasCapability &&
+                    current.validUntil != null) onPrepared()
+            } finally {
+                if (connectionPreparationOperation == expectedOperation) connectionPreparationOperation = null
+            }
+        }
+        return expectedOperation.takeIf { connectionPreparationOperation == it }
+    }
+    fun isConnectionPreparationPending(request: Long): Boolean =
+        connectionPreparationOperation == request && operation == request && busy
+    /** Cancel only this preparation request, keeping the session and durable delivery intact. */
+    fun cancelConnectionPreparation(request: Long) {
+        if (connectionPreparationOperation != request || operation != request) return
+        connectionPreparationOperation = null
+        operation++
+        task?.cancel(); task = null
+        busy = false; error = "准备已取消"
+        if (foregroundCheckPending && authenticated) revalidateAccount()
+    }
     fun restoreLocal() = run { localSubscription = repository.localSubscriptions.restore(); nodes = localSubscription.nodes }
 
     suspend fun commerce(path: String, body: String? = null, key: String? = null, expectedSession: String? = null) = repository.commerce(path, body, key, expectedSession)
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
-    fun commerceSessionExpired() { nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
-    private suspend fun loadResource() {
-        importStatus = null; deliveryReceived = false; resource = null
+    private suspend fun loadResource(onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
+        val expectedUsage = usageAuthentication
+        val expectedAuthEpoch = authSessionGeneration
+        fun publish(overview: BoundAccountOverview) {
+            // Original typed read context is retained even for singleton None/Reconciliation.
+            if (!authenticated || expectedAuthEpoch != authSessionGeneration || expectedUsage == null ||
+                overview.context.owner != expectedUsage.owner || overview.context.repositoryEpoch != expectedUsage.repositoryEpoch)
+                throw CancellationException("Resource observation owner changed")
+            // Auth matching alone is insufficient: the original read must also win the
+            // resource/cycle publication fence before the legacy resource field changes.
+            if (acceptAccountOverviewObservation(overview, expectedUsage, expectedAuthEpoch)) onAcceptedOverview(overview)
+        }
+        importStatus = null; importRejection = null; deliveryReceived = false; resource = null
         try {
-            if (localSubscription.hasProfile) {
+            if (repository.localSubscriptions.sourceKind() != ManualSourceKind.LegacyRemote ||
+                localSubscription.hasProfile && !repository.hasPendingLegacyRecovery()) {
                 // Wallet login never silently replaces a separately saved local VPN capability.
-                resource = repository.refresh()
+                publish(repository.refreshWithObservation())
             } else {
-                val snapshot = repository.refreshAndImport(onResource = { resource = it }, onDeliveryReceived = { deliveryReceived = true })
-                resource = snapshot.resource; importStatus = snapshot.status
+                val snapshot = repository.refreshAndImportObserved(onOverview = ::publish, onDeliveryReceived = { deliveryReceived = true })
+                if (!authenticated || expectedAuthEpoch != authSessionGeneration || expectedUsage != usageAuthentication)
+                    throw CancellationException("Resource observation owner changed")
+                // onOverview already published the ordered resource. Do not overwrite it
+                // again after setup/download with a possibly superseded snapshot.
+                importStatus = snapshot.status
+                importRejection = snapshot.rejection
                 nodes = snapshot.nodes
             }
         } finally {
@@ -375,23 +497,28 @@ internal class AccountController(private val repository: PortalRepository, priva
     fun clearLocal() = reset(clearLocal = true)
     fun cancelAuthentication() = reset(clearLocal = false)
     private fun reset(clearLocal: Boolean) {
+        manualImport.cancel()
+        nodeLatency.cancel()
+        clearAccountUsage()
         commerceSessionIdentity = null
         nodeSelection.invalidate()
         cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
         if (authenticated) account = displayEmail.orEmpty()
         val current = ++operation
         task?.cancel(); expiryTask?.cancel()
+        authenticationSubmitting = false
         restoring = false; restorationPending = false; foregroundCheckPending = false
-        if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING)
+        if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
+            sourceKind = ManualSourceKind.None)
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
         referralGenerationGuard = ReferralGenerationGuard()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
-        authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false
+        authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             try {
-                if (clearLocal) { repository.clearLocalData(); localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING) } else repository.signOutAccount()
+                if (clearLocal) { clearLocalData(); localSubscription = repository.localSubscriptions.snapshot() } else repository.signOutAccount()
                 nodes = localSubscription.nodes
                 error = null
             }
@@ -399,12 +526,14 @@ internal class AccountController(private val repository: PortalRepository, priva
             finally { if (current == operation) { busy = false; clearing = false } }
         }
     }
-    private fun run(action: suspend () -> Unit) {
-        if (busy) return
+    private fun run(authenticationSubmission: Boolean = false, action: suspend () -> Unit) {
+        if (busy || manualImport.busy) return
         // Account/security work cannot race a local selection read or revive its late result.
         if (nodeSelection.busy) nodeSelection.cancel()
+        nodeLatency.cancel()
         val current = ++operation
         busy = true; error = null
+        authenticationSubmitting = authenticationSubmission
         task = scope.launch {
             try { action() }
             catch (failure: CancellationException) { throw failure }
@@ -418,10 +547,16 @@ internal class AccountController(private val repository: PortalRepository, priva
                     emailHint = null; secondFactorEmail = null
                 }
                 error = when(failure.reason) {
-                    PortalFailure.Reason.SESSION_EXPIRED -> { commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; deliveryReceived = false; "登录已到期，请重新登录" }
+                    PortalFailure.Reason.SESSION_EXPIRED -> { clearAccountUsage(); commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; "登录已到期，请重新登录" }
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请刷新题目后重试" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
-                    PortalFailure.Reason.RECOVERY_REQUIRED -> "上次交付需要恢复，请稍后重试或联系支持；不会重复领取"
+                    PortalFailure.Reason.RECOVERY_REQUIRED -> when (failure.recoveryCause) {
+                        PortalFailure.RecoveryCause.RESOURCE_CHANGED -> "资源已变化，现有交付无法安全重绑，请联系支持"
+                        PortalFailure.RecoveryCause.SESSION_PENDING -> "上次交付未完成，当前会话无法确认，请联系支持"
+                        PortalFailure.RecoveryCause.MODEL_CHANGED -> "交付模型已变化，恢复已停止，请联系支持"
+                        PortalFailure.RecoveryCause.JOURNAL_CONFLICT -> "本地恢复记录已变化，请重新检查后重试"
+                        null -> "上次交付需要恢复，请联系支持；不会重复领取"
+                    }
                     PortalFailure.Reason.STORAGE -> "本地安全存储失败，交付状态需要恢复，请重试"
                     PortalFailure.Reason.RATE_LIMITED -> "请求过于频繁，请稍后重试"
                     PortalFailure.Reason.NETWORK -> "网络连接失败，请重试"
@@ -434,6 +569,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             } finally {
                 if (current == operation) {
                     busy = false
+                    authenticationSubmitting = false
                     if (foregroundCheckPending && authenticated && factorReference == null) revalidateAccount()
                 }
             }
@@ -445,9 +581,10 @@ internal class AccountController(private val repository: PortalRepository, priva
 internal fun AccountPanel(state: AccountController, compactLogin: Boolean = false,
                           registrationOpener: ((String) -> Unit)? = null,
                           loginStartupReady: Boolean = true,
-                          registrationOverride: RegistrationController? = null) {
+                          registrationOverride: RegistrationController? = null,
+                          startRegistration: Boolean = false) {
     var confirmReset by remember { mutableStateOf(false) }
-    var registering by remember(state) { mutableStateOf(false) }
+    var registering by remember(state, startRegistration) { mutableStateOf(startRegistration) }
     val registrationScope = rememberCoroutineScope()
     val registration = remember(state, registrationOverride) {
         registrationOverride ?: RegistrationController(registrationScope, productionRegistrationGateway(),
@@ -466,38 +603,31 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                 registering = true
             })
         }
-        else CircularProgressIndicator(Modifier.size(24.dp).testTag("login-starting"), color = Brand.Cyan)
+        else Spacer(Modifier.size(24.dp).testTag("login-starting"))
     } else AccountPanelContent(useCard = !compactLogin || state.authenticated) {
         Eyebrow("账户与资源")
         Text(if (state.authenticated) "已登录" else if (state.factorReference != null) "完成身份验证" else "欢迎回来",
             style = MaterialTheme.typography.titleLarge)
-        SupportingText(if (state.authenticated) "订阅按当前账号权益同步，无需手动导入。" else "安全登录后查看余额、套餐和订阅线路。登录会加密保存在本机，服务端到期或失效后需重新验证。")
-        if (state.busy) CircularProgressIndicator(modifier = Modifier.testTag("account-loading"))
-        val statusMessage = state.error ?: when {
-            state.busy -> "正在处理，请稍候"
-            state.authenticated -> "登录成功，可查看当前资源"
+        val statusMessage = when {
+            !state.authenticated && state.error != null -> state.error
             state.factorReference != null -> "需要身份验证器中的动态验证码"
-            else -> "请登录你的账号"
+            else -> null
         }
-        Text(statusMessage, style = MaterialTheme.typography.bodyMedium,
+        statusMessage?.let { Text(it, style = MaterialTheme.typography.bodyMedium,
             color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
             modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
-                .semantics { liveRegion = LiveRegionMode.Polite })
-        if (state.restorationPending && !state.busy) {
-            SupportingText("已保存的登录尚未通过服务器验证，主页保持锁定。网络恢复后可重试，或使用账号密码重新登录。")
-            BrandButton("重新验证已保存登录", state::restoreAccount, modifier = Modifier.testTag("session-restore-retry"))
-        }
+                .semantics { liveRegion = LiveRegionMode.Polite }) }
         if (state.authenticated) {
-            ResourceCard(state, showOperationState = false)
-            state.importStatus?.let { status -> SupportingText(subscriptionImportMessage(status)) }
-            if (state.deliveryReceived && state.importStatus == null) SupportingText(
-                if (state.busy) "订阅已安全保存，正在下载并校验配置"
-                else "订阅已安全保存；自动导入尚未完成，可刷新重试")
-            BrandButton("刷新／重试", state::refresh, enabled = !state.busy, modifier = Modifier.testTag("account-refresh"))
+            ResourceCard(state, showOperationState = false, showReadProgress = false)
+            TransientReadError(state.error ?: when (state.importStatus) {
+                ImportStatus.UNSUPPORTED_CONFIGURATION -> state.importRejection?.let(::subscriptionRejectionMessage)
+                    ?: "订阅配置暂不兼容"
+                ImportStatus.WAITING_DELIVERY -> "订阅暂未交付"
+                else -> null
+            }, Modifier.testTag("account-read-error"))
             TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅与登录") }
             TextButton(onClick = state::logout, enabled = !state.clearing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-signout")) { Text("退出账户（保留本地订阅）") }
-            SupportingText("退出钱包账户不会删除已保存的订阅。只有明确确认清除本地订阅才会移除它；本地清除不等于服务器撤销。")
         } else if (state.factorReference != null) {
             SupportingText("请输入身份验证器中的 TOTP 验证码")
             OutlinedTextField(state.code, { state.code = it }, enabled = !state.busy,
@@ -591,17 +721,12 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                     question(Modifier.weight(.56f))
                 }
             }
-            if (state.busy) CircularProgressIndicator(Modifier.size(24.dp).testTag("account-loading"), color = Brand.Cyan)
-            val status = state.error ?: if (state.busy) "正在处理，请稍候" else null
+            val status = state.error
             status?.let {
                 Text(it, color = if (state.error != null) MaterialTheme.colorScheme.error else Brand.Muted,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
                         .semantics { liveRegion = LiveRegionMode.Polite })
-            }
-            if (state.restorationPending && !state.busy) {
-                SupportingText("已保存的登录需要服务器重新验证。")
-                BrandButton("重新验证已保存登录", state::restoreAccount, modifier = Modifier.testTag("session-restore-retry"))
             }
             BrandButton("登录", state::login,
                 enabled = !state.busy && !state.challengeLoading && state.challenge != null && state.account.isNotBlank() && normalizedLoginPassword(state.password).isNotEmpty() && state.answer.isNotBlank(),
@@ -616,11 +741,11 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
 
 /** Exactly one visible state occupies the refresh target; network is never a fallback placeholder. */
 internal fun loginQuestionText(state: AccountController): String = when {
-    state.challengeLoading || state.busy -> "加载中…"
+    state.challengeLoading || state.busy -> state.challenge?.prompt ?: "验证题"
     state.challengeFailureReason == PortalFailure.Reason.NETWORK -> "无网络"
-    state.challengeExpired || state.challengeError != null -> "刷新重试"
+    state.challengeExpired || state.challengeError != null -> "换一道题"
     state.challenge != null -> state.challenge!!.prompt
-    else -> "刷新重试"
+    else -> "换一道题"
 }
 
 @Composable
@@ -629,7 +754,7 @@ private fun LoginQuestionPanel(state: AccountController, modifier: Modifier, onR
     val display = loginQuestionText(state)
     TextButton(onClick = onRefresh, enabled = refreshEnabled,
         modifier = modifier.heightIn(min = 48.dp).testTag("login-challenge")
-            .semantics { contentDescription = if (refreshEnabled) "$display，点击刷新验证题" else display }) {
+            .semantics { contentDescription = if (refreshEnabled) "$display，点击更换验证题" else display }) {
         Text(display, color = Brand.Cyan, fontSize = 16.sp,
             modifier = Modifier.testTag("login-challenge-prompt").semantics { liveRegion = LiveRegionMode.Polite })
     }
@@ -669,25 +794,80 @@ internal fun subscriptionImportMessage(status: ImportStatus): String = when (sta
     ImportStatus.QUOTA_EXHAUSTED -> "当前流量已用尽，暂不导入"
     ImportStatus.WAITING_DELIVERY -> "等待服务器交付；若曾清除本地订阅，请联系支持恢复"
     ImportStatus.UNSUPPORTED_CONFIGURATION -> "订阅已安全保存，但配置暂不兼容当前内核；不会尝试连接"
-    ImportStatus.IMPORTED -> "订阅已通过离线兼容性校验，首条线路已导入预览；生产 VPN 尚未开放，暂不能连接"
+    ImportStatus.IMPORTED -> "订阅已导入，可在节点页选择后连接"
+}
+
+/** Fixed categories only; never expose a configuration value or parser exception. */
+internal fun subscriptionRejectionMessage(reason: com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason): String = when (reason) {
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.InputSyntax -> "订阅配置格式暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.TopLevelOptions -> "配置包含暂不支持的全局选项"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Protocol -> "配置包含暂不支持的协议"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptions -> "配置包含暂不支持的节点选项"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionUdp -> "节点 UDP 选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionTfo -> "节点 TCP 快速打开选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionIpVersion -> "节点 IP 版本选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionPorts -> "节点多端口选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionFingerprint -> "节点证书指纹选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionHopInterval -> "节点端口跳跃间隔选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionBbrProfile -> "节点 BBR 配置选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionToken -> "节点认证选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionDisableSni -> "节点 TLS 域名选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionReduceRtt -> "节点往返时延优化选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionRequestTimeout -> "节点请求超时选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionHeartbeatInterval -> "节点心跳间隔选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionMaxUdpRelayPacketSize -> "节点 UDP 中继包大小选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionFastOpen -> "节点快速连接选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.NodeOptionMaxOpenStreams -> "节点并发流数量选项暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Endpoint -> "节点地址格式暂不受支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.EndpointHostname -> "节点使用域名地址，当前尚未支持"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Port -> "节点端口格式不正确"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.ProtocolOptions -> "节点协议参数暂不兼容"
+    com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason.Selection -> "所选节点不可用，请重新选择"
 }
 
 @Composable
-internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean) {
-    androidx.compose.runtime.LaunchedEffect(state.authSessionGeneration, state.authenticated) {
-        if (autoLoad && state.authenticated) state.readSecurity()
+internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, refreshRequest: Int = 0) {
+    var entryReadStarted by remember(state, state.authSessionGeneration, state.authenticated) { mutableStateOf(false) }
+    var handledRequest by remember(state, state.authSessionGeneration) { mutableStateOf(refreshRequest) }
+    LaunchedEffect(state, state.authSessionGeneration, state.authenticated, autoLoad) {
+        if (autoLoad && state.authenticated) {
+            // One read per entry/verified owner; account restoration can still own the busy slot.
+            snapshotFlow { !state.busy && !state.restoring && !state.foregroundCheckPending && !state.clearing }
+                .first { it }
+            if (!entryReadStarted) { entryReadStarted = true; state.readSecurity() }
+        }
+    }
+    LaunchedEffect(state, state.authSessionGeneration, autoLoad, refreshRequest) {
+        if (handledRequest != refreshRequest) {
+            handledRequest = refreshRequest
+            // Navigation while busy coalesces into the active read; it does not cancel or queue it.
+            if (autoLoad && state.authenticated && !state.busy && !state.restoring &&
+                !state.foregroundCheckPending && !state.clearing) {
+                entryReadStarted = true
+                state.readSecurity()
+            }
+        }
     }
     if (!state.authenticated || state.restoring || state.foregroundCheckPending) return
     BrandCard(Modifier.testTag("account-security-state")) {
         Text("安全状态", style = MaterialTheme.typography.titleMedium)
         val status = state.security
-        if (status == null) SupportingText(if (state.busy) "正在读取安全状态…" else "安全状态尚未确认，请重试读取。")
-        else {
+        if (status == null) {
+            SupportingText("—")
+        } else {
             SupportingText("身份验证器：${if (status.authenticatorBound) "已绑定" else "未绑定"}")
             SupportingText("通行密钥：${if (status.passkeyEnabled) "已启用" else "未启用"}")
             SupportingText("安全设置：${if (status.setupRequired) "待完成" else "无需补充"}")
         }
-        BrandButton("重新读取安全状态", state::readSecurity, enabled = !state.busy)
-        SupportingText("这里只展示服务器确认的状态，不修改安全凭据。")
     }
+}
+
+/** Read failures are announced once per visible result; revisiting the page owns retrying the read. */
+@Composable
+internal fun TransientReadError(message: String?, modifier: Modifier = Modifier) {
+    val host = remember { SnackbarHostState() }
+    LaunchedEffect(message) {
+        message?.takeIf { it.isNotBlank() }?.let { host.showSnackbar(it, duration = SnackbarDuration.Short) }
+    }
+    SnackbarHost(host, modifier)
 }

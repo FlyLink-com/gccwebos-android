@@ -32,7 +32,14 @@ mode=$(grep -F 'emuglConfig_init: vulkan_mode_selected:' "$OUT/emulator.log" | t
 adapter=$(grep -F 'Graphics Adapter ' "$OUT/emulator.log" | tail -n 1 | tr -d '\r')
 [[ "$adapter" == *'ANGLE ('* && "$adapter" == *'SwiftShader'* ]]
 api=$(grep -F 'Graphics API Version ' "$OUT/emulator.log" | tail -n 1 | tr -d '\r')
-[[ "$api" =~ Graphics\ API\ Version\ OpenGL\ ES\ 3[.]${minor}([.][0-9]+)?([[:space:]]|$) ]]
+# The translator reports its own outer 3.0 string; the nested ANGLE version is
+# the underlying ANGLE GL_VERSION. Match that version to the guest, fail closed on
+# missing/malformed identity, and keep using the last (not an earlier) record.
+driver_api_pattern="Graphics API Version OpenGL ES 3[.]0 [(]OpenGL ES 3[.]${minor}([.][0-9]+)? [(]ANGLE [^()]+[)][)]$"
+if [[ ! "$api" =~ $driver_api_pattern ]]; then
+  printf 'FAIL: expected ANGLE GLES 3.%s inside translator version\n' "$minor" >&2
+  exit 1
+fi
 if grep -Eq 'Bad feature name|Unknown feature|Initializing VkEmulation features:|Selecting Vulkan device:|androidboot.hardware.vulkan=ranchu' \
   "$OUT/emulator.log"; then
   printf 'FAIL: Vulkan initialization or unrecognized feature in host log\n' >&2

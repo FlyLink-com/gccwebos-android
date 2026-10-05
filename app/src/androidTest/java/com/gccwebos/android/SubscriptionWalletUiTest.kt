@@ -603,9 +603,12 @@ class SubscriptionWalletUiTest {
     @Test fun catalogAutoLoadWaitsOnceForRestorationAndBusyWithoutLoop() {
         val paths = mutableListOf<String>()
         val walletPath = "/api/portal/coins/wallet"
+        val modelPath = "/api/portal/commerce/model"
+        val catalogPath = "/api/portal/commerce/deferred/offers"
         val walletReads = AtomicInteger()
+        val modelReads = AtomicInteger()
         val initialBalance = CompletableDeferred<Unit>()
-        val catalogBalance = CompletableDeferred<Unit>()
+        val catalogModel = CompletableDeferred<Unit>()
         val laterBalance = CompletableDeferred<Unit>()
         compose.setContent {
             val scope = rememberCoroutineScope()
@@ -620,14 +623,17 @@ class SubscriptionWalletUiTest {
                     assertNull(body); assertNull(key); paths += path
                     if (path == walletPath) when (walletReads.incrementAndGet()) {
                         1 -> initialBalance.await()
-                        2 -> catalogBalance.await()
-                        3 -> laterBalance.await()
-                        else -> throw AssertionError("Catalog reads must not loop")
+                        2 -> laterBalance.await()
+                        else -> throw AssertionError("Only explicit balance reads are allowed")
+                    }
+                    if (path == modelPath) {
+                        assertEquals("Catalog reads must not loop", 1, modelReads.incrementAndGet())
+                        catalogModel.await()
                     }
                     WireResponse(200, when (path) {
                         walletPath -> """{"wallet":{"status":"active","version":1,"balances":{"paidCoins":21,"bonusCoins":0,"rewardCoins":0},"spendableUnits":21,"heldUnits":0,"pendingUnits":0}}"""
-                        "/api/portal/coins/recharge/offers", "/api/portal/commerce/deferred/offers" -> """{"offers":[]}"""
-                        "/api/portal/commerce/model" -> """{"commerceModel":"wallet_first_unique_v1"}"""
+                        catalogPath -> """{"offers":[]}"""
+                        modelPath -> """{"commerceModel":"wallet_first_unique_v1"}"""
                         else -> throw AssertionError("Unexpected read: $path")
                     })
                 }, recovery, "synthetic_catalog_account")
@@ -658,12 +664,13 @@ class SubscriptionWalletUiTest {
             assertFalse(commerce.catalogLoaded)
             initialBalance.complete(Unit)
         }
-        compose.waitUntil(5_000) { walletReads.get() == 2 }
+        compose.waitUntil(5_000) { modelReads.get() == 1 }
         compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(listOf(walletPath, walletPath), paths)
+            assertEquals(listOf(walletPath, modelPath), paths)
+            assertEquals(1, walletReads.get()); assertTrue(commerce.busy)
             assertFalse(commerce.catalogLoaded)
-            catalogBalance.complete(Unit)
+            catalogModel.complete(Unit)
         }
         compose.waitUntil(5_000) { commerce.catalogLoaded && !commerce.busy }
         compose.waitForIdle()
@@ -674,15 +681,17 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("catalog-loading").assertDoesNotExist()
         compose.runOnIdle {
             assertTrue(commerce.catalogLoaded)
-            assertEquals(3, walletReads.get())
+            assertEquals(2, walletReads.get())
             laterBalance.complete(Unit)
         }
         compose.waitUntil(5_000) { !commerce.busy }
         compose.onNodeWithTag("catalog-status").assertDoesNotExist()
         compose.onNodeWithTag("catalog-empty").assertTextEquals("暂无可购套餐")
         compose.runOnIdle {
-            assertEquals(listOf(walletPath, walletPath, "/api/portal/coins/recharge/offers",
-                "/api/portal/commerce/model", "/api/portal/commerce/deferred/offers", walletPath), paths)
+            assertEquals(listOf(walletPath, modelPath, catalogPath, walletPath), paths)
+            assertEquals(1, modelReads.get())
+            assertNull(commerce.quote); assertNull(commerce.purchase); assertNull(commerce.recharge)
+            assertFalse(commerce.pendingPurchase); assertFalse(commerce.pendingRecharge)
         }
     }
 

@@ -1,0 +1,111 @@
+{
+  "date": "2026-10-05",
+  "risk": "B",
+  "scope": "Three androidTest files and evidence only; no production source, native library or CI gate changes.",
+  "failed_ci": {
+    "source_commit": "877c2ab7e85f55a7d6625d38d8bdbec3c22dd1c5",
+    "m0_run": 37343423579,
+    "native_run": 37343423556,
+    "same_seven_failures": [
+      "catalogAutoLoadWaitsOnceForRestorationAndBusyWithoutLoop(com.gccwebos.android.SubscriptionWalletUiTest)",
+      "compactConnectionOmitsWalletAndKeepsTruthfulDisabledNodes(com.gccwebos.android.BrandUiTest)",
+      "narrowDoubledFontKeepsCircleAndLongDuplicateNodesReachable(com.gccwebos.android.BrandUiTest)",
+      "passwordLoginDefersPlansUntilResourceSuccess(com.gccwebos.android.CommerceEligibilityUiTest)",
+      "selectingTheCurrentPlansTabStartsOneNewReadWithoutCheckout(com.gccwebos.android.CommerceEligibilityUiTest)",
+      "totpLoginDefersPlansUntilResourceSuccess(com.gccwebos.android.CommerceEligibilityUiTest)",
+      "unverifiedReadAndStorageFailuresCannotBecomeExpiryOrEnableConnectionWhileBusy(com.gccwebos.android.BrandUiTest)"
+    ],
+    "m0_build_jvm_lint": "passed",
+    "native_build_packet_path_jni": "passed",
+    "native_followup_real_tun": "not_run_after_common_ui_failure",
+    "common_ui_each": {
+      "reported": 310,
+      "failed": 7
+    },
+    "unchanged_stock_identity_test": "passed in both original CI runs"
+  },
+  "baseline_red": {
+    "log": "oppo-red.log",
+    "sha256": "769a476cfe9a2ccf037ee212ee54e4ce86d9aed578859f06f001328db921b510",
+    "reported": 7,
+    "passed": 3,
+    "failed": 4,
+    "skipped": 0
+  },
+  "ordered_red": {
+    "log": "oppo-order-red.log",
+    "sha256": "2dbca1b09a5853079451939d313cc3c00deb4a9ac2626a0f1453b3b9a086010e",
+    "reported": 4,
+    "passed": 1,
+    "failed": 3,
+    "skipped": 0
+  },
+  "corrected_regression": {
+    "log": "oppo-green.log",
+    "sha256": "94717c05c5fafcb93598074d0d0eb229c2fccf9ec0fb2b9f934366a3d7e24b27",
+    "reported": 50,
+    "passed": 49,
+    "failed": 1,
+    "skipped": 0,
+    "whole_batch_passed": false,
+    "producer_first": "com.gccwebos.android.AutomaticSubscriptionUiTest#supportedFixtureImportsButNeverClaimsVpnConnected",
+    "original_seven_passed": [
+      "com.gccwebos.android.BrandUiTest#compactConnectionOmitsWalletAndKeepsTruthfulDisabledNodes",
+      "com.gccwebos.android.BrandUiTest#narrowDoubledFontKeepsCircleAndLongDuplicateNodesReachable",
+      "com.gccwebos.android.BrandUiTest#unverifiedReadAndStorageFailuresCannotBecomeExpiryOrEnableConnectionWhileBusy",
+      "com.gccwebos.android.CommerceEligibilityUiTest#passwordLoginDefersPlansUntilResourceSuccess",
+      "com.gccwebos.android.CommerceEligibilityUiTest#selectingTheCurrentPlansTabStartsOneNewReadWithoutCheckout",
+      "com.gccwebos.android.CommerceEligibilityUiTest#totpLoginDefersPlansUntilResourceSuccess",
+      "com.gccwebos.android.SubscriptionWalletUiTest#catalogAutoLoadWaitsOnceForRestorationAndBusyWithoutLoop"
+    ],
+    "remaining_failure": "Unchanged standard debug identity test rejects the deliberately isolated fixture applicationId; CI gate retained.",
+    "remaining_failure_test": "com.gccwebos.android.SubscriptionWalletUiTest#launcherAndAccessibleHeaderUseExactBrandNameWithoutChangingPackage"
+  },
+  "build": {
+    "app_and_android_test_apk": "passed",
+    "lint": {
+      "Error": 0,
+      "Warning": 23,
+      "Hint": 6
+    },
+    "static_artifact_verification": {
+      "source_base_commit": "877c2ab7e85f55a7d6625d38d8bdbec3c22dd1c5",
+      "source_working_tree_fingerprint": "75ccbdcdf7eda91de9b194842fb34c56a046145164caa23981cd0510b6aa0aad",
+      "artifacts": [
+        {
+          "package": "com.gccwebos.android.candidate.acceptance.latency20261005",
+          "apk": "ci-ui-fixture.apk",
+          "sha256": "cfa11ff308348e732535998d50f653dc5ee74ab7a93cb4d516eb42dfe01493de",
+          "bytes": 143933865,
+          "signer_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+          "verified": true
+        },
+        {
+          "package": "com.gccwebos.android.candidate.acceptance.latency20261005.test",
+          "apk": "ci-ui-fixture-test.apk",
+          "sha256": "bc10ebe4d1f8b730d8d1e1826d416a30256f359a5fa24f342690401c25481de4",
+          "bytes": 2335028,
+          "signer_sha256": "08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4",
+          "verified": true
+        }
+      ],
+      "changed_source_sha256": {
+        "app/src/androidTest/java/com/gccwebos/android/BrandUiTest.kt": "ce915279bc99faaa28d10fea3d8e0eb02e9a60adaaad3634c20cc7de3ebe1bdd",
+        "app/src/androidTest/java/com/gccwebos/android/CommerceEligibilityUiTest.kt": "bc5946b896b54cfa7ec1d6518ae3348952b2c4afe51da31eb5102fc2ba0a1946",
+        "app/src/androidTest/java/com/gccwebos/android/SubscriptionWalletUiTest.kt": "f9b722b670b9544b9d02c0c3dd377cf87716e374efa3367066b7c61a6fb28ae9"
+      },
+      "scope": "isolated synthetic Android UI staging; no customer data copied"
+    }
+  },
+  "review": "Independent read-only review: no blocking finding; authority, busy, expiry and no-checkout assertions retained.",
+  "cleanup": {
+    "owned_fixture_app_and_test_absent": true,
+    "original_stay_awake": "0",
+    "final_stay_awake": "0",
+    "normal_candidate_sha256": "b23a10ffcd6ab205b8ce935be99e1956f2761e10a7aa568a2e9abfa3ddd0425a",
+    "normal_candidate_unchanged": true,
+    "normal_candidate_data_not_cleared": true
+  },
+  "remaining_gate": "Complete CI on the corrected commit, including standard debug identity and subsequent Real TUN batches; no merge or Release performed.",
+  "raw_logs": ".build-output/ci-877c2ab/"
+}

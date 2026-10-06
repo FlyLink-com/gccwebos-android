@@ -75,7 +75,12 @@ class ManualImportAccountUiTest {
                 connectionControlState = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true),
                 onConnectionPowerAction = { actions += it })
         }
+        // Restore also schedules independent library/selection reads. Wait for the
+        // same admission gates as begin(); Compose idleness alone does not join IO.
         compose.waitUntil(10_000) { ::account.isInitialized && !account.busy && !account.restoring &&
+            !account.foregroundCheckPending && !account.clearing && !account.manualImport.busy &&
+            !account.configurationLibrary.busy && !account.nodeSelection.busy &&
+            !account.accountUsage.state.value.busy && !account.accountUsage.state.value.verifying &&
             account.authenticated == fixture.signedIn && account.localSubscription.sourceKind == ManualSourceKind.None }
     }
 

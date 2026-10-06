@@ -61,6 +61,7 @@ import com.gccwebos.android.portal.RegistrationController
 import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.NodeSelectionPanel
 import com.gccwebos.android.portal.ConfigurationLibraryPanel
+import com.gccwebos.android.portal.ManualSourceKind
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.productionRepository
 import com.gccwebos.android.vpn.ActivityVpnPermission
@@ -436,7 +437,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
                             account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
                         error = importer.error,
-                        canUseAccount = false,
+                        canUseAccount = account.authenticated && account.localSubscription.sourceKind == ManualSourceKind.None,
                         canRemove = false,
                         onDismiss = importer::cancel, onBegin = importer::beginAsync, onSubmit = importer::submit,
                         onCancel = importer::cancel, onFailure = importer::failure,

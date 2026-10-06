@@ -1,0 +1,235 @@
+package com.gccwebos.android
+
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import com.gccwebos.android.manualimport.ManualImportInputKind
+import com.gccwebos.android.portal.*
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+
+/** Real AppShell/controller/import authority with memory-only stores and synthetic transports.
+ * Does not open a camera, file picker, network socket, VPN, or another package's data. */
+class AccountSourceRecoveryUiTest {
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    private lateinit var account: AccountController
+    private val now = Instant.parse("2026-10-04T00:00:00Z")
+    private val powers = mutableListOf<ConnectionPowerAction>()
+    private fun yaml() = """proxies:
+  - name: Synthetic account recovery node
+    type: ss
+    server: 192.0.2.10
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+""".toByteArray()
+
+    private inner class Fixture(val signedIn: Boolean = true) {
+        val manual = ManualSourceRecord(kind = ManualSourceKind.None).use { MemoryManualSourceStore(it) }
+        val delivery = MemoryDeliveryStore()
+        val profiles = MemoryLocalProfileStore()
+        val sessions = MemorySessionStore().apply {
+            if (signedIn) save(SavedSession(Secret("native_recovery_fixture"), "recovery_fixture_account",
+                now.plusSeconds(1800), 1_800_000, now, 0))
+        }
+        val overviewReads = AtomicInteger()
+        val modelReads = AtomicInteger()
+        val setupReads = AtomicInteger()
+        val acknowledgments = AtomicInteger()
+        val downloads = AtomicInteger()
+        val commits = AtomicInteger()
+        var overviewGate: CompletableDeferred<Unit>? = null
+        private val source = object : SubscriptionSource {
+            override suspend fun download(url: Secret) = read(url).bytes
+            override suspend fun read(url: Secret): SubscriptionRead {
+                assertEquals("https://sub.invalid/sub/a/recovery-fixture", url.value)
+                downloads.incrementAndGet()
+                return SubscriptionRead(yaml(), now.plusSeconds(86400))
+            }
+        }
+        val repository = PortalRepository(object : PortalTransport {
+            override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                assertEquals("native_recovery_fixture", session?.value)
+                return when (path) {
+                    "/api/portal/resources/current/overview" -> {
+                        assertNull(body); overviewReads.incrementAndGet(); overviewGate?.await()
+                        WireResponse(200, """{"resource":{"state":"available",
+                            "resourceRef":"resource_${"a".repeat(64)}",
+                            "plan":{"id":"recovery-fixture","durationDays":30,"monthlyTrafficGb":50},
+                            "validUntil":"2099-10-04T00:00:00.000Z","setupAvailable":true,
+                            "usage":{"totalBytes":1000,"usedBytes":100,"remainingBytes":900,
+                            "collectionStatus":"measured","updatedAt":"2026-10-04T00:00:00.000Z",
+                            "cycleStartedAt":"2026-10-01T00:00:00.000Z","cycleEndsAt":"2026-11-01T00:00:00.000Z"}}}""")
+                    }
+                    "/api/portal/commerce/model" -> {
+                        assertNull(body); modelReads.incrementAndGet()
+                        WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                    }
+                    "/api/portal/resources/current/setup" -> {
+                        assertNotNull(body); setupReads.incrementAndGet()
+                        WireResponse(200, """{"delivery":{"handoffRef":"recovery_fixture_handoff",
+                            "kind":"subscription_url","subscriptionUrl":"https://sub.invalid/sub/a/recovery-fixture"}}""")
+                    }
+                    "/api/portal/resources/current/setup/ack" -> {
+                        assertNotNull(body); acknowledgments.incrementAndGet(); WireResponse(204, "")
+                    }
+                    else -> throw AssertionError("Unexpected synthetic recovery endpoint")
+                }
+            }
+        }, delivery, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L }, { now },
+            subscription = source, sessions = sessions, profiles = profiles, manualSources = manual,
+            externalSubscription = source)
+    }
+
+    private fun idle() = ::account.isInitialized && !account.busy && !account.restoring &&
+        !account.foregroundCheckPending && !account.manualImport.busy && !account.configurationLibrary.busy &&
+        !account.nodeSelection.busy && !account.accountUsage.state.value.busy && !account.accountUsage.state.value.verifying
+
+    private fun awaitIdle() { compose.waitUntil(10_000) { idle() } }
+
+    private fun launch(f: Fixture) {
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            account = remember { AccountController(f.repository, scope, sourceCommitFence = { action ->
+                action(); f.commits.incrementAndGet()
+            }) }
+            LaunchedEffect(account) { account.restore() }
+            AppShell(accountOverride = account, repositoryOverride = f.repository,
+                autoLoadCommerce = false, autoRefreshPages = false,
+                connectionControlState = ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true),
+                onConnectionPowerAction = { powers += it })
+        }
+        compose.waitUntil(10_000) { idle() && account.authenticated == f.signedIn &&
+            account.localSubscription.sourceKind == ManualSourceKind.None }
+    }
+
+    private fun openMenu() {
+        compose.onNodeWithTag("nav-Lines").performClick()
+        awaitIdle()
+        compose.onNodeWithTag("nodes-import").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("manual-import-host").assertExists()
+        listOf("scan", "document", "link").forEach {
+            compose.onNodeWithTag("manual-import-$it").assertExists()
+        }
+    }
+
+    private fun assertUnclaimed(f: Fixture) = compose.runOnIdle {
+        assertNull(f.delivery.read()); assertNull(f.profiles.read())
+        assertEquals(0, f.modelReads.get()); assertEquals(0, f.setupReads.get())
+        assertEquals(0, f.acknowledgments.get()); assertEquals(0, f.downloads.get())
+        assertTrue(powers.isEmpty())
+    }
+
+    @Test fun emptySelectionRequiresExplicitAccountRecoveryBeforeOneClickCanImport() {
+        val f = Fixture(); launch(f)
+        compose.runOnIdle {
+            assertTrue(account.configurationLibrary.snapshot.items.isEmpty())
+            assertEquals(2, f.overviewReads.get())
+        }
+        // An ordinary connection attempt cannot silently undo the user's None selection.
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { idle() && f.overviewReads.get() == 3 }
+        assertUnclaimed(f)
+        openMenu()
+        compose.onNodeWithTag("manual-use-account").assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
+            account.localSubscription.sourceKind == ManualSourceKind.LegacyRemote }
+        compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+        assertUnclaimed(f)
+        compose.runOnIdle {
+            assertEquals(1, f.commits.get())
+            assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+            assertEquals(3, f.overviewReads.get())
+        }
+        openMenu()
+        compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
+        compose.onNodeWithTag("manual-import-cancel").performClick()
+        // Recovery only selects account authority. The separate explicit power action imports it.
+        compose.onNodeWithTag("nav-Connect").performClick()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { idle() && powers.size == 1 }
+        compose.runOnIdle {
+            assertEquals(listOf(ConnectionPowerAction.Connect), powers)
+            assertEquals(ImportStatus.IMPORTED, account.importStatus)
+            assertEquals(LocalSubscriptionStatus.READY, account.localSubscription.status)
+            assertEquals(ManualSourceKind.LegacyRemote, account.localSubscription.sourceKind)
+            assertTrue(account.localSubscription.hasCapability)
+            assertEquals(1, account.nodes.size)
+            assertEquals(1, f.modelReads.get()); assertEquals(1, f.setupReads.get())
+            assertEquals(1, f.acknowledgments.get()); assertEquals(1, f.downloads.get())
+            assertNotNull(f.delivery.read()); assertNotNull(f.sessions.read())
+            assertFalse(requireNotNull(f.delivery.read()).pendingAck)
+        }
+    }
+
+    @Test fun signedOutEmptySelectionHasOnlyTheThreeImportMethods() {
+        val f = Fixture(signedIn = false); launch(f); openMenu()
+        compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
+        compose.onNodeWithTag("manual-import-cancel").performClick()
+        compose.runOnIdle {
+            assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
+            assertEquals(0, f.overviewReads.get()); assertEquals(0, f.commits.get())
+        }
+        assertUnclaimed(f)
+    }
+
+    @Test fun selectedLocalAndRemoteSourcesNeverExposeAnAccountSwitch() {
+        val f = Fixture(); launch(f)
+        for (kind in listOf(ManualImportInputKind.Document, ManualImportInputKind.Link)) {
+            openMenu()
+            compose.runOnIdle {
+                val bytes = if (kind == ManualImportInputKind.Document) yaml()
+                    else "https://sub.invalid/sub/a/recovery-fixture".toByteArray()
+                account.manualImport.submit(requireNotNull(account.manualImport.begin()), bytes, kind)
+                assertTrue(bytes.all { it == 0.toByte() })
+            }
+            compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
+                account.localSubscription.status == LocalSubscriptionStatus.READY }
+            val expected = if (kind == ManualImportInputKind.Document) ManualSourceKind.ImportedLocal else ManualSourceKind.ImportedRemote
+            openMenu()
+            compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
+            compose.onNodeWithTag("manual-import-cancel").performClick()
+            compose.runOnIdle {
+                assertEquals(expected, account.localSubscription.sourceKind)
+                assertEquals(expected, f.repository.localSubscriptions.sourceKind())
+                assertEquals(0, f.setupReads.get()); assertTrue(powers.isEmpty())
+            }
+        }
+        compose.runOnIdle {
+            assertEquals(2, account.configurationLibrary.snapshot.items.size)
+            assertEquals(2, f.commits.get()); assertEquals(1, f.downloads.get())
+        }
+    }
+
+    @Test fun busyAccountReadDisablesRecoveryAndCancelKeepsNone() {
+        val f = Fixture(); launch(f); openMenu()
+        compose.onNodeWithTag("manual-use-account").assertIsEnabled()
+        val gate = CompletableDeferred<Unit>()
+        try {
+            compose.runOnIdle { f.overviewGate = gate; account.refreshAccountUsage() }
+            compose.waitUntil(10_000) { account.accountUsage.state.value.busy && f.overviewReads.get() == 3 }
+            compose.onNodeWithTag("manual-use-account").assertIsNotEnabled().performClick()
+            compose.onNodeWithTag("manual-import-cancel").performClick()
+            compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
+                assertEquals(0, f.commits.get()); assertFalse(account.manualImport.busy)
+            }
+            assertUnclaimed(f)
+        } finally { gate.complete(Unit) }
+        awaitIdle(); openMenu()
+        compose.onNodeWithTag("manual-use-account").assertIsEnabled()
+        compose.onNodeWithTag("manual-import-cancel").performClick()
+        compose.runOnIdle {
+            assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
+            assertEquals(0, f.commits.get())
+        }
+    }
+}

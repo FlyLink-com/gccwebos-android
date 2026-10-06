@@ -1,0 +1,133 @@
+{
+  "date": "2026-10-05",
+  "risk": "A",
+  "state": "prepared, unsigned, not published",
+  "base_commit": "233abfa4bd7d51aaee27a1bd34d61b2c24fa254d",
+  "base_tree": "3b4c015710caea855adcd4ec3da1c8c0322a45b8",
+  "merged_prs": [
+    22,
+    23
+  ],
+  "jvm": {
+    "classes": [
+      {
+        "class": "com.gccwebos.android.update.AutomaticUpdateControllerTest",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.gccwebos.android.update.ReleaseManifestTests",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.gccwebos.android.update.UpdateRepositoryTests",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "passed": 37,
+    "failed": 0,
+    "skipped": 0
+  },
+  "offline_release_policy": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0
+  },
+  "build": {
+    "tasks": [
+      ":app:testDebugUnitTest --tests com.gccwebos.android.update.*",
+      ":app:assembleRelease",
+      ":app:lintRelease",
+      ":app:assembleDebug",
+      ":app:assembleDebugAndroidTest"
+    ],
+    "result": "passed",
+    "first_attempt": "Lifecycle type compilation failure; corrected via LifecycleOwner cast before successful build",
+    "release_dry_run_includes_native_gate": true,
+    "actual_native_input_gate_passed": true
+  },
+  "unsigned_apk": {
+    "source_base": "233abfa4bd7d51aaee27a1bd34d61b2c24fa254d",
+    "source_working_tree_fingerprint": "ece1a5550ba9a2717e2fea97978daed36b8b8ac911a9926f94231f9f7233721a",
+    "artifact": "app-release-unsigned.apk",
+    "sha256": "92781f801064ab521491490820e46a8ab6a07d3625e4b8f4a708e63100aca025",
+    "bytes": 139985834,
+    "signed": false,
+    "installable_release": false,
+    "published": false,
+    "dex_build_config": {
+      "APPLICATION_ID": "com.gccwebos.android",
+      "VERSION_CODE": 7,
+      "VERSION_NAME": "0.4.0",
+      "DEBUG": false,
+      "VPN_ENGINE_PACKAGED": true,
+      "CONNECTION_ENDPOINT_HOSTNAME": true,
+      "CONNECTION_SYNTHETIC_ACCEPTANCE": false,
+      "STORAGE_SYNTHETIC_ACCEPTANCE": false,
+      "NATIVE_VPN_LAB": false,
+      "NATIVE_TUN_ACCEPTANCE": false
+    },
+    "native_libraries": {
+      "arm64-v8a": "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+      "x86_64": "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8"
+    },
+    "license_assets": {
+      "assets/CMFA-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+      "assets/Mihomo-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+      "assets/licenses/ZXing-Android-Embedded-4.3.0-Apache-2.0.txt": "1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6",
+      "assets/licenses/ZXing-Attribution.txt": "c69a6f7010aef3637239ecb4869ecb7f3b5440fce808e52abcab94da712f1ec1",
+      "assets/licenses/ZXing-Core-3.4.1-Apache-2.0.txt": "b6707837e6fa0daf4cd09fe5e511086361d8b7126e34cce0a8624972491fc7ef",
+      "assets/licenses/ZXing-Core-3.4.1-NOTICE.txt": "e798d8427c9067b330d96630c6546eef83a8d466f6f57b7388259b76b93312f9"
+    },
+    "zipalign_16k": true,
+    "elf_16k": true,
+    "zip_crc": true,
+    "lab_components_absent": true,
+    "lint": {
+      "Error": 0,
+      "Warning": 27,
+      "Hint": 6
+    },
+    "remaining": "Formal signing identity, signed APK verification, device acceptance, complete CI, source bundle and public website distribution."
+  },
+  "compiled_changed_app_source_sha256": {
+    "app/build.gradle.kts": "00086c177919c038405c505e0562010a522c8f2e2dd2aec815edd1dd3283fcb3",
+    "app/src/androidTest/java/com/gccwebos/android/AutomaticUpdateUiTest.kt": "ae1550ece71f261a81d9b487a79387dc99d0f6040fa0afbdd2e24873dcc6e57a",
+    "app/src/androidTest/java/com/gccwebos/android/update/AndroidAutomaticUpdateStoreTest.kt": "20d872835288d370fa3631a00ee34152102650026757c3d18ec3c372204f6f17",
+    "app/src/main/java/com/gccwebos/android/MainActivity.kt": "c367ade50876df9cbfc3eea2c023c399199e3296e81181c1fb14bb526188e309",
+    "app/src/main/java/com/gccwebos/android/update/AndroidAutomaticUpdateStore.kt": "0780b90baf4d6c6210e7f695d82c3a590b8a5a08ca3cb020bf59fde4f135a7cd",
+    "app/src/main/java/com/gccwebos/android/update/AutomaticUpdateController.kt": "739a3277767111282b3f9d7f3d4b9cf3176cc2e8ecd49a98486242042bbe8153",
+    "app/src/main/java/com/gccwebos/android/update/AutomaticUpdateHost.kt": "ad4deff330e1b01b4f10f2426fd88decf5e918fb3fea10791aad69afa099ce59",
+    "app/src/main/java/com/gccwebos/android/update/UpdatePanel.kt": "d6b17c942915dd606cd4a399b014c13cc1d692b1b66398ed3b05bec3d29bedf4",
+    "app/src/release/res/values/strings.xml": "f9ff029344449e76337ab5cf2eb210360ad37d7970c566ba4c2751502d9c0704",
+    "app/src/test/java/com/gccwebos/android/update/AutomaticUpdateControllerTest.kt": "cff0505ce3da653beb556b69474b45f3196e6d96dcf30591801463891c5cd168"
+  },
+  "android_new_tests": {
+    "compiled": 8,
+    "executed": 0,
+    "status": "OPPO locked; manual unlock requested; no package installed in this phase"
+  },
+  "review": "Independent source review completed; persisted out-of-range version and repeated Home prompt fixed, lifecycle and test Context inspected.",
+  "remaining": [
+    "Formal signing identity and custody",
+    "Exact-head complete CI",
+    "New Android tests and existing update UI regression",
+    "Signed release APK identity and OPPO install/connection/upgrade acceptance",
+    "Corresponding source bundle for the final release source",
+    "Anonymous website APK/source distribution and stable manifest deployment"
+  ],
+  "production_changes": {
+    "new_release_created": false,
+    "website_updated": false,
+    "formal_key_created_or_read": false,
+    "existing_candidate_modified": false
+  }
+}

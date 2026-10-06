@@ -6,6 +6,9 @@ on:
       - 'native/**'
       - 'app/**'
       - 'scripts/verify_source.py'
+      - 'scripts/verify_release_policy.py'
+      - 'scripts/test_release_policy.py'
+      - 'scripts/verify_native_apks.py'
       - 'scripts/real-tun-runtime-api33.sh'
       - 'scripts/verify_real_tun_acceptance.py'
       - 'scripts/materialize-native-libraries.py'
@@ -37,6 +40,7 @@ jobs:
           mkdir -p .build-output/native
           git rev-parse HEAD | tee .build-output/native/source-commit.txt
           python3 scripts/verify_source.py
+          python3 scripts/test_release_policy.py
           python3 scripts/test-native-library-reuse.py
       - name: Install pinned Android native toolchain
         run: |

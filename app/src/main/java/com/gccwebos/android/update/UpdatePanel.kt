@@ -42,6 +42,11 @@ fun UpdatePanel(autoCheck: Boolean = true, refreshRequest: Int = 0) {
 @Composable
 internal fun UpdatePanelContent(controller: UpdateController, applicationId: String, autoCheck: Boolean = true,
     refreshRequest: Int = 0, openWebsite: (String) -> Unit) {
+    val automatic = LocalAutomaticUpdateController.current
+    DisposableEffect(automatic) {
+        val suppression = automatic?.suppressForManualCheck()
+        onDispose { suppression?.close() }
+    }
     DisposableEffect(controller) { onDispose { controller.close() } }
     LaunchedEffect(controller, autoCheck, refreshRequest) { if (autoCheck) controller.check() }
     val state by controller.state.collectAsState()
@@ -66,8 +71,20 @@ internal fun UpdatePanelContent(controller: UpdateController, applicationId: Str
         }, Modifier.testTag("update-read-error"))
     }
     if (result is UpdateResult.NewVersion && applicationId == OfficialReleases.RELEASE_APPLICATION_ID) {
-        AlertDialog(
-            onDismissRequest = { controller.dismiss() },
+        OfficialUpdateDialog(result, onDismiss = controller::dismiss, openWebsite = openWebsite,
+            onShown = { automatic?.manualPromptShown(result.release.versionCode) },
+            onBrowserFailure = { browserError = true })
+    }
+}
+
+/** Shared confirmation boundary for automatic and explicit checks. */
+@Composable
+internal fun OfficialUpdateDialog(result: UpdateResult.NewVersion, onDismiss: () -> Unit,
+    openWebsite: (String) -> Unit, onShown: () -> Unit = {}, onBrowserFailure: () -> Unit = {}) {
+    LaunchedEffect(result.release.versionCode) { onShown() }
+    AlertDialog(
+            onDismissRequest = onDismiss,
+            modifier = Modifier.testTag("official-update-prompt"),
             title = { Text(if (result.belowMinimum) "当前版本已不受支持，请升级" else "发现新版本 ${result.release.versionName}") },
             text = { Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                 Text(result.release.notesZh.take(1200))
@@ -79,12 +96,11 @@ internal fun UpdatePanelContent(controller: UpdateController, applicationId: Str
                 if (OfficialReleases.isDownloadPath(result.release.downloadPath)) {
                     try {
                         openWebsite(result.release.downloadUrl)
-                    } catch (_: ActivityNotFoundException) { browserError = true }
-                    catch (_: SecurityException) { browserError = true }
+                    } catch (_: ActivityNotFoundException) { onBrowserFailure() }
+                    catch (_: SecurityException) { onBrowserFailure() }
                 }
-                controller.dismiss()
+                onDismiss()
             }) { Text("前往官网下载") } },
-            dismissButton = { TextButton(onClick = { controller.dismiss() }) { Text("稍后") } },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("稍后") } },
         )
-    }
 }

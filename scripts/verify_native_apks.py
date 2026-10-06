@@ -3,6 +3,7 @@
 from pathlib import Path
 import struct
 import zipfile
+from verify_release_policy import verify_apk
 root = Path(__file__).resolve().parents[1]
 def verify_libraries(z):
     for abi in ('arm64-v8a', 'x86_64'):
@@ -29,6 +30,7 @@ with zipfile.ZipFile(debug) as z:
 release_apks = list((root / 'app/build/outputs/apk/release').glob('*.apk'))
 assert release_apks, 'Release APK must be compiled separately'
 for apk in release_apks:
+    verify_apk(apk)
     with zipfile.ZipFile(apk) as z:
         verify_libraries(z)
         # Android manifests are binary XML but ASCII class names are UTF-8 pool entries in these builds.

@@ -90,6 +90,8 @@ assert 'version "9.2.0"' in root_build and 'version "2.3.10"' in root_build
 assert 'id("org.jetbrains.kotlin.android")' not in root_build
 # Preserve the SDK alignment gate introduced by the separately merged PR #2.
 app_build = (ROOT / 'app/build.gradle.kts').read_text()
+from verify_release_policy import verify_configuration
+verify_configuration(app_build)
 workflow = (ROOT / '.github/workflows/android.yml').read_text()
 assert 'compileSdk = 36' in app_build and 'targetSdk = 36' in app_build
 assert '"platforms;android-36"' in workflow, 'CI SDK must match compileSdk'

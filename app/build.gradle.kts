@@ -15,8 +15,8 @@ android {
         applicationId = "com.gccwebos.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.4.0-mobile-parity"
+        versionCode = 7
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["connectionAppLabel"] = "@string/app_name"
         val packagedEngine = listOf("arm64-v8a", "x86_64").all {
@@ -51,14 +51,14 @@ android {
             manifestPlaceholders["nativeVpnLabEnabled"] = nativeLab.toString()
         }
         release {
-            buildConfigField("boolean", "CONNECTION_ENDPOINT_HOSTNAME", "false")
+            buildConfigField("boolean", "CONNECTION_ENDPOINT_HOSTNAME", "true")
             buildConfigField("boolean", "CONNECTION_SYNTHETIC_ACCEPTANCE", "false")
             buildConfigField("boolean", "STORAGE_SYNTHETIC_ACCEPTANCE", "false")
             buildConfigField("boolean", "NATIVE_VPN_LAB", "false")
             buildConfigField("boolean", "NATIVE_TUN_ACCEPTANCE", "false")
             isMinifyEnabled = false
             isDebuggable = false
-            // No production signing credentials or automatic release signing.
+            // Build unsigned; the release operator signs the verified APK outside Gradle.
         }
     }
     compileOptions {
@@ -67,6 +67,9 @@ android {
     }
     buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = true }
+    // Go already strips this verified library (-s -w). NDK stripping rewrites ELF
+    // metadata even then; preserve its fixed byte identity for every APK variant.
+    packaging.jniLibs.keepDebugSymbols += "**/libgccmihomo.so"
     sourceSets.getByName("test").resources.directories.add("../native/bridge/testdata")
     // Verified libraries are generated/materialized separately; no old APK is reused.
     sourceSets.getByName("main").jniLibs.directories.add("../native/build/jniLibs")
@@ -85,26 +88,40 @@ android {
     }
 }
 
-// A device candidate must contain both verified ABIs, never a UI-only APK.
-if (providers.gradleProperty("connectionCandidate").orNull == "true") {
-    tasks.register("verifyConnectionCandidateLibraries") {
-        doLast {
-            val expected = mapOf(
-                "arm64-v8a" to "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
-                "x86_64" to "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8")
-            expected.forEach { (abi, digest) ->
-                val file = rootProject.file("native/build/jniLibs/$abi/libgccmihomo.so")
-                check(file.isFile) { "Materialize verified native libraries before building a connection candidate" }
-                val actual = MessageDigest.getInstance("SHA-256").digest(file.readBytes())
-                    .joinToString("") { "%02x".format(it) }
-                check(actual == digest) { "Native library identity mismatch for $abi" }
-            }
-            listOf("Mihomo-GPL-3.0.txt", "CMFA-GPL-3.0.txt").forEach {
-                check(rootProject.file("native/notices/$it").isFile) { "Required native license notice missing" }
-            }
+// A release or device candidate must contain both verified ABIs and exact notices.
+// Register unconditionally so release assembly/bundling cannot bypass the check.
+val verifiedConnectionLibraries = tasks.register("verifyConnectionLibraries") {
+    doLast {
+        val expected = mapOf(
+            "arm64-v8a" to "2737f327ecdef298907c6d10913eaf71196d6772b7ab2bb10c0ab2d9b1f37463",
+            "x86_64" to "6e8ab0ed35e94cf128ce53523332bd3b50c9e10cb03ac768bd3a55c91ee252c8")
+        expected.forEach { (abi, digest) ->
+            val file = rootProject.file("native/build/jniLibs/$abi/libgccmihomo.so")
+            check(file.isFile) { "Materialize verified native libraries before building a release or connection candidate" }
+            val actual = MessageDigest.getInstance("SHA-256").digest(file.readBytes())
+                .joinToString("") { "%02x".format(it) }
+            check(actual == digest) { "Native library identity mismatch for $abi" }
+        }
+        val noticeDigest = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        listOf("Mihomo-GPL-3.0.txt", "CMFA-GPL-3.0.txt").forEach {
+            val file = rootProject.file("native/notices/$it")
+            check(file.isFile) { "Required native license notice missing" }
+            // Git may check text out with CRLF on Windows; verify its exact canonical LF text.
+            val text = file.readText(Charsets.UTF_8).replace("\r\n", "\n").toByteArray(Charsets.UTF_8)
+            val actual = MessageDigest.getInstance("SHA-256").digest(text)
+                .joinToString("") { "%02x".format(it) }
+            check(actual == noticeDigest) { "Native license notice identity mismatch" }
         }
     }
-    tasks.named("preBuild").configure { dependsOn("verifyConnectionCandidateLibraries") }
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(verifiedConnectionLibraries)
+}
+// Keep the ordinary no-JNI debug/UI CI path buildable.
+if (providers.gradleProperty("connectionCandidate").orNull == "true") {
+    tasks.matching { it.name == "preDebugBuild" }.configureEach {
+        dependsOn(verifiedConnectionLibraries)
+    }
 }
 
 // Pinned to an official documented stable BOM. Original 2026.09.00 was not

@@ -85,6 +85,7 @@ jobs:
           chmod +x gradlew build.sh scripts/*.sh
           sh scripts/bootstrap-wrapper.sh 2>&1 | tee .build-output/wrapper.log
           python3 scripts/verify_source.py | tee .build-output/source-validation.log
+          python3 scripts/test_release_policy.py
           sha256sum gradle/wrapper/gradle-wrapper.jar | tee .build-output/wrapper.sha256
           git archive --format=zip HEAD -o .build-output/source.zip
       - name: Retain verified Wrapper bytes

@@ -77,7 +77,7 @@ internal fun productionRepository(context: Context): PortalRepository {
     return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime,
         sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context),
         allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME,
-        manualSources = EncryptedManualSourceStore(context))
+        manualSources = EncryptedManualSourceStore(context), nativeSessionRenewal = true)
 }
 
 /** Process-local ownership only; identity contains no account label or bearer data. */
@@ -172,7 +172,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded()
         }, onSettled = { scope.launch {
             configurationLibrary.refresh()
-            if (foregroundCheckPending && authenticated && !busy && !manualImport.busy && !clearing) revalidateAccount()
+            if (foregroundCheckPending && (authenticated || renewableSession()) && !busy && !manualImport.busy && !clearing) revalidateAccount()
         } })
     fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
     fun cancelAccountUsageUpdate() = accountUsage.cancel()
@@ -189,12 +189,13 @@ internal class AccountController(private val repository: PortalRepository, priva
         resource = overview.resource
         return true
     }
+    private fun renewableSession(): Boolean = try { repository.hasRenewableSession() } catch (_: PortalFailure) { false }
     fun onForeground() {
         configurationLibrary.cancel()
         // Handler delays can pause during sleep; the repository's elapsed clock cannot.
         expireLoginChallengeIfNeeded()
         // Authenticator app round trips must retain the still-bounded TOTP ticket.
-        if (factorReference != null || !authenticated) return
+        if (factorReference != null || (!authenticated && !renewableSession())) return
         accountUsage.suspendForVerification()
         foregroundCheckPending = true
         if (!busy && !manualImport.busy) revalidateAccount()
@@ -205,16 +206,17 @@ internal class AccountController(private val repository: PortalRepository, priva
         expiryTask?.cancel()
         authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null; importRejection = null
         restoring = true; restorationPending = true
-        run {
+        run(allowRenewal = false) {
             try {
                 localSubscription = repository.localSubscriptions.restore()
                 nodes = localSubscription.nodes
                 // Cached connection state and a saved account must both restore on a fresh launch.
+                val renewal = renewableSession()
                 val saved = repository.restoreSession()
                 restorationPending = false
                 if (saved != null) {
                     acceptAuthenticated(saved)
-                    loadResource()
+                    loadResource(readOnly = renewal)
                 }
             } finally { restoring = false; foregroundCheckPending = false; nodeSelection.sync() }
         }
@@ -227,13 +229,14 @@ internal class AccountController(private val repository: PortalRepository, priva
         val checkOperation = operation + 1
         expiryTask?.cancel(); authenticated = false; security = null
         restoring = true; restorationPending = true
-        run {
+        run(allowRenewal = false) {
             try {
+                val renewal = renewableSession()
                 val saved = repository.restoreSession()
                 kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (operation != checkOperation) return@run
                 restorationPending = false
-                if (saved != null) { acceptAuthenticated(saved); loadResource() }
+                if (saved != null) { acceptAuthenticated(saved); loadResource(readOnly = renewal) }
             } finally {
                 if (operation == checkOperation) {
                     if (!authenticated) { commerceSessionIdentity = null; clearAccountUsage() }
@@ -391,7 +394,14 @@ internal class AccountController(private val repository: PortalRepository, priva
         expiryTask?.cancel()
         val authEpoch = authSessionGeneration
         expiryTask = scope.launch {
-            kotlinx.coroutines.delay(remaining)
+            val proactive = renewableSession() && remaining > 60000
+            kotlinx.coroutines.delay(if (proactive) remaining - 60000 else remaining)
+            if (authSessionGeneration == authEpoch && authenticated && renewableSession()) {
+                accountUsage.suspendForVerification()
+                foregroundCheckPending = true
+                if (!busy && !manualImport.busy) revalidateAccount()
+                return@launch
+            }
             if (authSessionGeneration == authEpoch && authenticated) {
                 clearAccountUsage()
                 nodeSelection.invalidate()
@@ -454,7 +464,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         operation++
         task?.cancel(); task = null
         busy = false; error = "准备已取消"
-        if (foregroundCheckPending && authenticated) revalidateAccount()
+        if (foregroundCheckPending && (authenticated || renewableSession())) revalidateAccount()
     }
     fun restoreLocal() = run { localSubscription = repository.localSubscriptions.restore(); nodes = localSubscription.nodes }
 
@@ -462,9 +472,14 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
-    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录"
+        if (renewableSession()) {
+            foregroundCheckPending = true
+            if (!busy && !manualImport.busy && !clearing) revalidateAccount()
+        }
+    }
 
-    private suspend fun loadResource(onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
+    private suspend fun loadResource(readOnly: Boolean = false, onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
         val expectedUsage = usageAuthentication
         val expectedAuthEpoch = authSessionGeneration
         fun publish(overview: BoundAccountOverview) {
@@ -478,7 +493,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         }
         importStatus = null; importRejection = null; deliveryReceived = false; resource = null
         try {
-            if (repository.localSubscriptions.sourceKind() != ManualSourceKind.LegacyRemote ||
+            if (readOnly || repository.localSubscriptions.sourceKind() != ManualSourceKind.LegacyRemote ||
                 localSubscription.hasProfile && !repository.hasPendingLegacyRecovery()) {
                 // Wallet login never silently replaces a separately saved local VPN capability.
                 publish(repository.refreshWithObservation())
@@ -533,7 +548,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             finally { if (current == operation) { busy = false; clearing = false } }
         }
     }
-    private fun run(authenticationSubmission: Boolean = false, action: suspend () -> Unit) {
+    private fun run(authenticationSubmission: Boolean = false, allowRenewal: Boolean = true, action: suspend () -> Unit) {
         if (busy || manualImport.busy) return
         // Account/security work cannot race a local selection read or revive its late result.
         if (nodeSelection.busy) nodeSelection.cancel()
@@ -547,6 +562,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             catch (failure: PortalFailure) {
                 if (current != operation) return@launch
                 if (failure.reason == PortalFailure.Reason.SESSION_EXPIRED) {
+                    if (allowRenewal && renewableSession()) foregroundCheckPending = true
                     account = if (authenticated) displayEmail.orEmpty() else ""
                     referralGenerationGuard = ReferralGenerationGuard()
                 }
@@ -577,7 +593,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                 if (current == operation) {
                     busy = false
                     authenticationSubmitting = false
-                    if (foregroundCheckPending && authenticated && factorReference == null) revalidateAccount()
+                    if (allowRenewal && foregroundCheckPending && (authenticated || renewableSession()) && factorReference == null) revalidateAccount()
                 }
             }
         }

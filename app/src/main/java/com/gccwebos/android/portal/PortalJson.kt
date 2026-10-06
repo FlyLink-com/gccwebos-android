@@ -68,6 +68,28 @@ internal object PortalJson {
         val lifetime = java.time.Duration.between(issued, expires).toMillis()
         return Session(Secret(token), value.text("accountId"), expires, lifetime, elapsed)
     }
+    fun nativeSession(body: String, now: Instant, elapsed: Long): Pair<Session, NativeRefreshGrant> {
+        val root = JSONObject(body); root.keysExactly("session", "refreshGrant")
+        val rawSession = root.getJSONObject("session")
+        rawSession.keysExactly("sessionRef", "accountId", "authMethod", "status", "issuedAt", "expiresAt", "safety")
+        require(rawSession.text("authMethod") in setOf("password", "totp") && rawSession.text("status") == "active")
+        val safety = rawSession.getJSONObject("safety")
+        val flags = arrayOf("totpCodeReturned", "encryptedTotpSecretReturned", "rawEntryTokenReturned", "runtimeDbMutated")
+        safety.keysExactly(*flags)
+        flags.forEach { require(safety.get(it) == false) }
+        val issued = time(rawSession.text("issuedAt"))
+        val expiry = time(rawSession.text("expiresAt"))
+        require(issued <= now && expiry > now)
+        val value = session(root, elapsed)
+        require(value.lifetimeMillis in 1..SavedSession.MAX_NATIVE_SESSION_MILLIS)
+        val rawGrant = root.getJSONObject("refreshGrant")
+        rawGrant.keysExactly("refreshToken", "issuedAt", "expiresAt")
+        val grant = NativeRefreshGrant(Secret(rawGrant.text("refreshToken")), time(rawGrant.text("issuedAt")),
+            time(rawGrant.text("expiresAt")), now, elapsed)
+        require(grant.valid(now, elapsed) && expiry <= grant.expiresAt && issued >= grant.issuedAt)
+        SavedSession.capture(value, now, elapsed, grant) // Validate the explicit native identity and bearer.
+        return value to grant
+    }
     fun delivery(body: String, previous: DeliveryRecord, policy: OriginPolicy): DeliveryRecord {
         val root = JSONObject(body); root.keysExactly("delivery")
         val value = root.getJSONObject("delivery")

@@ -132,6 +132,56 @@ class ManualImportControllerTest {
         assertEquals(0, f.fenceCalls); assertEquals(0, f.saves); assertTrue(f.snapshots.isEmpty())
     }
 
+    @Test fun noneSelectionChangesToAccountOnlyAfterExplicitMenuActionWithoutClaimingDelivery() = runTest {
+        val f = Fixture(this)
+        ManualSourceRecord(kind = ManualSourceKind.None).use(f.memory::save)
+        assertEquals(ManualSourceKind.None, f.manager.restore().sourceKind)
+        f.controller.useAccount(); runCurrent() // Closed host has no operation authority.
+        assertEquals(ManualSourceKind.None, f.manager.sourceKind())
+        f.controller.open(); runCurrent()
+        assertEquals(ManualSourceKind.None, f.manager.sourceKind())
+        assertEquals(0, f.saves); assertEquals(0, f.reads); assertEquals(0, f.fenceCalls)
+        f.controller.useAccount()
+        f.controller.useAccount() // Duplicate click while busy cannot obtain another ticket.
+        runCurrent()
+        assertEquals(ManualSourceKind.LegacyRemote, f.manager.sourceKind())
+        assertEquals(ManualSourceKind.LegacyRemote, f.snapshots.single().sourceKind)
+        assertEquals(LocalSubscriptionStatus.MISSING, f.snapshots.single().status)
+        assertEquals(1, f.saves); assertEquals(1, f.fenceCalls); assertEquals(0, f.reads)
+        assertFalse(f.controller.visible); assertFalse(f.controller.busy)
+        assertTrue(f.manager.nodeSelectionSnapshot().choices.isEmpty())
+    }
+
+    @Test fun noneAccountRecoveryRechecksBusyCancellationAndAdmissionBeforeCommit() = runTest {
+        for (boundary in listOf("blocked-before-click", "blocked-before-dispatch", "canceled-before-dispatch")) {
+            val f = Fixture(this)
+            ManualSourceRecord(kind = ManualSourceKind.None).use(f.memory::save)
+            f.manager.restore(); f.controller.open()
+            if (boundary == "blocked-before-click") f.allowed = false
+            f.controller.useAccount()
+            when (boundary) {
+                "blocked-before-dispatch" -> f.allowed = false
+                "canceled-before-dispatch" -> f.controller.cancel()
+            }
+            runCurrent()
+            assertEquals(boundary, ManualSourceKind.None, f.manager.sourceKind())
+            assertEquals(0, f.saves); assertEquals(0, f.reads); assertEquals(0, f.fenceCalls)
+            assertTrue(f.snapshots.isEmpty()); assertFalse(f.controller.busy)
+        }
+    }
+
+    @Test fun noneAccountRecoveryCannotBypassTheConnectionOwnersCommitFence() = runTest {
+        val f = Fixture(this)
+        ManualSourceRecord(kind = ManualSourceKind.None).use(f.memory::save)
+        f.manager.restore()
+        f.fence = { throw IllegalStateException("Synthetic connection is active") }
+        f.controller.open(); f.controller.useAccount(); runCurrent()
+        assertEquals(ManualSourceKind.None, f.manager.sourceKind())
+        assertEquals(1, f.fenceCalls); assertEquals(0, f.saves); assertEquals(0, f.reads)
+        assertTrue(f.snapshots.isEmpty()); assertTrue(f.controller.visible)
+        assertEquals("请先断开连接后再导入", f.controller.error)
+    }
+
     @Test fun useAccountWithExistingV1FreshlyReloadsSelectableNodesInTheSameOperation() = runTest {
         val f = Fixture(this)
         val accountUrl = Secret("https://sub.invalid/sub/a/synthetic-account")

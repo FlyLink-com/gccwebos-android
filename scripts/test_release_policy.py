@@ -16,9 +16,10 @@ class ReleasePolicyTests(unittest.TestCase):
     def test_current_source_is_a_stable_release_configuration(self):
         policy.verify_configuration(self.source)
 
-    def test_release_cannot_revert_to_candidate_version(self):
-        for old, new in [('versionCode = 7', 'versionCode = 6'),
-                         ('versionName = "0.4.0"', 'versionName = "0.4.0-rc.1"')]:
+    def test_release_cannot_revert_to_previous_or_candidate_version(self):
+        for old, new in [('versionCode = 8', 'versionCode = 7'),
+                         ('versionName = "0.4.1"', 'versionName = "0.4.0"'),
+                         ('versionName = "0.4.1"', 'versionName = "0.4.0-rc.1"')]:
             with self.subTest(new=new), self.assertRaises(AssertionError):
                 policy.verify_configuration(self.source.replace(old, new))
 

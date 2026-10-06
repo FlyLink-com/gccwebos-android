@@ -225,10 +225,23 @@ class ConnectionSetupRecoveryUiTest {
     }
 
     @Test fun failedUsageReadOnReadyConfigRecoversWithoutStartingUntilAnotherExplicitClick() {
-        val fixture = Fixture(setupAvailable = true)
+        val fixture = Fixture(setupAvailable = true, multipleNodes = true)
         launch(fixture)
+        val selected = compose.runOnIdle {
+            account.nodeSelection.sync()
+            assertEquals(2, account.nodeSelection.snapshot.choices.size)
+            account.nodeSelection.snapshot.choices[1].selection.also {
+                assertTrue(account.nodeSelection.select(it))
+                assertSame(it, account.nodeSelection.snapshot.selected)
+                assertEquals(1, fixture.downloads.get())
+            }
+        }
         compose.runOnIdle { fixture.failOverview = true; account.refreshAccountUsage() }
         compose.waitUntil(10_000) { account.accountUsage.state.value.error != null && !account.accountUsage.state.value.busy }
+        compose.runOnIdle {
+            assertSame(selected, account.nodeSelection.snapshot.selected)
+            assertEquals(1, fixture.downloads.get()); assertEquals(0, powers.get())
+        }
         compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-retry").assertDoesNotExist()
         val gate = CompletableDeferred<Unit>()
@@ -237,15 +250,23 @@ class ConnectionSetupRecoveryUiTest {
         compose.waitUntil(10_000) { fixture.overviews.get() == 3 && account.accountUsage.state.value.busy }
         compose.onNodeWithTag("vpn-connect").assertTextEquals("一键连接").assertIsNotEnabled()
         compose.onNodeWithTag("account-usage-cancel").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(0, powers.get()); gate.complete(Unit) }
+        compose.runOnIdle {
+            assertSame(selected, account.nodeSelection.snapshot.selected)
+            assertEquals(1, fixture.downloads.get()); assertEquals(0, powers.get())
+            gate.complete(Unit)
+        }
         compose.waitUntil(10_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.error == null }
         compose.runOnIdle {
             assertEquals(LocalSubscriptionStatus.READY, account.localSubscription.status)
+            assertSame(selected, account.nodeSelection.snapshot.selected)
             assertEquals(0, powers.get()); assertEquals(0, navigations.get())
             assertEquals(1, fixture.downloads.get()); assertEquals(1, fixture.setups.get()); assertEquals(1, fixture.acks.get())
         }
         compose.onNodeWithTag("vpn-connect").assertIsEnabled().performClick()
-        compose.runOnIdle { assertEquals(1, powers.get()) }
+        compose.runOnIdle {
+            assertSame(selected, account.nodeSelection.snapshot.selected)
+            assertEquals(1, fixture.downloads.get()); assertEquals(1, powers.get())
+        }
     }
 
     @Test fun localReadFailureUsesTheStableActionWithoutAutomaticallyStartingAfterRecovery() {

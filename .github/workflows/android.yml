@@ -1,9 +1,13 @@
 name: Android M0 build
+# Runs on PRs and on demand only: the change was already built here before merge,
+# so main is not rebuilt on the 4-core runner after every merge. Use
+# workflow_dispatch for an explicit main build/evidence run.
 on:
   workflow_dispatch:
   pull_request:
-  push:
-    branches: [main, master]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
 permissions:
   contents: read
 concurrency:
@@ -50,7 +54,7 @@ jobs:
             .build-output/copy-boundary/
           include-hidden-files: true
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
   validate:
     if: "!startsWith(github.head_ref || github.ref_name, 'codex/lucky-e2b-')"
     runs-on: gcc-android-api36-4core
@@ -98,7 +102,7 @@ jobs:
             .build-output/source.zip
           include-hidden-files: true
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
       - name: Install explicit SDK packages
         shell: bash
         run: |
@@ -135,13 +139,15 @@ jobs:
             .build-output/*signature.log
           include-hidden-files: true
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
       - name: Install, launch and test the same APK on an emulator
         if: steps.build.outcome == 'success'
         shell: bash
         run: bash scripts/m0-emulator-smoke.sh
+      # Full reports are ~140 MB per run. Keep them when something failed, or for an
+      # explicit manual evidence run; green PR runs only keep the APK/wrapper bundles.
       - name: Attach logs and actual device evidence
-        if: always()
+        if: failure() || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gccwebos-m0-reports-${{ steps.source.outputs.sha }}
@@ -153,4 +159,4 @@ jobs:
             app/build/reports/
           include-hidden-files: true
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 14 || 3 }}

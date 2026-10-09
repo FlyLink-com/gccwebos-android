@@ -154,8 +154,8 @@ class UnifiedWelcomeGlassUiTest {
                 }
             }
         }
-        compose.onNode(hasTestTag("connection-welcome") and
-            hasAnyAncestor(hasTestTag("connection-account-surface"))).assertExists()
+        compose.onNode(hasTestTag("vpn-connect") and
+            hasAnyAncestor(hasTestTag("connection-hero"))).assertExists()
         compose.onNode(hasTestTag("account-usage-card") and
             hasAnyAncestor(hasTestTag("connection-account-surface"))).assertExists()
         compose.onNodeWithTag("account-usage-title").assertDoesNotExist()

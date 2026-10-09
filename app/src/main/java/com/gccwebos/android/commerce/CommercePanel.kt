@@ -46,6 +46,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+/** Content slot of one 套餐 tab (category + plan period); keys the sliding tab content. */
+private data class CatalogTabKey(val category: String, val period: CatalogPeriod?)
+
 internal enum class CommerceMode { Overview, Mine, Plans, Orders, Wallet, Ledger }
 internal class CommerceController(private val account: AccountController, private val scope: CoroutineScope,
     private val storage: CommerceRecovery, private val includeHistory: Boolean = false, initialRepository: CommerceRepository? = null) {
@@ -518,31 +521,47 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
             onBack = onWalletBack, onRechargeRecords = onRechargeRecords)
         return // Wallet never inherits a retained purchase confirmation from another destination.
     } else if (mode == CommerceMode.Plans) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            CatalogPeriod.entries.filter { it != CatalogPeriod.Other || displayOffers.any { offer -> offer.category == "plan" && catalogPeriod(offer) == it } }.forEach { term ->
-                CatalogCategoryChip(selected = catalogCategory == "plan" && period == term, onClick = {
-                    initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null
-                    catalogCategory = "plan"; requestedPeriod = term
-                }, enabled = !state.busy, title = term.title, tag = term.tag)
+        val planTerms = CatalogPeriod.entries.filter { it != CatalogPeriod.Other || displayOffers.any { offer -> offer.category == "plan" && catalogPeriod(offer) == it } }
+        val planTabs = planTerms.map { SlidingTab(it.title, it.tag) } + SlidingTab("流量包", "catalog-data-packs")
+        val planTabIndex = if (catalogCategory == "data_pack") planTerms.size
+            else if (catalogCategory == "plan") planTerms.indexOf(period) else -1
+        // One sliding capsule highlight; the click handlers are the former chip handlers, unchanged.
+        SlidingTabRow(planTabs, planTabIndex, enabled = !state.busy, onSelect = { index ->
+            initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null
+            if (index < planTerms.size) { catalogCategory = "plan"; requestedPeriod = planTerms[index] }
+            else catalogCategory = "data_pack"
+        })
+        // The first catalog read (nothing to show yet) is a distinct loading state: skeleton cards, then a fade-in.
+        val planLoading = !state.catalogLoaded && state.busy && !state.pendingPurchase && displayOffers.isEmpty()
+        val planContent = if (planLoading) null else CatalogTabKey(catalogCategory, period.takeIf { catalogCategory == "plan" })
+        TabContent(planContent, indexOf = { key ->
+            when {
+                key == null -> -1
+                key.category == "data_pack" -> planTerms.size
+                else -> planTerms.indexOf(key.period)
             }
-            CatalogCategoryChip(selected = catalogCategory == "data_pack", onClick = { initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null; catalogCategory = "data_pack" }, enabled = !state.busy,
-                title = "流量包", tag = "catalog-data-packs")
-        }
-        val shownOffers = displayOffers.filter {
-            it.category == catalogCategory && (catalogCategory != "plan" || catalogPeriod(it) == period)
-        }
-        if (shownOffers.isEmpty() && state.catalogLoaded && !state.busy) BrandCard {
-            Text(if (catalogCategory == "data_pack") "暂无可购流量包" else "暂无可购套餐",
-                style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("catalog-empty"))
-        }
-        if (!state.pendingPurchase && shownOffers.isNotEmpty()) {
-            CatalogOfferList(shownOffers, selectedOffer, category = catalogCategory,
-                enabled = visitReady && state.catalogLoaded && !state.busy && state.canOperate(),
-                onSelect = { offer -> if (!state.busy && state.canOperate() && state.catalogLoaded && state.offers.any { it == offer }) {
-                    initialSelectionHandled = true; state.quote = null; selectionNotice = null
-                    selectedSnapshot = CatalogSelection(offer, account.authSessionGeneration)
-                } })
-            if (dock == null && purchaseSummary != null) CatalogPurchaseDock(purchaseSummary, continuePurchase)
+        }) { key ->
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (key == null) SkeletonCards(count = 3, cardHeight = 94.dp, modifier = Modifier.testTag("plan-skeleton"))
+                else {
+                    val shownOffers = displayOffers.filter {
+                        it.category == key.category && (key.category != "plan" || catalogPeriod(it) == key.period)
+                    }
+                    if (shownOffers.isEmpty() && state.catalogLoaded && !state.busy) BrandCard {
+                        Text(if (key.category == "data_pack") "暂无可购流量包" else "暂无可购套餐",
+                            style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("catalog-empty"))
+                    }
+                    if (!state.pendingPurchase && shownOffers.isNotEmpty()) {
+                        CatalogOfferList(shownOffers, selectedOffer, category = key.category,
+                            enabled = visitReady && state.catalogLoaded && !state.busy && state.canOperate(),
+                            onSelect = { offer -> if (!state.busy && state.canOperate() && state.catalogLoaded && state.offers.any { it == offer }) {
+                                initialSelectionHandled = true; state.quote = null; selectionNotice = null
+                                selectedSnapshot = CatalogSelection(offer, account.authSessionGeneration)
+                            } })
+                        if (dock == null && purchaseSummary != null) CatalogPurchaseDock(purchaseSummary, continuePurchase)
+                    }
+                }
+            }
         }
         if (state.pendingPurchase) BrandCard(Modifier.testTag("purchase-result")) {
             Text("当前套餐订单", style = MaterialTheme.typography.titleLarge)
@@ -696,9 +715,11 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
-    // The wallet top-up screen draws its own standalone top bar (same "mine-back" tag) whenever it renders.
+    // Wallet top-up and order/ledger history draw a standalone top bar (same "mine-back" tag).
+    val historyTopBar = view == "history" && account.authenticated && !account.restoring && !account.foregroundCheckPending
     val walletTopBar = (view == "wallet" || view == "recharge") && account.authenticated && !account.restoring && !account.foregroundCheckPending
-    if (view != "mine" && !walletTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
+    if (view != "mine" && !walletTopBar && !historyTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
+    if (historyTopBar) WalletTopBar(if (historyTab == "ledger") "账单明细" else "我的订单", onBack = { view = "mine" }, onRecords = null)
     if (view == "about") {
         BrandCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -713,11 +734,11 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         if (view == "history") {
             Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = historyTab == "orders", onClick = { historyTab = "orders" },
-                    enabled = !state.busy && state.canOperate(), label = { Text("订单") },
+                    enabled = !state.busy && state.canOperate(), label = { Text("消费订单") },
                     modifier = Modifier.testTag("mine-history-orders"))
                 FilterChip(selected = historyTab == "ledger", onClick = {
                     historyTab = "ledger"
-                }, enabled = !state.busy && state.canOperate(), label = { Text("账单明细") },
+                }, enabled = !state.busy && state.canOperate(), label = { Text("代币账单") },
                     modifier = Modifier.testTag("mine-history-ledger"))
             }
         }

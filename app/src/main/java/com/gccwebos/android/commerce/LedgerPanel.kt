@@ -19,82 +19,108 @@ import androidx.compose.ui.unit.dp
 import com.gccwebos.android.R
 import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
-/** One glass container; selecting a row reads no additional endpoint or transaction. */
+/** One opaque container; selecting a row reads no additional endpoint or transaction. */
 @Composable
 internal fun LedgerPanel(account: AccountController, state: CommerceController) {
-    var selectedEntry by remember(state, account.authSessionGeneration) { mutableStateOf<WalletLedgerEntry?>(null) }
+    var selectedGroup by remember(state, account.authSessionGeneration) { mutableStateOf<LedgerDisplayGroup?>(null) }
     val rows = state.ledgerPage?.entries
-    val detail = selectedEntry?.takeIf { state.canOperate() && rows?.contains(it) == true }
-    BrandCard(Modifier.testTag("ledger-container")) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("账单明细", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-        }
+    val groups = rows?.let(LedgerPresentation::displayGroups)
+    val detail = selectedGroup?.takeIf { state.canOperate() && groups?.any { g -> g.id == it.id } == true }
+    HistoryListCard(Modifier.testTag("ledger-container")) {
         CommerceReadNotice(state, state.error?.takeUnless { state.busy }, "ledger-error")
         when {
             state.busy || rows == null -> Unit
-            rows.isEmpty() -> SupportingText("暂无账单", Modifier.testTag("ledger-empty"))
+            groups.isNullOrEmpty() -> SupportingText("暂无账单", Modifier.testTag("ledger-empty"))
         }
-        if (state.currentSession()) rows?.groupBy { ledgerDate(it.occurredAt) }?.forEach { (date, entries) ->
-            Text(date, style = MaterialTheme.typography.labelLarge, color = Brand.Muted, modifier = Modifier.testTag("ledger-date-$date"))
-            entries.forEachIndexed { index, entry ->
+        if (state.currentSession()) groups?.groupBy { LedgerPresentation.dayKey(it.occurredAt) }?.forEach { (date, dayGroups) ->
+            val heading = LedgerPresentation.dateHeading(dayGroups.first().occurredAt)
+            Text(heading, style = MaterialTheme.typography.labelLarge, color = Brand.Muted,
+                modifier = Modifier.testTag("ledger-date-$date"))
+            dayGroups.forEachIndexed { index, group ->
                 if (index > 0) HorizontalDivider(color = Brand.RowDivider)
-                LedgerRow(entry, enabled = !state.busy && state.canOperate()) { selectedEntry = entry }
+                LedgerRow(group, enabled = !state.busy && state.canOperate()) { selectedGroup = group }
             }
         }
-        if (state.ledgerPage?.nextCursor != null) TextButton(onClick = { selectedEntry = null; state.loadLedger(true) },
-            enabled = !state.busy && state.canOperate(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("ledger-more")) { Text("加载更早账单") }
+        if (state.ledgerPage?.nextCursor != null) TextButton(onClick = { selectedGroup = null; state.loadLedger(true) },
+            enabled = !state.busy && state.canOperate(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("ledger-more")) { Text("加载更早账单") }
     }
-    detail?.let { entry ->
-        AlertDialog(onDismissRequest = { selectedEntry = null }, modifier = Modifier.testTag("ledger-detail"),
+    detail?.let { group ->
+        AlertDialog(onDismissRequest = { selectedGroup = null }, modifier = Modifier.testTag("ledger-detail"),
             title = { Text("余额变动详情") }, text = {
-                Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LedgerDetailField("交易类型", ledgerLabel(entry.category))
-                    LedgerDetailField("币种", ledgerRowCoinType(entry.coinType))
-                    LedgerDetailField("时间", ledgerDetailTime(entry.occurredAt))
-                    LedgerDetailField("总余额变化", ledgerSigned(entry.totalDeltaUnits), "ledger-detail-total")
-                    LedgerDetailField("可用变化", ledgerSigned(entry.availableDeltaUnits), "ledger-detail-available")
-                    LedgerDetailField("待确认变化", ledgerSigned(entry.pendingDeltaUnits), "ledger-detail-pending")
-                    LedgerDetailField("预留变化", ledgerSigned(entry.heldDeltaUnits), "ledger-detail-held")
-                    LedgerDetailField("记录金额", formatCoins(entry.amountUnits))
-                    LedgerDetailField("记录标识", entry.entryRef, "ledger-detail-ref")
-                    entry.relatedOrderRef?.let { LedgerDetailField("关联订单", it) }
+                Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LedgerDetailField("业务", group.title)
+                    LedgerDetailField("时间", LedgerPresentation.detailTime(group.occurredAt))
+                    LedgerDetailField("合计变动", LedgerPresentation.signedCoins(group.netTotalDeltaUnits), "ledger-detail-total")
+                    group.entries.forEach { entry ->
+                        HorizontalDivider(color = Brand.RowDivider)
+                        LedgerDetailField("明细", LedgerPresentation.categoryLabel(entry.category))
+                        LedgerDetailField("币种", LedgerPresentation.coinTypeLabel(entry.coinType))
+                        LedgerDetailField("变动", LedgerPresentation.signedCoins(entry.totalDeltaUnits),
+                            "ledger-detail-amount-${entry.entryRef}")
+                        LedgerDetailField("可用变化", entry.availableDeltaUnits?.let(LedgerPresentation::signedCoins) ?: "未提供",
+                            "ledger-detail-available-${entry.entryRef}")
+                        LedgerDetailField("待确认变化", entry.pendingDeltaUnits?.let(LedgerPresentation::signedCoins) ?: "未提供",
+                            "ledger-detail-pending-${entry.entryRef}")
+                        LedgerDetailField("预留变化", entry.heldDeltaUnits?.let(LedgerPresentation::signedCoins) ?: "未提供",
+                            "ledger-detail-held-${entry.entryRef}")
+                        LedgerDetailField("记录标识", entry.entryRef, "ledger-detail-ref-${entry.entryRef}")
+                        entry.relatedOrderRef?.let { LedgerDetailField("关联订单", it) }
+                    }
+                    // Stable aliases for single-entry groups (instrumentation).
+                    if (group.entries.size == 1) {
+                        val entry = group.entries.first()
+                        LedgerDetailField("可用变化", entry.availableDeltaUnits?.let(LedgerPresentation::signedCoins) ?: "未提供",
+                            "ledger-detail-available")
+                        LedgerDetailField("预留变化", entry.heldDeltaUnits?.let(LedgerPresentation::signedCoins) ?: "未提供",
+                            "ledger-detail-held")
+                        LedgerDetailField("记录标识", entry.entryRef, "ledger-detail-ref")
+                    }
                 }
-            }, confirmButton = { TextButton(onClick = { selectedEntry = null },
+            }, confirmButton = { TextButton(onClick = { selectedGroup = null },
                 modifier = Modifier.heightIn(min = 48.dp).testTag("ledger-detail-close")) { Text("返回账单") } })
     }
 }
 
 @Composable
-private fun LedgerRow(entry: WalletLedgerEntry, enabled: Boolean, onClick: () -> Unit) {
-    val primary = when {
-        entry.totalDeltaUnits != 0L -> "总余额" to entry.totalDeltaUnits
-        entry.availableDeltaUnits != null && entry.availableDeltaUnits != 0L -> "可用" to entry.availableDeltaUnits
-        entry.pendingDeltaUnits != null && entry.pendingDeltaUnits != 0L -> "待确认" to entry.pendingDeltaUnits
-        entry.heldDeltaUnits != null && entry.heldDeltaUnits != 0L -> "预留" to entry.heldDeltaUnits
-        else -> "总余额" to entry.totalDeltaUnits
+private fun LedgerRow(group: LedgerDisplayGroup, enabled: Boolean, onClick: () -> Unit) {
+    val primaryRef = group.id
+    val net = group.netTotalDeltaUnits
+    val amountColor = when {
+        net > 0 -> Brand.Green
+        else -> Brand.Text
     }
     val largeFont = LocalDensity.current.fontScale > 1.3f
-    Surface(Modifier.fillMaxWidth().testTag("ledger-row-${entry.entryRef}")
+    Surface(Modifier.fillMaxWidth().testTag("ledger-row-$primaryRef")
         .clickable(enabled = enabled, role = Role.Button, onClickLabel = "查看余额变动详情", onClick = onClick),
         shape = RoundedCornerShape(14.dp), color = Color.Transparent) {
-        Row(Modifier.heightIn(min = 64.dp).padding(vertical = 10.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(painterResource(if (entry.category == "available_to_held") R.drawable.brand_lock
-                else R.drawable.brand_wallet), null, tint = Brand.Cyan, modifier = Modifier.size(24.dp))
+        Row(Modifier.heightIn(min = 64.dp).padding(vertical = 10.dp, horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(painterResource(if (net < 0) R.drawable.brand_receipt else R.drawable.brand_wallet),
+                null, tint = Brand.Cyan, modifier = Modifier.size(24.dp))
             val heading: @Composable () -> Unit = {
-                Text(ledgerLabel(entry.category), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                SupportingText("${ledgerClock(entry.occurredAt)} · ${ledgerRowCoinType(entry.coinType)}")
-                if (entry.totalDeltaUnits == 0L) SupportingText("总余额未变", Modifier.testTag("ledger-total-unchanged-${entry.entryRef}"))
+                Text(group.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                val subtitle = buildString {
+                    append(LedgerPresentation.clock(group.occurredAt))
+                    if (group.entries.size == 1) {
+                        append(" · ")
+                        append(LedgerPresentation.coinTypeLabel(group.entries.first().coinType))
+                    } else {
+                        append(" · ")
+                        append("${group.entries.size} 笔明细")
+                    }
+                }
+                SupportingText(subtitle)
             }
             val amount: @Composable () -> Unit = {
-                Text(ledgerSigned(primary.second), color = if (primary.second > 0) Brand.Green else Brand.Text,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("ledger-amount-${entry.entryRef}"))
-                Text("${primary.first}变化", style = MaterialTheme.typography.labelSmall, color = Brand.Muted,
-                    modifier = Modifier.testTag("ledger-qualifier-${entry.entryRef}"))
+                Text(LedgerPresentation.signedCoins(net), color = amountColor, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("ledger-amount-$primaryRef"))
+                if (group.entries.size > 1) {
+                    Text("含赠送/已购明细", style = MaterialTheme.typography.labelSmall, color = Brand.Muted,
+                        modifier = Modifier.testTag("ledger-qualifier-$primaryRef"))
+                }
             }
             if (largeFont) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { heading(); amount() }
             else {
@@ -112,15 +138,4 @@ private fun LedgerDetailField(label: String, value: String, tag: String? = null)
         SupportingText(label)
         Text(value, modifier = if (tag == null) Modifier else Modifier.testTag(tag))
     }
-}
-
-private fun ledgerSigned(value: Long?): String = value?.let { "${if (it > 0) "+" else ""}$it Coins" } ?: "未提供"
-private fun ledgerRowCoinType(value: String) = when (value) { "paid_coins" -> "已购 Coins"; "bonus_coins" -> "赠送 Coins"; "reward_coins" -> "奖励 Coins"; else -> "Coins" }
-private fun ledgerDate(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault()).format(value)
-private fun ledgerClock(value: Instant) = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault()).format(value)
-private fun ledgerDetailTime(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z").withZone(ZoneId.systemDefault()).format(value)
-private fun ledgerLabel(value: String) = when(value) {
-    "credit" -> "入账"; "pending_to_available" -> "待确认转可用"; "pending_to_reversed" -> "待确认撤回"
-    "available_to_held" -> "订单预留"; "held_to_available" -> "预留释放"; "held_to_consumed" -> "订单扣款"
-    "held_to_expired", "available_to_expired" -> "余额到期"; "available_to_reversed" -> "可用余额撤回"; else -> "账单记录"
 }

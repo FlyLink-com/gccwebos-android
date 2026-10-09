@@ -53,7 +53,7 @@ internal fun CatalogPurchaseDock(summary: CatalogPurchaseSummary, onContinue: ()
             }
             val action: @Composable (Modifier) -> Unit = { modifier ->
                 BrandButton("立即购买", onContinue,
-                    enabled = summary.enabled, modifier = modifier.testTag("plan-continue"))
+                    enabled = summary.enabled, haptic = UiHaptic.Primary, modifier = modifier.testTag("plan-continue"))
             }
             if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { details(Modifier.fillMaxWidth()); action(Modifier.fillMaxWidth()) }

@@ -160,7 +160,7 @@ class ManualImportAccountUiTest {
             assertEquals(0, f.reads.get()); assertEquals(1, f.downloads.get())
         }
         compose.onNodeWithTag("account-usage-remaining").performScrollTo().assertTextEquals("7 GB")
-        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 3 GB")
+        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 30%").assertContentDescriptionEquals("已用 3 GB，30%")
         compose.onNodeWithTag("account-usage-total").assertTextEquals("总量 10 GB")
         compose.onNodeWithTag("subscription-usage-source", useUnmergedTree = true).assertExists()
     }

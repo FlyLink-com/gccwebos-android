@@ -238,7 +238,9 @@ class PreviewV2LayoutUiTest {
     private fun fourPages(widthDp: Int) {
         launch(widthDp)
         val prefix = "${widthDp}dp-font100"
-        compose.onNodeWithTag("connection-welcome").assert(hasAnyAncestor(hasTestTag("connection-account-surface")))
+        compose.onNodeWithTag("connection-status").assert(hasAnyAncestor(hasTestTag("connection-hero")))
+        compose.onNodeWithTag("connection-nodes").assert(hasAnyAncestor(hasTestTag("connection-hero")))
+        compose.onNodeWithTag("vpn-connect").assert(hasAnyAncestor(hasTestTag("connection-hero")))
         compose.onNodeWithTag("account-usage-card").assert(hasAnyAncestor(hasTestTag("connection-account-surface")))
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()

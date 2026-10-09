@@ -18,6 +18,7 @@ import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.design.GlassMode
 import com.gccwebos.android.design.SubscriptionUsagePresentation
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +38,9 @@ class ConnectionUsageCardUiTest {
         var refreshEnabled by mutableStateOf(true)
         var authenticated by mutableStateOf(true)
         var subscriptionUsage by mutableStateOf<SubscriptionUsagePresentation?>(null)
+        var planText by mutableStateOf<String?>(null)
+        var renewable by mutableStateOf(false)
+        var renews = 0
         var refreshes = 0
         var primaryActions = 0
     }
@@ -52,7 +56,9 @@ class ConnectionUsageCardUiTest {
                             refreshEnabled = fixture.refreshEnabled, primaryLabel = "一键连接", primaryEnabled = true,
                             primaryHint = null, showPrimary = fixture.showPrimary,
                             onPrimaryAction = { fixture.primaryActions++ },
-                            subscriptionUsage = fixture.subscriptionUsage)
+                            subscriptionUsage = fixture.subscriptionUsage, planText = fixture.planText,
+                            activePlan = fixture.planText != null,
+                            onRenew = if (fixture.renewable) ({ fixture.renews++ }) else null)
                     }
                 }
             }
@@ -63,7 +69,7 @@ class ConnectionUsageCardUiTest {
         val fixture = Fixture()
         show(fixture)
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("47 GB")
-        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 3 GB")
+        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 6%").assertContentDescriptionEquals("已用 3 GB，6%")
         compose.onNodeWithTag("account-usage-total").assertTextEquals("总量 50 GB")
         compose.onNodeWithTag("account-usage-cycle").assertContentDescriptionEquals(
             "统计周期 ${fixture.presentation.cycleText}")
@@ -119,12 +125,12 @@ class ConnectionUsageCardUiTest {
         val fixture = Fixture()
         show(fixture)
         compose.mainClock.autoAdvance = false
-        compose.runOnIdle { fixture.presentation = fixture.presentation.copy(remainingText = "46.5 GB", usedText = "3.5 GB") }
+        compose.runOnIdle { fixture.presentation = fixture.presentation.copy(remainingText = "46.5 GB", usedText = "3.5 GB", progress = .07f) }
         compose.mainClock.advanceTimeBy(100) // mid-roll
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("46.5 GB")
-        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 3.5 GB")
+        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 7%").assertContentDescriptionEquals("已用 3.5 GB，7%")
         compose.onAllNodesWithText("47 GB", substring = true).assertCountEquals(0)
-        compose.onAllNodesWithText("已用 3 GB").assertCountEquals(0)
+        compose.onAllNodesWithText("已用 6%").assertCountEquals(0)
         compose.onNodeWithTag("account-usage-progress").assertExists()
         compose.mainClock.autoAdvance = true
         compose.waitForIdle()
@@ -148,7 +154,7 @@ class ConnectionUsageCardUiTest {
         }
         show(fixture)
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("7 GB")
-        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 3 GB")
+        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 30%")
         compose.onNodeWithTag("account-usage-total").assertTextEquals("总量 10 GB")
         compose.onNodeWithTag("account-usage-progress").assertExists()
         compose.onNodeWithTag("account-usage-expiry").assertContentDescriptionEquals("套餐到期 2026-11-01 00:00:00 +08:00")
@@ -185,5 +191,23 @@ class ConnectionUsageCardUiTest {
         compose.onNodeWithText("知道了").performClick()
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().performClick()
         assertEquals(1, fixture.primaryActions)
+    }
+
+    @Test fun planHeaderPutsBadgeExpiryAndOptionalRenewOnOneRow() {
+        val fixture = Fixture().apply { planText = "365天套餐"; renewable = true; showPrimary = false }
+        show(fixture)
+        val badge = compose.onNodeWithTag("account-usage-plan").assertTextEquals("365天套餐").fetchSemanticsNode().boundsInRoot
+        val expiry = compose.onNodeWithTag("account-usage-expiry", useUnmergedTree = true)
+            .assertContentDescriptionEquals("套餐到期 2027-09-05 00:00:00 +08:00").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithText("2027.09.05 到期", useUnmergedTree = true).assertExists()
+        val renew = compose.onNodeWithTag("connection-renew").assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+        // Same row on a 280 dp column at normal font: vertical ranges overlap.
+        assertTrue(badge.top < expiry.bottom && expiry.top < badge.bottom)
+        assertTrue(renew.top < expiry.bottom && expiry.top < renew.bottom)
+        compose.onNodeWithTag("connection-renew").performClick()
+        assertEquals(1, fixture.renews); assertEquals(0, fixture.primaryActions); assertEquals(0, fixture.refreshes)
+        compose.runOnIdle { fixture.renewable = false }
+        compose.onNodeWithTag("connection-renew").assertDoesNotExist()
+        compose.onNodeWithTag("vpn-connect").assertDoesNotExist()
     }
 }

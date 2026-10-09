@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,7 +40,6 @@ import com.gccwebos.android.R
 import com.gccwebos.android.design.*
 
 private val CardRadius = 22.dp
-private val SelectedChip = Color(0xFF0B5368)
 private val BadgeStart = Color(0xFFFFB347)
 private val BadgeEnd = Color(0xFFFF7A59)
 private val BadgeText = Color(0xFF2A1300)
@@ -201,29 +198,4 @@ private fun CatalogBenefits(offer: Offer?, category: String) {
         }
         if (offer == null) SupportingText("选择商品后显示可用的支付余额")
     }
-}
-
-/** Capsule tab: deep cyan with a faint halo when selected, translucent glass otherwise. */
-@Composable
-internal fun CatalogCategoryChip(selected: Boolean, enabled: Boolean, title: String, tag: String, onClick: () -> Unit) {
-    val halo by animateFloatAsState(if (selected) 1f else 0f, tween(200), label = "chip-halo")
-    FilterChip(selected = selected, onClick = onClick, enabled = enabled,
-        label = { Text(title, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 4.dp)) },
-        modifier = Modifier.heightIn(min = 44.dp).testTag(tag).drawBehind {
-            if (halo > 0f) {
-                val s = 5.dp.toPx()
-                drawRoundRect(Brand.Cyan.copy(alpha = .16f * halo), topLeft = Offset(-s / 2, -s / 2),
-                    size = Size(size.width + s, size.height + s), cornerRadius = CornerRadius(size.height / 2 + s / 2),
-                    style = Stroke(width = s))
-            }
-        },
-        shape = CircleShape,
-        border = BorderStroke(1.dp, if (selected) Brand.Cyan.copy(alpha = .85f) else Brand.GlassBorder.copy(alpha = .30f)),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = Color.White.copy(alpha = .06f), labelColor = Brand.Text,
-            selectedContainerColor = SelectedChip, selectedLabelColor = Brand.Text,
-            disabledContainerColor = Color.White.copy(alpha = .04f), disabledLabelColor = Brand.Muted,
-            disabledSelectedContainerColor = SelectedChip.copy(alpha = .6f),
-        ))
 }

@@ -31,6 +31,9 @@ import androidx.compose.ui.unit.sp
 import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
+import com.gccwebos.android.design.UiHaptic
+import com.gccwebos.android.design.pressFeedback
+import com.gccwebos.android.design.rememberPressFeedback
 
 /**
  * Visual building blocks of the 我的 page. Static gradients and 1px rims only: no blur, no animation,
@@ -77,8 +80,10 @@ internal fun MineGlowIcon(icon: Int, enabled: Boolean, size: Dp = 20.dp) {
 
 @Composable
 internal fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, subtitle: String? = null, onClick: () -> Unit) {
+    val press = rememberPressFeedback(enabled)
     TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag(tag)) {
+        interactionSource = press.interactionSource,
+        modifier = Modifier.pressFeedback(press).fillMaxWidth().heightIn(min = 52.dp).testTag(tag)) {
         val icon = when (tag) {
             "mine-history" -> R.drawable.brand_receipt
             "mine-security" -> R.drawable.brand_lock
@@ -106,10 +111,12 @@ internal fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, su
  */
 @Composable
 internal fun MineInviteBanner(tag: String, enabled: Boolean, onClick: () -> Unit) {
-    GlassSurface(Modifier.fillMaxWidth().testTag("mine-referral-banner"), shape = MineStyle.CardShape,
+    val press = rememberPressFeedback(enabled)
+    GlassSurface(Modifier.pressFeedback(press).fillMaxWidth().testTag("mine-referral-banner"), shape = MineStyle.CardShape,
         edge = MineStyle.Edge, tint = MineStyle.InviteTint) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick).testTag(tag)
+            .clickable(interactionSource = press.interactionSource, indication = androidx.compose.material3.ripple(),
+                enabled = enabled, role = Role.Button, onClick = onClick).testTag(tag)
             .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             GiftIcon(40.dp, enabled)
@@ -207,16 +214,18 @@ internal fun MineBalanceHeading() {
 internal fun MineWalletActions(enabled: Boolean, onRecharge: () -> Unit, onLedger: () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val recharge: @Composable (Modifier) -> Unit = { modifier ->
-            com.gccwebos.android.design.BrandButton("钱包充值", onRecharge, enabled = enabled,
+            com.gccwebos.android.design.BrandButton("钱包充值", onRecharge, enabled = enabled, haptic = UiHaptic.Primary,
                 modifier = modifier.heightIn(min = 48.dp).testTag("mine-recharge"))
         }
         val ledger: @Composable (Modifier) -> Unit = { modifier ->
+            val press = rememberPressFeedback(enabled)
             androidx.compose.material3.OutlinedButton(onClick = onLedger, enabled = enabled, shape = RoundedCornerShape(14.dp),
+                interactionSource = press.interactionSource,
                 border = BorderStroke(1.dp, if (enabled) Brand.GlassBorder.copy(alpha = .45f) else Brand.Border.copy(alpha = .35f)),
                 colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                     containerColor = Color.White.copy(alpha = .05f), contentColor = Brand.Text,
                     disabledContainerColor = Color.White.copy(alpha = .02f), disabledContentColor = Brand.DisabledText),
-                modifier = modifier.heightIn(min = 48.dp).testTag("mine-ledger")) { Text("账单明细", fontWeight = FontWeight.Medium) }
+                modifier = modifier.pressFeedback(press).heightIn(min = 48.dp).testTag("mine-ledger")) { Text("账单明细", fontWeight = FontWeight.Medium) }
         }
         if (maxWidth < 260.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

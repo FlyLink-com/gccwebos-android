@@ -63,7 +63,8 @@ class AppShellTest {
         compose.onNodeWithTag("nav-Orders").assertDoesNotExist()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
         compose.onNodeWithTag("connection-power").assertDoesNotExist()
-        compose.onNodeWithTag("connection-welcome").assertExists()
+        compose.onNodeWithTag("connection-welcome").assertDoesNotExist()
+        compose.onNodeWithTag("connection-hero").assertExists()
         compose.onNodeWithTag("account-usage-card").assertExists()
         compose.onNodeWithTag("subscription-waterdrop").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
@@ -143,7 +144,8 @@ class AppShellTest {
         restoration.emulateSavedInstanceStateRestore()
         compose.onNodeWithTag("page-Connect").assertExists()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
-        compose.onNodeWithTag("connection-welcome").assertExists()
+        compose.onNodeWithTag("connection-welcome").assertDoesNotExist()
+        compose.onNodeWithTag("connection-hero").assertExists()
         compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
     }

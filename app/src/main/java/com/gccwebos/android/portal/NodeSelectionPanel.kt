@@ -194,6 +194,11 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             motionEnabled = motionEnabled,
                         )
                     }
+                    // N9: search sits directly under the toolbar, above everything that scrolls with the rows.
+                    if (searchable) NodeSearchField(query) { query = it }
+                    // N8: with a node chosen it is shown once, as the highlighted row below. This summary is the
+                    // "nothing selected yet" prompt only.
+                    if (selectedChoice == null) {
                     Row(Modifier.fillMaxWidth().testTag("nodes-selection-summary")
                         .background(Brand.Cyan.copy(alpha = .035f)).padding(horizontal = 12.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -214,7 +219,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             measuring = latency?.busy == true && latency.reading(selectedChoice.selection) == null,
                             tunnelActive = tunnelActive)
                     }
-                    if (searchable) NodeSearchField(query) { query = it }
+                    }
                     if (needle != null && shownProxy.isEmpty()) Text("没有匹配的节点", color = Brand.Muted, fontSize = 12.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp)
                             .testTag("nodes-search-empty"))

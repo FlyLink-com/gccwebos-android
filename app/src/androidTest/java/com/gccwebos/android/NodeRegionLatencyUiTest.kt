@@ -136,10 +136,9 @@ class NodeRegionLatencyUiTest {
         badge(0).assertTextEquals("— ms")
         badge(1).assertTextEquals("— ms")
         compose.onNodeWithTag("nodes-selected-region").assertContentDescriptionEquals("地区未标注")
-        compose.onNodeWithTag("nodes-selected-latency").assertTextEquals("— ms")
         compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
-        compose.onNodeWithTag("nodes-selected-region").assertContentDescriptionEquals("节点标注地区：日本")
+        compose.onNodeWithTag("nodes-selected-region").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, measurements.get()); assertEquals(1, reads.get()) }
     }
 
@@ -156,7 +155,7 @@ class NodeRegionLatencyUiTest {
         compose.runOnIdle { assertSame(selected, state.snapshot.selected); gate.complete(Unit) }
         awaitObservation(1)
         badge(1).assertTextEquals("27 ms")
-        compose.onNodeWithTag("nodes-selected-latency").assertTextEquals("27 ms")
+        badge(1).assertTextEquals("27 ms")
         compose.runOnIdle { assertFalse(latency.busy) }
         compose.runOnIdle { showPanel = false }
         compose.runOnIdle { assertFalse(latency.busy); showPanel = true }
@@ -260,13 +259,13 @@ class NodeRegionLatencyUiTest {
             measurements.get() == 4 && compose.onAllNodes(hasTestTag("node-latency-0") and hasText("— ms"), useUnmergedTree = true)
                 .fetchSemanticsNodes().size == 1
         }
-        compose.onNodeWithTag("nodes-selected-latency").assertTextEquals("— ms")
+        badge(1).assertTextEquals("— ms")
         compose.runOnIdle {
             assertSame(selected, state.snapshot.selected)
             assertEquals(4, measurements.get()); assertEquals(1, reads.get()); gate.complete(Unit)
         }
         compose.waitUntil(5000) { latency.reading(selected) == NodeLatencyObservation.Success(19L, 7L) }
-        compose.onNodeWithTag("nodes-selected-latency").assertTextEquals("19 ms")
+        badge(1).assertTextEquals("19 ms")
     }
 
     @Test fun backgroundSuspensionRejectsRecompositionUntilForegroundReturns() {

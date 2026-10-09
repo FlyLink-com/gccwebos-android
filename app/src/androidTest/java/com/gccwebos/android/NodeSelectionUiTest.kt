@@ -223,7 +223,7 @@ class NodeSelectionUiTest {
         compose.onNodeWithTag("nodes-filter-all").assertDoesNotExist()
         compose.onNodeWithTag("nodes-count", useUnmergedTree = true).assertTextEquals("3 条")
         compose.onNodeWithTag("node-choice-2").performScrollTo().performClick().assertIsSelected()
-        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("Fixture Alpha")
+        compose.onNodeWithTag("nodes-selected-name").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.runOnIdle { assertSame(third, state.snapshot.selected); assertEquals(1, reads.get()) }
     }
@@ -242,7 +242,7 @@ class NodeSelectionUiTest {
         }
         compose.onNodeWithTag("nodes-group-toggle").assertContentDescriptionEquals("展开配置节点").performClick()
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
-        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("重复节点")
+        compose.onNodeWithTag("nodes-selected-name").assertDoesNotExist()
         compose.runOnIdle { assertSame(second, state.snapshot.selected); assertEquals(1, reads.get()) }
     }
 

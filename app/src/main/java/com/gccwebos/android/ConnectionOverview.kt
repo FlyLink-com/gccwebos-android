@@ -456,6 +456,10 @@ internal fun ConnectionOverview(
                     stateDescription = local.connectionText
                 })
         }
+        // C10: a local configuration that reports no verified usage (no Subscription-Userinfo) has nothing honest to put
+        // on this card; "暂未获取" next to the node page's info-row text read as a contradiction. Info-row text is
+        // third-party display text and is never promoted to a usage figure here.
+        if (!connectionUsageCardHidden(account.authenticated, manualSource, subscriptionUsage != null, snapshot.status)) {
         HomeCard(Modifier.testTag("connection-account-surface")) {
             ConnectionUsageCard(display, authenticated = account.authenticated,
                 subscriptionUsage = subscriptionUsage,
@@ -474,6 +478,7 @@ internal fun ConnectionOverview(
                 activePlan = verifiedUsage && connectionPlanIsActive(display),
                 onRenew = openPlans.takeIf { subscriptionUsage == null &&
                     connectionRenewVisible(account.authenticated && verifiedUsage, manualSource, display.state) })
+        }
         }
         // Local configuration evidence has no account/resource binding and is never the account usage.
         if (snapshot.status != LocalSubscriptionStatus.MISSING) {
@@ -527,13 +532,14 @@ private fun ConnectedNodeSummary(node: ConnectedNodePresentation, kind: com.gccw
             Text(nodeDisplayName(node.name), color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("connection-node-name"))
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // C9: the latency (with its "ms" unit) must never be the part that gets clipped: the speeds shrink first.
                 Text(if (node.trafficIdle) "等待流量" else "↓ ${node.downText}  ↑ ${node.upText}", color = Brand.Muted,
-                    fontSize = 11.sp, maxLines = 1,
-                    modifier = Modifier.testTag("connection-node-throughput")
+                    fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).testTag("connection-node-throughput")
                         .semantics { contentDescription = node.throughputDescription })
                 Text(" · ", color = Brand.Muted, fontSize = 11.sp)
                 Text(node.latencyText, color = if (node.latencyKnown) Brand.Green else Brand.Muted, fontSize = 11.sp,
-                    maxLines = 1, modifier = Modifier.testTag("connection-node-latency")
+                    maxLines = 1, softWrap = false, modifier = Modifier.testTag("connection-node-latency")
                         .semantics { contentDescription = node.latencyDescription })
             }
         }
@@ -642,3 +648,14 @@ private fun ConnectionNodeRow(
         }
     }
 }
+
+/**
+ * C10: hide the usage card when the page is driven by a local/imported configuration and that configuration reported
+ * no verified usage. A signed-in account source, the empty first-run page and any state with usage keep the card.
+ */
+internal fun connectionUsageCardHidden(
+    authenticated: Boolean,
+    manualSource: Boolean,
+    hasSubscriptionUsage: Boolean,
+    status: LocalSubscriptionStatus,
+): Boolean = (!authenticated || manualSource) && !hasSubscriptionUsage && status != LocalSubscriptionStatus.MISSING

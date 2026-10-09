@@ -258,7 +258,8 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("合成节点 Beta")
         open("Lines")
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
-        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("合成节点 Beta")
+        // N8: the selected node is shown once, as the highlighted row (asserted above).
+        compose.onNodeWithTag("nodes-selected-name").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         assertNoActions()
 

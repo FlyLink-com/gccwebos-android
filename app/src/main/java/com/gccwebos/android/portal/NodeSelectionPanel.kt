@@ -155,7 +155,12 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                         val choice = indexed.value
                         val chosen = value.selected === choice.selection
                         if (visibleIndex > 0) HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
-                        NodeChoiceRow(choice.name, choice.protocol, true, chosen,
+                        // A provider notice (remaining traffic, expiry, website) is shown but never selectable.
+                        if (choice.info) NodeChoiceRow(choice.name, choice.protocol, true, null,
+                            regionTag = "node-region-${indexed.index}",
+                            latencyTag = "node-latency-${indexed.index}",
+                            modifier = Modifier.testTag("node-info-${indexed.index}"), readOnlyLabel = "信息")
+                        else NodeChoiceRow(choice.name, choice.protocol, true, chosen,
                             observation = latency?.reading(choice.selection),
                             regionTag = "node-region-${indexed.index}",
                             latencyTag = "node-latency-${indexed.index}",
@@ -185,7 +190,7 @@ private fun nodeProtocolLabel(protocol: String): String = when (protocol) {
 @Composable
 internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, chosen: Boolean?,
     observation: NodeLatencyObservation? = null, regionTag: String, latencyTag: String,
-    modifier: Modifier = Modifier, inspectionIndex: Int? = null) {
+    modifier: Modifier = Modifier, inspectionIndex: Int? = null, readOnlyLabel: String = "只读") {
     Row(modifier.fillMaxWidth().heightIn(min = 56.dp)
         .then(if (chosen == true) Modifier.background(Brand.Cyan.copy(alpha = .08f)) else Modifier)
         .padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
@@ -200,7 +205,7 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-details-$it") } ?: Modifier)
         }
         NodeLatencyBadge(observation, Modifier.testTag(latencyTag))
-        if (chosen == null) Text("只读", color = Brand.Muted, fontSize = 10.sp)
+        if (chosen == null) Text(readOnlyLabel, color = Brand.Muted, fontSize = 10.sp)
         else Box(Modifier.size(20.dp).border(1.5.dp, if (chosen) Brand.Cyan else Brand.Border, CircleShape)
             .then(if (chosen) Modifier.background(Brand.Cyan, CircleShape) else Modifier), contentAlignment = Alignment.Center) {
             if (chosen) Canvas(Modifier.size(12.dp)) {

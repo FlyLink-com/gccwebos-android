@@ -66,10 +66,15 @@ class OfficialWebsiteCardUiTest {
         val fixture = Fixture()
         show(fixture)
         compose.runOnIdle { assertEquals(emptyList<String>(), fixture.first); fixture.width = 340 }
-        compose.onNodeWithTag("official-website-domain", useUnmergedTree = true).assertTextEquals("gccwebos.com")
         compose.onNodeWithTag("official-website-title", useUnmergedTree = true).assertTextEquals("其他平台如何使用我们的订阅")
-        compose.onNodeWithTag("official-website-action", useUnmergedTree = true).assertTextEquals("点击官网了解更多")
-        compose.onNodeWithTag("official-website-robot", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("official-website-action", useUnmergedTree = true).assertTextEquals("查看多端导入教程")
+        compose.onNodeWithTag("official-website-devices", useUnmergedTree = true).assertExists()
+        // Compact single row: no duplicate mascot and no bare domain line; same fixed target.
+        compose.onNodeWithTag("official-website-robot", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("official-website-domain", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("official-website-open").assertHeightIsAtLeast(48.dp)
+        assertTrue(compose.onNodeWithTag("official-website-card").fetchSemanticsNode().size.height <=
+            with(compose.density) { 80.dp.roundToPx() })
         compose.onNodeWithTag("official-website-globe", useUnmergedTree = true).assertDoesNotExist()
         compose.runOnIdle { assertEquals(emptyList<String>(), fixture.first) }
         compose.onNodeWithTag("official-website-open").performClick()
@@ -110,12 +115,12 @@ class OfficialWebsiteCardUiTest {
         compose.runOnIdle { assertEquals(listOf("https://gccwebos.com", "https://gccwebos.com"), fixture.first) }
     }
 
-    @Test fun narrowLargeTextKeepsTheDomainReadableAndWholeCardReachable() {
+    @Test fun narrowLargeTextKeepsTheActionReadableAndWholeCardReachable() {
         val fixture = Fixture().apply { width = 240 }
         show(fixture, fontScale = 2f)
         val layouts = mutableListOf<TextLayoutResult>()
-        compose.onNodeWithTag("official-website-domain", useUnmergedTree = true)
-            .assertTextEquals("gccwebos.com").assertIsDisplayed()
+        compose.onNodeWithTag("official-website-action", useUnmergedTree = true)
+            .assertTextEquals("查看多端导入教程").assertIsDisplayed()
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
         val metrics = buildString {
@@ -148,9 +153,9 @@ class OfficialWebsiteCardUiTest {
         val fixture = Fixture()
         show(fixture)
         compose.waitForIdle()
-        val before = compose.onNodeWithTag("official-website-robot", useUnmergedTree = true).captureToImage().toPixelMap()
+        val before = compose.onNodeWithTag("official-website-devices", useUnmergedTree = true).captureToImage().toPixelMap()
         compose.mainClock.advanceTimeBy(3_500)
-        val after = compose.onNodeWithTag("official-website-robot", useUnmergedTree = true).captureToImage().toPixelMap()
+        val after = compose.onNodeWithTag("official-website-devices", useUnmergedTree = true).captureToImage().toPixelMap()
         assertEquals(before.width, after.width)
         assertEquals(before.height, after.height)
         for (y in 0 until before.height) for (x in 0 until before.width) assertEquals(before[x, y], after[x, y])

@@ -1,6 +1,5 @@
 package com.gccwebos.android
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -10,10 +9,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -224,7 +222,7 @@ internal class ConnectionSetupUiLease(private val authGeneration: Long) {
     fun isCurrent(generation: Long): Boolean = mounted && authGeneration == generation
 }
 
-/** Welcome and account overview are independent of local configuration and engine admission. */
+/** Home zones (Hero, plan, multi-platform link) are independent of local configuration and engine admission. */
 @Composable
 internal fun ConnectionOverview(
     account: AccountController,
@@ -334,145 +332,123 @@ internal fun ConnectionOverview(
         (local.action != ConnectionPowerAction.Connect || (!account.clearing && !account.manualImport.busy &&
             !account.nodeSelection.busy && (if (manualSource) !account.busy && !account.restoring && !account.foregroundCheckPending
             else !account.authenticated || (operable && verifiedUsage && !usageRecovery))))
-    Column(Modifier.fillMaxWidth().testTag("connection-overview"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        BrandCard(Modifier.testTag("connection-account-surface"), contentPadding = PaddingValues(18.dp, 16.dp, 18.dp, 16.dp)) {
-            // Each section already owns its spacing; avoid stacking the generic card's row gaps.
-            Column(Modifier.fillMaxWidth()) {
-                ConnectionWelcome()
-                ConnectionStatusRow(local, display.planText.takeIf { account.authenticated },
-                    activePlan = verifiedUsage && connectionPlanIsActive(display), modifier = Modifier.padding(top = 2.dp))
-                ConnectionUsageCard(display, authenticated = account.authenticated,
-                    modifier = Modifier.padding(top = 5.dp), subscriptionUsage = subscriptionUsage,
-                    // Display-only motion inputs: tunnel phase for the glow, the same clocks the card text uses.
-                    connected = control.phase == ConnectionPhase.Connected,
-                    now = if (subscriptionUsage != null) now else usageNow,
-                    onRefresh = account::refreshAccountUsage,
-                    loading = account.busy || account.nodeSelection.busy || usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
-                    error = usage.error, refreshEnabled = verifiedUsage && operable,
-                    primaryLabel = setup.label,
-                    primaryEnabled = setup.enabled || (localReadRecovery && operable),
-                    primaryHint = setup.hint ?: if (control.phase != ConnectionPhase.Unavailable && account.authenticated &&
-                        display.state == AccountUsageState.Available) local.title.ifBlank { local.powerLabel } else null,
-                    onPrimaryAction = primary@{
-                        val currentUsage = account.accountUsage.state.value
-                        val currentVerified = account.authenticated && currentUsage.authenticated && !currentUsage.verifying
-                        val currentOperable = !account.busy && !account.nodeSelection.busy && !account.restoring && !account.foregroundCheckPending &&
-                            !account.clearing && !currentUsage.busy
-                        val currentTime = clock()
-                        val currentLocal = connectionOverviewPresentation(account.localSubscription, currentTime, latestControl)
-                        if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl) &&
-                            currentVerified && currentOperable && account.localSubscription.hasCapability &&
-                            currentLocal.status in setOf(LocalSubscriptionStatus.RETRY_REQUIRED,
-                                LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)) {
-                            account.refreshSubscription()
-                            return@primary // Read-only recovery never completes with an automatic power action.
+    val loading = account.busy || account.nodeSelection.busy || usage.busy || usage.verifying || account.restoring ||
+        account.foregroundCheckPending
+    val onSetupAction: () -> Unit = primary@{
+        val currentUsage = account.accountUsage.state.value
+        val currentVerified = account.authenticated && currentUsage.authenticated && !currentUsage.verifying
+        val currentOperable = !account.busy && !account.nodeSelection.busy && !account.restoring && !account.foregroundCheckPending &&
+            !account.clearing && !currentUsage.busy
+        val currentTime = clock()
+        val currentLocal = connectionOverviewPresentation(account.localSubscription, currentTime, latestControl)
+        if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl) &&
+            currentVerified && currentOperable && account.localSubscription.hasCapability &&
+            currentLocal.status in setOf(LocalSubscriptionStatus.RETRY_REQUIRED,
+                LocalSubscriptionStatus.UNSUPPORTED, LocalSubscriptionStatus.STORAGE_ERROR)) {
+            account.refreshSubscription()
+            return@primary // Read-only recovery never completes with an automatic power action.
+        }
+        if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl))
+            dispatchConnectionSetup(connectionSetupGuidance(account.authenticated, currentVerified,
+                currentUsage.resource, account.localSubscription, currentTime, currentOperable, account.busy,
+                refreshFailed = currentUsage.error != null),
+                { showGuestChoice = true }, openPlans, {
+                    preparationHint = null
+                    preparationRequest = account.prepareForConnection {
+                        preparationRequest = null
+                        // This is the same explicit request's completion; account.busy is still owned by it.
+                        if (preparationLease.isCurrent(account.authSessionGeneration) && !account.restoring &&
+                            !account.foregroundCheckPending && !account.clearing && !acceptedCommand) {
+                            val completedUsage = account.accountUsage.state.value
+                            val completedResource = completedUsage.resource as? Resource.Available
+                            val completedTime = clock()
+                            val entitlementCurrent = account.authenticated && completedUsage.authenticated &&
+                                !completedUsage.verifying && completedUsage.error == null && completedResource != null &&
+                                completedResource.validUntil > completedTime &&
+                                !(completedResource.usage.status in setOf("measured", "measured_zero") &&
+                                    completedResource.usage.remainingBytes == 0L)
+                            val completedLocal = connectionOverviewPresentation(account.localSubscription, completedTime, latestControl)
+                            if (entitlementCurrent && completedLocal.action == ConnectionPowerAction.Connect &&
+                                latestPowerAction != null) {
+                                account.nodeSelection.sync()
+                                val choices = account.nodeSelection.snapshot
+                                when {
+                                    account.nodeSelection.busy || choices.status != LocalSubscriptionStatus.READY ||
+                                        choices.choices.isEmpty() -> preparationHint = "请重试读取配置"
+                                    // The owner/gateway chooses only from fresh legal nodes and preserves manual selection.
+                                    else -> { acceptedCommand = true; latestPowerAction?.invoke(ConnectionPowerAction.Connect) }
+                                }
+                            } else preparationHint = completedLocal.title.ifBlank { "连接暂不可用" }
                         }
-                        if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl))
-                            dispatchConnectionSetup(connectionSetupGuidance(account.authenticated, currentVerified,
-                                currentUsage.resource, account.localSubscription, currentTime, currentOperable, account.busy,
-                                refreshFailed = currentUsage.error != null),
-                                { showGuestChoice = true }, openPlans, {
-                                    preparationHint = null
-                                    preparationRequest = account.prepareForConnection {
-                                        preparationRequest = null
-                                        // This is the same explicit request's completion; account.busy is still owned by it.
-                                        if (preparationLease.isCurrent(account.authSessionGeneration) && !account.restoring &&
-                                            !account.foregroundCheckPending && !account.clearing && !acceptedCommand) {
-                                            val completedUsage = account.accountUsage.state.value
-                                            val completedResource = completedUsage.resource as? Resource.Available
-                                            val completedTime = clock()
-                                            val entitlementCurrent = account.authenticated && completedUsage.authenticated &&
-                                                !completedUsage.verifying && completedUsage.error == null && completedResource != null &&
-                                                completedResource.validUntil > completedTime &&
-                                                !(completedResource.usage.status in setOf("measured", "measured_zero") &&
-                                                    completedResource.usage.remainingBytes == 0L)
-                                            val completedLocal = connectionOverviewPresentation(account.localSubscription, completedTime, latestControl)
-                                            if (entitlementCurrent && completedLocal.action == ConnectionPowerAction.Connect &&
-                                                latestPowerAction != null) {
-                                                account.nodeSelection.sync()
-                                                val choices = account.nodeSelection.snapshot
-                                                when {
-                                                    account.nodeSelection.busy || choices.status != LocalSubscriptionStatus.READY ||
-                                                        choices.choices.isEmpty() -> preparationHint = "请重试读取配置"
-                                                    // The owner/gateway chooses only from fresh legal nodes and preserves manual selection.
-                                                    else -> { acceptedCommand = true; latestPowerAction?.invoke(ConnectionPowerAction.Connect) }
-                                                }
-                                            } else preparationHint = completedLocal.title.ifBlank { "连接暂不可用" }
-                                        }
-                                    }
-                                })
-                    },
-                    showPrimary = !controlMode || recoverBeforeConnect)
-                val setupMessage = if (account.authenticated && verifiedUsage && snapshot.status == LocalSubscriptionStatus.MISSING &&
-                    !account.busy) connectionSetupMessage(account.importStatus, account.error, false) else null
-                val notice = when {
-                    account.busy || account.nodeSelection.busy || usage.busy -> null
-                    preparationHint != null -> preparationHint!! to "connection-preparation-next"
-                    control.phase == ConnectionPhase.Failed -> local.title to "connection-failure"
-                    setupMessage != null -> setupMessage to "connection-setup-status"
-                    localReadRecovery -> local.title to "connection-read-error"
-                    usage.error != null -> "账户信息暂未更新" to "connection-read-error"
-                    else -> null
-                }
-                ConnectionNotice(account, account.authSessionGeneration, notice)
-                if (preparationRequest?.let(account::isConnectionPreparationPending) == true) TextButton({
-                    preparationRequest?.let(account::cancelConnectionPreparation)
-                    preparationRequest = null
-                }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("connection-prepare-cancel")) { Text("取消准备") }
-                if (controlMode && !recoverBeforeConnect) ConnectionActionButton(
-                    when (local.action) {
+                    }
+                })
+    }
+    val connected = control.phase == ConnectionPhase.Connected
+    // Zones: (1) the page's light brand header, (2) Hero: state + node + power, (3) plan/usage, (4) multi-platform link.
+    Column(Modifier.fillMaxWidth().padding(bottom = homeBottomSpacer()).testTag("connection-overview"),
+        verticalArrangement = Arrangement.spacedBy(HomeSpacing.CardGap)) {
+        HomeCard(Modifier.testTag("connection-hero"),
+            // Static rim tint while connected; the only breathing glow stays on the usage bar (#36 rules).
+            edge = if (connected) Brand.Green.copy(alpha = .38f) else HomeCardEdge) {
+            ConnectionStatusRow(local)
+            ConnectionNodeRow(account, connectedNode, displayedNode, selectedNode, snapshot.sourceKind,
+                connectionNodeEmphasized(control.phase), openNodes)
+            if (!controlMode || recoverBeforeConnect) ConnectionSetupButton(display, account.authenticated,
+                account::refreshAccountUsage, loading, usage.error, verifiedUsage && operable, setup.label,
+                setup.enabled || (localReadRecovery && operable), onSetupAction)
+            val setupMessage = if (account.authenticated && verifiedUsage && snapshot.status == LocalSubscriptionStatus.MISSING &&
+                !account.busy) connectionSetupMessage(account.importStatus, account.error, false) else null
+            val notice = when {
+                account.busy || account.nodeSelection.busy || usage.busy -> null
+                preparationHint != null -> preparationHint!! to "connection-preparation-next"
+                control.phase == ConnectionPhase.Failed -> local.title to "connection-failure"
+                setupMessage != null -> setupMessage to "connection-setup-status"
+                localReadRecovery -> local.title to "connection-read-error"
+                usage.error != null -> "账户信息暂未更新" to "connection-read-error"
+                else -> null
+            }
+            ConnectionNotice(account, account.authSessionGeneration, notice)
+            if (preparationRequest?.let(account::isConnectionPreparationPending) == true) TextButton({
+                preparationRequest?.let(account::cancelConnectionPreparation)
+                preparationRequest = null
+            }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("connection-prepare-cancel")) { Text("取消准备") }
+            if (controlMode && !recoverBeforeConnect) ConnectionActionButton(
+                when (local.action) {
+                    ConnectionPowerAction.Connect -> "一键连接"
+                    ConnectionPowerAction.Cancel -> "取消连接"
+                    ConnectionPowerAction.Disconnect -> "断开"
+                    ConnectionPowerAction.None -> local.powerLabel
+                }, {
+                    if (controlEnabled && !acceptedCommand) { acceptedCommand = true; onPowerAction?.invoke(local.action) }
+                }, enabled = controlEnabled, connected = connectionActionIsConnected(control.phase),
+                modifier = Modifier.testTag("vpn-connect").semantics {
+                    contentDescription = when (local.action) {
                         ConnectionPowerAction.Connect -> "一键连接"
-                        ConnectionPowerAction.Cancel -> "取消连接"
                         ConnectionPowerAction.Disconnect -> "断开"
-                        ConnectionPowerAction.None -> local.powerLabel
-                    }, {
-                        if (controlEnabled && !acceptedCommand) { acceptedCommand = true; onPowerAction?.invoke(local.action) }
-                    }, enabled = controlEnabled, connected = connectionActionIsConnected(control.phase),
-                    modifier = Modifier.padding(top = 5.dp).testTag("vpn-connect").semantics {
-                        contentDescription = when (local.action) {
-                            ConnectionPowerAction.Connect -> "一键连接"
-                            ConnectionPowerAction.Disconnect -> "断开"
-                            else -> local.powerLabel
-                        }
-                        stateDescription = local.connectionText
-                    })
-            }
-        }
-        val nodesPress = rememberPressFeedback()
-        GlassSurface(Modifier.pressFeedback(nodesPress), shape = RoundedCornerShape(23.dp)) {
-            TextButton(onClick = openNodes, shape = RoundedCornerShape(23.dp), interactionSource = nodesPress.interactionSource,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    val summary: @Composable (Modifier) -> Unit = { modifier ->
-                        if (connectedNode != null) ConnectedNodeSummary(connectedNode, snapshot.sourceKind, modifier)
-                        else Row(modifier, verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            NodeRegionIcon(name = displayedNode?.name, size = 39.dp, emphasized = true)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
-                                SourceKindLabel(snapshot.sourceKind)
-                                Text(displayedNode?.name ?: "未选择",
-                                    color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.testTag("connection-node-name"))
-                                displayedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
-                                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("connection-node-protocol")) }
-                                NodeLatencyBadge(account.nodeLatency.reading(selectedNode?.selection),
-                                    Modifier.testTag("connection-node-latency"))
-                            }
-                        }
+                        else -> local.powerLabel
                     }
-                    if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) Column(Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        summary(Modifier.fillMaxWidth()); Text("选择节点 ›", fontSize = 12.sp, modifier = Modifier.align(Alignment.End))
-                    } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        summary(Modifier.weight(1f)); Text("选择节点 ›", fontSize = 12.sp)
-                    }
-                }
-            }
+                    stateDescription = local.connectionText
+                })
         }
-        OfficialWebsiteCard()
+        HomeCard(Modifier.testTag("connection-account-surface")) {
+            ConnectionUsageCard(display, authenticated = account.authenticated,
+                subscriptionUsage = subscriptionUsage,
+                // Display-only motion inputs: tunnel phase for the glow, the same clocks the card text uses.
+                connected = connected,
+                now = if (subscriptionUsage != null) now else usageNow,
+                onRefresh = account::refreshAccountUsage,
+                loading = loading,
+                error = usage.error, refreshEnabled = verifiedUsage && operable,
+                primaryLabel = setup.label,
+                primaryEnabled = setup.enabled || (localReadRecovery && operable),
+                primaryHint = null,
+                // The setup action lives in the Hero card now.
+                onPrimaryAction = onSetupAction, showPrimary = false,
+                planText = display.planText.takeIf { account.authenticated },
+                activePlan = verifiedUsage && connectionPlanIsActive(display),
+                onRenew = openPlans.takeIf { subscriptionUsage == null &&
+                    connectionRenewVisible(account.authenticated && verifiedUsage, manualSource, display.state) })
+        }
         // Local configuration evidence has no account/resource binding and is never the account usage.
         if (snapshot.status != LocalSubscriptionStatus.MISSING) {
             val action = when {
@@ -483,17 +459,17 @@ internal fun ConnectionOverview(
             action?.let { TextButton(it.third, enabled = operable,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(it.second)) { Text(it.first) } }
         }
+        OfficialWebsiteCard()
     }
-    // A light navigation-only choice: bottom sheet (swipe/scrim/back dismiss). Same tags, texts and actions.
-    if (showGuestChoice && !account.authenticated) GccBottomSheet(onDismissRequest = { showGuestChoice = false },
-        modifier = Modifier.testTag("usage-guest-guidance"), title = "开通飞连vpn") { close ->
-        Text("登录或注册后查看套餐", color = Brand.Muted)
-        BrandButton("登录", { showGuestChoice = false; openAccount() }, haptic = UiHaptic.Primary,
-            modifier = Modifier.testTag("usage-guest-login"))
-        TextButton({ showGuestChoice = false; openRegistration() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-            .testTag("usage-guest-register")) { Text("注册") }
-        TextButton(close, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("取消") }
-    }
+    if (showGuestChoice && !account.authenticated) AlertDialog(
+        modifier = Modifier.testTag("usage-guest-guidance"), onDismissRequest = { showGuestChoice = false },
+        title = { Text("开通飞连vpn") }, text = { Text("登录或注册后查看套餐") },
+        confirmButton = { Column {
+            TextButton({ showGuestChoice = false; openAccount() }, modifier = Modifier.heightIn(min = 48.dp)
+                .testTag("usage-guest-login")) { Text("登录") }
+            TextButton({ showGuestChoice = false; openRegistration() }, modifier = Modifier.heightIn(min = 48.dp)
+                .testTag("usage-guest-register")) { Text("注册") }
+        } }, dismissButton = { TextButton({ showGuestChoice = false }) { Text("取消") } })
 }
 
 @Composable
@@ -515,9 +491,6 @@ private fun ConnectedNodeSummary(node: ConnectedNodePresentation, kind: com.gccw
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
                 SourceKindLabel(kind)
-                Box(Modifier.size(5.dp).background(Brand.Green, CircleShape))
-                Text(node.stateText, color = Brand.Green, fontSize = 10.sp,
-                    modifier = Modifier.testTag("connection-node-state"))
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(node.name, color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
@@ -566,62 +539,76 @@ private fun ConnectionNotice(account: AccountController, generation: Long, notic
     }
 }
 
+/** Hero header: the tunnel state, once. The plan badge moved to the plan card's header row. */
 @Composable
-private fun ConnectionStatusRow(local: ConnectionOverviewPresentation, plan: String?, activePlan: Boolean,
-    modifier: Modifier = Modifier) {
+private fun ConnectionStatusRow(local: ConnectionOverviewPresentation, modifier: Modifier = Modifier) {
     val tone = when (local.tone) {
         ConnectionVisualTone.Connected -> Brand.Green
         ConnectionVisualTone.Connecting -> Brand.Cyan
         ConnectionVisualTone.Error -> MaterialTheme.colorScheme.error
         ConnectionVisualTone.Neutral -> Brand.Muted
     }
-    val status: @Composable () -> Unit = {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Box(Modifier.size(6.dp).background(tone, CircleShape))
-            Text(local.connectionText, color = tone, fontSize = 12.sp, lineHeight = 18.sp,
-                modifier = Modifier.testTag("connection-status"))
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Static halo while connected; no extra looping animation here.
+        Box(Modifier.size(14.dp).background(tone.copy(alpha = if (local.tone == ConnectionVisualTone.Connected) .22f else 0f),
+            CircleShape), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(7.dp).background(tone, CircleShape))
         }
-    }
-    val badge: @Composable () -> Unit = {
-        plan?.let {
-            Text(it, color = if (activePlan) Brand.Green else Brand.Muted, fontSize = 10.sp, lineHeight = 14.sp,
-                letterSpacing = .4.sp,
-                modifier = Modifier.background(if (activePlan) Brand.Green.copy(alpha = .17f)
-                    else Brand.SurfaceRaised.copy(alpha = .45f), RoundedCornerShape(8.dp))
-                    .border(1.dp, if (activePlan) Brand.Green.copy(alpha = .45f) else Brand.RowDivider, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                    .testTag("account-usage-plan"))
-        }
-    }
-    BoxWithConstraints(modifier.fillMaxWidth()) {
-        if (maxWidth < 260.dp || LocalDensity.current.fontScale >= 1.5f) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { status(); badge() }
-        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween) { status(); badge() }
+        Text(local.connectionText, color = tone, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.testTag("connection-status"))
     }
 }
 
-/** Exact V2 welcome asset; it already carries the current mobile brand. */
+/** Hero node row: the whole row opens node selection (64 dp min). Idle node info is muted; connected shows live data. */
 @Composable
-private fun ConnectionWelcome() {
-    BoxWithConstraints(Modifier.fillMaxWidth().testTag("connection-welcome")) {
-        val compact = maxWidth < 300.dp
-        val greeting: @Composable (Modifier) -> Unit = { modifier ->
-            Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("欢迎回来", fontSize = if (compact) 24.sp else 28.sp, lineHeight = if (compact) 32.sp else 37.sp,
-                    letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
-                Text("飞连vpn · 与你同行", color = Brand.Muted, fontSize = if (compact) 11.sp else 12.sp,
-                    letterSpacing = .45.sp)
+private fun ConnectionNodeRow(
+    account: AccountController,
+    connectedNode: ConnectedNodePresentation?,
+    displayedNode: com.gccwebos.android.core.ConnectionChoice?,
+    selectedNode: com.gccwebos.android.core.ConnectionChoice?,
+    sourceKind: com.gccwebos.android.portal.ManualSourceKind,
+    emphasized: Boolean,
+    openNodes: () -> Unit,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    TextButton(onClick = openNodes, shape = shape,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)
+            .background(Color.White.copy(alpha = if (emphasized) .05f else .03f), shape)
+            .testTag("connection-nodes")) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val summary: @Composable (Modifier) -> Unit = { modifier ->
+                if (connectedNode != null) ConnectedNodeSummary(connectedNode, sourceKind, modifier)
+                else Row(modifier, verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    NodeRegionIcon(name = displayedNode?.name, size = 36.dp, emphasized = emphasized)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
+                            SourceKindLabel(sourceKind)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(displayedNode?.name ?: "未选择",
+                                color = if (emphasized) Brand.Text else Brand.Muted, fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false).testTag("connection-node-name"))
+                            displayedNode?.let { Text(it.protocol.uppercase(), color = Brand.Muted,
+                                style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                                modifier = Modifier.testTag("connection-node-protocol")) }
+                        }
+                        NodeLatencyBadge(account.nodeLatency.reading(selectedNode?.selection),
+                            Modifier.testTag("connection-node-latency"))
+                    }
+                }
+            }
+            if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) Column(Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                summary(Modifier.fillMaxWidth()); Text("选择节点 ›", fontSize = 12.sp, modifier = Modifier.align(Alignment.End))
+            } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                summary(Modifier.weight(1f)); Text("选择节点 ›", fontSize = 12.sp)
             }
         }
-        val image: @Composable (Modifier) -> Unit = { modifier ->
-            Image(painterResource(R.drawable.brand_robot_welcome), contentDescription = null,
-                contentScale = ContentScale.Fit, modifier = modifier.size(if (compact) 76.dp else 84.dp))
-        }
-        if (maxWidth < 230.dp || LocalDensity.current.fontScale >= 1.5f) Column(Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            greeting(Modifier.fillMaxWidth()); image(Modifier.align(Alignment.End))
-        } else Row(Modifier.fillMaxWidth().heightIn(min = 82.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) { greeting(Modifier.weight(1f)); image(Modifier) }
     }
 }

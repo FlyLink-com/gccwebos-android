@@ -25,7 +25,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.withLock
 
 class CachedSubscription(val binding: String, bytes: ByteArray, val validUntil: Instant?, val url: Secret? = null,
-    val observedStatus: LocalSubscriptionStatus? = null) : AutoCloseable {
+    val observedStatus: LocalSubscriptionStatus? = null,
+    /** Display-only usage reported by this capability's own last download; null is unknown. Never account data. */
+    val usage: SubscriptionUsage? = null) : AutoCloseable {
     private var material: ByteArray? = bytes.copyOf()
     fun copyBytes(): ByteArray = requireNotNull(material).copyOf()
     override fun close() { material?.fill(0); material = null }
@@ -38,8 +40,8 @@ interface LocalProfileStore {
 }
 class MemoryLocalProfileStore : LocalProfileStore {
     private var value: CachedSubscription? = null
-    override fun read(): CachedSubscription? = value?.let { old -> val bytes = old.copyBytes(); try { CachedSubscription(old.binding, bytes, old.validUntil, old.url, old.observedStatus) } finally { bytes.fill(0) } }
-    override fun save(value: CachedSubscription) { val bytes = value.copyBytes(); try { this.value?.close(); this.value = CachedSubscription(value.binding, bytes, value.validUntil, value.url, value.observedStatus) } finally { bytes.fill(0) } }
+    override fun read(): CachedSubscription? = value?.let { old -> val bytes = old.copyBytes(); try { CachedSubscription(old.binding, bytes, old.validUntil, old.url, old.observedStatus, old.usage) } finally { bytes.fill(0) } }
+    override fun save(value: CachedSubscription) { val bytes = value.copyBytes(); try { this.value?.close(); this.value = CachedSubscription(value.binding, bytes, value.validUntil, value.url, value.observedStatus, value.usage) } finally { bytes.fill(0) } }
     override fun clear() { value?.close(); value = null }
 }
 enum class LocalSubscriptionStatus { MISSING, READY, EXPIRED, RETRY_REQUIRED, INVALID_LINK, UNSUPPORTED, STORAGE_ERROR }
@@ -912,23 +914,24 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (!same) throw PreparationRejected(PreparationFailure.STALE)
         if (until != null && until <= now()) throw PreparationRejected(PreparationFailure.EXPIRED)
     }
-    private fun describe(raw: ByteArray, until: Instant?): LocalSubscriptionSnapshot {
+    private fun describe(raw: ByteArray, until: Instant?, usage: SubscriptionUsage? = null): LocalSubscriptionSnapshot {
         val nodes = if (allowHostnamePreparation) SafeProxyConfig.validateForPreparation(raw) else {
             val inspected = SafeProxyConfig.inspect(raw)
             SafeProxyConfig.project(raw, 0).fill(0)
             inspected
         }
         return LocalSubscriptionSnapshot(if (until != null && until <= now()) LocalSubscriptionStatus.EXPIRED else LocalSubscriptionStatus.READY,
-            true, true, nodes, until)
+            true, true, nodes, until, usage = usage)
     }
     /** Only called after acknowledged delivery and strict projection; never a connection admission. */
-    fun remember(raw: ByteArray, url: Secret, until: Instant?): LocalSubscriptionSnapshot = synchronized(lock) {
+    fun remember(raw: ByteArray, url: Secret, until: Instant?, usage: SubscriptionUsage? = null): LocalSubscriptionSnapshot = synchronized(lock) {
         requireLegacySource()
         val binding = sessionBinding(url)
         check(sameCapability(binding)) { "Subscription changed" }
-        val next = describe(raw, until)
+        // Usage is only this download's own report (null = unknown); it is never carried from an older profile.
+        val next = describe(raw, until, usage)
         revision++ // A newly observed artifact fences old admission even if durable save fails.
-        val cached = CachedSubscription(binding, raw, until, url)
+        val cached = CachedSubscription(binding, raw, until, url, usage = usage)
         try { profiles.save(cached) } catch (_: Exception) {
             invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR, until)
             state = next.copy(status = LocalSubscriptionStatus.STORAGE_ERROR)
@@ -940,14 +943,14 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** Repository-only legacy transaction; ordinary capability checks are never relaxed. */
     internal fun rememberRecoveredLegacy(raw: ByteArray, journal: LegacyRecoveryJournal, until: Instant?,
-        checkCurrent: () -> Unit): LocalSubscriptionSnapshot = synchronized(lock) {
+        usage: SubscriptionUsage? = null, checkCurrent: () -> Unit): LocalSubscriptionSnapshot = synchronized(lock) {
         requireLegacySource()
         require(journal.phase in setOf(LegacyRecoveryPhase.ACKNOWLEDGED, LegacyRecoveryPhase.PROFILE_COMMITTING))
         val candidate = journal.candidate
         require(!candidate.pendingAck && candidate.url != null && candidate.handoff != null)
         validateCapability(candidate.url)
         val binding = sessionBinding(candidate.url)
-        val next = describe(raw, until)
+        val next = describe(raw, until, usage)
         fun checkJournal(expected: LegacyRecoveryJournal) {
             checkCurrent()
             val actual = delivery.readLegacyRecovery()
@@ -963,7 +966,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         try {
             delivery.saveLegacyRecovery(committing)
             checkJournal(committing)
-            val cached = CachedSubscription(binding, raw, until, candidate.url)
+            val cached = CachedSubscription(binding, raw, until, candidate.url, usage = usage)
             try { profiles.save(cached) } finally { cached.close() }
             // This readback is required even for an injected store; durable production storage
             // also verifies its own atomic write. Keep the journal if either verification fails.
@@ -972,7 +975,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 val bytes = received.copyBytes()
                 try {
                     if (received.binding != binding || received.url?.value != candidate.url.value ||
-                        received.validUntil != until || received.observedStatus != null || !bytes.contentEquals(raw))
+                        received.validUntil != until || received.observedStatus != null || received.usage != usage ||
+                        !bytes.contentEquals(raw))
                         throw PortalFailure(PortalFailure.Reason.STORAGE)
                 } finally { bytes.fill(0) }
             } finally { received.close() }
@@ -1091,7 +1095,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         val old = profiles.read() ?: return
         try {
             val raw = old.copyBytes()
-            val updated = try { CachedSubscription(old.binding, raw, old.validUntil, old.url, kind) } finally { raw.fill(0) }
+            val updated = try { CachedSubscription(old.binding, raw, old.validUntil, old.url, kind, old.usage) } finally { raw.fill(0) }
             try { profiles.save(updated) } finally { updated.close() }
         } finally { old.close() }
     }
@@ -1125,11 +1129,12 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                             val blocked = authority.selectionStatus?.takeIf { it != LocalSubscriptionStatus.READY }
                             // A readable cached artifact can still be incompatible with this build.
                             // Keep its durable capability/profile; parsing rejection is not a store failure.
-                            val parsed = try { describe(raw, cached.validUntil) }
+                            val parsed = try { describe(raw, cached.validUntil, cached.usage) }
                                 catch (_: UnsafeProxyConfiguration) {
                                     val nodes = try { SafeProxyConfig.inspect(raw) } catch (_: Exception) { emptyList() }
                                     LocalSubscriptionSnapshot(LocalSubscriptionStatus.UNSUPPORTED,
-                                        hasProfile = true, hasCapability = true, nodes = nodes, validUntil = cached.validUntil)
+                                        hasProfile = true, hasCapability = true, nodes = nodes, validUntil = cached.validUntil,
+                                        usage = cached.usage)
                                 }
                             state = parsed.let { parsed ->
                                 (blocked ?: cached.observedStatus)?.let { parsed.copy(status = it) } ?: parsed
@@ -1366,13 +1371,16 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 synchronized(lock) {
                     check(revision == epoch && sameCapability(binding)) { "Subscription changed" }
                     val until = result.validUntil ?: knownUntil
-                    val next = try { describe(result.bytes, until) } catch (_: UnsafeProxyConfiguration) {
+                    // Only this download's own report; a download without usage is unknown, never the old value.
+                    val usage = result.usage?.let { SubscriptionUsage.observed(it, now()) }
+                    val next = try { describe(result.bytes, until, usage) } catch (_: UnsafeProxyConfiguration) {
                         invalidateSelections(LocalSubscriptionStatus.UNSUPPORTED, until)
                         val nodes = try { SafeProxyConfig.inspect(result.bytes) } catch (_: Exception) { emptyList() }
-                        state = state.copy(status = LocalSubscriptionStatus.UNSUPPORTED, hasCapability = true, nodes = nodes)
+                        state = state.copy(status = LocalSubscriptionStatus.UNSUPPORTED, hasCapability = true, nodes = nodes,
+                            usage = usage)
                         return state
                     }
-                    val cached = CachedSubscription(binding, result.bytes, until, url)
+                    val cached = CachedSubscription(binding, result.bytes, until, url, usage = usage)
                     try { profiles.save(cached) } finally { cached.close() }
                     if (next.status == LocalSubscriptionStatus.READY) observeContent(result.bytes, binding, next.nodes, until)
                     else invalidateSelections(next.status, until)

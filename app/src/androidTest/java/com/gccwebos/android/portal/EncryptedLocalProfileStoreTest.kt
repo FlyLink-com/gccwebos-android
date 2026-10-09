@@ -26,6 +26,20 @@ class EncryptedLocalProfileStoreTest {
             store.clear(); assertNull(store.read())
         } finally { saved.close(); raw.fill(0); store.clear() }
     }
+    @Test fun reportedUsageRoundTripsEncryptedAndClearsBackToUnknown() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val store = EncryptedLocalProfileStore(context)
+        val url = Secret("https://sub.invalid/sub/a/synthetic-private")
+        val usage = SubscriptionUsage(1L shl 30, 2L shl 30, 10L shl 30, Instant.parse("2026-10-09T00:00:00Z"))
+        val withUsage = CachedSubscription(sessionBinding(url), "synthetic-configuration-material".toByteArray(), null, url, usage = usage)
+        val without = CachedSubscription(sessionBinding(url), "synthetic-configuration-material".toByteArray(), null, url)
+        try {
+            store.clear(); store.save(withUsage)
+            EncryptedLocalProfileStore(context).read()!!.use { assertEquals(usage, it.usage) }
+            store.save(without)
+            EncryptedLocalProfileStore(context).read()!!.use { assertNull(it.usage) }
+        } finally { withUsage.close(); without.close(); store.clear() }
+    }
     @Test fun tamperedProfileFailsWithoutLeakingUrlOrRawConfiguration() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val store = EncryptedLocalProfileStore(context)

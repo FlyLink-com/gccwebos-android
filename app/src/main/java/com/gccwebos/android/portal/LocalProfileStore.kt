@@ -46,30 +46,10 @@ class EncryptedLocalProfileStore(context: Context) : LocalProfileStore {
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         cipher.updateAAD("gccwebos.profile.v1".toByteArray(Charsets.UTF_8))
         val plain = cipher.doFinal(bytes.copyOfRange(12, bytes.size))
-        try {
-            val value = JSONObject(plain.toString(Charsets.UTF_8))
-            require(value.keys().asSequence().toSet() == setOf("version", "binding", "body", "validUntil", "url", "observedStatus"))
-            require(value.get("version") == 1)
-            val binding = value.get("binding") as String; require(binding.matches(Regex("[a-f0-9]{64}")))
-            val bytes = java.util.Base64.getDecoder().decode(value.get("body") as String)
-            try {
-                require(bytes.size in 1..com.gccwebos.android.vpn.SafeProxyConfig.MAX_BYTES)
-                val observed = if (value.isNull("observedStatus")) null else LocalSubscriptionStatus.valueOf(value.get("observedStatus") as String)
-                require(observed == null || observed in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.INVALID_LINK))
-                CachedSubscription(binding, bytes, if (value.isNull("validUntil")) null else java.time.Instant.parse(value.get("validUntil") as String),
-                    if (value.isNull("url")) null else Secret(value.get("url") as String), observed)
-            } finally { bytes.fill(0) }
-        } finally { plain.fill(0) }
+        try { LocalProfileCodec.decode(plain) } finally { plain.fill(0) }
     }
     override fun save(record: CachedSubscription) = storage(StoreTarget.Profile, StoreOperation.Save) {
-        val raw = record.copyBytes()
-        val plain = try {
-            require(raw.size in 1..com.gccwebos.android.vpn.SafeProxyConfig.MAX_BYTES)
-            JSONObject().put("version", 1).put("binding", record.binding)
-                .put("body", java.util.Base64.getEncoder().encodeToString(raw))
-                .put("validUntil", record.validUntil?.toString() ?: JSONObject.NULL)
-                .put("url", record.url?.value ?: JSONObject.NULL).put("observedStatus", record.observedStatus?.name ?: JSONObject.NULL).toString().toByteArray(Charsets.UTF_8)
-        } finally { raw.fill(0) }
+        val plain = LocalProfileCodec.encode(record)
         try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key())
             cipher.updateAAD("gccwebos.profile.v1".toByteArray(Charsets.UTF_8))
@@ -85,7 +65,7 @@ class EncryptedLocalProfileStore(context: Context) : LocalProfileStore {
             val received = read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
             try {
                 val expected = record.copyBytes(); val actual = received.copyBytes()
-                try { require(received.binding == record.binding && received.validUntil == record.validUntil && received.url?.value == record.url?.value && received.observedStatus == record.observedStatus && expected.contentEquals(actual)) }
+                try { require(received.binding == record.binding && received.validUntil == record.validUntil && received.url?.value == record.url?.value && received.observedStatus == record.observedStatus && received.usage == record.usage && expected.contentEquals(actual)) }
                 finally { expected.fill(0); actual.fill(0) }
             } finally { received.close() }
         } finally { plain.fill(0) }
@@ -109,4 +89,60 @@ class EncryptedLocalProfileStore(context: Context) : LocalProfileStore {
             AndroidStorageDiagnostics.report(target, operation, failure)
             throw PortalFailure(PortalFailure.Reason.STORAGE)
         }
+}
+
+/**
+ * Plaintext profile format inside the encrypted envelope. v1 is the 0.4.1 format and is still written,
+ * byte-for-byte, whenever usage is unknown. v2 adds one strict `usage` object only when the last download
+ * reported usage. Builds before v2 cannot read a v2 record (they treat it as a storage failure), so a
+ * downgrade after usage was stored needs the account subscription to be fetched again.
+ */
+internal object LocalProfileCodec {
+    private const val USAGE_VERSION = 2
+    private val v1Keys = setOf("version", "binding", "body", "validUntil", "url", "observedStatus")
+    private val usageKeys = setOf("upload", "download", "total", "observedAt")
+    private val counter = Regex("0|[1-9][0-9]{0,18}")
+
+    fun encode(record: CachedSubscription): ByteArray {
+        val raw = record.copyBytes()
+        try {
+            require(raw.size in 1..com.gccwebos.android.vpn.SafeProxyConfig.MAX_BYTES)
+            val value = JSONObject().put("version", if (record.usage == null) 1 else USAGE_VERSION).put("binding", record.binding)
+                .put("body", java.util.Base64.getEncoder().encodeToString(raw))
+                .put("validUntil", record.validUntil?.toString() ?: JSONObject.NULL)
+                .put("url", record.url?.value ?: JSONObject.NULL).put("observedStatus", record.observedStatus?.name ?: JSONObject.NULL)
+            record.usage?.let { usage ->
+                value.put("usage", JSONObject().put("upload", usage.uploadBytes.toString())
+                    .put("download", usage.downloadBytes.toString()).put("total", usage.totalBytes.toString())
+                    .put("observedAt", usage.observedAt.toString()))
+            }
+            return value.toString().toByteArray(Charsets.UTF_8)
+        } finally { raw.fill(0) }
+    }
+
+    /** Strict: unknown keys, version/key mismatches and invalid usage reject the whole record. */
+    fun decode(plain: ByteArray): CachedSubscription {
+        val value = JSONObject(plain.toString(Charsets.UTF_8))
+        val version = value.get("version")
+        val keys = value.keys().asSequence().toSet()
+        require((version == 1 && keys == v1Keys) || (version == USAGE_VERSION && keys == v1Keys + "usage"))
+        val binding = value.get("binding") as String; require(binding.matches(Regex("[a-f0-9]{64}")))
+        val usage = if (version == USAGE_VERSION) usage(value.get("usage") as JSONObject) else null
+        val bytes = java.util.Base64.getDecoder().decode(value.get("body") as String)
+        try {
+            require(bytes.size in 1..com.gccwebos.android.vpn.SafeProxyConfig.MAX_BYTES)
+            val observed = if (value.isNull("observedStatus")) null else LocalSubscriptionStatus.valueOf(value.get("observedStatus") as String)
+            require(observed == null || observed in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.INVALID_LINK))
+            return CachedSubscription(binding, bytes, if (value.isNull("validUntil")) null else java.time.Instant.parse(value.get("validUntil") as String),
+                if (value.isNull("url")) null else Secret(value.get("url") as String), observed, usage)
+        } finally { bytes.fill(0) }
+    }
+
+    private fun usage(value: JSONObject): SubscriptionUsage {
+        require(value.keys().asSequence().toSet() == usageKeys)
+        fun number(key: String): Long = (value.get(key) as String).also { require(counter.matches(it)) }.toLong()
+        val observedAt = (value.get("observedAt") as String).also { require(it.length <= 64) }
+        // SubscriptionUsage itself rejects negative counters and a zero total: zero is never stored as usage.
+        return SubscriptionUsage(number("upload"), number("download"), number("total"), java.time.Instant.parse(observedAt))
+    }
 }

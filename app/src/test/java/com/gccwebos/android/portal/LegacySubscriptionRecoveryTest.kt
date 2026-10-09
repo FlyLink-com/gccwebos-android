@@ -149,7 +149,11 @@ class LegacySubscriptionRecoveryTest {
         var downloadHook: suspend () -> Unit = {}
         var content = yaml
         var lastBytes: ByteArray? = null
-        val repo = PortalRepository(wire, store, policy, { 0L }, { start }, SubscriptionSource { requested ->
+        var usage: SubscriptionUsageReport? = null
+        val repo = PortalRepository(wire, store, policy, { 0L }, { start }, object : SubscriptionSource {
+          override suspend fun read(url: Secret) = SubscriptionRead(download(url), null, usage)
+          override suspend fun download(url: Secret): ByteArray {
+            val requested = url
             events += "download"; downloads++
             if (checkLegacyOrdering) {
                 assertSame(expectedOriginal, store.value)
@@ -159,7 +163,8 @@ class LegacySubscriptionRecoveryTest {
             assertTrue("Synthetic download capability changed", expectedUrl == requested.value)
             downloadHook()
             downloadFailure?.let { throw PortalFailure(it) }
-            content.toByteArray().also { lastBytes = it }
+            return content.toByteArray().also { lastBytes = it }
+          }
         }, profiles = profiles, allowHostnamePreparation = allowHostnamePreparation)
         suspend fun login(token: String = "new_fixture_session", owner: String = account) {
             wire.loginReplies += WireResponse(200, """{"session":{"sessionRef":"$token","accountId":"$owner","issuedAt":"2026-09-30T00:00:00.000Z","expiresAt":"2026-09-30T00:30:00.000Z"}}""")
@@ -272,6 +277,18 @@ class LegacySubscriptionRecoveryTest {
         assertEquals(callsBefore, h.wire.calls.size)
         assertEquals(1, h.downloads)
         assertNull(h.store.journal)
+    }
+
+    @Test fun deliveredImportStoresOnlyThatDownloadsReportedUsage() = runTest {
+        val h = Harness(); h.login(); h.usage = SubscriptionUsageReport(1L shl 30, 2L shl 30, 10L shl 30)
+        assertEquals(ImportStatus.IMPORTED, h.repo.refreshAndImport().status); h.assertImported()
+        val expected = SubscriptionUsage(1L shl 30, 2L shl 30, 10L shl 30, start)
+        assertEquals(expected, h.repo.localSubscriptions.snapshot().usage)
+        h.profiles.read()!!.use { assertEquals(expected, it.usage) }
+        // Signed out after restart: the cached account profile still carries the report, without a download.
+        val restored = LocalSubscriptionManager(h.store, h.profiles, SubscriptionSource { error("Cached restore must not download") },
+            policy, { start }, LocalSubscriptionAuthority()).restore()
+        assertEquals(expected, restored.usage)
     }
 
     @Test fun newLegacyImportCommitsOnlyAfterDurableStageCurrentAckAndProfile() = runTest {

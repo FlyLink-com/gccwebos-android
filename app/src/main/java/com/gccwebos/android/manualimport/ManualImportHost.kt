@@ -1,11 +1,25 @@
 package com.gccwebos.android.manualimport
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
 import android.view.WindowManager
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -13,14 +27,18 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
@@ -28,7 +46,6 @@ import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.BrandButton
 import com.gccwebos.android.design.GlassSurface
-import com.gccwebos.android.design.UiHaptic
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -37,6 +54,7 @@ import kotlinx.coroutines.launch
 /** Ticket validation and source commit belong exclusively to the caller's coordinator.
  * onSubmit transfers byte ownership; the caller must consume/copy synchronously and wipe in finally.
  * No input, payload or pending ticket is saveable. A recreated host starts with an empty menu. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun <T : Any> ManualImportHost(
     visible: Boolean,
@@ -128,6 +146,61 @@ internal fun <T : Any> ManualImportHost(
             fail(ticket, ManualImportFailure.InvalidInput)
         }
     }
+    val menuEnabled = !busy && !preparing
+    if (mode == ManualHostMode.Menu) {
+        // Menu is a bottom sheet; link / confirm steps stay in a secure dialog (no auto clipboard read).
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = ::dismiss,
+            sheetState = sheetState,
+            containerColor = Brand.SurfaceRaised,
+            contentColor = Brand.Text,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            modifier = Modifier.testTag("manual-import-host"),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("导入配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                ManualImportMenuRow(
+                    title = "扫描二维码",
+                    subtitle = "使用摄像头扫描订阅二维码",
+                    enabled = menuEnabled,
+                    testTag = "manual-import-scan",
+                    onClick = { begin(ManualImportInputKind.Scan) },
+                    icon = { ManualImportScanIcon() },
+                )
+                ManualImportMenuRow(
+                    title = "导入订阅链接",
+                    subtitle = "粘贴订阅链接导入",
+                    enabled = menuEnabled,
+                    testTag = "manual-import-link",
+                    onClick = { begin(ManualImportInputKind.Link) },
+                    icon = { ManualImportLinkIcon() },
+                )
+                ManualImportMenuRow(
+                    title = "导入配置文件",
+                    subtitle = "从手机存储选择配置文件",
+                    enabled = menuEnabled,
+                    testTag = "manual-import-document",
+                    onClick = { begin(ManualImportInputKind.Document) },
+                    icon = { ManualImportFileIcon() },
+                )
+                if (canUseAccount || canRemove) HorizontalDivider(color = Brand.RowDivider)
+                if (canUseAccount) TextButton({ if (menuEnabled) onUseAccount() }, enabled = menuEnabled,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-use-account")) { Text("使用账户订阅") }
+                if (canRemove) TextButton({ if (menuEnabled) mode = ManualHostMode.Remove }, enabled = menuEnabled,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-remove")) { Text("移除导入配置") }
+                (failure?.caption ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("manual-import-error")) }
+                TextButton(::dismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .testTag("manual-import-cancel")) { Text("取消") }
+            }
+        }
+        return
+    }
     Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(
         securePolicy = SecureFlagPolicy.SecureOn, usePlatformDefaultWidth = false)) {
         // The link field never takes focus by itself: the keyboard appears only when the user taps it.
@@ -164,26 +237,13 @@ internal fun <T : Any> ManualImportHost(
         GlassSurface(Modifier.padding(20.dp).widthIn(max = 420.dp).fillMaxWidth().testTag("manual-import-host")) {
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(when (mode) {
-                    ManualHostMode.Menu -> "导入配置"
                     ManualHostMode.Link -> "订阅链接"
                     ManualHostMode.Remove -> "移除导入配置？"
                     else -> "导入配置"
                 }, style = MaterialTheme.typography.titleMedium)
-                if (mode == ManualHostMode.Menu) {
-                    BrandButton("扫描二维码", { begin(ManualImportInputKind.Scan) }, enabled = !busy && !preparing,
-                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-import-scan"))
-                    BrandButton("导入配置文件", { begin(ManualImportInputKind.Document) }, enabled = !busy && !preparing,
-                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-import-document"))
-                    BrandButton("导入订阅链接", { begin(ManualImportInputKind.Link) }, enabled = !busy && !preparing,
-                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-import-link"))
-                    if (canUseAccount || canRemove) HorizontalDivider(color = Brand.RowDivider)
-                    if (canUseAccount) TextButton({ if (!busy && !preparing) onUseAccount() }, enabled = !busy && !preparing,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-use-account")) { Text("使用账户订阅") }
-                    if (canRemove) TextButton({ if (!busy && !preparing) mode = ManualHostMode.Remove }, enabled = !busy && !preparing,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-remove")) { Text("移除导入配置") }
-                } else if (mode == ManualHostMode.Remove) {
+                if (mode == ManualHostMode.Remove) {
                     BrandButton("确认移除", { if (!busy) onRemove() }, enabled = !busy,
-                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
+                        modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
                 } else {
                     if (mode == ManualHostMode.Link) OutlinedTextField(link, { value ->
                         if (value.length <= ManualInputBytes.Limit) { link = value; failure = null; pasteHint = null }
@@ -204,7 +264,7 @@ internal fun <T : Any> ManualImportHost(
                         modifier = Modifier.testTag("manual-link-paste-hint")) }
                     if (mode != ManualHostMode.External) BrandButton("导入", ::submit,
                         enabled = !busy && !submitted && (staged || (mode == ManualHostMode.Link && link.isNotBlank())),
-                        haptic = UiHaptic.Primary, modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
+                        modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
                 }
                 (failure?.caption ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.testTag("manual-import-error")) }
@@ -212,6 +272,94 @@ internal fun <T : Any> ManualImportHost(
                     .testTag("manual-import-cancel")) { Text("取消") }
             }
         }
+    }
+}
+
+@Composable
+private fun ManualImportMenuRow(
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    testTag: String,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .background(Brand.Cyan.copy(alpha = if (enabled) .08f else .04f), RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { icon() }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold, color = if (enabled) Brand.Text else Brand.DisabledText)
+            Text(subtitle, fontSize = 12.sp, color = Brand.Muted)
+        }
+    }
+}
+
+@Composable
+private fun ManualImportScanIcon() {
+    Canvas(Modifier.size(24.dp)) {
+        val s = 2.2.dp.toPx()
+        val c = Brand.Cyan
+        val inset = size.minDimension * .12f
+        val arm = size.minDimension * .28f
+        // Four corner brackets.
+        drawLine(c, Offset(inset, inset + arm), Offset(inset, inset), s, StrokeCap.Round)
+        drawLine(c, Offset(inset, inset), Offset(inset + arm, inset), s, StrokeCap.Round)
+        drawLine(c, Offset(size.width - inset - arm, inset), Offset(size.width - inset, inset), s, StrokeCap.Round)
+        drawLine(c, Offset(size.width - inset, inset), Offset(size.width - inset, inset + arm), s, StrokeCap.Round)
+        drawLine(c, Offset(inset, size.height - inset - arm), Offset(inset, size.height - inset), s, StrokeCap.Round)
+        drawLine(c, Offset(inset, size.height - inset), Offset(inset + arm, size.height - inset), s, StrokeCap.Round)
+        drawLine(c, Offset(size.width - inset - arm, size.height - inset), Offset(size.width - inset, size.height - inset), s, StrokeCap.Round)
+        drawLine(c, Offset(size.width - inset, size.height - inset - arm), Offset(size.width - inset, size.height - inset), s, StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun ManualImportLinkIcon() {
+    Canvas(Modifier.size(24.dp)) {
+        val s = 2.2.dp.toPx()
+        val c = Brand.Cyan
+        // Two offset chain links (simple rounded rectangles as strokes).
+        drawRoundRect(c, topLeft = Offset(size.width * .12f, size.height * .28f),
+            size = androidx.compose.ui.geometry.Size(size.width * .46f, size.height * .28f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.minDimension * .14f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(s))
+        drawRoundRect(c, topLeft = Offset(size.width * .42f, size.height * .44f),
+            size = androidx.compose.ui.geometry.Size(size.width * .46f, size.height * .28f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.minDimension * .14f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(s))
+    }
+}
+
+@Composable
+private fun ManualImportFileIcon() {
+    Canvas(Modifier.size(24.dp)) {
+        val s = 2.2.dp.toPx()
+        val c = Brand.Cyan
+        val left = size.width * .22f
+        val top = size.height * .12f
+        val right = size.width * .78f
+        val bottom = size.height * .88f
+        val fold = size.width * .55f
+        val foldY = size.height * .32f
+        // Document outline with folded corner.
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(left, top); lineTo(fold, top); lineTo(right, foldY); lineTo(right, bottom)
+            lineTo(left, bottom); close()
+        }
+        drawPath(path, c, style = androidx.compose.ui.graphics.drawscope.Stroke(s))
+        drawLine(c, Offset(fold, top), Offset(fold, foldY), s, StrokeCap.Round)
+        drawLine(c, Offset(fold, foldY), Offset(right, foldY), s, StrokeCap.Round)
+        drawLine(c, Offset(left + size.width * .12f, size.height * .52f),
+            Offset(right - size.width * .12f, size.height * .52f), s, StrokeCap.Round)
+        drawLine(c, Offset(left + size.width * .12f, size.height * .66f),
+            Offset(right - size.width * .18f, size.height * .66f), s, StrokeCap.Round)
     }
 }
 

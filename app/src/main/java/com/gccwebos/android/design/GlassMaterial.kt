@@ -51,8 +51,15 @@ internal object GlassMaterialPolicy {
     const val NavigationStartArgb = 0xFF182A43L
     const val NavigationEndArgb = 0xFF1E223FL
     const val NavigationSolidArgb = 0xFF172B48L
-    const val CardStartAlpha = .72f
-    const val CardEndAlpha = .76f
+    // Raised from .72/.76: the city backdrop's bright windows showed through cards (design review C5).
+    const val CardStartAlpha = .84f
+    const val CardEndAlpha = .88f
+    /** Dark wash over the clear backdrop outside cards; Plans uses the stronger value (review P2). */
+    const val BackdropScrimAlpha = .26f
+    const val BackdropScrimStrongAlpha = .44f
+    const val LoginBackdropScrimAlpha = .18f
+    /** Dim behind modal bottom sheets (review I1); Material's default .32 left the page competing. */
+    const val SheetScrimAlpha = .66f
     const val NavigationStartAlpha = .76f
     const val NavigationEndAlpha = .78f
     const val DisabledArgb = 0xFF263B58L
@@ -213,7 +220,7 @@ private object SoftBackdropCache {
 
 /** Clear original artwork outside surfaces; only GlassSurface uses the softened, aligned copy. */
 @Composable
-internal fun BrandBackdrop(modifier: Modifier = Modifier, loginPage: Boolean = false) {
+internal fun BrandBackdrop(modifier: Modifier = Modifier, loginPage: Boolean = false, strongScrim: Boolean = false) {
     val context = LocalContext.current
     val mode = LocalGlassMode.current
     val state = LocalGlassBackdrop.current
@@ -231,7 +238,8 @@ internal fun BrandBackdrop(modifier: Modifier = Modifier, loginPage: Boolean = f
         if (!solid && original != null) Image(original, contentDescription = null,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            drawRect(Brand.Background.copy(alpha = if (solid) 1f else if (loginPage) .18f else .10f))
+            drawRect(Brand.Background.copy(alpha = if (solid) 1f else if (loginPage) GlassMaterialPolicy.LoginBackdropScrimAlpha
+                else if (strongScrim) GlassMaterialPolicy.BackdropScrimStrongAlpha else GlassMaterialPolicy.BackdropScrimAlpha))
         }
     }
 }

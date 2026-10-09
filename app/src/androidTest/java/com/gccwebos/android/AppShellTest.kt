@@ -190,7 +190,11 @@ class AppShellTest {
         launch()
         compose.onNodeWithTag("nav-Plans").performClick()
         compose.onNodeWithTag("commerce-signed-out").assertExists()
-        compose.onNodeWithText("选择适合你的套餐").assertExists()
+        compose.onNodeWithTag("anonymous-plans-title").assertTextEquals("浏览全部套餐")
+        compose.onNodeWithTag("anonymous-plans-placeholder").assertExists()
+        compose.onNodeWithTag("anonymous-plans-import").assertExists()
+        // No price, tier or coin figure may appear before a verified session reads the catalog.
+        compose.onNodeWithText("¥", substring = true).assertDoesNotExist()
         compose.onNodeWithText("当前套餐尚未加载").assertDoesNotExist()
         compose.onNodeWithTag("anonymous-plans-login").assertIsEnabled()
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()

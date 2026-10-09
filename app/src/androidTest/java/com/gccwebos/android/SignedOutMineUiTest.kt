@@ -3,7 +3,6 @@ package com.gccwebos.android
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.gccwebos.android.portal.*
@@ -44,7 +43,7 @@ class SignedOutMineUiTest {
         compose.onNodeWithTag("nav-Profile").performClick()
     }
 
-    @Test fun signedOutMineUsesTheNormalLayoutWithLoginPromptsAndInertWalletActions() {
+    @Test fun signedOutMineShowsOneLoginActionAndHidesAccountOnlyEntries() {
         launch()
         compose.onNodeWithTag("mine-signed-out").assertExists()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
@@ -52,20 +51,18 @@ class SignedOutMineUiTest {
         compose.onNodeWithTag("mine-account-identity").assertDoesNotExist()
         compose.onNodeWithTag("mine-current-plan").assertDoesNotExist()
         compose.onNodeWithTag("mine-go-login").assertTextEquals("去登录").assertIsEnabled()
-        compose.onNodeWithTag("wallet-balance-signed-out").assertTextEquals("登录查看你的余额")
+        compose.onNodeWithTag("wallet-balance-signed-out").assertTextEquals("登录后查看余额")
+        compose.onNodeWithTag("wallet-signed-out-hint").assertTextEquals("充值与账单明细登录后使用")
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
-        for (tag in listOf("mine-recharge", "mine-ledger")) {
-            compose.onNodeWithTag(tag).performScrollTo().assertIsNotEnabled()
-            assertTrue(compose.onNodeWithTag(tag).fetchSemanticsNode().config.contains(SemanticsProperties.Disabled))
-            compose.onNodeWithTag(tag).performClick()
-        }
+        // 去登录 is the only action in the wallet area: no inert recharge / ledger buttons.
+        for (tag in listOf("mine-recharge", "mine-ledger")) compose.onNodeWithTag(tag).assertDoesNotExist()
         compose.onNodeWithTag("mine-signed-out").assertExists()
         compose.onNodeWithTag("mine-back").assertDoesNotExist()
-        compose.onNodeWithText("钱包充值").assertExists()
-        compose.onNodeWithText("账单明细").assertExists()
+        compose.onNodeWithTag("mine-history").assertTextContains("登录后查看订单与充值记录", substring = true)
         compose.onNodeWithTag("mine-signout").assertDoesNotExist()
-        // Redesigned cards keep the signed-out invite banner routing to login like the other entries.
-        compose.onNodeWithTag("mine-referral").assert(hasAnyAncestor(hasTestTag("mine-referral-banner")))
+        // The invite banner is a signed-in surface; signed out it is not shown at all.
+        compose.onNodeWithTag("mine-referral-banner").assertDoesNotExist()
+        compose.onNodeWithTag("mine-referral").assertDoesNotExist()
         compose.onNodeWithTag("mine-telegram").assert(hasAnyAncestor(hasTestTag("mine-menu")))
         compose.onNodeWithTag("mine-security").assert(hasAnyAncestor(hasTestTag("mine-functions")))
         compose.onNodeWithTag("mine-wallet").assertDoesNotExist() // The balance card already covers the wallet.

@@ -17,6 +17,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -79,11 +80,15 @@ internal fun ConnectionUsageCard(
     connected: Boolean = false,
     /** Clock for the expiring-soon emphasis; null disables only that emphasis. */
     now: Instant? = null,
+    /** Verified plan name badge (account plans only); shown on the same row as the expiry date. */
+    planText: String? = null,
+    activePlan: Boolean = false,
+    /** Navigation-only "续费" link to the existing 套餐 tab; null hides it. */
+    onRenew: (() -> Unit)? = null,
 ) {
-    val refreshAllowed = authenticated && !loading && refreshEnabled
     val motion = rememberUsageMotion(connected)
     Column(modifier.fillMaxWidth().testTag("account-usage-card")) {
-        if (subscriptionUsage != null) ConnectionSubscriptionUsage(subscriptionUsage, motion, now)
+        if (subscriptionUsage != null) ConnectionSubscriptionUsage(subscriptionUsage, motion, now, planText, activePlan)
         else if (!authenticated) ConnectionRemaining("暂未获取", motion) else when (presentation.state) {
             AccountUsageState.Unknown -> ConnectionRemaining("暂未获取", motion)
             AccountUsageState.NoActivePlan -> if (error != null) ConnectionRemaining("暂未获取", motion) else
@@ -91,45 +96,75 @@ internal fun ConnectionUsageCard(
             AccountUsageState.Reconciliation -> Text("套餐正在核对", color = Brand.Muted,
                 modifier = Modifier.testTag("account-usage-reconciliation"))
             AccountUsageState.Available -> {
-                ConnectionRemaining(presentation.remainingText, motion)
+                ConnectionUsageDates(presentation, planText, activePlan, onRenew)
+                ConnectionRemaining(presentation.remainingText, motion, presentation)
                 ConnectionUsageAmounts(presentation, motion, now)
-                ConnectionUsageDates(presentation)
                 if (presentation.serviceExpired) Text("已到期", color = Brand.Amber,
-                    modifier = Modifier.padding(top = 10.dp).testTag("account-usage-service-expired"))
+                    modifier = Modifier.padding(top = 8.dp).testTag("account-usage-service-expired"))
                 presentation.collectionText?.let {
                     Text(it, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 10.dp).testTag("account-usage-collection"))
+                        modifier = Modifier.padding(top = 8.dp).testTag("account-usage-collection"))
                 }
             }
         }
-        if (showPrimary) {
-            val retry = authenticated && (error != null || presentation.state == AccountUsageState.Unknown ||
-                presentation.state == AccountUsageState.Reconciliation)
-            val label = if (retry || primaryLabel in setOf("重试", "准备中")) "一键连接" else primaryLabel
-            val enabled = if (retry) refreshAllowed else primaryEnabled && !loading
-            ConnectionActionButton(label, { if (enabled) { if (retry) onRefresh() else onPrimaryAction() } },
-                Modifier.padding(top = 12.dp).testTag("vpn-connect"), enabled)
-        }
+        if (showPrimary) ConnectionSetupButton(presentation, authenticated, onRefresh, loading, error, refreshEnabled,
+            primaryLabel, primaryEnabled, onPrimaryAction, Modifier.padding(top = 12.dp))
     }
+}
+
+/** The setup/one-tap primary action (moved out so the home Hero card can host it). Logic is unchanged. */
+@Composable
+internal fun ConnectionSetupButton(
+    presentation: AccountUsagePresentation,
+    authenticated: Boolean,
+    onRefresh: () -> Unit,
+    loading: Boolean,
+    error: String?,
+    refreshEnabled: Boolean,
+    primaryLabel: String,
+    primaryEnabled: Boolean,
+    onPrimaryAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val refreshAllowed = authenticated && !loading && refreshEnabled
+    val retry = authenticated && (error != null || presentation.state == AccountUsageState.Unknown ||
+        presentation.state == AccountUsageState.Reconciliation)
+    val label = if (retry || primaryLabel in setOf("重试", "准备中")) "一键连接" else primaryLabel
+    val enabled = if (retry) refreshAllowed else primaryEnabled && !loading
+    ConnectionActionButton(label, { if (enabled) { if (retry) onRefresh() else onPrimaryAction() } },
+        modifier.testTag("vpn-connect"), enabled)
 }
 
 /** Same layout as account usage, but always labelled as subscription-provided. Primary action logic is unchanged. */
 @Composable
-private fun ConnectionSubscriptionUsage(usage: SubscriptionUsagePresentation, motion: UsageMotion, now: Instant?) {
+private fun ConnectionSubscriptionUsage(usage: SubscriptionUsagePresentation, motion: UsageMotion, now: Instant?,
+                                        planText: String?, activePlan: Boolean) {
     val display = usage.asCardPresentation()
-    ConnectionRemaining(display.remainingText, motion)
+    ConnectionUsageDates(display, planText, activePlan, null)
+    ConnectionRemaining(display.remainingText, motion, display)
     ConnectionUsageAmounts(display, motion, now)
-    ConnectionUsageDates(display)
     if (display.serviceExpired) Text("已到期", color = Brand.Amber,
-        modifier = Modifier.padding(top = 10.dp).testTag("account-usage-service-expired"))
-    Text(usage.sourceText, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.padding(top = 10.dp).testTag("subscription-usage-source"))
+        modifier = Modifier.padding(top = 8.dp).testTag("account-usage-service-expired"))
+    // Subdued provenance line: kept (not lost), just quieter than the amounts.
+    Text(usage.sourceText, color = Brand.Muted.copy(alpha = .72f), style = MaterialTheme.typography.labelSmall,
+        modifier = Modifier.padding(top = 8.dp).testTag("subscription-usage-source"))
 }
 
 @Composable
-private fun ConnectionRemaining(value: String, motion: UsageMotion) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text("剩余流量", color = Brand.Muted, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
+private fun ConnectionRemaining(value: String, motion: UsageMotion, amounts: AccountUsagePresentation? = null) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("剩余流量", color = Brand.Muted, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f))
+            // Used share on the right replaces the old "已用 X GB" line; the GB amount stays in the spoken description.
+            amounts?.let {
+                Text(connectionUsedSummary(it.usedText, it.progress), color = Brand.Muted, fontSize = 12.sp,
+                    lineHeight = 18.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("account-usage-used")
+                        .semantics { contentDescription = connectionUsedDescription(it.usedText, it.progress) })
+            }
+        }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val density = LocalDensity.current
             val measurer = rememberTextMeasurer()
@@ -161,28 +196,32 @@ private fun ConnectionRemaining(value: String, motion: UsageMotion) {
 
 @Composable
 private fun ConnectionUsageAmounts(presentation: AccountUsagePresentation, motion: UsageMotion, now: Instant?) {
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        presentation.periodText?.let {
-            Text(it, color = Brand.Muted, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(bottom = 6.dp).testTag("account-usage-period"))
-        }
-        val used: @Composable () -> Unit = {
-            RollingUsageValue(presentation.usedText, motion) { text, textModifier, ghost ->
-                ConnectionUsageAmount("已用", text, "account-usage-used".takeUnless { ghost }, textModifier)
-            }
-        }
-        val total: @Composable () -> Unit = { ConnectionUsageAmount("总量", presentation.totalText, "account-usage-total") }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            if (maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.5f) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { used(); total() }
-            } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.weight(1f)) { used() }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { total() }
-            }
-        }
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         presentation.progress?.let { progress ->
             val severity = usageSeverity(progress, presentation.expiresAt, presentation.serviceExpired, now)
             ConnectionUsageProgress(progress, severity, motion)
+        }
+        // One quiet meta row under the bar: the period label and the plan total (kept, never dropped).
+        val period: @Composable () -> Unit = {
+            presentation.periodText?.let {
+                Text(it, color = Brand.Muted, fontSize = 11.sp, lineHeight = 16.sp,
+                    modifier = Modifier.testTag("account-usage-period"))
+            }
+        }
+        val total: @Composable () -> Unit = { ConnectionUsageAmount("总量", presentation.totalText, "account-usage-total") }
+        BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            if (maxWidth < 240.dp || LocalDensity.current.fontScale >= 1.5f) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { period(); total() }
+            } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.weight(1f)) { period() }
+                total()
+            }
+        }
+        presentation.cycleText?.let {
+            Text("统计周期 ${connectionCycleSummary(it)}", color = Brand.Muted.copy(alpha = .72f),
+                style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp)
+                    .testTag("account-usage-cycle").semantics { contentDescription = "统计周期 $it" })
         }
     }
 }
@@ -192,13 +231,15 @@ private fun ConnectionUsageAmount(label: String, value: String, tag: String?, mo
     Text(buildAnnotatedString {
         append("$label ")
         withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(value) }
-    }, color = Brand.Muted, fontSize = 12.sp, lineHeight = 18.sp, softWrap = tag != null,
+    }, color = Brand.Muted, fontSize = 11.sp, lineHeight = 16.sp, softWrap = tag != null,
         modifier = if (tag != null) modifier.testTag(tag) else modifier)
 }
 
+/** Plan header: name badge, expiry date (tap for full times) and the optional 续费 link, on one row when it fits. */
 @Composable
-private fun ConnectionUsageDates(presentation: AccountUsagePresentation) {
-    if (presentation.cycleText == null && presentation.expiresAtText == null) return
+private fun ConnectionUsageDates(presentation: AccountUsagePresentation, planText: String?, activePlan: Boolean,
+                                 onRenew: (() -> Unit)?) {
+    if (planText == null && onRenew == null && presentation.cycleText == null && presentation.expiresAtText == null) return
     var showDetails by remember { mutableStateOf(false) }
     // The detail tap already exists; it only gains a light press scale and one haptic tick.
     val haptic = LocalHapticFeedback.current
@@ -209,19 +250,39 @@ private fun ConnectionUsageDates(presentation: AccountUsagePresentation) {
         if (motion.enabled) spring(dampingRatio = .6f, stiffness = Spring.StiffnessMedium) else snap(),
         label = "usage-detail-press")
     val openDetails = { haptic.performHapticFeedback(HapticFeedbackType.ContextClick); showDetails = true }
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp).graphicsLayer { scaleX = pressScale; scaleY = pressScale }) {
-        HorizontalDivider(color = Brand.RowDivider)
-        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            presentation.cycleText?.let {
-                ConnectionDateRow("统计周期", connectionCycleSummary(it), it, "account-usage-cycle")
-            }
-            presentation.expiresAtText?.let {
-                ConnectionDateRow("套餐到期", connectionDateSummary(it), it, "account-usage-expiry", press, openDetails)
+    val badge: @Composable () -> Unit = { planText?.let { ConnectionPlanBadge(it, activePlan) } }
+    val expiry: @Composable () -> Unit = {
+        val expiresAt = presentation.expiresAtText
+        if (expiresAt != null) ConnectionDateRow(connectionDateSummary(expiresAt), expiresAt, "account-usage-expiry",
+            press, openDetails)
+        else if (presentation.cycleText != null) TextButton(openDetails, interactionSource = press,
+            modifier = Modifier.heightIn(min = 48.dp).testTag("account-usage-time-details")) {
+            Text("查看完整时间 ›", fontSize = 11.sp)
+        }
+    }
+    val renew: @Composable () -> Unit = {
+        onRenew?.let {
+            TextButton(it, contentPadding = PaddingValues(horizontal = 10.dp),
+                modifier = Modifier.heightIn(min = 48.dp).testTag("connection-renew")) {
+                Text("续费", color = Brand.Cyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
-        if (presentation.expiresAtText == null) {
-            TextButton(openDetails, interactionSource = press, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)
-                .testTag("account-usage-time-details")) { Text("查看完整时间 ›", fontSize = 11.sp) }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 4.dp)
+        .graphicsLayer { scaleX = pressScale; scaleY = pressScale }) {
+        if (maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.3f) {
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { badge() }
+                    renew()
+                }
+                expiry()
+            }
+        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Box(Modifier.weight(1f)) { badge() }
+            expiry()
+            renew()
         }
     }
     if (showDetails) AlertDialog(onDismissRequest = { showDetails = false },
@@ -234,27 +295,28 @@ private fun ConnectionUsageDates(presentation: AccountUsagePresentation) {
 }
 
 @Composable
-private fun ConnectionDateRow(label: String, summary: String, full: String, tag: String,
+private fun ConnectionPlanBadge(text: String, active: Boolean) {
+    Text(text, color = if (active) Brand.Green else Brand.Muted, fontSize = 11.sp, lineHeight = 14.sp,
+        fontWeight = FontWeight.SemiBold, letterSpacing = .3.sp,
+        modifier = Modifier.background(if (active) Brand.Green.copy(alpha = .15f)
+            else Brand.SurfaceRaised.copy(alpha = .45f), RoundedCornerShape(8.dp))
+            .border(1.dp, if (active) Brand.Green.copy(alpha = .45f) else Brand.RowDivider, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .testTag("account-usage-plan"))
+}
+
+/** "2026.10.12 到期" with the existing full-time chevron (48 dp target). The full timestamp stays in the description. */
+@Composable
+private fun ConnectionDateRow(summary: String, full: String, tag: String,
                               interactionSource: MutableInteractionSource? = null, onDetails: (() -> Unit)? = null) {
-    BoxWithConstraints(Modifier.fillMaxWidth().testTag(tag).semantics { contentDescription = "$label $full" }) {
-        val labelContent: @Composable () -> Unit = { Text(label, color = Brand.Muted, fontSize = 11.sp, lineHeight = 16.sp) }
-        val valueContent: @Composable () -> Unit = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                Text(summary, color = Brand.Muted, fontSize = 11.sp, lineHeight = 16.sp,
-                    modifier = Modifier.weight(1f, fill = false))
-                onDetails?.let {
-                    // A full touch target preserves the preview's compact chevron without a tiny interactive area.
-                    IconButton(it, interactionSource = interactionSource, modifier = Modifier.size(48.dp).testTag("account-usage-time-details")
-                        .semantics { contentDescription = "查看完整时间" }) { Text("›", fontSize = 18.sp) }
-                }
-            }
-        }
-        if (maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.5f) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) { labelContent(); valueContent() }
-        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            labelContent()
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { valueContent() }
+    Row(Modifier.testTag(tag).semantics { contentDescription = "套餐到期 $full" },
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("$summary 到期", color = Brand.Muted, fontSize = 12.sp, lineHeight = 16.sp,
+            modifier = Modifier.weight(1f, fill = false))
+        onDetails?.let {
+            // A full touch target preserves the compact chevron without a tiny interactive area.
+            IconButton(it, interactionSource = interactionSource, modifier = Modifier.size(48.dp).testTag("account-usage-time-details")
+                .semantics { contentDescription = "查看完整时间" }) { Text("›", fontSize = 18.sp) }
         }
     }
 }
@@ -267,8 +329,9 @@ internal fun ConnectionActionButton(text: String, onClick: () -> Unit, modifier:
     Button(onClick, enabled = enabled,
         modifier = modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape)
             .background(Brush.horizontalGradient(when {
-                connected && enabled -> listOf(Color(0xFF087F69), Color(0xFF116747))
-                connected -> listOf(Color(0xFF164B40), Color(0xFF183E34))
+                // Disconnect: a low-saturation rose, clearly "stop" without an alarming red.
+                connected && enabled -> listOf(Color(0xFF8A3B52), Color(0xFF5E2F4E))
+                connected -> listOf(Color(0xFF4A2A3C), Color(0xFF3A2536))
                 enabled -> listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.Blue)
                 else -> listOf(Brand.Disabled, Brand.Disabled)
             })),

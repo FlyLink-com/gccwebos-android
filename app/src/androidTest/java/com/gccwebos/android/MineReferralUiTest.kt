@@ -30,6 +30,7 @@ class MineReferralUiTest {
     private val requests = mutableListOf<Pair<String, String?>>()
     private var density = 1f
     private var referralVisit by mutableStateOf(0)
+    private val shared = mutableListOf<Pair<ReferralShareTarget, String>>()
     private var referralRefreshRequest by mutableStateOf(0)
     private var referralAutoLoad by mutableStateOf(true)
     private var referralReadGate: CompletableDeferred<Unit>? = null
@@ -78,7 +79,8 @@ class MineReferralUiTest {
             CompositionLocalProvider(LocalDensity provides Density(actual.density, font)) {
                 GccTheme { Column(Modifier.width(320.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp)) {
                     ReferralPanel(owner, autoLoad = referralAutoLoad, stateOverride = state,
-                        copyOverride = { copied += it }, refreshRequest = referralRefreshRequest)
+                        copyOverride = { copied += it }, refreshRequest = referralRefreshRequest,
+                        shareOverride = { target, url -> shared += target to url })
                 } }
             }
             }
@@ -149,10 +151,32 @@ class MineReferralUiTest {
         launchReferral({ """{"profile":{"eligible":true,"linkPath":"$path","policy":{"policyRef":"referral_ui_policy","version":3,"effectiveAt":"2026-09-30T00:00:00.000Z","rateBps":735,"rounding":"floor","attributionDays":47,"confirmationDays":9},"attributionDays":47}}""" })
         compose.onNodeWithTag("referral-policy-rate").assertTextEquals("当前奖励比例 7.35%")
         compose.onNodeWithTag("referral-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("referral-available-reward").performScrollTo().assertTextEquals("已转可用奖励 5 Coins")
+        compose.onNodeWithTag("referral-available-reward").performScrollTo().assertTextEquals("可用奖励", "5", "Coins", "已到账，尚未使用")
+        compose.onNodeWithTag("referral-stat-invites").performScrollTo().assertTextEquals("累计邀请", "4", "人", "首次充值 1 人")
+        compose.onNodeWithTag("referral-stat-pending").performScrollTo().assertTextContains("3")
+        compose.onNodeWithTag("referral-stat-reversed").performScrollTo().assertTextContains("2")
+        compose.onNodeWithTag("referral-hero-title").assertTextEquals("邀请好友 · 赚 7.35% 首充奖励")
+        compose.onNodeWithTag("referral-rule-attribution").performScrollTo().assertTextContains("47 天有效追踪")
+        compose.onNodeWithTag("referral-rule-confirmation").performScrollTo().assertTextContains("9 天确认期")
+        compose.onNodeWithTag("referral-link-masked").performScrollTo().assertTextEquals("portal.gccwebos.com/r/" + path.removePrefix("/r/").take(4) + "…" + path.takeLast(4))
         compose.runOnIdle { assertTrue(copied.isEmpty()); assertEquals(listOf(ReferralJson.PROFILE, ReferralJson.PERFORMANCE), requests.map { it.first }) }
         compose.onNodeWithTag("referral-copy").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf("https://portal.gccwebos.com$path"), copied); assertEquals(2, requests.size); assertTrue(requests.all { it.second == null }); assertTrue(opened.isEmpty()) }
+    }
+    @Test fun shareRowUsesTheConfirmedLinkWithoutExtraRequests() {
+        launchReferral({ """{"profile":{"eligible":true,"linkPath":"$path","policy":null,"attributionDays":30}}""" }, font = 2f)
+        val url = "https://portal.gccwebos.com$path"
+        compose.onNodeWithTag("referral-policy-rate").assertDoesNotExist()
+        compose.onNodeWithTag("referral-rule-confirmation").assertDoesNotExist()
+        compose.onNodeWithTag("referral-share-telegram").performScrollTo().performClick()
+        compose.onNodeWithTag("referral-share-x").performScrollTo().performClick()
+        compose.onNodeWithTag("referral-share-system").performScrollTo().performClick()
+        compose.onNodeWithTag("referral-share-text").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(ReferralShareTarget.Telegram to url, ReferralShareTarget.X to url, ReferralShareTarget.System to url), shared)
+            assertEquals(listOf(ReferralPresentation.shareMessage(url)), copied)
+            assertEquals(2, requests.size); assertTrue(requests.none { it.first == ReferralJson.LINK })
+        }
     }
     @Test fun unknownDistributionWindowHasNoDefaultRateAndKeepsGenerateDisabledAtLargeFont() {
         launchReferral({ """{"profile":{"eligible":true,"linkPath":null,"policy":null}}""" }, font = 2f)

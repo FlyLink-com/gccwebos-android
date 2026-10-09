@@ -217,24 +217,22 @@ class CommerceCompactUiTest {
         compose.onAllNodesWithTag("plan-continue").assertCountEquals(1)
     }
 
-    @Test fun ledgerReservationShowsItsDeltaFieldAndLocalDetailPreservesZeroTotal() {
-        val entry = WalletLedgerEntry("compact_ledger_hold", "available_to_held", "paid_coins", 17,
+    @Test fun ledgerHidesReserveBookkeepingAndShowsConsumedBusinessLine() {
+        val hold = WalletLedgerEntry("compact_ledger_hold", "available_to_held", "paid_coins", 17,
             -17, 0, 17, 0, "compact_order", Instant.parse("2026-10-02T12:30:00Z"))
+        val consume = WalletLedgerEntry("compact_ledger_consume", "held_to_consumed", "paid_coins", 17,
+            0, 0, -17, -17, "compact_order", Instant.parse("2026-10-02T12:31:00Z"))
         launch(mode = CommerceMode.Ledger, width = 320, fontScale = 2f) {
-            ledgerPage = WalletLedgerPage(listOf(entry), null)
+            ledgerPage = WalletLedgerPage(listOf(hold, consume), null)
         }
-        compose.onNodeWithTag("ledger-amount-${entry.entryRef}", useUnmergedTree = true).performScrollTo().assertTextEquals("-17 Coins")
-        compose.onNodeWithTag("ledger-qualifier-${entry.entryRef}", useUnmergedTree = true).assertTextEquals("可用变化")
-        compose.onNodeWithTag("ledger-total-unchanged-${entry.entryRef}", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
-        repeat(2) {
-            compose.onNodeWithTag("ledger-row-${entry.entryRef}").performScrollTo().performClick()
-            compose.onNodeWithTag("ledger-detail-total").performScrollTo().assertTextEquals("0 Coins")
-            compose.onNodeWithTag("ledger-detail-available").performScrollTo().assertTextEquals("-17 Coins")
-            compose.onNodeWithTag("ledger-detail-held").performScrollTo().assertTextEquals("+17 Coins")
-            compose.onNodeWithTag("ledger-detail-ref").performScrollTo().assertTextEquals(entry.entryRef)
-            if (it == 0) compose.onNodeWithTag("ledger-detail-close").performClick()
-            else compose.runOnIdle { account.authSessionGeneration++ }
-        }
+        compose.onNodeWithTag("ledger-row-${hold.entryRef}").assertDoesNotExist()
+        compose.onNodeWithTag("ledger-total-unchanged-${hold.entryRef}").assertDoesNotExist()
+        compose.onNodeWithTag("ledger-amount-${consume.entryRef}", useUnmergedTree = true).performScrollTo().assertTextEquals("-17 Coins")
+        compose.onNodeWithText("购买扣款").assertExists()
+        compose.onNodeWithTag("ledger-row-${consume.entryRef}").performScrollTo().performClick()
+        compose.onNodeWithTag("ledger-detail-total").performScrollTo().assertTextEquals("-17 Coins")
+        compose.onNodeWithTag("ledger-detail-ref").performScrollTo().assertTextEquals(consume.entryRef)
+        compose.onNodeWithTag("ledger-detail-close").performClick()
         compose.onNodeWithTag("ledger-detail").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("/api/portal/commerce/model"), calls) }
     }

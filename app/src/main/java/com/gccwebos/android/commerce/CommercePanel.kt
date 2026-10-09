@@ -696,9 +696,11 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
-    // The wallet top-up screen draws its own standalone top bar (same "mine-back" tag) whenever it renders.
+    // Wallet top-up and order/ledger history draw a standalone top bar (same "mine-back" tag).
+    val historyTopBar = view == "history" && account.authenticated && !account.restoring && !account.foregroundCheckPending
     val walletTopBar = (view == "wallet" || view == "recharge") && account.authenticated && !account.restoring && !account.foregroundCheckPending
-    if (view != "mine" && !walletTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
+    if (view != "mine" && !walletTopBar && !historyTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
+    if (historyTopBar) WalletTopBar(if (historyTab == "ledger") "账单明细" else "我的订单", onBack = { view = "mine" }, onRecords = null)
     if (view == "about") {
         BrandCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -713,11 +715,11 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         if (view == "history") {
             Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = historyTab == "orders", onClick = { historyTab = "orders" },
-                    enabled = !state.busy && state.canOperate(), label = { Text("订单") },
+                    enabled = !state.busy && state.canOperate(), label = { Text("消费订单") },
                     modifier = Modifier.testTag("mine-history-orders"))
                 FilterChip(selected = historyTab == "ledger", onClick = {
                     historyTab = "ledger"
-                }, enabled = !state.busy && state.canOperate(), label = { Text("账单明细") },
+                }, enabled = !state.busy && state.canOperate(), label = { Text("代币账单") },
                     modifier = Modifier.testTag("mine-history-ledger"))
             }
         }

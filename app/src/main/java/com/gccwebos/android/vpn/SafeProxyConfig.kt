@@ -2,6 +2,7 @@ package com.gccwebos.android.vpn
 
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
+import java.security.MessageDigest
 import java.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
@@ -67,8 +68,14 @@ object SafeProxyConfig {
     private val fingerprints = setOf("chrome", "firefox", "safari", "ios", "edge")
     private val uuidPattern = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
-    /** Display-only metadata; names/indexes are never stable authorization or connection IDs. */
-    data class NodeSummary(val index: Int, val name: String, val protocol: String, val supported: Boolean)
+    /** Display-only metadata; names/indexes are never stable authorization or connection IDs.
+     * An info entry (for example "剩余流量：…") is a provider notice shaped like a node; it is never selectable. */
+    data class NodeSummary(val index: Int, val name: String, val protocol: String, val supported: Boolean,
+        val info: Boolean = false)
+    // Conservative: a known notice keyword immediately followed by a colon. Ordinary node names never match.
+    private val infoNodeName = Regex("(?:剩余流量|已用流量|总流量|流量|套餐到期|到期时间|过期时间|到期|官网|网址|客服|重置)\\s*[:：]|" +
+        "(?i)\\b(?:remaining\\s+traffic|traffic|expire|expiry|expiration|website)\\s*[:：]")
+    internal fun isInfoNodeName(name: String): Boolean = infoNodeName.containsMatchIn(name)
     /** Complete static validation; a hostname still needs a separately authorized physical-network resolution. */
     fun validateForPreparation(yaml: ByteArray): List<NodeSummary> = classified(RejectionReason.InputSyntax) {
         preparation(yaml).summaries
@@ -95,6 +102,25 @@ object SafeProxyConfig {
         val proxy = selected(preparation(yaml).proxies, selectedIndex)
         this.ipv4(ipv4)
         projection(node(proxy, allowHostname = true).put("server", ipv4))
+    }
+    /** Memory-only node identities, index-aligned with the proxies. A key is a SHA-256 over the display
+     * name and the normalized engine DTO, so key order, whitespace and other nodes never change it.
+     * Keys contain credential material in digested form only; never log, persist or display them. */
+    internal fun selectionKeys(yaml: ByteArray): List<String> = classified(RejectionReason.InputSyntax) {
+        input(yaml).map { p ->
+            val digest = MessageDigest.getInstance("SHA-256")
+            digest.update(string(p, "name", RejectionReason.NodeOptions).toByteArray(Charsets.UTF_8))
+            digest.update(0)
+            digest.update(canonical(node(p, allowHostname = true)).toByteArray(Charsets.UTF_8))
+            val bytes = digest.digest()
+            try { Base64.getEncoder().encodeToString(bytes) } finally { bytes.fill(0) }
+        }
+    }
+    private fun canonical(value: Any?): String = when (value) {
+        is JSONObject -> value.keys().asSequence().sorted().joinToString(",", "{", "}") { JSONObject.quote(it) + ":" + canonical(value.get(it)) }
+        is JSONArray -> (0 until value.length()).joinToString(",", "[", "]") { canonical(value.get(it)) }
+        is String -> JSONObject.quote(value)
+        else -> value.toString()
     }
     fun inspect(yaml: ByteArray): List<NodeSummary> = try {
         input(yaml).mapIndexed { index, p ->
@@ -132,7 +158,7 @@ object SafeProxyConfig {
         }
         val protocol = string(p, "type", RejectionReason.Protocol)
         classified(RejectionReason.Protocol) { require(protocol.matches(Regex("[a-z0-9-]{1,24}"))) }
-        return NodeSummary(index, name, protocol, true)
+        return NodeSummary(index, name, protocol, true, isInfoNodeName(name))
     }
     private fun projection(proxy: JSONObject): ByteArray =
         JSONObject().put("schemaVersion", SCHEMA_VERSION).put("proxies", JSONArray().put(proxy))

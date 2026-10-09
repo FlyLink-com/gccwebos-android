@@ -179,4 +179,38 @@ class ManualImportHostUiTest {
         compose.onNodeWithTag("manual-import-error").assertTextEquals("未允许相机权限")
         compose.runOnIdle { assertEquals(listOf(ManualImportFailure.CameraPermission), failures); assertTrue(submissions.isEmpty()) }
     }
+
+    private fun clipboard(text: String?) {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val manager = instrumentation.targetContext.getSystemService(android.content.ClipboardManager::class.java)
+            if (text == null) manager.clearPrimaryClip()
+            else manager.setPrimaryClip(android.content.ClipData.newPlainText("synthetic", text))
+        }
+    }
+
+    @Test fun linkFieldDoesNotTakeFocusAndPasteFillsItOnlyOnTap() {
+        clipboard("  https://sub.invalid/sub/a/synthetic\n")
+        launch()
+        compose.onNodeWithTag("manual-import-link").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("manual-link-input").assertIsNotFocused()
+        compose.onNodeWithTag("manual-import-confirm").assertIsNotEnabled()
+        compose.onNodeWithTag("manual-link-paste").assertIsEnabled().performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-import-confirm").fetchSemanticsNodes()
+            .singleOrNull()?.config?.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled) == false }
+        compose.onNodeWithTag("manual-link-input").assertIsNotFocused()
+        compose.onNodeWithTag("manual-import-confirm").performClick()
+        compose.runOnIdle { assertEquals(listOf(ManualImportInputKind.Link), submissions) }
+    }
+
+    @Test fun pastingAnEmptyClipboardShowsAHintAndLeavesTheFieldEmpty() {
+        clipboard(null)
+        launch()
+        compose.onNodeWithTag("manual-import-link").performClick()
+        compose.onNodeWithTag("manual-link-paste").performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-link-paste-hint").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("manual-import-confirm").assertIsNotEnabled()
+        compose.runOnIdle { assertTrue(submissions.isEmpty()) }
+    }
 }

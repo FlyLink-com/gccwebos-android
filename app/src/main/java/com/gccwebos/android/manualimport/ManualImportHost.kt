@@ -5,11 +5,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import android.view.WindowManager
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.design.Brand
@@ -53,6 +61,7 @@ internal fun <T : Any> ManualImportHost(
     var staged by remember { mutableStateOf(false) }
     var submitted by remember { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(false) }
+    var pasteHint by remember { mutableStateOf<String?>(null) }
     DisposableEffect(owner) { onDispose { link = ""; owner.close() } }
     fun dismiss() { link = ""; owner.close(); onDismiss() }
     fun fail(ticket: T, reason: ManualImportFailure) {
@@ -115,6 +124,37 @@ internal fun <T : Any> ManualImportHost(
     }
     Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(
         securePolicy = SecureFlagPolicy.SecureOn, usePlatformDefaultWidth = false)) {
+        // The link field never takes focus by itself: the keyboard appears only when the user taps it.
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { dialogWindow?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN or
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE) }
+        val focusManager = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
+        LaunchedEffect(mode) {
+            if (mode != ManualHostMode.Link) return@LaunchedEffect
+            withFrameNanos { }
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
+        val clipboard = LocalClipboard.current
+        val context = LocalContext.current
+        // Reads the clipboard only on an explicit tap. The masked field never displays the pasted text.
+        fun paste() {
+            val ticket = owner.ticket ?: return
+            if (busy || submitted || mode != ManualHostMode.Link) return
+            scope.launch {
+                val raw = try {
+                    clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)
+                } catch (_: Exception) { null }
+                if (!owner.accepts(ticket) || mode != ManualHostMode.Link || submitted) return@launch
+                val text = clipboardLinkText(raw)
+                when {
+                    text == null -> pasteHint = "剪贴板中没有可粘贴的内容"
+                    text.length > ManualInputBytes.Limit -> fail(ticket, ManualImportFailure.TooLarge)
+                    else -> { link = text; failure = null; pasteHint = null }
+                }
+            }
+        }
         GlassSurface(Modifier.padding(20.dp).widthIn(max = 420.dp).fillMaxWidth().testTag("manual-import-host")) {
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(when (mode) {
@@ -139,12 +179,19 @@ internal fun <T : Any> ManualImportHost(
                     BrandButton("确认移除", { if (!busy) onRemove() }, enabled = !busy,
                         modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
                 } else {
-                    if (mode == ManualHostMode.Link) OutlinedTextField(link, { value ->
-                        if (value.length <= ManualInputBytes.Limit) { link = value; failure = null }
-                        else owner.ticket?.let { fail(it, ManualImportFailure.TooLarge) }
-                    }, label = { Text("订阅链接") }, singleLine = true, enabled = !busy && !submitted,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth().testTag("manual-link-input"))
+                    if (mode == ManualHostMode.Link) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedTextField(link, { value ->
+                            if (value.length <= ManualInputBytes.Limit) { link = value; failure = null; pasteHint = null }
+                            else owner.ticket?.let { fail(it, ManualImportFailure.TooLarge) }
+                        }, label = { Text("订阅链接") }, singleLine = true, enabled = !busy && !submitted,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.weight(1f).testTag("manual-link-input"))
+                        TextButton(::paste, enabled = !busy && !submitted,
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("manual-link-paste")) { Text("粘贴") }
+                    }
+                    if (mode == ManualHostMode.Link) pasteHint?.let { Text(it, color = Brand.Muted,
+                        modifier = Modifier.testTag("manual-link-paste-hint")) }
                     if (mode != ManualHostMode.External) BrandButton("导入", ::submit,
                         enabled = !busy && !submitted && (staged || (mode == ManualHostMode.Link && link.isNotBlank())),
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
@@ -177,3 +224,6 @@ private class ManualHostOwner<T : Any>(private val cancel: (T) -> Unit) {
         ticket?.let(cancel); ticket = null
     }
 }
+
+/** Clipboard text for the link field: trimmed, or null when there is nothing usable to paste. */
+internal fun clipboardLinkText(raw: CharSequence?): String? = raw?.toString()?.trim()?.takeIf { it.isNotEmpty() }

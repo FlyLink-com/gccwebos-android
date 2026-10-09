@@ -34,6 +34,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     hasCapability: Boolean, accountBusy: Boolean, authenticated: Boolean = false,
     connectionControl: ConnectionControlState = ConnectionControlState(),
     onSelected: () -> Unit = {}, latency: NodeLatencyController? = null,
+    namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     onImport: () -> Unit, onReplace: (ConfigurationHandle) -> Unit, openAccount: () -> Unit) {
     LaunchedEffect(library) { library.refresh() }
     val busy = library.busy || accountBusy || library.snapshot.storageError
@@ -43,6 +44,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     ConfigurationLibraryContent(library.snapshot, busy, library.error, canMeasure,
         onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
+        namingEntryId = namingEntryId, onNamingDone = onNamingDone,
         activeContent = { item, menu ->
             NodeSelectionPanel(state, nodes, resource, hasCapability, busy, authenticated, connectionControl,
                 onSelected = onSelected, latency = latency, groupTitle = item.name,
@@ -52,7 +54,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-account")) { Text("登录") }
 }
 
-private enum class LibraryDialog { Details, Rename, Remove }
+private enum class LibraryDialog { Details, Rename, Remove, Name }
 
 /** Pure presentation: callbacks carry handles, never display indexes, URLs or raw configurations. */
 @Composable
@@ -60,6 +62,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     canMeasure: Boolean, onMeasure: () -> Unit, onImport: () -> Unit,
     onActivate: (ConfigurationHandle) -> Unit, onRename: (ConfigurationHandle, String) -> Unit,
     onRemove: (ConfigurationHandle) -> Unit, onReplace: (ConfigurationHandle) -> Unit,
+    namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     activeContent: @Composable (ConfigurationItem, @Composable () -> Unit) -> Unit) {
     val actionsBlocked = busy || snapshot.storageError
     val activeIndex = snapshot.items.indexOfFirst { it.active }
@@ -67,9 +70,19 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     var dialogHandle by remember { mutableStateOf<ConfigurationHandle?>(null) }
     var dialog by remember { mutableStateOf<LibraryDialog?>(null) }
     var name by remember { mutableStateOf("") }
-    val target = snapshot.items.firstOrNull { it.handle === dialogHandle }
+    // The post-import naming dialog follows its saved entry id, because the import's own settle
+    // refresh replaces every handle right after the dialog opens.
+    val target = snapshot.items.firstOrNull { it.handle === dialogHandle } ?: if (dialog == LibraryDialog.Name)
+        dialogHandle?.entryId?.let { id -> snapshot.items.firstOrNull { it.handle.entryId == id } } else null
     fun closeDialog() { dialogHandle = null; dialog = null; name = "" }
     LaunchedEffect(snapshot.items) { if (dialogHandle != null && target == null) closeDialog() }
+    LaunchedEffect(namingEntryId, snapshot.items, dialog) {
+        if (namingEntryId == null || dialog != null) return@LaunchedEffect
+        val created = snapshot.items.firstOrNull { it.handle.entryId == namingEntryId } ?: return@LaunchedEffect
+        onNamingDone()
+        if (created.kind == ManualSourceKind.LegacyRemote) return@LaunchedEffect
+        dialogHandle = created.handle; name = created.name; dialog = LibraryDialog.Name
+    }
     Column(Modifier.fillMaxWidth().testTag("configuration-library"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("配置", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -114,19 +127,28 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     }
     if (target != null && dialog != null) {
         val editable = target.kind != ManualSourceKind.LegacyRemote
+        val naming = dialog == LibraryDialog.Rename || dialog == LibraryDialog.Name
+        // Compared against every other visible configuration name, including the account subscription.
+        val duplicateName = naming && ConfigurationName.conflicts(name, snapshot.items.filter { it !== target }.map { it.name })
         AlertDialog(onDismissRequest = { if (!actionsBlocked) closeDialog() }, containerColor = Brand.SurfaceRaised,
             shape = Brand.Shape, properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
             modifier = Modifier.testTag("configuration-dialog"),
             title = { Text(when (dialog) {
                 LibraryDialog.Rename -> "重命名配置"
+                LibraryDialog.Name -> "为订阅命名"
                 LibraryDialog.Remove -> "删除配置？"
                 else -> target.name
             }) },
             text = {
                 when (dialog) {
-                    LibraryDialog.Rename -> OutlinedTextField(name, { if (it.codePointCount(0, it.length) <= 48) name = it },
-                        label = { Text("配置名称") }, singleLine = true, enabled = !actionsBlocked && editable,
-                        modifier = Modifier.fillMaxWidth().testTag("configuration-name-input"))
+                    LibraryDialog.Rename, LibraryDialog.Name -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(name, { if (it.codePointCount(0, it.length) <= 48) name = it },
+                            label = { Text(if (dialog == LibraryDialog.Name) "订阅名称" else "配置名称") }, singleLine = true,
+                            enabled = !actionsBlocked && editable, isError = duplicateName,
+                            modifier = Modifier.fillMaxWidth().testTag("configuration-name-input"))
+                        if (duplicateName) Text(ConfigurationName.DUPLICATE_MESSAGE, color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("configuration-name-duplicate"))
+                    }
                     LibraryDialog.Remove -> Text(target.name)
                     else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(configurationKindLabel(target.kind))
@@ -142,16 +164,17 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                         val action = dialog
                         val renamed = name.trim()
                         closeDialog()
-                        if (editable && action == LibraryDialog.Rename && renamed.isNotEmpty()) onRename(handle, renamed)
+                        if (editable && (action == LibraryDialog.Rename || action == LibraryDialog.Name) && renamed.isNotEmpty() &&
+                            !duplicateName && (action == LibraryDialog.Rename || renamed != target.name)) onRename(handle, renamed)
                         else if (editable && action == LibraryDialog.Remove) onRemove(handle)
                     }
-                }, enabled = !actionsBlocked && (dialog != LibraryDialog.Rename || editable && name.isNotBlank()),
+                }, enabled = !actionsBlocked && (!naming || editable && name.isNotBlank() && !duplicateName),
                     modifier = Modifier.testTag("configuration-dialog-confirm")) {
-                    Text(when (dialog) { LibraryDialog.Rename -> "保存"; LibraryDialog.Remove -> "删除"; else -> "完成" })
+                    Text(when (dialog) { LibraryDialog.Rename, LibraryDialog.Name -> "保存"; LibraryDialog.Remove -> "删除"; else -> "完成" })
                 }
             }, dismissButton = {
                 if (dialog != LibraryDialog.Details) TextButton(onClick = ::closeDialog, enabled = !actionsBlocked,
-                    modifier = Modifier.testTag("configuration-dialog-cancel")) { Text("取消") }
+                    modifier = Modifier.testTag("configuration-dialog-cancel")) { Text(if (dialog == LibraryDialog.Name) "跳过" else "取消") }
             })
     }
 }

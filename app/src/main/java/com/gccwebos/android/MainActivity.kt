@@ -429,6 +429,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
                         onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency,
+                        namingEntryId = account.manualImport.namingEntryId, onNamingDone = account.manualImport::namingHandled,
                         onImport = account.manualImport::open, onReplace = account.manualImport::openForReplacement)
                     val importer = account.manualImport
                     val importUsage by account.accountUsage.state.collectAsState()

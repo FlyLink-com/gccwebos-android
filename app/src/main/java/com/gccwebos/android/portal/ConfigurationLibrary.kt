@@ -25,6 +25,16 @@ object ConfigurationName {
         finally { if (encoded.hasArray()) encoded.array().fill(0) }
         name
     } catch (_: Exception) { throw IllegalArgumentException() }
+
+    /** Display-name comparison only (ids stay authoritative): NFKC, trimmed, collapsed spaces, case-insensitive. */
+    fun comparable(value: String): String = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFKC)
+        .trim().replace(Regex("\\s+"), " ").lowercase(java.util.Locale.ROOT)
+    /** True when a user-chosen name would repeat another saved name. Existing stored duplicates are tolerated. */
+    fun conflicts(candidate: String, others: Iterable<String>): Boolean {
+        val wanted = comparable(candidate)
+        return wanted.isNotEmpty() && others.any { comparable(it) == wanted }
+    }
+    const val DUPLICATE_MESSAGE = "已有同名订阅，请重新命名你的订阅"
 }
 
 enum class ConfigurationSelector { Account, None, Entry }

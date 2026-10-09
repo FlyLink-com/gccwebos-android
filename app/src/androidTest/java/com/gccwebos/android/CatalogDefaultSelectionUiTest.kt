@@ -121,7 +121,7 @@ class CatalogDefaultSelectionUiTest {
         compose.onNodeWithTag("plan-offer-${monthly.offerRef}").performScrollTo().assertIsSelected()
         compose.onNodeWithTag("plan-offer-${cheaper.offerRef}").assertIsNotSelected()
         compose.onNodeWithTag("purchase-return").assertDoesNotExist()
-        compose.onNodeWithTag("plan-continue").performScrollTo().assertTextEquals("购买").assertIsEnabled()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertTextEquals("立即购买").assertIsEnabled()
         compose.runOnIdle { assertNull(owner.purchaseReturnRef) }
     }
 

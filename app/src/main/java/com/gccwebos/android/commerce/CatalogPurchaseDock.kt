@@ -4,7 +4,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -35,21 +40,25 @@ internal fun CatalogPurchaseDock(summary: CatalogPurchaseSummary, onContinue: ()
     BrandCard(Modifier.testTag("plan-purchase-dock"), contentPadding = PaddingValues(10.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val details: @Composable (Modifier) -> Unit = { modifier ->
-                Column(modifier, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(summary.title?.let { "已选 · $it" } ?: "请选择套餐",
-                        style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
-                    summary.price?.let { Text(it, color = Brand.Cyan, fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.titleMedium) }
-                }
+                // "已选 100 GB 月度套餐 | 30 Coins": the price part is highlighted.
+                val line = catalogDockSummary(summary.title, summary.price)
+                val price = summary.price?.takeIf { summary.title != null }
+                Text(buildAnnotatedString {
+                    if (price == null) append(line) else {
+                        append(line.removeSuffix(price))
+                        withStyle(SpanStyle(color = Brand.Cyan, fontWeight = FontWeight.Bold)) { append(price) }
+                    }
+                }, modifier.testTag("plan-dock-summary"), style = MaterialTheme.typography.bodyMedium,
+                    color = Brand.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             val action: @Composable (Modifier) -> Unit = { modifier ->
-                BrandButton("购买", onContinue,
+                BrandButton("立即购买", onContinue,
                     enabled = summary.enabled, modifier = modifier.testTag("plan-continue"))
             }
             if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { details(Modifier.fillMaxWidth()); action(Modifier.fillMaxWidth()) }
-            } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                details(Modifier.weight(1f)); action(Modifier.weight(1f))
+            } else Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                details(Modifier.weight(1.4f)); action(Modifier.weight(1f))
             }
         }
     }

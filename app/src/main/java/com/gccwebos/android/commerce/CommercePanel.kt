@@ -341,81 +341,7 @@ internal class CommerceController(private val account: AccountController, privat
     }
 }
 
-@Composable
-private fun CatalogOfferCard(offer: Offer, selected: Boolean, enabled: Boolean, modifier: Modifier = Modifier, onSelect: () -> Unit) {
-    Column(modifier.fillMaxWidth().heightIn(min = 94.dp).testTag("plan-offer-${offer.offerRef}")
-        .background(if (selected) Brand.Cyan.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent, Brand.Shape)
-        .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect)
-        .padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(offer.title.zh, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold)
-            Text(if (selected) "●" else "○", color = if (selected) Brand.Cyan else Brand.Muted,
-                modifier = Modifier.padding(start = 12.dp), fontSize = 21.sp)
-        }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val traffic: @Composable () -> Unit = {
-                Text(if (offer.category == "plan") "${offer.monthlyTrafficGb} GB / 月" else "${offer.trafficGb} GB",
-                    fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.testTag("plan-traffic-${offer.offerRef}"))
-            }
-            val price: @Composable () -> Unit = {
-                Text(formatCoins(offer.baseCoinUnits), fontSize = 18.sp,
-                    color = Brand.Cyan, modifier = Modifier.testTag("plan-price-${offer.offerRef}"))
-            }
-            if (maxWidth < 260.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) { traffic(); price() }
-            } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween) { traffic(); price() }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SupportingText(if (offer.category == "plan") "有效期" else "流量包")
-            val title = if (offer.category == "plan") offer.durationDays?.let { "${it}天" } ?: offer.title.zh else offer.title.zh
-            Text(title, style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
-                modifier = Modifier.testTag("plan-title-${offer.offerRef}"))
-        }
-    }
-}
-
-@Composable
-private fun CatalogBenefits(offer: Offer?, category: String) {
-    Column(Modifier.testTag("plan-benefits").padding(12.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (category == "plan") "套餐权益" else "商品权益", style = MaterialTheme.typography.titleMedium)
-            if (offer == null) SupportingText("选择商品查看权益") else {
-                CatalogBenefit("有效期", if (category == "plan") "${offer.durationDays} 天" else "永久有效，用完为止")
-                CatalogBenefit(if (category == "plan") "每月流量" else "独立流量",
-                    if (category == "plan") "${offer.monthlyTrafficGb} GB" else "${offer.trafficGb} GB")
-                CatalogBenefit("支付余额", offer.acceptedCoinTypes.joinToString("、", transform = ::ledgerCoinType))
-            }
-        }
-    }
-}
-
-@Composable
-private fun CatalogBenefit(label: String, value: String) {
-    if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { SupportingText(label); Text(value) }
-    } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        SupportingText(label, Modifier.weight(1f)); Text(value, modifier = Modifier.weight(1.2f))
-    }
-}
-
 private data class CatalogSelection(val offer: Offer, val accountGeneration: Long)
-
-@Composable
-private fun CatalogCategoryChip(selected: Boolean, enabled: Boolean, title: String, tag: String, onClick: () -> Unit) {
-    FilterChip(selected = selected, onClick = onClick, enabled = enabled,
-        label = { Text(title, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium) },
-        modifier = Modifier.heightIn(min = 44.dp).testTag(tag), shape = androidx.compose.foundation.shape.RoundedCornerShape(13.dp),
-        border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Brand.Cyan else Brand.Border),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = Brand.SurfaceRaised, labelColor = Brand.Text,
-            selectedContainerColor = Brand.Cyan, selectedLabelColor = Brand.Background,
-            disabledContainerColor = Brand.SurfaceRaised, disabledLabelColor = Brand.Muted,
-            disabledSelectedContainerColor = Brand.SurfaceRaised,
-        ))
-}
 
 @Composable
 internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true,
@@ -608,18 +534,12 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
                 style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("catalog-empty"))
         }
         if (!state.pendingPurchase && shownOffers.isNotEmpty()) {
-            BrandCard(Modifier.testTag("plan-options"), contentPadding = PaddingValues(6.dp)) {
-                shownOffers.forEachIndexed { index, offer ->
-                    if (index > 0) HorizontalDivider(color = Brand.RowDivider)
-                    CatalogOfferCard(offer, selectedOffer == offer,
-                                enabled = visitReady && state.catalogLoaded && !state.busy && state.canOperate(),
-                                onSelect = { if (!state.busy && state.canOperate() && state.catalogLoaded && state.offers.any { it == offer }) {
-                                    initialSelectionHandled = true; state.quote = null; selectionNotice = null
-                                    selectedSnapshot = CatalogSelection(offer, account.authSessionGeneration)
-                                } }) }
-                HorizontalDivider(color = Brand.RowDivider)
-                CatalogBenefits(selectedOffer, catalogCategory)
-            }
+            CatalogOfferList(shownOffers, selectedOffer, category = catalogCategory,
+                enabled = visitReady && state.catalogLoaded && !state.busy && state.canOperate(),
+                onSelect = { offer -> if (!state.busy && state.canOperate() && state.catalogLoaded && state.offers.any { it == offer }) {
+                    initialSelectionHandled = true; state.quote = null; selectionNotice = null
+                    selectedSnapshot = CatalogSelection(offer, account.authSessionGeneration)
+                } })
             if (dock == null && purchaseSummary != null) CatalogPurchaseDock(purchaseSummary, continuePurchase)
         }
         if (state.pendingPurchase) BrandCard(Modifier.testTag("purchase-result")) {
@@ -713,7 +633,7 @@ internal fun purchaseStatus(value: PurchaseResult): String = when(value) {
 }
 private fun localTime(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z").withZone(ZoneId.systemDefault()).format(value)
 
-private fun ledgerCoinType(value: String) = when (value) { "paid_coins" -> "已购 Coins"; "bonus_coins" -> "赠送 Coins"; "reward_coins" -> "奖励 Coins"; else -> "Coins" }
+private fun ledgerCoinType(value: String) = catalogCoinTypeLabel(value)
 
 
 /** Original mobile Alipay vector, placed on a light plate within the blue payment action. */

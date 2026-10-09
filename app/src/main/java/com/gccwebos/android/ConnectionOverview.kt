@@ -317,6 +317,9 @@ internal fun ConnectionOverview(
                     activePlan = verifiedUsage && connectionPlanIsActive(display), modifier = Modifier.padding(top = 2.dp))
                 ConnectionUsageCard(display, authenticated = account.authenticated,
                     modifier = Modifier.padding(top = 5.dp), subscriptionUsage = subscriptionUsage,
+                    // Display-only motion inputs: tunnel phase for the glow, the same clocks the card text uses.
+                    connected = control.phase == ConnectionPhase.Connected,
+                    now = if (subscriptionUsage != null) now else usageNow,
                     onRefresh = account::refreshAccountUsage,
                     loading = account.busy || account.nodeSelection.busy || usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
                     error = usage.error, refreshEnabled = verifiedUsage && operable,

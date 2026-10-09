@@ -20,6 +20,8 @@ internal data class SubscriptionUsagePresentation(
     val expiresAtText: String?,
     val serviceExpired: Boolean,
     val sourceText: String,
+    /** Display-only expiry instant for the card's expiring-soon emphasis. */
+    val expiresAt: Instant? = null,
 ) {
     /** Reuses the connection card's existing amount/date layout; it does not become account usage. */
     internal fun asCardPresentation() = AccountUsagePresentation(
@@ -31,6 +33,7 @@ internal data class SubscriptionUsagePresentation(
         progress = progress,
         expiresAtText = expiresAtText,
         serviceExpired = serviceExpired,
+        expiresAt = expiresAt,
     )
 }
 
@@ -51,6 +54,7 @@ internal fun subscriptionUsagePresentation(
         serviceExpired = validUntil?.let { it <= now } == true,
         sourceText = "订阅提供 · 更新于 " + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.ROOT)
             .withZone(zone).format(usage.observedAt),
+        expiresAt = validUntil,
     )
 }
 

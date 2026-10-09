@@ -266,7 +266,7 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
         compose.onNodeWithTag("plan-purchase-dock").assertExists()
         compose.onNodeWithTag("plan-offer-synthetic_preview_month").assertIsSelected()
-        compose.onNodeWithTag("plan-continue").assertTextEquals("购买")
+        compose.onNodeWithTag("plan-continue").assertTextEquals("立即购买")
         capture("$prefix-plans")
         captureConfirmation("$prefix-confirmation", "synthetic_preview_month")
         reachable("catalog-yearly").performClick()

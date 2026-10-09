@@ -379,7 +379,7 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("plan-title-${fixtures.first().offerRef}", useUnmergedTree = true)
             .performScrollTo().assertTextEquals("30天")
         compose.onNodeWithTag("plan-traffic-${fixtures.first().offerRef}", useUnmergedTree = true)
-            .assertTextEquals("10 GB / 月")
+            .assertTextEquals("10 GB")
         compose.onNodeWithTag("plan-price-${fixtures.first().offerRef}", useUnmergedTree = true)
             .assertTextEquals("20 Coins")
         capture("plans-with-active-resource")
@@ -529,7 +529,7 @@ class SubscriptionWalletUiTest {
                 .assertTextEquals("${offer.durationDays}天")
             compose.onNodeWithTag("plan-price-${offer.offerRef}", useUnmergedTree = true).performScrollTo().assertTextEquals(formatCoins(offer.baseCoinUnits))
             compose.onNodeWithTag("plan-traffic-${offer.offerRef}", useUnmergedTree = true)
-                .performScrollTo().assertTextEquals("${offer.monthlyTrafficGb} GB / 月")
+                .performScrollTo().assertTextEquals("${offer.monthlyTrafficGb} GB")
             compose.onNodeWithTag("plan-offer-${offer.offerRef}").performScrollTo().performClick().assertIsSelected()
             compose.onNodeWithTag("plan-continue").performScrollTo().assertIsDisplayed().assertIsEnabled()
         }
@@ -709,10 +709,13 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("plan-title-${fixture.offerRef}", useUnmergedTree = true).performScrollTo().assertTextEquals("47天")
         compose.onNodeWithTag("plan-price-${fixture.offerRef}", useUnmergedTree = true).assertTextEquals("73 Coins")
         compose.onNodeWithTag("catalog-other").assertIsSelected()
-        compose.onNodeWithTag("plan-traffic-${fixture.offerRef}", useUnmergedTree = true).assertTextEquals("17 GB / 月")
+        compose.onNodeWithTag("plan-traffic-${fixture.offerRef}", useUnmergedTree = true).assertTextEquals("17 GB")
         compose.onNodeWithTag("plan-offer-${fixture.offerRef}").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("plan-benefits").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("17 GB").performScrollTo().assertIsDisplayed()
+        // Benefits never repeat the card's validity or traffic.
+        compose.onNodeWithText("每月流量").assertDoesNotExist()
+        compose.onNodeWithText("有效期").assertDoesNotExist()
+        compose.onNodeWithText("安全加密", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         compose.runOnIdle { commerce.busy = true }
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("catalog-plans").performScrollTo().assertIsNotEnabled()

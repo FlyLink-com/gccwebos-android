@@ -461,7 +461,8 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
             .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = if (compact) 12.dp else 16.dp)
             .testTag("page-${destination.name}"),
             verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp)) {
-            BrandHeader()
+            // 我的 draws its own clean title bar (MineTopBar); a second wordmark there read as a ghosted logo.
+            if (destination != Destination.Profile) BrandHeader()
             when (destination) {
                 Destination.Connect -> {
                     ConnectionOverview(account, openAccount, openPlans, openNodes, connectionControlState,

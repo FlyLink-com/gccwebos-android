@@ -85,11 +85,11 @@ internal fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, su
         interactionSource = press.interactionSource,
         modifier = Modifier.pressFeedback(press).fillMaxWidth().heightIn(min = 52.dp).testTag(tag)) {
         val icon = when (tag) {
-            "mine-wallet" -> R.drawable.brand_wallet
             "mine-history" -> R.drawable.brand_receipt
             "mine-security" -> R.drawable.brand_lock
             "mine-referral" -> R.drawable.brand_share
-            "mine-telegram" -> R.drawable.brand_telegram
+            "mine-telegram" -> R.drawable.brand_paper_plane
+            "mine-channel" -> R.drawable.brand_link
             "mine-more" -> R.drawable.brand_refresh
             else -> R.drawable.brand_arrow
         }
@@ -178,18 +178,6 @@ internal fun GiftIcon(size: Dp, enabled: Boolean = true) {
         }
         drawPath(bow, ribbon, style = Stroke(width = w * .06f))
     }
-}
-
-/** Soft cyan halo and elliptical ring beneath the mascot; static. */
-internal fun Modifier.mascotRingBase(): Modifier = drawBehind {
-    val w = size.width; val h = size.height
-    drawCircle(Brush.radialGradient(listOf(Brand.Cyan.copy(alpha = .20f), Color.Transparent),
-        Offset(w / 2, h * .55f), w * .55f))
-    val ringTop = h * .80f; val ringH = h * .18f
-    drawOval(Brush.radialGradient(listOf(Brand.Cyan.copy(alpha = .35f), Color.Transparent),
-        Offset(w / 2, ringTop + ringH / 2), w * .45f), Offset(w * .08f, ringTop), Size(w * .84f, ringH))
-    drawOval(Brush.horizontalGradient(listOf(Brand.Cyan.copy(alpha = .15f), Brand.Cyan.copy(alpha = .75f), Brand.Blue.copy(alpha = .25f))),
-        Offset(w * .12f, ringTop + ringH * .1f), Size(w * .76f, ringH * .8f), style = Stroke(width = 1.5.dp.toPx()))
 }
 
 /**

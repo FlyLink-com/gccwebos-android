@@ -1,7 +1,6 @@
 package com.gccwebos.android.commerce
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -15,14 +14,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gccwebos.android.R
 import com.gccwebos.android.connectionDateSummary
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.accountUsagePresentation
@@ -32,12 +29,14 @@ import java.time.Instant
 
 /**
  * Reuses the verified overview; opening Mine never starts another account read.
- * Signed in: masked account identity + plan capsule + one membership-expiry line.
+ * Signed in: masked email (or the shortened account ID) + 复制 ID + plan capsule + expiry line + 续费 link,
+ * with a drawn default avatar in place of the mascot.
  * Signed out (onLogin set): 我的账户 / 未登录 / 去登录, unchanged from #35.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = false, onLogin: (() -> Unit)? = null) {
+internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = false, onLogin: (() -> Unit)? = null,
+    onRenew: (() -> Unit)? = null, copyOverride: ((String) -> Unit)? = null) {
     val signedOut = onLogin != null && !account.authenticated
     val usage by account.accountUsage.state.collectAsState()
     val verifying = account.restoring || account.foregroundCheckPending || usage.verifying
@@ -45,6 +44,8 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
     val resource = if (verified) usage.resource else null
     val display = accountUsagePresentation(resource, Instant.now(), usage.notUpdated)
     val signedIn = account.authenticated && !account.clearing
+    val identity = mineIdentityText(account.displayEmail, account.authenticatedAccountId)
+    val copyId = if (signedIn && !verifying) copyableAccountId(account.authenticatedAccountId) else null
     val content: @Composable ColumnScope.() -> Unit = {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val compact = maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.5f
@@ -54,10 +55,16 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
                         val plan = if (verifying) "—" else display.planText ?: subscriptionTitle(resource) ?: display.statusText ?: "—"
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
                             itemVerticalAlignment = Alignment.CenterVertically) {
-                            Text(account.displayEmail?.let(::maskAccountEmail) ?: "账户", fontSize = 18.sp, lineHeight = 24.sp,
+                            Text(identity.title, fontSize = 18.sp, lineHeight = 24.sp,
                                 fontWeight = FontWeight.Bold, color = Brand.Text, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("mine-account-identity"))
                             PlanCapsule(plan)
+                        }
+                        if (identity.idLine != null || copyId != null) Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            identity.idLine?.let { Text(it, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).testTag("mine-account-id")) }
+                            copyId?.let { MineCopyIdButton(it, copyOverride) }
                         }
                         val expiry = display.expiresAtText
                         val line = when {
@@ -65,14 +72,18 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
                             display.serviceExpired -> "会员已到期：${connectionDateSummary(expiry)}"
                             else -> "会员有效期至：${connectionDateSummary(expiry)}"
                         }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(line, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.testTag("mine-plan-expiry").semantics {
+                            modifier = Modifier.weight(1f, fill = false).testTag("mine-plan-expiry").semantics {
                                 contentDescription = when {
                                     verifying || expiry == null -> line
                                     display.serviceExpired -> "会员已到期 $expiry"
                                     else -> "会员有效期至 $expiry"
                                 }
                             })
+                        // Opens the existing 套餐 tab only; never a retained quote or a purchase.
+                        if (onRenew != null) MineRenewLink(!account.busy && !verifying, onRenew)
+                        }
                     } else {
                         Text(if (signedOut) "我的账户" else "账户未登录", fontSize = 20.sp, lineHeight = 26.sp,
                             fontWeight = FontWeight.Bold, modifier = Modifier.testTag("mine-welcome-title"))
@@ -83,19 +94,16 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
                     }
                 }
             }
-            val mascot: @Composable (Modifier) -> Unit = { modifier ->
-                Box(modifier.size(72.dp).mascotRingBase(), contentAlignment = Alignment.TopCenter) {
-                    Image(painterResource(R.drawable.brand_robot_welcome), contentDescription = null,
-                        modifier = Modifier.size(62.dp))
-                }
+            val avatar: @Composable (Modifier) -> Unit = { modifier ->
+                Box(modifier) { MineAvatar(if (signedIn) mineAvatarInitial(account.displayEmail) else null, enabled = signedIn) }
             }
             if (compact) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 details(Modifier.fillMaxWidth())
-                mascot(Modifier.align(Alignment.End))
+                avatar(Modifier.align(Alignment.End))
             } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 details(Modifier.weight(1f))
-                mascot(Modifier)
+                avatar(Modifier)
             }
         }
         if (signedOut) com.gccwebos.android.design.BrandButton("去登录", { onLogin?.invoke() },

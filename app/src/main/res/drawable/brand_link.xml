@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Neutral two-link chain for a non-Telegram official channel; same 1.7 stroke as the other brand icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M10,13.5 a4.5,4.5 0 0,0 6.4,0.4 l3,-3 a4.5,4.5 0 0,0 -6.4,-6.4 l-1.6,1.6" android:fillColor="@android:color/transparent" android:strokeColor="#F2F6FF" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+    <path android:pathData="M14,10.5 a4.5,4.5 0 0,0 -6.4,-0.4 l-3,3 a4.5,4.5 0 0,0 6.4,6.4 l1.6,-1.6" android:fillColor="@android:color/transparent" android:strokeColor="#F2F6FF" android:strokeWidth="1.7" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+</vector>

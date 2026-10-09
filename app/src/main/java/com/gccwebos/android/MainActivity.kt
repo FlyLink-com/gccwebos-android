@@ -432,8 +432,9 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
             if (showLogin) account.restoreAccount()
         } else if (destination == Destination.Lines) {
             // An ordinary page visit cannot invalidate an accepted connection preparation.
-            if (!account.nodeSelection.busy && !latestControl.commandPending && latestControl.phase !in
-                setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)) {
+            val connectionActive = latestControl.commandPending || latestControl.phase in
+                setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
+            if (!account.nodeSelection.busy && !connectionActive) {
                 // Navigation reads never claim or acknowledge a delivery. Those recovery
                 // transactions stay behind the existing explicit connection/import actions.
                 if (account.localSubscription.hasCapability) account.nodeSelection.refreshIfNeeded {
@@ -443,6 +444,13 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 else if (account.authenticated) account.refreshAccountUsage()
                 snapshotFlow { !account.busy && !account.nodeSelection.busy }.first { it }
                 account.nodeLatency.refresh()
+            } else if (!account.nodeSelection.busy && connectionActive &&
+                account.localSubscription.hasCapability && account.nodeSelection.snapshot.choices.isEmpty()) {
+                // Login/foreground revoked opaque handles while the tunnel stayed up. Rebuild from
+                // local material only so Nodes is not stuck on read-only rows; never download a
+                // subscription through the accepted connection.
+                account.nodeSelection.rebuildLocallyIfNeeded()
+                snapshotFlow { !account.nodeSelection.busy }.first { it }
             }
         } else if (destination == Destination.Connect || destination == Destination.Profile) {
             if (account.authenticated) account.refreshAccountUsage()

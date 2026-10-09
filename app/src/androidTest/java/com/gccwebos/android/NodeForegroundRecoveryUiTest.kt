@@ -179,7 +179,7 @@ class NodeForegroundRecoveryUiTest {
         }
     }
 
-    @Test fun foregroundRecoveryCannotRefreshThroughAnAcceptedConnectionPhase() {
+    @Test fun foregroundRecoveryRebuildsLocalHandlesWithoutSubscriptionDownloadWhileConnected() {
         launch()
         val previous = compose.runOnIdle { requireNotNull(account.nodeSelection.snapshot.selected) }
         listOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting).forEachIndexed { index, blocked ->
@@ -192,12 +192,15 @@ class NodeForegroundRecoveryUiTest {
                 account.authenticated && !account.busy && !account.foregroundCheckPending &&
                     account.authSessionGeneration > generation
             }
-            compose.waitForIdle()
+            // Local rebuild restores selectable handles; never downloads a subscription mid-connection.
+            compose.waitUntil(10_000) {
+                !account.nodeSelection.busy && account.nodeSelection.snapshot.choices.size == 2
+            }
             compose.runOnIdle {
                 assertEquals(4 + 2 * index, overviewReads.get())
-                assertEquals("An accepted connection blocks navigation config reads", 1, subscriptionReads.get())
-                assertTrue(account.nodeSelection.snapshot.choices.isEmpty())
+                assertEquals("An accepted connection blocks subscription downloads", 1, subscriptionReads.get())
                 assertFalse(account.nodeSelection.select(previous))
+                assertTrue(account.nodeSelection.select(account.nodeSelection.snapshot.choices[0].selection))
                 assertNull(account.nodeLatency.reading(previous))
                 assertTrue(powerActions.isEmpty())
             }

@@ -645,6 +645,46 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             state
         } finally { previous.close() }
     }
+    /**
+     * Rebuild opaque node-selection handles from local cached material only (no subscription HTTP).
+     * Used when authentication revoked handles while a tunnel is still up: navigation must not
+     * download through an accepted connection, but the Nodes page still needs selectable rows
+     * instead of the misleading read-only fallback.
+     */
+    fun rebuildNodeSelectionFromLocal(): Boolean = synchronized(lock) {
+        if (authority.manualStorageBlocked || authority.incompleteClear) return@synchronized false
+        val selectedSource = readManualSource()
+        if (selectedSource != null) try {
+            if (selectedSource.kind == ManualSourceKind.None) return@synchronized false
+            if (selectedSource.kind != ManualSourceKind.LegacyRemote) {
+                val bytes = selectedSource.copyBytes() ?: return@synchronized false
+                try {
+                    val next = try { manualSnapshot(bytes, selectedSource) }
+                        catch (_: UnsafeProxyConfiguration) { return@synchronized false }
+                    if (next.status != LocalSubscriptionStatus.READY) return@synchronized false
+                    observeContent(bytes, sourceBinding(selectedSource), next.nodes, next.validUntil,
+                        selectedSource.kind, selectedSource.revision)
+                    state = next
+                    return@synchronized true
+                } finally { bytes.fill(0) }
+            }
+        } finally { selectedSource.close() }
+        val url = try { capability() } catch (_: Exception) { null } ?: return@synchronized false
+        val binding = sessionBinding(url)
+        val cached = profiles.read() ?: return@synchronized false
+        try {
+            if (cached.binding != binding) return@synchronized false
+            val raw = cached.copyBytes()
+            try {
+                val next = try { describe(raw, cached.validUntil, cached.usage) }
+                    catch (_: UnsafeProxyConfiguration) { return@synchronized false }
+                if (next.status != LocalSubscriptionStatus.READY) return@synchronized false
+                observeContent(raw, binding, next.nodes, cached.validUntil)
+                state = next
+                true
+            } finally { raw.fill(0) }
+        } finally { cached.close() }
+    }
     /** Selection invalidation preserves the user's encrypted subscription and delivery receipt. */
     fun invalidateNodeSelection() = synchronized(lock) {
         revision++; invalidateSelections(); authority.selectionRequiresRefresh = true; Unit

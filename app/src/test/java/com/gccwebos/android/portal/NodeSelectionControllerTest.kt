@@ -342,4 +342,22 @@ class NodeSelectionControllerTest {
             assertEquals(1, f.reads)
         }
     }
+
+    @Test fun localRebuildAfterInvalidateRestoresChoicesWithoutDownloading() = runTest {
+        val f = Fixture(this)
+        f.controller.refresh(); runCurrent(); f.selectSecond()
+        val previous = f.selected()!!
+        assertEquals(1, f.reads)
+        f.manager.invalidateNodeSelection()
+        f.controller.sync()
+        assertTrue(f.controller.snapshot.choices.isEmpty())
+        assertFalse(f.controller.select(previous))
+        f.controller.rebuildLocallyIfNeeded(); runCurrent()
+        assertEquals(LocalSubscriptionStatus.READY, f.controller.snapshot.status)
+        assertEquals(2, f.controller.snapshot.choices.size)
+        assertEquals(1, f.reads)
+        assertFalse(f.controller.select(previous))
+        assertTrue(f.controller.select(f.controller.snapshot.choices[0].selection))
+        assertNotNull(f.selected())
+    }
 }

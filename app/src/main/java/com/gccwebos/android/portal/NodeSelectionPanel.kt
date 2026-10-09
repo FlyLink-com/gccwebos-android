@@ -218,14 +218,31 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                     if (state.select(choice.selection)) onSelected()
                                 })
                     }
-                    readOnlyNodes.filterNot { it.info }.forEachIndexed { visibleIndex, node ->
-                        if (visibleIndex > 0 || displayProxy.isNotEmpty()) {
-                            HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+                    val connectionActive = connectionControl.phase in setOf(
+                        ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
+                    if (readOnlyNodes.isNotEmpty() && connectionActive && displayProxy.isEmpty()) {
+                        // Auth/foreground revoked opaque handles while the tunnel stayed up. Avoid the
+                        // misleading "只读" rows; MainActivity rebuilds from local cache in this state.
+                        Text(
+                            if (state.busy) "正在恢复节点列表…"
+                            else (state.message ?: "已连接时节点列表正在恢复。若仍不可选，请断开后再试。"),
+                            color = Brand.Muted,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 16.dp)
+                                .testTag("nodes-connected-registry-empty"),
+                        )
+                    } else {
+                        readOnlyNodes.filterNot { it.info }.forEachIndexed { visibleIndex, node ->
+                            if (visibleIndex > 0 || displayProxy.isNotEmpty()) {
+                                HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+                            }
+                            NodeChoiceRow(node.name, node.protocol, node.supported, null,
+                                regionTag = "subscription-node-region-${node.index}",
+                                latencyTag = "subscription-node-latency-${node.index}",
+                                modifier = Modifier.testTag("subscription-node-${node.index}"), inspectionIndex = node.index)
                         }
-                        NodeChoiceRow(node.name, node.protocol, node.supported, null,
-                            regionTag = "subscription-node-region-${node.index}",
-                            latencyTag = "subscription-node-latency-${node.index}",
-                            modifier = Modifier.testTag("subscription-node-${node.index}"), inspectionIndex = node.index)
                     }
                 }
             }

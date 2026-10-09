@@ -93,6 +93,31 @@ internal class NodeSelectionController(private val manager: LocalSubscriptionMan
         message = if (accepted) null else "节点已失效，请刷新后重新选择。"
         return accepted
     }
+    /**
+     * Rebuild selectable node handles from local cache only. Used when opaque handles were
+     * revoked (login / foreground) while Connecting/Connected/Disconnecting blocks HTTP refresh.
+     */
+    fun rebuildLocallyIfNeeded() {
+        if (!allowed() || busy) return
+        if (accountGeneration != authGeneration()) accountGeneration = authGeneration()
+        if (snapshot.status == LocalSubscriptionStatus.READY && snapshot.choices.isNotEmpty()) return
+        val request = ++generation
+        val account = authGeneration()
+        busy = true; message = null; localReadOnly = true
+        task = scope.launch {
+            try {
+                withContext(ioDispatcher) { manager.rebuildNodeSelectionFromLocal() }
+                coroutineContext.ensureActive()
+                if (request != generation || account != authGeneration() || !allowed()) return@launch
+                snapshot = manager.nodeSelectionDisplaySnapshot()
+                val local = manager.snapshot()
+                onSnapshot(local.copy(status = snapshot.status))
+                if (snapshot.choices.isEmpty()) message = "连接中无法刷新节点列表，断开后可重新选择。"
+            } finally {
+                if (request == generation) { busy = false; localReadOnly = false }
+            }
+        }
+    }
     fun cancel() {
         if (localReadOnly) {
             generation++; task?.cancel(); task = null

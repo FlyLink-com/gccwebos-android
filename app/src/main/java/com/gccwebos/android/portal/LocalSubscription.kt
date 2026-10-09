@@ -1275,6 +1275,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         var index = -1
         var until: Instant? = null
         var selectionAtPreparation: ConnectionSelection? = null
+        var preparedNode: com.gccwebos.android.core.PreparedNodeLabel? = null
         try {
             mutex.withLock {
                 val snapshot = refreshLocked(expectedEpoch) { fresh, raw, freshBinding, freshEpoch ->
@@ -1286,6 +1287,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     }
                     binding = freshBinding; epoch = freshEpoch; until = fresh.validUntil
                     selectionAtPreparation = authority.selected
+                    preparedNode = authority.choices[index].let {
+                        com.gccwebos.android.core.PreparedNodeLabel(it.selection, it.name, it.protocol)
+                    }
                     rawCopy = raw.copyOf()
                 }
                 if (result == null && rawCopy == null) result = ConfigPreparation.Unavailable(when (snapshot.status) {
@@ -1328,7 +1332,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     action()
                 } }
                 leaseTransferred = true
-                result = ConfigPreparation.Ready(requireNotNull(material))
+                result = ConfigPreparation.Ready(requireNotNull(material), preparedNode)
             }
             currentCoroutineContext().ensureActive()
             return requireNotNull(result)

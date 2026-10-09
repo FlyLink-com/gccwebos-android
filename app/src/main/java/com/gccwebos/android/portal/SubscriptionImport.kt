@@ -10,7 +10,9 @@ data class ImportSnapshot(val resource: Resource, val status: ImportStatus,
     val rejection: com.gccwebos.android.vpn.SafeProxyConfig.RejectionReason? = null)
 
 /** Separate credential-free transport boundary. Caller owns and wipes returned bytes. */
-class SubscriptionRead(val bytes: ByteArray, val validUntil: java.time.Instant? = null) {
+class SubscriptionRead(val bytes: ByteArray, val validUntil: java.time.Instant? = null,
+    /** Only this download's own reported usage; null means unknown. Never account data. */
+    val usage: SubscriptionUsageReport? = null) {
     override fun toString() = "SubscriptionRead([REDACTED])"
 }
 fun interface SubscriptionSource {

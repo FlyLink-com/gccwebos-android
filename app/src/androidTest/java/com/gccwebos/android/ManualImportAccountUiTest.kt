@@ -41,6 +41,7 @@ class ManualImportAccountUiTest {
         val downloads = AtomicInteger()
         var downloadGate: CompletableDeferred<Unit>? = null
         var remoteExpiry: Instant? = now.plusSeconds(600)
+        var remoteUsage: SubscriptionUsageReport? = null
         val repository = PortalRepository(object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
                 assertEquals("/api/portal/resources/current/overview", path)
@@ -61,7 +62,7 @@ class ManualImportAccountUiTest {
                 override suspend fun download(url: Secret) = read(url).bytes
                 override suspend fun read(url: Secret): SubscriptionRead {
                     downloads.incrementAndGet(); downloadGate?.await()
-                    return SubscriptionRead(yaml(), remoteExpiry)
+                    return SubscriptionRead(yaml(), remoteExpiry, remoteUsage)
                 }
             }, sessions = sessions, manualSources = manual)
     }
@@ -132,11 +133,36 @@ class ManualImportAccountUiTest {
             assertFalse(account.authenticated); assertNull(account.accountUsage.state.value.resource)
             assertEquals(LocalSourceValidity.LocalNoServerExpiry, account.localSubscription.validity)
             assertNull(account.localSubscription.validUntil)
+            // A local file has no subscription-reported usage, so the signed-out card stays unknown.
+            assertNull(account.localSubscription.usage)
             assertEquals(0, f.reads.get()); assertEquals(0, f.downloads.get()); assertTrue(actions.isEmpty())
         }
+        compose.onNodeWithTag("account-usage-remaining").performScrollTo().assertTextEquals("暂未获取")
+        compose.onNodeWithTag("subscription-usage-source").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").performClick()
         compose.runOnIdle { assertEquals(listOf(ConnectionPowerAction.Connect), actions) }
         compose.onNodeWithText("已连接", substring = false).assertDoesNotExist()
+    }
+
+    @Test fun signedOutRemoteImportShowsOnlyItsOwnReportedUsageWithoutAccountReads() {
+        val f = Fixture(signedIn = false).apply { remoteUsage = SubscriptionUsageReport(1_073_741_824L, 2_147_483_648L, 10_737_418_240L) }
+        launch(f)
+        compose.runOnIdle {
+            account.manualImport.open()
+            account.manualImport.submit(requireNotNull(account.manualImport.begin()),
+                "https://sub.invalid/sub/a/synthetic".toByteArray(), ManualImportInputKind.Link)
+        }
+        compose.waitUntil(10_000) { !account.manualImport.busy && account.localSubscription.status == LocalSubscriptionStatus.READY }
+        compose.runOnIdle {
+            assertFalse(account.authenticated); assertNull(account.accountUsage.state.value.resource)
+            assertEquals(ManualSourceKind.ImportedRemote, account.localSubscription.sourceKind)
+            assertEquals(10_737_418_240L, requireNotNull(account.localSubscription.usage).totalBytes)
+            assertEquals(0, f.reads.get()); assertEquals(1, f.downloads.get())
+        }
+        compose.onNodeWithTag("account-usage-remaining").performScrollTo().assertTextEquals("7 GB")
+        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 3 GB")
+        compose.onNodeWithTag("account-usage-total").assertTextEquals("总量 10 GB")
+        compose.onNodeWithTag("subscription-usage-source", useUnmergedTree = true).assertExists()
     }
 
     @Test fun availableAccountCannotSupplyExpiryToAnImportedRemoteLink() {

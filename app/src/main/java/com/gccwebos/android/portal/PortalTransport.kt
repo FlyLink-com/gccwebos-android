@@ -60,11 +60,12 @@ class SubscriptionTransport(private val policy: OriginPolicy) : SubscriptionSour
     override suspend fun read(url: Secret): SubscriptionRead = receiveSubscriptionRead {
         val response = executeBytes(client, Request.Builder().url(policy.subscription(url.value))
             .header("Accept", "application/x-yaml").header("Cache-Control", "no-store").build(), 2 * 1024 * 1024)
-        decodeSubscriptionResponse(response.status, response.bytes, response.validUntil)
+        decodeSubscriptionResponse(response.status, response.bytes, response.validUntil, response.userinfo)
     }
 }
 /** Takes ownership of bytes on failure; successful caller owns the returned buffer. */
-internal fun decodeSubscriptionResponse(status: Int, bytes: ByteArray, validUntil: String?): SubscriptionRead {
+internal fun decodeSubscriptionResponse(status: Int, bytes: ByteArray, validUntil: String?,
+    userinfo: List<String> = emptyList()): SubscriptionRead {
     var transferred = false
     try {
         if (status != 200) {
@@ -81,8 +82,10 @@ internal fun decodeSubscriptionResponse(status: Int, bytes: ByteArray, validUnti
             require(it.length <= 64)
             java.time.Instant.parse(it)
         }
+        // Expiry keeps its existing contract; malformed or zero usage metadata is only "unknown".
+        val usage = SubscriptionUserinfoParser.lenientUsage(userinfo)
         transferred = true
-        return SubscriptionRead(bytes, until)
+        return SubscriptionRead(bytes, until, usage)
     } catch (failure: PortalFailure) { throw failure }
     catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.PROTOCOL) }
     finally { if (!transferred) bytes.fill(0) }
@@ -112,7 +115,8 @@ private fun isolatedClient() = OkHttpClient.Builder().cookieJar(CookieJar.NO_COO
     .followRedirects(false).followSslRedirects(false).cache(null)
     .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS)
     .callTimeout(30, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
-private class BinaryResponse(val status: Int, val bytes: ByteArray, val validUntil: String? = null) {
+private class BinaryResponse(val status: Int, val bytes: ByteArray, val validUntil: String? = null,
+    val userinfo: List<String> = emptyList()) {
     override fun toString() = "BinaryResponse(status=$status)"
 }
 private fun executeBounded(client: OkHttpClient, request: Request, limit: Int): WireResponse {
@@ -139,7 +143,8 @@ private fun executeBytes(client: OkHttpClient, request: Request, limit: Int): Bi
                 } finally { buffer.fill(0); output.wipe() }
             }
             if (bytes.size > limit) { bytes.fill(0); throw PortalFailure(PortalFailure.Reason.PROTOCOL) }
-            return BinaryResponse(response.code, bytes, response.header("X-Subscription-Valid-Until"))
+            return BinaryResponse(response.code, bytes, response.header("X-Subscription-Valid-Until"),
+                response.headers("Subscription-Userinfo"))
         }
     } catch (_: IOException) { throw PortalFailure(PortalFailure.Reason.NETWORK) }
 }

@@ -143,7 +143,8 @@ interface LibraryManualSourceStore : ManualSourceStore {
     fun saveLibrary(library: ConfigurationLibrary)
 }
 
-/** v3 embeds unchanged strict v1/v2 source records. Legacy reads never cause writes. */
+/** v3 embeds strict v1/v2/v4 source records. A bare (pre-library) envelope may be v1, v2 or v4.
+ * Legacy reads never cause writes. */
 internal object ConfigurationLibraryCodec {
     const val MAX_ENCODED_BYTES = ConfigurationLibrary.MAX_ENCODED_BYTES
     private const val MAGIC = 0x474d5331
@@ -153,7 +154,7 @@ internal object ConfigurationLibraryCodec {
         require(plain.size in 8..MAX_ENCODED_BYTES)
         val header = ByteBuffer.wrap(plain)
         require(header.int == MAGIC)
-        return header.int.also { require(it in 1..VERSION) }
+        return header.int.also { require(it in 1..VERSION || it == ManualSourceCodec.USAGE_VERSION) }
     }
     internal fun encodedSize(library: ConfigurationLibrary): Int {
         var size = 8 + 40 + 4 + 4 + (library.selectedEntryId?.length ?: 0) + 40 + 1 + 4

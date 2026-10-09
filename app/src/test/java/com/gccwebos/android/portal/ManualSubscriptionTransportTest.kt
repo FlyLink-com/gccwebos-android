@@ -151,6 +151,24 @@ class ManualSubscriptionTransportTest {
         result.bytes.fill(0)
     }
 
+    @Test fun reportedUsageAndExpiryTravelWithTheDownloadAndZeroTotalIsUnknown() = runTest {
+        val reported = SubscriptionCalls("proxies: []".toByteArray(), headers = Headers.headersOf("Subscription-Userinfo",
+            "upload=1; download=2; total=30; expire=1798761600"))
+        val result = ManualSubscriptionTransport(reported).read(Secret(EXTERNAL_URL))
+        assertEquals(SubscriptionUsageReport(1, 2, 30), result.usage)
+        assertEquals(Instant.ofEpochSecond(1798761600), result.validUntil)
+        result.bytes.fill(0)
+        val zero = SubscriptionCalls("proxies: []".toByteArray(), headers = Headers.headersOf("Subscription-Userinfo",
+            "upload=0; download=0; total=0; expire=0"))
+        val unknown = ManualSubscriptionTransport(zero).read(Secret(EXTERNAL_URL))
+        assertNull(unknown.usage); assertNull(unknown.validUntil)
+        unknown.bytes.fill(0)
+        val malformed = SubscriptionCalls("proxies: []".toByteArray(), headers = Headers.headersOf("Subscription-Userinfo", "total=bad"))
+        try { ManualSubscriptionTransport(malformed).read(Secret(EXTERNAL_URL)); fail() }
+        catch (_: ManualSubscriptionMetadataFailure) { }
+        assertTrue(malformed.closed)
+    }
+
     @Test fun unsafeInputDoesNotCreateAnyNetworkCall() = runTest {
         val fake = SubscriptionCalls(byteArrayOf(1))
         try { ManualSubscriptionTransport(fake).read(Secret("https://127.0.0.1/sub")); fail() }
@@ -261,7 +279,8 @@ private fun assertFixedFailureChain(failure: Throwable, expectedClass: Class<out
 
 private class SubscriptionCalls(private val bytes: ByteArray, private val status: Int = 200,
     private val reportedLength: Long = bytes.size.toLong(), private val finalUrl: String? = null,
-    private val delayed: Boolean = false, private val failure: IOException? = null) : Call.Factory {
+    private val delayed: Boolean = false, private val failure: IOException? = null,
+    private val headers: Headers = Headers.headersOf()) : Call.Factory {
     var request: Request? = null
     var calls = 0
     var cancelled = false
@@ -292,7 +311,7 @@ private class SubscriptionCalls(private val bytes: ByteArray, private val status
             override fun close() { closed = true; cancelledBeforeClose = cancelled; super.close() }
         }
         val response = Response.Builder().request(if (finalUrl == null) request!! else request!!.newBuilder().url(finalUrl).build())
-            .protocol(Protocol.HTTP_1_1).code(status).message("fixture").body(body).build()
+            .protocol(Protocol.HTTP_1_1).code(status).message("fixture").headers(headers).body(body).build()
         callback!!.onResponse(call, response)
     }
 }

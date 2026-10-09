@@ -40,7 +40,7 @@ PR #8 的「新 session + pendingAck 一律需要恢复」只描述当时统一�
 | --- | --- |
 | none | 显示无已发放资源；不 setup、不下载，不自动购买 |
 | reconciliation_required | 停止导入；保留旧 receipt 供恢复 |
-| 到期 / 已知剩余为 0 | 不领取或下载；不把未知用量误认为 0 |
+| 到期 / 已知剩余为 0 | 不领取或下载；不把未知用量误认为 0（订阅头 `total=0` 或全零同样视为未知，见 `third-party-subscription-import-preparation.md` 的“订阅自报流量”）|
 | available + 无本地 receipt + setupAvailable=true | 保存新 operation key 后领取、保存、ACK、下载、投影 |
 | available + 无本地 receipt + setupAvailable=false | 等待交付提示；不能从 false 区分开通中、已交付、其他租约或 escrow 问题 |
 | 同账号、同 resourceRef、已确认 URL | 可以重新下载，包括 setupAvailable=false 和重新登录后的新 session |

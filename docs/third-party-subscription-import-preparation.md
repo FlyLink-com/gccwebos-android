@@ -103,7 +103,20 @@ URL 全体按秘密处理；异常、日志、截图、UI 和测试回执不含 
 单个相关头最多 1,024 字符，userinfo 最多 16 个字段，期限限定至公元 9999 年；重复头、重复字段、非法数字与格式错误拒绝，和字段缺失分别处理。
 两个有效到期值同时存在时取更早者；明确已过期时拒绝导入/连接。`expire=0` 仅表示未提供可用期限，不推断永久有效。
 首次没有有效到期值时保存显式未报告状态，对应 `ExternalUnreported`。同一确切 URL 曾记录真实期限后，后续缺失/零值不能把它升级为无限期：保留已知期限并继续到期拦截。
-换 URL 不借用前一个来源期限；不从这些头推导官方账号身份或套餐。首期不新增未验证的流量余额计算。
+换 URL 不借用前一个来源期限；不从这些头推导官方账号身份或套餐。
+
+### 订阅自报流量（Subscription-Userinfo upload/download/total）
+
+更新：此前“首期不新增未验证的流量余额计算”的限制已由本规则取代。第三方（`ManualSubscriptionTransport`）与官方（`SubscriptionTransport`）下载共用同一个严格解析器 `SubscriptionUserinfoParser`，同时读取 `upload`、`download`、`total` 与 `expire`。
+
+- **零值即未知**：三个计数器任一缺失、`total=0`（含全零 `upload=0; download=0; total=0`）一律视为“未知”（null），不显示为“剩余 0”。只有服务器报告的 `total > 0` 且已用量超过总量时才显示真实耗尽（剩余 0 GB）。
+- **严格程度**：第三方下载对格式错误／重复头仍整体拒绝（与期限规则一致）；官方下载保持原有期限契约，用量头格式错误只视为未知，不影响导入。
+- **按配置保存**：用量（附本地观测时间 `observedAt`）只保存在对应远程配置的加密 manual-source 记录中（记录格式 v4；无用量的记录仍写 v1/v2 原字节，旧记录读取后用量为 null）。本地文件导入永远没有用量。
+- **写入时机**：仅在显式导入、显式刷新和连接/激活时的新鲜下载成功后写入；该次下载没有有效用量即写为未知。不从旧记录或其他 URL 继承；删除配置或清除全部时随记录一并清除；没有后台轮询。
+- **展示**：未登录，或当前选中的是导入配置时，连接页显示“订阅提供 · 更新于 …”标注的剩余／已用／总量；没有用量时仍显示“暂未获取”。已登录且使用账户订阅时仍以 Portal 账户数据为准。
+- **边界**：这些数值不进入 `AccountUsageController`、Portal `Resource`、套餐判断或连接准入；`toString` 均脱敏，不写日志。
+
+English summary: subscription-reported usage is parsed from the source's own `Subscription-Userinfo`, stored per saved remote configuration, shown with a "subscription-provided" label when signed out or when an imported configuration is selected, treats missing/zero totals as unknown, and never feeds account, plan or admission logic.
 
 官方账户与旧官方手工来源仍要求它们原有的有效期条件。
 所有来源仍有有限的连接准备期限、一次性 activation 和运行期已知期限检查；第三方的资源有效期可为明确的 `ExternalUnreported`。

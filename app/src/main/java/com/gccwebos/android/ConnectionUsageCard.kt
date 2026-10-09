@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.AccountUsagePresentation
 import com.gccwebos.android.design.AccountUsageState
 import com.gccwebos.android.design.Brand
+import com.gccwebos.android.design.SubscriptionUsagePresentation
 
 /** Connection-page layout only. The host still owns account verification and every explicit action. */
 @Composable
@@ -45,10 +46,13 @@ internal fun ConnectionUsageCard(
     showPrimary: Boolean,
     onPrimaryAction: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The selected configuration's own reported usage. The host decides when it replaces account values. */
+    subscriptionUsage: SubscriptionUsagePresentation? = null,
 ) {
     val refreshAllowed = authenticated && !loading && refreshEnabled
     Column(modifier.fillMaxWidth().testTag("account-usage-card")) {
-        if (!authenticated) ConnectionRemaining("暂未获取") else when (presentation.state) {
+        if (subscriptionUsage != null) ConnectionSubscriptionUsage(subscriptionUsage)
+        else if (!authenticated) ConnectionRemaining("暂未获取") else when (presentation.state) {
             AccountUsageState.Unknown -> ConnectionRemaining("暂未获取")
             AccountUsageState.NoActivePlan -> if (error != null) ConnectionRemaining("暂未获取") else
                 Text("暂无生效套餐", modifier = Modifier.testTag("account-usage-no-plan"))
@@ -75,6 +79,19 @@ internal fun ConnectionUsageCard(
                 Modifier.padding(top = 12.dp).testTag("vpn-connect"), enabled)
         }
     }
+}
+
+/** Same layout as account usage, but always labelled as subscription-provided. Primary action logic is unchanged. */
+@Composable
+private fun ConnectionSubscriptionUsage(usage: SubscriptionUsagePresentation) {
+    val display = usage.asCardPresentation()
+    ConnectionRemaining(display.remainingText)
+    ConnectionUsageAmounts(display)
+    ConnectionUsageDates(display)
+    if (display.serviceExpired) Text("已到期", color = Brand.Amber,
+        modifier = Modifier.padding(top = 10.dp).testTag("account-usage-service-expired"))
+    Text(usage.sourceText, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(top = 10.dp).testTag("subscription-usage-source"))
 }
 
 @Composable

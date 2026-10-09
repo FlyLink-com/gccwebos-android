@@ -53,7 +53,9 @@ sealed interface LocalSourceValidity {
 data class LocalSubscriptionSnapshot(val status: LocalSubscriptionStatus, val hasProfile: Boolean = false,
     val hasCapability: Boolean = false, val nodes: List<SafeProxyConfig.NodeSummary> = emptyList(), val validUntil: Instant? = null,
     val sourceKind: ManualSourceKind = ManualSourceKind.LegacyRemote,
-    val validity: LocalSourceValidity = LocalSourceValidity.RemoteExpiry(validUntil))
+    val validity: LocalSourceValidity = LocalSourceValidity.RemoteExpiry(validUntil),
+    /** Display-only usage reported by the selected remote source's own last download; never admission or account data. */
+    val usage: SubscriptionUsage? = null)
 /** Credential-free, process-local UI selection; never connection admission or a persisted ID. */
 data class NodeSelectionSnapshot(val status: LocalSubscriptionStatus,
     val choices: List<ConnectionChoice> = emptyList(), val selected: ConnectionSelection? = null,
@@ -329,7 +331,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     val raw = downloaded?.bytes ?: requireNotNull(old.copyBytes())
                     try {
                         val until = downloaded?.validUntil ?: old.validUntil
-                        ManualSourceRecord(kind = old.kind, bytes = raw, url = old.url, validUntil = until).use { fresh ->
+                        // Usage is only ever this download's own report; a download without it is unknown.
+                        val usage = downloaded?.usage?.let { SubscriptionUsage.observed(it, now()) }
+                        ManualSourceRecord(kind = old.kind, bytes = raw, url = old.url, validUntil = until, usage = usage).use { fresh ->
                             val staged = manualSnapshot(raw, fresh)
                             if (staged.status != LocalSubscriptionStatus.READY) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_EXPIRED)
                             commitSource(fresh, staged, ticket, commitFence) { current ->
@@ -422,7 +426,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     private fun manualSnapshot(raw: ByteArray, record: ManualSourceRecord): LocalSubscriptionSnapshot {
         val parsed = describe(raw, record.validUntil)
-        return parsed.copy(sourceKind = record.kind, validity = sourceValidity(record.kind, record.validUntil))
+        return parsed.copy(sourceKind = record.kind, validity = sourceValidity(record.kind, record.validUntil), usage = record.usage)
     }
     private fun sourceValidity(kind: ManualSourceKind, until: Instant?): LocalSourceValidity = when (kind) {
         ManualSourceKind.ImportedLocal -> LocalSourceValidity.LocalNoServerExpiry
@@ -566,8 +570,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     val until = result.validUntil ?: known
                     if (until == null && kind == ManualSourceKind.ImportedRemote) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE)
                     if (until != null && until <= now()) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_EXPIRED)
+                    // Usage is never carried over from an older record or URL: only this download's own report.
                     staged = ManualSourceRecord(kind = kind, bytes = result.bytes, url = url,
-                        validUntil = until)
+                        validUntil = until, usage = result.usage?.let { SubscriptionUsage.observed(it, now()) })
                     next = manualSnapshot(result.bytes, requireNotNull(staged))
                 } finally { result.bytes.fill(0) }
             } else {
@@ -1078,7 +1083,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 if (selectedSource.kind in setOf(ManualSourceKind.ImportedRemote, ManualSourceKind.ExternalRemote)) {
                     val bytes = selectedSource.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
                     try { ManualSourceRecord(selectedSource.revision, selectedSource.kind, bytes, selectedSource.url,
-                        selectedSource.validUntil, kind).use(::writeManualSource) } finally { bytes.fill(0) }
+                        selectedSource.validUntil, kind, usage = selectedSource.usage).use(::writeManualSource) } finally { bytes.fill(0) }
                 }
                 return
             }
@@ -1171,7 +1176,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             val parsed = try { manualSnapshot(bytes, record) } catch (_: UnsafeProxyConfiguration) {
                 LocalSubscriptionSnapshot(LocalSubscriptionStatus.UNSUPPORTED, hasProfile = true, hasCapability = true,
                     validUntil = record.validUntil, sourceKind = record.kind,
-                    validity = sourceValidity(record.kind, record.validUntil))
+                    validity = sourceValidity(record.kind, record.validUntil), usage = record.usage)
             }
             val blocked = authority.selectionStatus?.takeIf { it != LocalSubscriptionStatus.READY }
             state = (blocked ?: record.observedStatus)?.let { parsed.copy(status = it) } ?: parsed
@@ -1199,7 +1204,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             currentCoroutineContext().ensureActive()
             val until = if (downloaded != null) downloaded.validUntil ?: record.validUntil else null
             if (record.kind == ManualSourceKind.ImportedRemote && until == null) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE)
-            val fresh = ManualSourceRecord(record.revision, record.kind, bytes, record.url, until)
+            // A successful download replaces usage with its own report (or unknown); local files never carry usage.
+            val usage = downloaded?.usage?.let { SubscriptionUsage.observed(it, now()) }
+            val fresh = ManualSourceRecord(record.revision, record.kind, bytes, record.url, until, usage = usage)
             try {
                 val next = manualSnapshot(bytes, fresh)
                 return synchronized(lock) {

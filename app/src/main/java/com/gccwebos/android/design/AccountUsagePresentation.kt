@@ -29,6 +29,8 @@ internal data class AccountUsagePresentation(
     val collectionText: String? = null,
     val updatedAtText: String? = null,
     val refreshText: String? = null,
+    /** Display-only expiry instant for the card's expiring-soon emphasis; the text above stays authoritative. */
+    val expiresAt: Instant? = null,
 )
 
 /** Pure mapping of a whole, owner-validated snapshot; no refresh or other side effects. */
@@ -86,6 +88,7 @@ internal fun accountUsagePresentation(
                 // This is the server's sample timestamp, independent of now or refresh success.
                 updatedAtText = usage.updatedAt?.let { accountUsageTime(it, zone) },
                 refreshText = refreshText,
+                expiresAt = resource.validUntil,
             )
         }
     }

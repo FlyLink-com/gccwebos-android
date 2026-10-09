@@ -115,6 +115,22 @@ class ConnectionUsageCardUiTest {
         assertEquals(0, fixture.primaryActions); assertEquals(0, fixture.refreshes)
     }
 
+    @Test fun odometerRollKeepsOneSemanticValueAndNeverReadsTheOutgoingCopy() {
+        val fixture = Fixture()
+        show(fixture)
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle { fixture.presentation = fixture.presentation.copy(remainingText = "46.5 GB", usedText = "3.5 GB") }
+        compose.mainClock.advanceTimeBy(100) // mid-roll
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("46.5 GB")
+        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 3.5 GB")
+        compose.onAllNodesWithText("47 GB", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("已用 3 GB").assertCountEquals(0)
+        compose.onNodeWithTag("account-usage-progress").assertExists()
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("46.5 GB")
+    }
+
     @Test fun signedOutWithoutSubscriptionUsageStillShowsUnknown() {
         val fixture = Fixture().apply { authenticated = false }
         show(fixture)

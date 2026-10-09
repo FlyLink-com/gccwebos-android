@@ -88,10 +88,15 @@ internal fun BrandCard(modifier: Modifier, content: @Composable ColumnScope.() -
 
 @Composable
 internal fun BrandButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier,
-                         enabled: Boolean = true) {
+                         enabled: Boolean = true, haptic: UiHaptic? = null, pressFeedback: Boolean = haptic != null) {
     val shape = RoundedCornerShape(14.dp)
-    Button(onClick, enabled = enabled,
-        modifier = modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape)
+    // Opt-in press scale/alpha and an opt-in light tick on the user's tap; default callers are unchanged.
+    val press = if (pressFeedback) rememberPressFeedback(enabled) else null
+    val tick = rememberTapHaptic()
+    Button(if (haptic == null) onClick else ({ tick(haptic); onClick() }), enabled = enabled,
+        interactionSource = press?.interactionSource,
+        modifier = modifier.then(if (press != null) Modifier.pressFeedback(press) else Modifier)
+            .fillMaxWidth().heightIn(min = 48.dp).clip(shape)
             .background(if (enabled) Brush.horizontalGradient(listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd))
                 else Brush.horizontalGradient(listOf(Brand.Disabled, Brand.Disabled))),
         shape = shape,

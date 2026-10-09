@@ -129,7 +129,10 @@ class BrandUiTest {
                     connectionControlState = ConnectionControlState(phase = ConnectionPhase.Unavailable))
             }
         }
-        if (!signedIn) compose.onNodeWithTag("nav-Profile").performClick()
+        if (!signedIn) {
+            compose.onNodeWithTag("nav-Profile").performClick()
+            compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
+        }
         return controller
     }
     private fun awaitReadOnlyConfiguration(state: AccountController) {

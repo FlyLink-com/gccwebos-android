@@ -108,6 +108,7 @@ class CommerceEligibilityUiTest {
 
     private fun submitLogin() {
         compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
         compose.waitUntil(5000) { ::account.isInitialized && account.challenge != null && !account.challengeLoading && !account.busy }
         compose.onNodeWithTag("login-account").performTextReplacement("eligibility_$owner@example.invalid")
         compose.onNodeWithTag("login-password").performTextReplacement("synthetic-only")
@@ -204,7 +205,7 @@ class CommerceEligibilityUiTest {
         launch(true); openWhileResourcePending(CommerceMode.Mine)
         compose.runOnIdle { resourceReply.complete(WireResponse(401, "")) }
         compose.waitUntil(5000) { !account.authenticated && !account.busy }
-        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("mine-signed-out").assertExists()
         compose.runOnIdle { assertTrue(commerceReads.isEmpty()) }
     }
 
@@ -212,7 +213,9 @@ class CommerceEligibilityUiTest {
         launch(); openWhileResourcePending(CommerceMode.Wallet)
         compose.runOnIdle { account.cancelAuthentication() }
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("login-screen").assertExists()
+        // Clearing may still hold the form; either signed-out surface is acceptable, neither reads commerce.
+        compose.waitUntil(5000) { listOf("login-screen", "mine-signed-out").any {
+            compose.onAllNodesWithTag(it).fetchSemanticsNodes().isNotEmpty() } }
         compose.runOnIdle {
             assertFalse(account.authenticated); assertTrue(account.clearing); assertTrue(commerceReads.isEmpty())
             resourceReply.complete(noResource)

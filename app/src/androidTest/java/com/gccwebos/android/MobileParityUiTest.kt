@@ -106,7 +106,7 @@ class MobileParityUiTest {
         compose.waitUntil(10_000) { !state.busy }
         compose.onNodeWithTag("page-Connect").assertExists()
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("mine-signed-out").assertExists()
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.runOnIdle { assertNull(saved.read()); assertFalse(state.authenticated) }
     }
@@ -178,6 +178,7 @@ class MobileParityUiTest {
         }
         // Compact form admission owns the challenge; a preseeded question is intentionally invalidated.
         compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
         compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
         compose.runOnIdle { state.answer = "3"; state.login() }; compose.waitUntil(10_000) { started.isCompleted }
         compose.runOnIdle { state.onForeground(); assertTrue(state.foregroundCheckPending) }
@@ -220,6 +221,7 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
         compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
         compose.runOnIdle { state.answer = "3"; state.login() }
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
@@ -235,7 +237,7 @@ class MobileParityUiTest {
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("page-Connect").assertExists()
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("login-screen").assertExists()
+        compose.onNodeWithTag("mine-signed-out").assertExists()
         compose.runOnIdle {
             assertNull(saved.read())
             assertEquals(listOf("/api/portal/resources/current/overview"), authenticatedRequests)
@@ -301,6 +303,7 @@ class MobileParityUiTest {
             assertNull(saved.read()); assertTrue(calls.isEmpty())
         }
         compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
         // The signed-out compact form intentionally omits reset. Reset belongs to the
         // authenticated account panel, so reach it through a fresh offline login.
         compose.onNodeWithTag("account-reset").assertDoesNotExist()

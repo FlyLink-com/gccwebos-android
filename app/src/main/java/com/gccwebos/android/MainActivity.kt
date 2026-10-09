@@ -199,6 +199,20 @@ internal fun shouldCancelLoginOnBack(account: AccountController): Boolean =
     !account.authenticated && !account.restoring && !account.foregroundCheckPending &&
         !account.restorationPending && (account.factorReference != null || account.busy)
 
+/**
+ * Signed out, 「我的」 shows the ordinary Mine layout. The login form appears only after an explicit
+ * request (去登录 or another page's login entry) or while sign-in/restore work is already in flight.
+ */
+internal fun showsSignedOutMine(authenticated: Boolean, retainingCommerceSession: Boolean, loginRequested: Boolean,
+    restoring: Boolean, foregroundCheckPending: Boolean, restorationPending: Boolean, factorPending: Boolean,
+    busy: Boolean): Boolean =
+    !authenticated && !retainingCommerceSession && !loginRequested && !restoring && !foregroundCheckPending &&
+        !restorationPending && !factorPending && !busy
+
+internal fun showsSignedOutMine(account: AccountController, loginRequested: Boolean): Boolean =
+    showsSignedOutMine(account.authenticated, account.retainingCommerceSession, loginRequested, account.restoring,
+        account.foregroundCheckPending, account.restorationPending, account.factorReference != null, account.busy)
+
 @Composable
 internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommerce: Boolean = true,
     commerceOverride: com.gccwebos.android.commerce.CommerceController? = null,
@@ -263,6 +277,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     }
     var selectedName by rememberSaveable { mutableStateOf(Destination.Connect.name) }
     var startRegistration by rememberSaveable { mutableStateOf(false) }
+    // Presentation only: whether the signed-out 我的 tab shows the login form instead of the Mine layout.
+    var loginRequested by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(account, account.authenticated) { if (account.authenticated) loginRequested = false }
     var plansVisit by remember { mutableStateOf(0) }
     var navigationRequest by remember { mutableStateOf(0) }
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
@@ -272,13 +289,17 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     }
     BackHandler(enabled = selected != Destination.Connect) {
         if (selected == Destination.Profile && shouldCancelLoginOnBack(account)) account.cancelAuthentication()
+        else if (selected == Destination.Profile && loginRequested && !account.authenticated) {
+            loginRequested = false; startRegistration = false
+        }
         else { selectedName = Destination.Connect.name; navigationRequest++ }
     }
     GccTheme(materialMode = glassMode) {
         Surface(Modifier.fillMaxSize(), color = Brand.Background) {
             // One continuous backdrop also remains visible behind the floating navigation bar.
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                val loginPage = selected == Destination.Profile && !account.authenticated && !account.retainingCommerceSession
+                val signedOutMine = selected == Destination.Profile && showsSignedOutMine(account, loginRequested || startRegistration)
+                val loginPage = selected == Destination.Profile && !account.authenticated && !account.retainingCommerceSession && !signedOutMine
                 val backdropModifier = if (loginPage) Modifier.fillMaxSize() else Modifier.widthIn(max = 680.dp).fillMaxSize()
                 BrandBackdrop(backdropModifier, loginPage = loginPage)
                 CompositionLocalProvider(LocalCatalogPurchaseDock provides catalogDock) {
@@ -305,7 +326,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                                         .background(if (chosen) Brand.Cyan.copy(alpha = .15f) else Color.Transparent)
                                         .testTag("nav-${destination.name}")
                                         .selectable(selected = chosen, onClick = {
-                                            if (destination == Destination.Profile) startRegistration = false
+                                            if (destination == Destination.Profile) { startRegistration = false; loginRequested = false }
                                             if (destination == Destination.Plans) plansVisit++
                                             navigationRequest++
                                             selectedName = destination.name
@@ -325,11 +346,12 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                     // Scaffold measures the entire bar, its gap and system inset for content clearance.
                     key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
                         commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
-                        openAccount = { startRegistration = false; navigationRequest++; selectedName = Destination.Profile.name },
+                        openAccount = { startRegistration = false; loginRequested = true; navigationRequest++; selectedName = Destination.Profile.name },
                         openPlans = { plansVisit++; navigationRequest++; selectedName = Destination.Plans.name },
                         openConnect = { navigationRequest++; selectedName = Destination.Connect.name },
                         openNodes = { navigationRequest++; selectedName = Destination.Lines.name },
-                        openRegistration = { startRegistration = true; navigationRequest++; selectedName = Destination.Profile.name },
+                        openRegistration = { startRegistration = true; loginRequested = true; navigationRequest++; selectedName = Destination.Profile.name },
+                        showLogin = !signedOutMine, requestLogin = { loginRequested = true },
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
                         loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
                         plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages,
@@ -368,7 +390,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   commerceRecoveryOverride: com.gccwebos.android.commerce.CommerceRecovery?, paymentOpenerOverride: ((String) -> Unit)?,
                   connectionControlState: ConnectionControlState, onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)?,
                   openAccount: () -> Unit, openPlans: () -> Unit, openConnect: () -> Unit, openNodes: () -> Unit,
-                  openRegistration: () -> Unit, startRegistration: Boolean,
+                  openRegistration: () -> Unit, showLogin: Boolean, requestLogin: () -> Unit, startRegistration: Boolean,
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
                   registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
                   autoRefreshPages: Boolean,
@@ -380,12 +402,14 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
     // Verified authentication revokes old opaque node handles. A mounted Nodes page must
     // rebuild them with a fresh read; other pages do not gain another navigation refresh.
     val nodesOwnerGeneration = account.authSessionGeneration.takeIf { destination == Destination.Lines }
-    LaunchedEffect(account, destination, navigationRequest, autoRefreshPages, nodesOwnerGeneration) {
+    // The signed-out Mine layout makes no account read; the saved-session check runs once the login form is shown.
+    val profileLoginForm = destination == Destination.Profile && showLogin
+    LaunchedEffect(account, destination, navigationRequest, autoRefreshPages, nodesOwnerGeneration, profileLoginForm) {
         if (!autoRefreshPages || (navigationRequest == 0 && destination != Destination.Lines)) return@LaunchedEffect
         snapshotFlow { !account.busy && !account.restoring && !account.foregroundCheckPending && !account.clearing &&
             !account.manualImport.busy && !account.configurationLibrary.busy }.first { it }
         if (destination == Destination.Profile && !account.authenticated && !startRegistration) {
-            account.restoreAccount()
+            if (showLogin) account.restoreAccount()
         } else if (destination == Destination.Lines) {
             // An ordinary page visit cannot invalidate an accepted connection preparation.
             if (!account.nodeSelection.busy && !latestControl.commandPending && latestControl.phase !in
@@ -405,7 +429,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
         }
     }
     if (destination == Destination.Profile) {
-        if (!account.authenticated && !account.retainingCommerceSession) {
+        if (!account.authenticated && !account.retainingCommerceSession && showLogin) {
             LoginScreen(account, registrationOpener, loginStartupReady, registrationOverride, padding, startRegistration)
             return
         }
@@ -470,7 +494,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 Destination.Profile -> {
                     com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans,
                         recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride,
-                        refreshRequest = navigationRequest)
+                        refreshRequest = navigationRequest, onLogin = requestLogin)
                 }
             }
             if (!compact) Text(stringResource(R.string.build_stage), color = Brand.Muted,

@@ -756,7 +756,13 @@ private fun HistoryState(size: Int?, busy: Boolean, label: String = "订单") {
 internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, stateOverride: CommerceController? = null,
     onReturnToPlans: (() -> Unit)? = null, telegramOpener: ((String) -> Unit)? = null,
     referralOverride: ReferralController? = null, copyOverride: ((String) -> Unit)? = null,
-    recoveryOverride: CommerceRecovery? = null, paymentOpener: ((String) -> Unit)? = null, refreshRequest: Int = 0) {
+    recoveryOverride: CommerceRecovery? = null, paymentOpener: ((String) -> Unit)? = null, refreshRequest: Int = 0,
+    onLogin: (() -> Unit)? = null) {
+    if (onLogin != null && !account.authenticated && !account.retainingCommerceSession) {
+        // Signed out: no commerce controller exists, so no wallet, ledger or order read can start.
+        MineSignedOutPanel(account, onLogin, autoLoad, telegramOpener, refreshRequest)
+        return
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sessionOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
@@ -842,6 +848,70 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         if (account.authenticated) {
             HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
             MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, onClick = account::logout)
+        }
+        }
+    }
+}
+
+/** Same layout as the signed-in Mine page; account data is replaced by login prompts and wallet actions are inert. */
+@Composable
+private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, autoLoad: Boolean,
+    telegramOpener: ((String) -> Unit)?, refreshRequest: Int) {
+    val context = LocalContext.current
+    var about by remember { mutableStateOf(false) }
+    var telegramUnavailable by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = about) { about = false }
+    if (about) {
+        TextButton(onClick = { about = false }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
+        BrandCard(Modifier.testTag("mine-about")) {
+            Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            com.gccwebos.android.update.UpdatePanel(autoCheck = autoLoad, refreshRequest = refreshRequest)
+        }
+        return
+    }
+    val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
+    BrandCard(Modifier.testTag("mine-surface")) {
+        Column(Modifier.fillMaxWidth().testTag("mine-signed-out"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        MineWelcomeCard(account, embedded = true, onLogin = onLogin)
+        HorizontalDivider(color = Brand.RowDivider)
+        Column(Modifier.fillMaxWidth().testTag("wallet-card"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("可用余额", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f))
+                androidx.compose.foundation.Image(painterResource(com.gccwebos.android.R.drawable.brand_wallet_coin),
+                    contentDescription = null, modifier = Modifier.size(32.dp))
+            }
+            Text("登录查看你的余额", style = MaterialTheme.typography.titleMedium, color = Brand.Muted,
+                modifier = Modifier.fillMaxWidth().testTag("wallet-balance-signed-out"))
+            // Shown for layout parity only: disabled, so they expose disabled semantics and accept no click.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BrandButton("钱包充值", {}, enabled = false,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("mine-recharge"))
+                OutlinedButton(onClick = {}, enabled = false, shape = androidx.compose.foundation.shape.RoundedCornerShape(17.dp),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("mine-ledger")) { Text("账单明细") }
+            }
+        }
+        HorizontalDivider(color = Brand.RowDivider)
+        Column(Modifier.testTag("mine-menu")) {
+            MineMenuRow("我的订单", "mine-history", idle, subtitle = "商品订单与充值记录", onClick = onLogin)
+            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+            MineMenuRow("我的钱包", "mine-wallet", idle, onClick = onLogin)
+            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+            MineMenuRow("账户与安全", "mine-security", idle, onClick = onLogin)
+        }
+        HorizontalDivider(color = Brand.RowDivider)
+        MineMenuRow("分享一份好连接", "mine-referral", idle, subtitle = "邀请好友 · 查看推荐与奖励", onClick = onLogin)
+        HorizontalDivider(color = Brand.RowDivider)
+        Column(Modifier.testTag("mine-functions")) {
+            MineMenuRow("关于与更新", "mine-more") { about = true }
+            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+            MineMenuRow("官方频道", "mine-telegram", subtitle = "@flylinevpn") {
+                telegramUnavailable = false
+                try { (telegramOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) })("https://t.me/flylinevpn") }
+                catch (_: Exception) { telegramUnavailable = true }
+            }
+            if (telegramUnavailable) SupportingText("暂时无法打开 Telegram 频道，请稍后重试。")
         }
         }
     }

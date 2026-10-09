@@ -154,7 +154,7 @@ class SafeProxyRejectionReasonTest {
     }
 
     @Test fun validProjectionKeepsOwnedRuleAndProtocolDefaultsUnchanged() {
-        val expected = JSONObject("""{"schemaVersion":1,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"192.0.2.10","port":18443,"cipher":"aes-128-gcm","password":"synthetic-only","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}""")
+        val expected = JSONObject("""{"schemaVersion":2,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"192.0.2.10","port":18443,"cipher":"aes-128-gcm","password":"synthetic-only","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"],"routingMode":"global"}""")
         val actual = JSONObject(String(SafeProxyConfig.project(ss.toByteArray(), 0), Charsets.UTF_8))
         assertTrue("Synthetic projection changed", structure(actual) == structure(expected))
         assertTrue(SafeProxyConfig.inspect(ss.toByteArray()).single().supported)

@@ -10,7 +10,7 @@ import kotlinx.coroutines.CancellationException
 /** One explicit connection intent; random choice never authorizes cached material. */
 class OneClickConfigGateway(private val manager: LocalSubscriptionManager,
     private val files: PreparedConfigStore,
-    private val addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer,
+    private val addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer(),
     private val chooseUnselected: (List<ConnectionChoice>) -> ConnectionChoice? = { choices -> choices.filterNot { it.info }.randomOrNull() }) : LocalConfigGateway {
     override suspend fun prepare(intent: SelectionIntent): ConfigPreparation {
         if (intent is SelectionIntent.Selected) return manager.prepare(intent, files, addressPreparer)

@@ -32,7 +32,7 @@ object SafeProxyConfig {
         Endpoint, EndpointHostname, Port, ProtocolOptions, Selection
     }
     const val MAX_BYTES = 64 * 1024
-    const val SCHEMA_VERSION = 1
+    const val SCHEMA_VERSION = 2
     private val settings = LoadSettings.builder().setAllowDuplicateKeys(false)
         .setAllowRecursiveKeys(false).setMaxAliasesForCollections(0)
         .setCodePointLimit(MAX_BYTES).setUseMarks(false).setSchema(JsonSchema())
@@ -101,10 +101,11 @@ object SafeProxyConfig {
         }
     }
     /** Only the selected endpoint is replaced; this validates the address, not its resolution or lease. */
-    fun projectResolved(yaml: ByteArray, selectedIndex: Int, ipv4: String): ByteArray = classified(RejectionReason.InputSyntax) {
+    fun projectResolved(yaml: ByteArray, selectedIndex: Int, ipv4: String,
+        routingMode: RoutingMode = RoutingMode.Global): ByteArray = classified(RejectionReason.InputSyntax) {
         val proxy = selected(preparation(yaml).proxies, selectedIndex)
         this.ipv4(ipv4)
-        projection(node(proxy, allowHostname = true).put("server", ipv4))
+        projection(node(proxy, allowHostname = true).put("server", ipv4), routingMode)
     }
     /** Memory-only node identities, index-aligned with the proxies. A key is a SHA-256 over the display
      * name and the normalized engine DTO, so key order, whitespace and other nodes never change it.
@@ -132,12 +133,13 @@ object SafeProxyConfig {
         }
     } catch (failure: UnsafeProxyConfiguration) { throw failure }
       catch (_: Exception) { throw UnsafeProxyConfiguration() }
-    fun project(yaml: ByteArray, selectedIndex: Int): ByteArray = try {
+    fun project(yaml: ByteArray, selectedIndex: Int,
+        routingMode: RoutingMode = RoutingMode.Global): ByteArray = try {
         val proxies = input(yaml)
         classified(RejectionReason.Selection) { require(selectedIndex in proxies.indices) }
         // Validate ALL nodes. An unsupported mixed node must never disappear silently.
         val safe = proxies.map(::node)
-        projection(safe[selectedIndex])
+        projection(safe[selectedIndex], routingMode)
     } catch (failure: UnsafeProxyConfiguration) { throw failure }
       catch (_: Exception) { throw UnsafeProxyConfiguration() }
     private class Preparation(val proxies: List<Map<*, *>>, val summaries: List<NodeSummary>)
@@ -163,9 +165,10 @@ object SafeProxyConfig {
         classified(RejectionReason.Protocol) { require(protocol.matches(Regex("[a-z0-9-]{1,24}"))) }
         return NodeSummary(index, name, protocol, true, isInfoNodeName(name))
     }
-    private fun projection(proxy: JSONObject): ByteArray =
+    private fun projection(proxy: JSONObject, routingMode: RoutingMode = RoutingMode.Global): ByteArray =
         JSONObject().put("schemaVersion", SCHEMA_VERSION).put("proxies", JSONArray().put(proxy))
             .put("rules", JSONArray().put("MATCH,GCC_SELECTED_PROXY"))
+            .put("routingMode", routingMode.wire)
             .toString().toByteArray(Charsets.UTF_8).also { require(it.size <= MAX_BYTES) }
     private fun input(yaml: ByteArray): List<Map<*, *>> {
         require(yaml.size in 1..MAX_BYTES)

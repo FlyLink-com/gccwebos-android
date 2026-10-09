@@ -1,6 +1,8 @@
 package com.gccwebos.android.portal
 
 import com.gccwebos.android.core.ConnectionTransportLease
+import com.gccwebos.android.vpn.RoutingMode
+import com.gccwebos.android.vpn.RoutingModeSource
 import com.gccwebos.android.vpn.SafeProxyConfig
 import java.io.Closeable
 
@@ -16,6 +18,9 @@ fun interface ConfigAddressPreparer {
 }
 
 /** Retains the literal-only contract when address preparation is disabled. */
-object LiteralConfigAddressPreparer : ConfigAddressPreparer {
-    override suspend fun prepare(raw: ByteArray, index: Int) = PreparedAddressConfig(SafeProxyConfig.project(raw, index))
+class LiteralConfigAddressPreparer(
+    private val routingModes: RoutingModeSource = RoutingModeSource { RoutingMode.Global },
+) : ConfigAddressPreparer {
+    override suspend fun prepare(raw: ByteArray, index: Int) =
+        PreparedAddressConfig(SafeProxyConfig.project(raw, index, routingModes.current()))
 }

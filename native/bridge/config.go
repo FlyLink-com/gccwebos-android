@@ -55,6 +55,7 @@ type inputConfig struct {
 	SchemaVersion int          `json:"schemaVersion"`
 	Proxies       []inputProxy `json:"proxies"`
 	Rules         []string     `json:"rules"`
+	RoutingMode   string       `json:"routingMode,omitempty"`
 }
 
 var errConfig = errors.New("CONFIG_REJECTED")
@@ -82,9 +83,14 @@ func parseInput(data []byte) (inputConfig, error) {
 	}
 	// encoding/json matches struct fields case-insensitively. Inspect exact key
 	// spellings separately; DisallowUnknownFields alone does not close that gap.
-	root, err := objectFields(data, "schemaVersion proxies rules")
-	if err != nil || len(root) != 3 {
+	root, err := objectFields(data, "schemaVersion proxies rules routingMode")
+	if err != nil || len(root) < 3 || len(root) > 4 {
 		return cfg, errConfig
+	}
+	for _, key := range []string{"schemaVersion", "proxies", "rules"} {
+		if _, ok := root[key]; !ok {
+			return cfg, errConfig
+		}
 	}
 	var proxies []json.RawMessage
 	if json.Unmarshal(root["proxies"], &proxies) != nil || len(proxies) != 1 {
@@ -179,11 +185,19 @@ func containsWord(words, value string) bool {
 }
 
 func validateInput(cfg inputConfig) error {
-	if cfg.SchemaVersion != 1 || len(cfg.Proxies) != 1 || len(cfg.Rules) != 1 || cfg.Rules[0] != "MATCH,GCC_SELECTED_PROXY" {
+	if cfg.SchemaVersion != 2 || len(cfg.Proxies) != 1 || len(cfg.Rules) != 1 || cfg.Rules[0] != "MATCH,GCC_SELECTED_PROXY" {
 		return errConfig
 	}
 	_, err := safeProxyMap(cfg.Proxies[0])
 	return err
+}
+
+// Unknown or empty routingMode fails closed to global; only exact "rule" enables LAN DIRECT.
+func effectiveRoutingMode(cfg inputConfig) string {
+	if strings.EqualFold(strings.TrimSpace(cfg.RoutingMode), "rule") {
+		return "rule"
+	}
+	return "global"
 }
 
 // safeProxyMap creates a new map of only this contract's validated fields. It is

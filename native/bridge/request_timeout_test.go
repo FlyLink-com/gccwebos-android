@@ -33,7 +33,7 @@ func TestNativeRequestTimeoutRoundTrip(t *testing.T) {
 				t.Fatal("bounded TUIC compatibility value rejected")
 			}
 			out, err := safeProxyMap(in.Proxies[0])
-			if err != nil || out["request-timeout"] != value || in.SchemaVersion != 1 {
+			if err != nil || out["request-timeout"] != value || in.SchemaVersion != 2 {
 				t.Fatal("explicit compatibility integer or schema changed")
 			}
 			encoded, err := json.Marshal(in.Proxies[0])

@@ -78,7 +78,7 @@ keys and use on SS, VLESS or Hysteria2 remain rejected.
 Parsing support alone does not prove endpoint interoperability. Example:
 
 ```json
-{"schemaVersion":1,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}
+{"schemaVersion":2,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"],"routingMode":"global"}
 ```
 
 The native layer constructs its own full config. All controller/inbound socket

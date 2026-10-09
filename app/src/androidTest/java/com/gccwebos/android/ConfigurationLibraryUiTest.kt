@@ -39,6 +39,8 @@ class ConfigurationLibraryUiTest {
     private val replacements = mutableListOf<ConfigurationHandle>()
     private val removals = mutableListOf<ConfigurationHandle>()
     private var imports = 0
+    private var namingEntryId by mutableStateOf<String?>(null)
+    private var namingDone = 0
     private var measurements = 0
     private var activeDisposals = 0
 
@@ -53,6 +55,7 @@ class ConfigurationLibraryUiTest {
                             onMeasure = { measurements++ }, onImport = { imports++ },
                             onActivate = { activations += it }, onRename = { handle, name -> renames += handle to name },
                             onRemove = { removals += it }, onReplace = { replacements += it },
+                            namingEntryId = namingEntryId, onNamingDone = { namingDone++; namingEntryId = null },
                             activeContent = { item, menu ->
                                 DisposableEffect(Unit) { onDispose { activeDisposals++ } }
                                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("library-active-fixture")) {
@@ -210,5 +213,53 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("configuration-activate-2").performScrollTo().assertIsDisplayed()
             .assertHeightIsAtLeast(48.dp).performClick()
         compose.runOnIdle { assertSame(second, activations.single()) }
+    }
+
+    @Test fun renameToAnotherSavedNameShowsTheDuplicateMessageAndBlocksSaving() {
+        launch()
+        // Item 2 already shares "合成配置" with item 1 (data written before the rule existed).
+        menu(2, "rename")
+        compose.onNodeWithTag("configuration-name-duplicate").assertTextEquals("已有同名订阅，请重新命名你的订阅")
+        compose.onNodeWithTag("configuration-dialog-confirm").assertIsNotEnabled()
+        compose.onNodeWithTag("configuration-name-input").performTextReplacement("  账户订阅 ")
+        compose.onNodeWithTag("configuration-dialog-confirm").assertIsNotEnabled()
+        compose.onNodeWithTag("configuration-name-input").performTextReplacement("唯一名称")
+        compose.onNodeWithTag("configuration-name-duplicate").assertDoesNotExist()
+        compose.onNodeWithTag("configuration-dialog-confirm").assertIsEnabled().performClick()
+        compose.runOnIdle { assertSame(second, renames.single().first); assertEquals("唯一名称", renames.single().second) }
+    }
+
+    @Test fun aNewlyImportedEntryAsksForANameThatSurvivesARefreshAndRejectsDuplicates() {
+        snapshot = ConfigurationLibrarySnapshot(listOf(
+            ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
+            ConfigurationItem(first, "Kitty", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, false),
+            ConfigurationItem(second, "配置 3", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, true)))
+        namingEntryId = "synthetic-second"
+        launch()
+        compose.onNodeWithText("为订阅命名").assertExists()
+        compose.onNodeWithTag("configuration-name-input").assertTextContains("配置 3")
+        compose.runOnIdle { assertEquals(1, namingDone); assertNull(namingEntryId) }
+        // The import's settle refresh replaces handles; the dialog stays on the same saved entry.
+        val refreshed = ConfigurationHandle(owner, "synthetic-revision-2", "synthetic-second", 0)
+        compose.runOnIdle { snapshot = snapshot.copy(items = snapshot.items.map {
+            if (it.handle === second) it.copy(handle = refreshed) else it }) }
+        compose.onNodeWithTag("configuration-name-input").performTextReplacement("kitty")
+        compose.onNodeWithTag("configuration-name-duplicate").assertExists()
+        compose.onNodeWithTag("configuration-dialog-confirm").assertIsNotEnabled()
+        compose.onNodeWithTag("configuration-name-input").performTextReplacement("Kitty 日本")
+        compose.onNodeWithTag("configuration-dialog-confirm").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertSame(refreshed, renames.single().first); assertEquals("Kitty 日本", renames.single().second)
+            assertEquals(1, namingDone)
+        }
+    }
+
+    @Test fun skippingTheNameKeepsTheDefaultWithoutRenaming() {
+        namingEntryId = "synthetic-first"
+        launch()
+        compose.onNodeWithText("为订阅命名").assertExists()
+        compose.onNodeWithTag("configuration-dialog-cancel").assertTextEquals("跳过").performClick()
+        compose.onNodeWithTag("configuration-dialog").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(renames.isEmpty()); assertEquals(1, namingDone) }
     }
 }

@@ -5,11 +5,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import android.view.WindowManager
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.design.Brand
@@ -53,14 +61,18 @@ internal fun <T : Any> ManualImportHost(
     var staged by remember { mutableStateOf(false) }
     var submitted by remember { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(false) }
-    DisposableEffect(owner) { onDispose { link = ""; owner.close() } }
-    fun dismiss() { link = ""; owner.close(); onDismiss() }
+    var pasteHint by remember { mutableStateOf<String?>(null) }
+    var menuHint by remember { mutableStateOf<String?>(null) }
+    var pendingClipboardLink by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(owner) { onDispose { link = ""; pendingClipboardLink = null; owner.close() } }
+    fun dismiss() { link = ""; pendingClipboardLink = null; menuHint = null; owner.close(); onDismiss() }
     fun fail(ticket: T, reason: ManualImportFailure) {
         failure = reason
         failureLatest(ticket, reason)
     }
     fun begin(kind: ManualImportInputKind) {
         if (busyLatest || preparing || owner.closed || owner.ticket != null) return
+        menuHint = null
         preparing = true
         val work = scope.launch(start = CoroutineStart.LAZY) {
             var acquired: T? = null
@@ -115,12 +127,102 @@ internal fun <T : Any> ManualImportHost(
     }
     Dialog(onDismissRequest = ::dismiss, properties = DialogProperties(
         securePolicy = SecureFlagPolicy.SecureOn, usePlatformDefaultWidth = false)) {
+        // The link field never takes focus by itself: the keyboard appears only when the user taps it.
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { dialogWindow?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN or
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE) }
+        val focusManager = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
+        LaunchedEffect(mode) {
+            if (mode != ManualHostMode.Link) return@LaunchedEffect
+            withFrameNanos { }
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
+        val clipboard = LocalClipboard.current
+        val context = LocalContext.current
+        // Reads the clipboard only on an explicit tap. The masked field never displays the pasted text.
+        fun paste() {
+            val ticket = owner.ticket ?: return
+            if (busy || submitted || mode != ManualHostMode.Link) return
+            scope.launch {
+                val raw = try {
+                    clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)
+                } catch (_: Exception) { null }
+                if (!owner.accepts(ticket) || mode != ManualHostMode.Link || submitted) return@launch
+                val text = clipboardLinkText(raw)
+                when {
+                    text == null -> pasteHint = "剪贴板中没有可粘贴的内容"
+                    text.length > ManualInputBytes.Limit -> fail(ticket, ManualImportFailure.TooLarge)
+                    else -> { link = text; failure = null; pasteHint = null }
+                }
+            }
+        }
+        // Menu entry: clipboard is read only on this tap, never on resume or focus.
+        fun readClipboardFromMenu() {
+            if (busyLatest || preparing || owner.closed || owner.ticket != null || mode != ManualHostMode.Menu) return
+            scope.launch {
+                val raw = try {
+                    clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)
+                } catch (_: Exception) { null }
+                if (owner.closed || mode != ManualHostMode.Menu || owner.ticket != null) return@launch
+                val text = clipboardLinkText(raw)
+                when {
+                    text == null -> menuHint = "剪贴板中没有可导入的内容"
+                    text.length > ManualInputBytes.Limit -> menuHint = ManualImportFailure.TooLarge.caption
+                    !looksLikeSubscriptionLink(text) -> menuHint = "剪贴板内容不是订阅链接"
+                    else -> {
+                        menuHint = null
+                        pendingClipboardLink = text
+                        mode = ManualHostMode.ClipboardConfirm
+                    }
+                }
+            }
+        }
+        fun confirmClipboardImport() {
+            val text = pendingClipboardLink ?: return
+            if (busyLatest || preparing || submitted || owner.closed || owner.ticket != null) return
+            if (mode != ManualHostMode.ClipboardConfirm) return
+            preparing = true
+            val work = scope.launch(start = CoroutineStart.LAZY) {
+                var acquired: T? = null
+                var adopted = false
+                try {
+                    val ticket = beginLatest() ?: return@launch
+                    acquired = ticket
+                    coroutineContext.ensureActive()
+                    if (owner.closed || busyLatest || owner.ticket != null) return@launch
+                    if (mode != ManualHostMode.ClipboardConfirm || pendingClipboardLink != text) return@launch
+                    owner.ticket = ticket
+                    adopted = true
+                    owner.kind = ManualImportInputKind.Link
+                    failure = null
+                    val bytes = try { ManualInputBytes.fromText(text) }
+                    catch (invalid: ManualInputException) { fail(ticket, invalid.failure); return@launch }
+                    pendingClipboardLink = null
+                    link = ""
+                    submitted = true
+                    try { onSubmit(ticket, bytes, ManualImportInputKind.Link) }
+                    catch (_: Exception) {
+                        bytes.fill(0)
+                        fail(ticket, ManualImportFailure.InvalidInput)
+                    }
+                } finally {
+                    if (!adopted) acquired?.let { cancelLatest(it) }
+                    owner.preparation = null
+                    preparing = false
+                }
+            }
+            owner.preparation = work
+            work.start()
+        }
         GlassSurface(Modifier.padding(20.dp).widthIn(max = 420.dp).fillMaxWidth().testTag("manual-import-host")) {
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(when (mode) {
                     ManualHostMode.Menu -> "导入配置"
                     ManualHostMode.Link -> "订阅链接"
                     ManualHostMode.Remove -> "移除导入配置？"
+                    ManualHostMode.ClipboardConfirm -> "从剪贴板导入"
                     else -> "导入配置"
                 }, style = MaterialTheme.typography.titleMedium)
                 if (mode == ManualHostMode.Menu) {
@@ -130,6 +232,10 @@ internal fun <T : Any> ManualImportHost(
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-document"))
                     BrandButton("导入订阅链接", { begin(ManualImportInputKind.Link) }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-link"))
+                    BrandButton("从剪贴板导入", ::readClipboardFromMenu, enabled = !busy && !preparing,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-import-clipboard"))
+                    menuHint?.let { Text(it, color = Brand.Muted,
+                        modifier = Modifier.testTag("manual-clipboard-hint")) }
                     if (canUseAccount || canRemove) HorizontalDivider(color = Brand.RowDivider)
                     if (canUseAccount) TextButton({ if (!busy && !preparing) onUseAccount() }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-use-account")) { Text("使用账户订阅") }
@@ -138,13 +244,33 @@ internal fun <T : Any> ManualImportHost(
                 } else if (mode == ManualHostMode.Remove) {
                     BrandButton("确认移除", { if (!busy) onRemove() }, enabled = !busy,
                         modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
+                } else if (mode == ManualHostMode.ClipboardConfirm) {
+                    Text("检测到剪贴板中有订阅链接，是否导入到配置？", color = Brand.Muted,
+                        modifier = Modifier.testTag("manual-clipboard-confirm-message"))
+                    BrandButton("导入", ::confirmClipboardImport, enabled = !busy && !preparing && !submitted,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-clipboard-confirm"))
+                    TextButton({
+                        if (!busy && !preparing && !submitted) {
+                            pendingClipboardLink = null; menuHint = null; mode = ManualHostMode.Menu
+                        }
+                    }, enabled = !busy && !preparing && !submitted,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-clipboard-back")) {
+                        Text("返回")
+                    }
                 } else {
-                    if (mode == ManualHostMode.Link) OutlinedTextField(link, { value ->
-                        if (value.length <= ManualInputBytes.Limit) { link = value; failure = null }
-                        else owner.ticket?.let { fail(it, ManualImportFailure.TooLarge) }
-                    }, label = { Text("订阅链接") }, singleLine = true, enabled = !busy && !submitted,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth().testTag("manual-link-input"))
+                    if (mode == ManualHostMode.Link) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedTextField(link, { value ->
+                            if (value.length <= ManualInputBytes.Limit) { link = value; failure = null; pasteHint = null }
+                            else owner.ticket?.let { fail(it, ManualImportFailure.TooLarge) }
+                        }, label = { Text("订阅链接") }, singleLine = true, enabled = !busy && !submitted,
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.weight(1f).testTag("manual-link-input"))
+                        TextButton(::paste, enabled = !busy && !submitted,
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("manual-link-paste")) { Text("粘贴") }
+                    }
+                    if (mode == ManualHostMode.Link) pasteHint?.let { Text(it, color = Brand.Muted,
+                        modifier = Modifier.testTag("manual-link-paste-hint")) }
                     if (mode != ManualHostMode.External) BrandButton("导入", ::submit,
                         enabled = !busy && !submitted && (staged || (mode == ManualHostMode.Link && link.isNotBlank())),
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
@@ -158,7 +284,7 @@ internal fun <T : Any> ManualImportHost(
     }
 }
 
-private enum class ManualHostMode { Menu, Link, External, Confirm, Remove }
+private enum class ManualHostMode { Menu, Link, External, Confirm, Remove, ClipboardConfirm }
 private class ManualHostOwner<T : Any>(private val cancel: (T) -> Unit) {
     var ticket: T? = null
     var kind: ManualImportInputKind? = null
@@ -176,4 +302,16 @@ private class ManualHostOwner<T : Any>(private val cancel: (T) -> Unit) {
         payload?.fill(0); payload = null
         ticket?.let(cancel); ticket = null
     }
+}
+
+/** Clipboard text for the link field: trimmed, or null when there is nothing usable to paste. */
+internal fun clipboardLinkText(raw: CharSequence?): String? = raw?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+
+/**
+ * Shape-only check aligned with ManualImportController.isHttpsLink: an https:// prefix after
+ * leading whitespace. Origin and path authority still run after the user confirms.
+ */
+internal fun looksLikeSubscriptionLink(text: String): Boolean {
+    val start = text.indexOfFirst { !it.isWhitespace() }
+    return start >= 0 && text.regionMatches(start, "https://", 0, 8, ignoreCase = false)
 }

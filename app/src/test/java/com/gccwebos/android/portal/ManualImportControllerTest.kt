@@ -240,6 +240,34 @@ class ManualImportControllerTest {
         }
     }
 
+    @Test fun onlyANewlyAddedConfigurationRequestsANameForItsOwnSavedEntry() = runTest {
+        val f = Fixture(this)
+        f.local("192.0.2.11")
+        assertNull(f.controller.namingEntryId)
+        f.controller.submit(f.ticket(), yaml("192.0.2.12"), ManualImportInputKind.Document)
+        runCurrent()
+        val library = f.manager.configurationLibrarySnapshot().items
+        val created = library.single { it.active }
+        assertTrue(created.name.startsWith("配置 ")) // single-slot test store: one synthesized entry
+        assertEquals(created.handle.entryId, f.controller.namingEntryId)
+        f.controller.namingHandled()
+        assertNull(f.controller.namingEntryId)
+
+        // Replacing an existing entry keeps its chosen name and never asks again.
+        f.controller.openForReplacement(created.handle)
+        f.controller.submit(requireNotNull(f.controller.begin()), yaml("192.0.2.13"), ManualImportInputKind.Document)
+        runCurrent()
+        assertFalse(f.controller.busy); assertNull(f.controller.error)
+        assertNull(f.controller.namingEntryId)
+
+        // A rejected import does not ask for a name either.
+        f.response = { error("Synthetic failure") }
+        f.controller.submit(f.ticket(), url(), ManualImportInputKind.Link)
+        runCurrent()
+        assertNotNull(f.controller.error)
+        assertNull(f.controller.namingEntryId)
+    }
+
     @Test fun unsupportedRemoteLinksHaveSpecificCaptionWithoutDownloadOrSourceMutation() = runTest {
         for (kind in ManualImportInputKind.entries) {
             for (input in listOf("https://third-party.invalid/api/v1/client/subscribe?token=synthetic",

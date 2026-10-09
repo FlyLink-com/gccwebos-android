@@ -31,6 +31,8 @@ internal class ManualImportController(
     var visible by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
+    /** Saved entry id of a configuration this controller just added; the library asks the user to name it. */
+    var namingEntryId by mutableStateOf<String?>(null); private set
     private var ticket: Ticket? = null
     private var task: Job? = null
     private var operation = 0L
@@ -65,6 +67,7 @@ internal class ManualImportController(
             null
         }
     }
+    fun namingHandled() { namingEntryId = null }
     fun failure(value: Ticket, failure: ManualImportFailure) {
         if (ticket === value) error = failure.caption
     }
@@ -87,9 +90,15 @@ internal class ManualImportController(
             return
         }
         val owned = bytes.copyOf(); bytes.fill(0)
-        run(value, onComplete = { owned.fill(0) }) {
+        var created: String? = null
+        run(value, onComplete = { owned.fill(0) }, onSuccess = { namingEntryId = created }) {
             // All three surfaces pass through exactly the same bounded parser and authority.
-            if (value.replacement == null) manager.importManual(owned, value.source, guardedFence(value))
+            if (value.replacement == null) manager.importManual(owned, value.source, guardedFence(value)).also {
+                // A new import becomes the active saved entry; naming is optional, so a failed read only skips it.
+                created = try {
+                    manager.configurationLibrarySnapshot().items.firstOrNull { it.active && it.handle.entryId != null }?.handle?.entryId
+                } catch (_: Exception) { null }
+            }
             else manager.replaceConfiguration(owned, value.replacement, value.source, guardedFence(value))
         }
     }
@@ -107,7 +116,7 @@ internal class ManualImportController(
         // Check again inside the actual connection owner's lock, after any download/mutex wait.
         commitFence { checkCurrent(value); action() }
     }
-    private fun run(value: Ticket, onComplete: () -> Unit = {}, action: suspend () -> LocalSubscriptionSnapshot) {
+    private fun run(value: Ticket, onComplete: () -> Unit = {}, onSuccess: () -> Unit = {}, action: suspend () -> LocalSubscriptionSnapshot) {
         val current = ++operation
         busy = true; error = null
         // Assign ownership before execution, including an already-cancelled parent/immediate scope.
@@ -117,7 +126,7 @@ internal class ManualImportController(
                 coroutineContext.ensureActive()
                 if (ticket === value && current == operation) {
                     onSnapshot(result)
-                    if (ticket === value && current == operation) { ticket = null; visible = false }
+                    if (ticket === value && current == operation) { ticket = null; visible = false; onSuccess() }
                 }
             } catch (cancel: CancellationException) {
                 if (ticket === value && current == operation) error = "导入已取消"

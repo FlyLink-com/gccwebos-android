@@ -65,7 +65,7 @@ class ManualImportHostUiTest {
         try {
             compose.onNodeWithTag("manual-import-scan").performClick()
             compose.waitUntil(5000) { entered.isCompleted }
-            listOf("scan", "document", "link").forEach {
+            listOf("scan", "document", "link", "clipboard").forEach {
                 compose.onNodeWithTag("manual-import-$it").assertIsNotEnabled()
             }
             compose.runOnIdle { assertEquals(1, starts); assertTrue(platform.starts.isEmpty()); assertTrue(tickets.isEmpty()) }
@@ -116,9 +116,9 @@ class ManualImportHostUiTest {
             }
         } finally { release.complete(Unit) }
     }
-    @Test fun allThreeEntriesAreExplicitAndLinkSubmitsOnlyOnceWithTheIssuedTicket() {
+    @Test fun allImportEntriesAreExplicitAndLinkSubmitsOnlyOnceWithTheIssuedTicket() {
         launch()
-        listOf("scan", "document", "link").forEach {
+        listOf("scan", "document", "link", "clipboard").forEach {
             compose.onNodeWithTag("manual-import-$it").assertIsDisplayed().assertIsEnabled()
         }
         compose.runOnIdle { assertTrue(platform.starts.isEmpty()); assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
@@ -178,5 +178,90 @@ class ManualImportHostUiTest {
         compose.runOnIdle { platform.callbacks.single()(ManualInputResult.Failure(ManualImportFailure.CameraPermission)) }
         compose.onNodeWithTag("manual-import-error").assertTextEquals("未允许相机权限")
         compose.runOnIdle { assertEquals(listOf(ManualImportFailure.CameraPermission), failures); assertTrue(submissions.isEmpty()) }
+    }
+
+    private fun clipboard(text: String?) {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val manager = instrumentation.targetContext.getSystemService(android.content.ClipboardManager::class.java)
+            if (text == null) manager.clearPrimaryClip()
+            else manager.setPrimaryClip(android.content.ClipData.newPlainText("synthetic", text))
+        }
+    }
+
+    @Test fun linkFieldDoesNotTakeFocusAndPasteFillsItOnlyOnTap() {
+        clipboard("  https://sub.invalid/sub/a/synthetic\n")
+        launch()
+        compose.onNodeWithTag("manual-import-link").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("manual-link-input").assertIsNotFocused()
+        compose.onNodeWithTag("manual-import-confirm").assertIsNotEnabled()
+        compose.onNodeWithTag("manual-link-paste").assertIsEnabled().performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-import-confirm").fetchSemanticsNodes()
+            .singleOrNull()?.config?.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled) == false }
+        compose.onNodeWithTag("manual-link-input").assertIsNotFocused()
+        compose.onNodeWithTag("manual-import-confirm").performClick()
+        compose.runOnIdle { assertEquals(listOf(ManualImportInputKind.Link), submissions) }
+    }
+
+    @Test fun pastingAnEmptyClipboardShowsAHintAndLeavesTheFieldEmpty() {
+        clipboard(null)
+        launch()
+        compose.onNodeWithTag("manual-import-link").performClick()
+        compose.onNodeWithTag("manual-link-paste").performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-link-paste-hint").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("manual-import-confirm").assertIsNotEnabled()
+        compose.runOnIdle { assertTrue(submissions.isEmpty()) }
+    }
+
+    @Test fun clipboardMenuShowsAHintWhenEmptyOrNotALinkAndNeverSubmits() {
+        clipboard(null)
+        launch()
+        compose.onNodeWithTag("manual-import-clipboard").assertIsDisplayed().performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-clipboard-hint").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("manual-clipboard-hint").assertTextEquals("剪贴板中没有可导入的内容")
+        compose.onNodeWithTag("manual-clipboard-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
+
+        clipboard("hello world")
+        compose.onNodeWithTag("manual-import-clipboard").performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithTag("manual-clipboard-hint").fetchSemanticsNodes().any { node ->
+                node.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }
+                    .any { it.text == "剪贴板内容不是订阅链接" }
+            }
+        }
+        compose.onNodeWithTag("manual-clipboard-hint").assertTextEquals("剪贴板内容不是订阅链接")
+        compose.onNodeWithTag("manual-clipboard-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(submissions.isEmpty()) }
+    }
+
+    @Test fun clipboardMenuConfirmsAnHttpsLinkThenImportsAsLink() {
+        clipboard("  https://sub.invalid/sub/a/synthetic\n")
+        launch()
+        compose.onNodeWithTag("manual-import-clipboard").performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-clipboard-confirm").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("manual-clipboard-confirm-message")
+            .assertTextEquals("检测到剪贴板中有订阅链接，是否导入到配置？")
+        compose.onNodeWithTag("manual-clipboard-hint").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
+        compose.onNodeWithTag("manual-clipboard-confirm").assertIsEnabled().performClick()
+        compose.waitUntil(5000) { submissions.isNotEmpty() }
+        compose.runOnIdle {
+            assertEquals(listOf(ManualImportInputKind.Link), submissions)
+            assertEquals(1, tickets.size)
+            assertTrue(platform.starts.isEmpty())
+        }
+    }
+
+    @Test fun clipboardConfirmBackReturnsToMenuWithoutImporting() {
+        clipboard("https://sub.invalid/sub/a/synthetic")
+        launch()
+        compose.onNodeWithTag("manual-import-clipboard").performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-clipboard-back").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("manual-clipboard-back").performClick()
+        compose.onNodeWithTag("manual-import-clipboard").assertIsDisplayed()
+        compose.onNodeWithTag("manual-clipboard-confirm").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
     }
 }

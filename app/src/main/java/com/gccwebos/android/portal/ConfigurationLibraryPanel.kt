@@ -1,17 +1,19 @@
 package com.gccwebos.android.portal
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -22,7 +24,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.ConnectionControlState
-import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
 import com.gccwebos.android.vpn.SafeProxyConfig
@@ -42,6 +43,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     val canMeasure = active && !busy && !state.busy && latency != null && !latency.busy &&
         latency.foreground && state.snapshot.status == LocalSubscriptionStatus.READY && state.snapshot.choices.isNotEmpty()
     ConfigurationLibraryContent(library.snapshot, busy, library.error, canMeasure,
+        measuring = latency?.busy == true,
         onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
         namingEntryId = namingEntryId, onNamingDone = onNamingDone,
@@ -59,7 +61,7 @@ private enum class LibraryDialog { Details, Rename, Remove, Name }
 /** Pure presentation: callbacks carry handles, never display indexes, URLs or raw configurations. */
 @Composable
 internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot, busy: Boolean, error: String?,
-    canMeasure: Boolean, onMeasure: () -> Unit, onImport: () -> Unit,
+    canMeasure: Boolean, measuring: Boolean = false, onMeasure: () -> Unit, onImport: () -> Unit,
     onActivate: (ConfigurationHandle) -> Unit, onRename: (ConfigurationHandle, String) -> Unit,
     onRemove: (ConfigurationHandle) -> Unit, onReplace: (ConfigurationHandle) -> Unit,
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
@@ -84,18 +86,39 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
         dialogHandle = created.handle; name = created.name; dialog = LibraryDialog.Name
     }
     Column(Modifier.fillMaxWidth().testTag("configuration-library"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("配置", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            IconButton(onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() }, enabled = !actionsBlocked && canMeasureActive,
-                modifier = Modifier.size(48.dp).testTag("nodes-latency-refresh")) {
-                Icon(painterResource(R.drawable.brand_lightning), "测试节点延迟", Modifier.size(21.dp),
-                    tint = if (!actionsBlocked && canMeasureActive) Brand.Cyan else Brand.Muted)
+        // Opaque library chrome: keeps title/actions readable over the city backdrop (same idea as WalletTopBar).
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Brand.SurfaceRaised.copy(alpha = .92f))
+                .border(1.dp, Brand.GlassBorder.copy(alpha = .18f), RoundedCornerShape(16.dp))
+                .padding(start = 14.dp, end = 4.dp)
+                .testTag("configuration-library-header"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val activeItem = snapshot.items.firstOrNull { it.active }
+            val headerLabel = when {
+                activeItem != null -> {
+                    val n = activeItem.nodes.count { !it.info }
+                    "${activeItem.name}（${n}个节点）"
+                }
+                else -> "配置"
             }
-            IconButton(onClick = { if (!actionsBlocked) onImport() }, enabled = !actionsBlocked,
-                modifier = Modifier.size(48.dp).testTag("nodes-import")) {
-                Icon(painterResource(R.drawable.brand_receipt), "新增配置", Modifier.size(21.dp),
-                    tint = if (actionsBlocked) Brand.Muted else Brand.Cyan)
-            }
+            Text(
+                headerLabel,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = Brand.Text,
+                modifier = Modifier.weight(1f).testTag("configuration-library-title"),
+            )
+            NodesLatencyRefreshButton(
+                enabled = !actionsBlocked && canMeasureActive,
+                busy = measuring,
+                onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() },
+            )
+            NodesImportButton(onClick = { if (!actionsBlocked) onImport() }, enabled = !actionsBlocked)
         }
         // Controller errors are fixed captions. Never interpolate an exception or source material.
         if (snapshot.storageError) Text("配置暂不可用", color = Brand.Muted,
@@ -153,7 +176,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                     else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(configurationKindLabel(target.kind))
                         Text(configurationStatusLabel(target))
-                        Text("${target.nodes.size} 条节点")
+                        Text("${target.nodes.count { !it.info }} 条节点")
                     }
                 }
             },
@@ -226,14 +249,23 @@ private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy
                     Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
                         Text(item.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                             overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("configuration-name-$index"))
-                        Text("${item.nodes.size} 条 · ${configurationStatusLabel(item)}", fontSize = 10.sp,
+                        Text("${item.nodes.count { !it.info }} 条 · ${configurationStatusLabel(item)}", fontSize = 10.sp,
                             color = Brand.Muted, modifier = Modifier.testTag("configuration-status-$index"))
                     }
                 }
                 menu()
             }
             if (expanded) {
-                item.nodes.forEachIndexed { nodeIndex, node ->
+                val infoLine = formatNodeInfoBarLine(extractNodeInfoBar(item.nodes.filter { it.info }.map { it.name }))
+                infoLine?.let { line ->
+                    HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+                    Text(line, fontSize = 11.sp, color = Brand.Muted,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                            .testTag("configuration-info-$index"))
+                }
+                item.nodes.withIndex().filterNot { it.value.info }.forEach { indexed ->
+                    val node = indexed.value
+                    val nodeIndex = indexed.index
                     HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
                     NodeChoiceRow(node.name, node.protocol, node.supported, chosen = null,
                         regionTag = "configuration-region-$index-$nodeIndex", latencyTag = "configuration-latency-$index-$nodeIndex",

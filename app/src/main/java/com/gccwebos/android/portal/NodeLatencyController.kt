@@ -75,6 +75,22 @@ internal class NodeLatencyController(
         return entry.observation.takeIf { visible(entry, elapsedMillis(), networkKey()) }
     }
 
+    /**
+     * Monotonic elapsed millis of the newest still-visible reading, or null when nothing is on
+     * screen. Display-only; does not start measurement or touch disk.
+     */
+    fun lastMeasuredAtElapsed(): Long? {
+        if (probe == null || !canRun()) return null
+        val now = elapsedMillis()
+        val network = networkKey()
+        return readings.values.mapNotNull { entry ->
+            entry.measuredAt.takeIf { visible(entry, now, network) }
+        }.maxOrNull()
+    }
+
+    /** Same clock [lastMeasuredAtElapsed] uses, so the UI can compute a relative "ago" label. */
+    fun latencyClockElapsed(): Long = elapsedMillis()
+
     fun ensureMeasured(selection: ConnectionSelection? = null) = measure(selection, force = false)
 
     /** Explicit remeasurement is rate-limited per opaque node and physical network. */

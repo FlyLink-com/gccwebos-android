@@ -28,6 +28,8 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -282,6 +284,10 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     LaunchedEffect(account, account.authenticated) { if (account.authenticated) loginRequested = false }
     var plansVisit by remember { mutableStateOf(0) }
     var navigationRequest by remember { mutableStateOf(0) }
+    // Direction of the last user tab tap (-1/0/+1), consumed by the next page; programmatic navigation
+    // (openPlans, back, etc.) leaves 0 and gets a plain fade. Not observable state: it never recomposes.
+    val navDirection = remember { intArrayOf(0) }
+    val navMotion = rememberUiMotionEnabled()
     val selected = Destination.entries.firstOrNull { it.name == selectedName } ?: Destination.Connect
     val catalogDock = remember { CatalogDockState() }
     val catalogDisplayCache = remember(account, account.commerceSessionIdentity) {
@@ -316,16 +322,26 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         GlassSurface(Modifier.widthIn(max = 760.dp).fillMaxWidth().testTag("glass-navigation"),
                             shape = RoundedCornerShape(20.dp), kind = GlassSurfaceKind.Navigation) {
                             // A minimum, not a fixed height: wrapped or enlarged labels grow this row.
-                            Row(Modifier.fillMaxWidth().selectableGroup().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 3.dp),
+                            val selectedNavIndex = primaryDestinations.indexOf(selected)
+                            val navIndicator = rememberSlidingIndicator(selectedNavIndex, primaryDestinations.size)
+                            val tapHaptic = rememberTapHaptic()
+                            // One highlight block slides between tabs instead of each tab switching its own background.
+                            Row(Modifier.fillMaxWidth().slidingIndicator(navIndicator, primaryDestinations.size,
+                                    Brand.Cyan.copy(alpha = .15f), corner = 16.dp, horizontalInset = 4.dp, verticalInset = 3.dp)
+                                .selectableGroup().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
-                                primaryDestinations.forEach { destination ->
+                                primaryDestinations.forEachIndexed { index, destination ->
                                     val title = stringResource(destination.title)
                                     val chosen = destination == selected
+                                    val press = rememberPressFeedback()
                                     Column(Modifier.weight(1f).heightIn(min = 48.dp)
+                                        .pressFeedback(press)
                                         .clip(RoundedCornerShape(16.dp))
-                                        .background(if (chosen) Brand.Cyan.copy(alpha = .15f) else Color.Transparent)
                                         .testTag("nav-${destination.name}")
-                                        .selectable(selected = chosen, onClick = {
+                                        .selectable(selected = chosen, interactionSource = press.interactionSource,
+                                            indication = androidx.compose.material3.ripple(), onClick = {
+                                            if (tabTapHaptic(selectedNavIndex, index, userInitiated = true)) tapHaptic(UiHaptic.Tab)
+                                            if (selected != destination) navDirection[0] = tabSlideDirection(selectedNavIndex, index)
                                             if (destination == Destination.Profile) { startRegistration = false; loginRequested = false }
                                             if (destination == Destination.Plans) plansVisit++
                                             navigationRequest++
@@ -333,9 +349,11 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                                         }, role = Role.Tab)
                                         .padding(2.dp), horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        val tint by animateColorAsState(if (chosen) Brand.Cyan else Brand.Muted,
+                                            tween(uiMotionMillis(navMotion, UiMotionSpec.TabMillis)), label = "nav-tint")
                                         Icon(painterResource(destination.icon), contentDescription = null,
-                                            tint = if (chosen) Brand.Cyan else Brand.Muted, modifier = Modifier.size(20.dp))
-                                        Text(title, color = if (chosen) Brand.Cyan else Brand.Muted,
+                                            tint = tint, modifier = Modifier.size(20.dp))
+                                        Text(title, color = tint,
                                             style = MaterialTheme.typography.labelMedium, fontSize = 11.sp, textAlign = TextAlign.Center)
                                     }
                                 }
@@ -344,7 +362,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                     }
                 }) { padding ->
                     // Scaffold measures the entire bar, its gap and system inset for content clearance.
-                    key(selected) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
+                    // Only the arriving page is composed (no overlap of page effects); it fades/drifts in from the tab side.
+                    key(selected) { val enter = rememberEnterMotion(remember { navDirection[0].also { navDirection[0] = 0 } })
+                        Box(Modifier.fillMaxSize().enterMotion(enter)) { Page(selected, padding, account, autoLoadCommerce, commerceOverride,
                         commerceRecoveryOverride, paymentOpenerOverride, powerControl, powerAction,
                         openAccount = { startRegistration = false; loginRequested = true; navigationRequest++; selectedName = Destination.Profile.name },
                         openPlans = { plansVisit++; navigationRequest++; selectedName = Destination.Plans.name },
@@ -355,7 +375,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
                         loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
                         plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages,
-                        catalogDisplayCache = catalogDisplayCache) }
+                        catalogDisplayCache = catalogDisplayCache) } }
                 }
                 }
 

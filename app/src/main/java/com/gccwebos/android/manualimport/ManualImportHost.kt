@@ -28,6 +28,7 @@ import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.BrandButton
 import com.gccwebos.android.design.GlassSurface
+import com.gccwebos.android.design.UiHaptic
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -170,11 +171,11 @@ internal fun <T : Any> ManualImportHost(
                 }, style = MaterialTheme.typography.titleMedium)
                 if (mode == ManualHostMode.Menu) {
                     BrandButton("扫描二维码", { begin(ManualImportInputKind.Scan) }, enabled = !busy && !preparing,
-                        modifier = Modifier.fillMaxWidth().testTag("manual-import-scan"))
+                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-import-scan"))
                     BrandButton("导入配置文件", { begin(ManualImportInputKind.Document) }, enabled = !busy && !preparing,
-                        modifier = Modifier.fillMaxWidth().testTag("manual-import-document"))
+                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-import-document"))
                     BrandButton("导入订阅链接", { begin(ManualImportInputKind.Link) }, enabled = !busy && !preparing,
-                        modifier = Modifier.fillMaxWidth().testTag("manual-import-link"))
+                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-import-link"))
                     if (canUseAccount || canRemove) HorizontalDivider(color = Brand.RowDivider)
                     if (canUseAccount) TextButton({ if (!busy && !preparing) onUseAccount() }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-use-account")) { Text("使用账户订阅") }
@@ -182,7 +183,7 @@ internal fun <T : Any> ManualImportHost(
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-remove")) { Text("移除导入配置") }
                 } else if (mode == ManualHostMode.Remove) {
                     BrandButton("确认移除", { if (!busy) onRemove() }, enabled = !busy,
-                        modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
+                        pressFeedback = true, modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
                 } else {
                     if (mode == ManualHostMode.Link) OutlinedTextField(link, { value ->
                         if (value.length <= ManualInputBytes.Limit) { link = value; failure = null; pasteHint = null }
@@ -203,7 +204,7 @@ internal fun <T : Any> ManualImportHost(
                         modifier = Modifier.testTag("manual-link-paste-hint")) }
                     if (mode != ManualHostMode.External) BrandButton("导入", ::submit,
                         enabled = !busy && !submitted && (staged || (mode == ManualHostMode.Link && link.isNotBlank())),
-                        modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
+                        haptic = UiHaptic.Primary, modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
                 }
                 (failure?.caption ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.testTag("manual-import-error")) }

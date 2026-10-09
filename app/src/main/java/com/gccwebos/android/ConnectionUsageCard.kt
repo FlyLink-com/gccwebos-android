@@ -53,6 +53,11 @@ import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.AccountUsagePresentation
 import com.gccwebos.android.design.AccountUsageState
 import com.gccwebos.android.design.Brand
+import com.gccwebos.android.design.GccBottomSheet
+import com.gccwebos.android.design.UiHaptic
+import com.gccwebos.android.design.pressFeedback
+import com.gccwebos.android.design.rememberPressFeedback
+import com.gccwebos.android.design.rememberTapHaptic
 import com.gccwebos.android.design.SubscriptionUsagePresentation
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -285,13 +290,12 @@ private fun ConnectionUsageDates(presentation: AccountUsagePresentation, planTex
             renew()
         }
     }
-    if (showDetails) AlertDialog(onDismissRequest = { showDetails = false },
-        title = { Text("套餐时间") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                presentation.cycleText?.let { Text("统计周期\n$it") }
-                presentation.expiresAtText?.let { Text("套餐到期\n$it") }
-            }
-        }, confirmButton = { TextButton({ showDetails = false }) { Text("知道了") } })
+    // Read-only details: a swipe-dismissable sheet instead of a centred dialog; same texts and 知道了 action.
+    if (showDetails) GccBottomSheet(onDismissRequest = { showDetails = false }, title = "套餐时间") { close ->
+        presentation.cycleText?.let { Text("统计周期\n$it") }
+        presentation.expiresAtText?.let { Text("套餐到期\n$it") }
+        TextButton(close, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)) { Text("知道了") }
+    }
 }
 
 @Composable
@@ -326,8 +330,11 @@ internal fun ConnectionActionButton(text: String, onClick: () -> Unit, modifier:
                                     enabled: Boolean = true, connected: Boolean = false) {
     val shape = RoundedCornerShape(18.dp)
     val color = if (enabled) Brand.Text else Brand.DisabledText
-    Button(onClick, enabled = enabled,
-        modifier = modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape)
+    // Press scale/alpha plus one light tick, only from the user's own tap (Button never clicks programmatically).
+    val press = rememberPressFeedback(enabled)
+    val tick = rememberTapHaptic()
+    Button({ tick(UiHaptic.Primary); onClick() }, enabled = enabled, interactionSource = press.interactionSource,
+        modifier = modifier.pressFeedback(press).fillMaxWidth().heightIn(min = 56.dp).clip(shape)
             .background(Brush.horizontalGradient(when {
                 // Disconnect: a low-saturation rose, clearly "stop" without an alarming red.
                 connected && enabled -> listOf(Color(0xFF8A3B52), Color(0xFF5E2F4E))

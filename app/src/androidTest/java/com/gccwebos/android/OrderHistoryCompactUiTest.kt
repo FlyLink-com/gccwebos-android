@@ -140,8 +140,8 @@ class OrderHistoryCompactUiTest {
         compose.runOnIdle { position = scroll.value }
         target.performClick()
         compose.onNodeWithText(third.ref).assertExists()
-        compose.onNodeWithTag("history-payment-state").assertTextEquals("已扣款")
-        compose.onNodeWithTag("history-fulfillment-state").assertTextEquals("等待发放")
+        compose.onNodeWithTag("history-payment-state").assertTextEquals("已完成")
+        compose.onNodeWithTag("history-fulfillment-state").assertTextEquals("处理中")
         compose.onNodeWithTag("history-detail-back").performClick()
         compose.onNodeWithTag("history-order-${third.ref}").assertIsSelected()
         compose.runOnIdle { assertSame(page, commerce.orderPage); assertEquals(position, scroll.value) }
@@ -163,15 +163,15 @@ class OrderHistoryCompactUiTest {
         compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
         val verifiedTag = "history-recharge-${verified.orderRef}"
         compose.onNodeWithTag("$verifiedTag-amount", useUnmergedTree = true).assertTextEquals("USD 12.345")
-        compose.onNodeWithTag("$verifiedTag-state-0", useUnmergedTree = true).assertTextEquals("充值 · 支付已核验")
-        compose.onNodeWithTag("$verifiedTag-state-1", useUnmergedTree = true).assertTextEquals("到账 · 等待 Coins 到账")
+        compose.onNodeWithTag("$verifiedTag-state-0", useUnmergedTree = true).assertTextEquals("确认中")
+        compose.onNodeWithTag("$verifiedTag-state-1", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("$verifiedTag-expected", useUnmergedTree = true).assertTextEquals("预计 73 Coins")
         val creditedTag = "history-recharge-${credited.orderRef}"
         compose.onNodeWithTag("$creditedTag-amount", useUnmergedTree = true).assertTextEquals("JPY 1234")
-        compose.onNodeWithTag("$creditedTag-state-1", useUnmergedTree = true).assertTextEquals("到账 · Coins 已到账")
+        compose.onNodeWithTag("$creditedTag-state-0", useUnmergedTree = true).assertTextEquals("已到账")
         compose.onNodeWithTag("history-detail-${verified.orderRef}").performScrollTo().performClick()
-        compose.onNodeWithTag("history-recharge-state").assertTextEquals("支付已核验，Coins 尚待到账")
-        compose.onNodeWithTag("history-credit-state").assertTextEquals("等待 Coins 到账")
+        compose.onNodeWithTag("history-recharge-state").assertTextEquals("确认中")
+        compose.onNodeWithTag("history-credit-state").assertTextEquals("确认中")
         compose.onNodeWithTag("history-detail-back").performClick()
         compose.onNodeWithTag("orders-recharge").assertIsSelected()
         compose.onNodeWithTag("history-recharge-${verified.orderRef}").assertIsSelected()

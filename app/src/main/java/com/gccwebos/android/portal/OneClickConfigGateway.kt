@@ -11,7 +11,7 @@ import kotlinx.coroutines.CancellationException
 class OneClickConfigGateway(private val manager: LocalSubscriptionManager,
     private val files: PreparedConfigStore,
     private val addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer,
-    private val chooseUnselected: (List<ConnectionChoice>) -> ConnectionChoice? = { it.randomOrNull() }) : LocalConfigGateway {
+    private val chooseUnselected: (List<ConnectionChoice>) -> ConnectionChoice? = { choices -> choices.filterNot { it.info }.randomOrNull() }) : LocalConfigGateway {
     override suspend fun prepare(intent: SelectionIntent): ConfigPreparation {
         if (intent is SelectionIntent.Selected) return manager.prepare(intent, files, addressPreparer)
         val before = manager.nodeSelectionAttempt()
@@ -20,7 +20,7 @@ class OneClickConfigGateway(private val manager: LocalSubscriptionManager,
         if (fresh !is ConfigPreparation.SelectionRequired) return fresh
         // A changed registry needs a new explicit intent; do not silently follow replacement material.
         if (before.snapshot.choices.isNotEmpty() && !sameChoices(before.snapshot.choices, fresh.choices)) return fresh
-        val choice = chooseUnselected(fresh.choices) ?: return fresh
+        val choice = chooseUnselected(fresh.choices)?.takeIf { !it.info } ?: return fresh
         val current = manager.nodeSelectionAttempt()
         // A successful discovery takes exactly one epoch in refreshLocked. Later user choices,
         // refreshes or cancellation must cancel this intent, not grant it a replacement epoch.
@@ -35,6 +35,10 @@ class OneClickConfigGateway(private val manager: LocalSubscriptionManager,
     override fun clearPreparedMaterial() = files.clear()
     override fun observeClear(onClear: () -> Unit): Closeable = manager.observeClear(onClear)
 
+    /** Provider notices are rewritten on every download and are never selectable, so they do not
+     * make a registry different; every selectable entry must keep its opaque identity. */
     private fun sameChoices(left: List<ConnectionChoice>, right: List<ConnectionChoice>): Boolean =
-        left.size == right.size && left.indices.all { left[it].selection === right[it].selection }
+        left.size == right.size && left.indices.all {
+            left[it].info == right[it].info && (left[it].info || left[it].selection === right[it].selection)
+        }
 }

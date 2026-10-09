@@ -4,7 +4,9 @@ package com.gccwebos.android.core
 class ConnectionSelection internal constructor() {
     override fun toString() = "ConnectionSelection(<opaque>)"
 }
-data class ConnectionChoice(val selection: ConnectionSelection, val name: String, val protocol: String)
+/** [info] marks a provider notice shaped like a node (for example remaining traffic); it is never selectable. */
+data class ConnectionChoice(val selection: ConnectionSelection, val name: String, val protocol: String,
+    val info: Boolean = false)
 sealed interface SelectionIntent {
     data object Choose : SelectionIntent
     data class Selected(val selection: ConnectionSelection) : SelectionIntent

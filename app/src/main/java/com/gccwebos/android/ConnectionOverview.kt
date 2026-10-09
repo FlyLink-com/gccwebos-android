@@ -295,6 +295,10 @@ internal fun ConnectionOverview(
     val controlMode = showsConnectionCommand(local, control)
     val manualSource = snapshot.sourceKind in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
         com.gccwebos.android.portal.ManualSourceKind.ImportedRemote, com.gccwebos.android.portal.ManualSourceKind.ExternalRemote)
+    // Display-only: the selected configuration's own reported usage when signed out or using an imported source.
+    // A signed-in account source keeps Portal data. Never fed into account usage, setup guidance or admission.
+    val subscriptionUsage = if (!account.authenticated || manualSource)
+        subscriptionUsagePresentation(snapshot.usage, snapshot.validUntil, now) else null
     val usageRecovery = !manualSource && account.authenticated && (usage.error != null ||
         display.state in setOf(AccountUsageState.Unknown, AccountUsageState.Reconciliation))
     val recoverBeforeConnect = controlMode && local.action == ConnectionPowerAction.Connect && usageRecovery
@@ -312,7 +316,7 @@ internal fun ConnectionOverview(
                 ConnectionStatusRow(local, display.planText.takeIf { account.authenticated },
                     activePlan = verifiedUsage && connectionPlanIsActive(display), modifier = Modifier.padding(top = 2.dp))
                 ConnectionUsageCard(display, authenticated = account.authenticated,
-                    modifier = Modifier.padding(top = 5.dp),
+                    modifier = Modifier.padding(top = 5.dp), subscriptionUsage = subscriptionUsage,
                     onRefresh = account::refreshAccountUsage,
                     loading = account.busy || account.nodeSelection.busy || usage.busy || usage.verifying || account.restoring || account.foregroundCheckPending,
                     error = usage.error, refreshEnabled = verifiedUsage && operable,

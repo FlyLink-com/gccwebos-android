@@ -180,11 +180,11 @@ class ManualSubscriptionTransport internal constructor(private val calls: Call.F
                                     // Error response bodies are never consumed or included in a diagnostic.
                                     if (it.code in setOf(401, 403, 404, 410)) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_REVOKED)
                                     if (it.code != 200) throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE)
-                                    val until = manualSubscriptionExpiry(it.headers)
+                                    val metadata = manualSubscriptionMetadata(it.headers)
                                     owned = boundedManualSubscriptionBody(it.body ?: throw PortalFailure(PortalFailure.Reason.PROTOCOL)) {
                                         continuation.isActive && !call.isCanceled()
                                     }
-                                    val result = SubscriptionRead(requireNotNull(owned), until)
+                                    val result = SubscriptionRead(requireNotNull(owned), metadata.expiry, metadata.usage)
                                     // Ownership transfers to the continuation; prompt cancellation wipes undelivered bytes.
                                     continuation.resume(result) { _, rejected, _ -> rejected.bytes.fill(0) }
                                     owned = null
@@ -231,45 +231,28 @@ private fun boundedManualSubscriptionBody(body: ResponseBody, active: () -> Bool
     } finally { owned.fill(0) }
 }
 
-/** Unknown expiry remains null. Account identity/quota are never inferred from these headers. */
-internal fun manualSubscriptionExpiry(headers: Headers): Instant? {
+/** Metadata from one third-party download. Usage describes only this source, never the account. */
+internal class ManualSubscriptionMetadata(val expiry: Instant?, val usage: SubscriptionUsageReport?) {
+    override fun toString() = "ManualSubscriptionMetadata([REDACTED])"
+}
+
+/** Unknown expiry remains null. Account identity/plan are never inferred from these headers. */
+internal fun manualSubscriptionExpiry(headers: Headers): Instant? = manualSubscriptionMetadata(headers).expiry
+
+/** Strict: malformed or duplicate metadata rejects the download. Unknown usage is null, never zero. */
+internal fun manualSubscriptionMetadata(headers: Headers): ManualSubscriptionMetadata {
     try {
         fun single(name: String): String? {
             val values = headers.values(name)
             require(values.size <= 1)
-            return values.singleOrNull()?.also { require(it.length in 1..1024 && it.all { ch -> ch.code in 0x20..0x7e }) }
+            return values.singleOrNull()?.also { require(it.length in 1..SubscriptionUserinfoParser.MAX_HEADER_CHARS && it.all { ch -> ch.code in 0x20..0x7e }) }
         }
-        val userinfo = single("Subscription-Userinfo")
+        val userinfo = single("Subscription-Userinfo")?.let(SubscriptionUserinfoParser::parse)
         val explicit = single("X-Subscription-Valid-Until")
-        val unixExpiry = userinfo?.let { text ->
-            val parts = text.split(';')
-            require(parts.size in 1..16)
-            val seen = mutableSetOf<String>()
-            var expiry: Instant? = null
-            for (part in parts) {
-                val pair = part.trim().split('=', limit = 2)
-                require(pair.size == 2 && Regex("[A-Za-z][A-Za-z0-9_-]{0,31}").matches(pair[0]))
-                val key = pair[0].lowercase(Locale.ROOT)
-                require(seen.add(key))
-                val value = pair[1].trim()
-                require(value.isNotEmpty() && value.length <= 128 && value.none { it == ',' })
-                if (key in setOf("expire", "upload", "download", "total")) {
-                    require(Regex("0|[1-9][0-9]{0,18}").matches(value))
-                    val number = value.toLong()
-                    if (key == "expire") {
-                        require(number <= MAX_SUBSCRIPTION_UNIX_SECONDS)
-                        if (number > 0) expiry = Instant.ofEpochSecond(number)
-                    }
-                }
-            }
-            expiry
-        }
         val explicitExpiry = explicit?.let {
             require(it.length <= 64 && Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?Z").matches(it))
-            OffsetDateTime.parse(it).toInstant().also { parsed -> require(parsed.epochSecond in 0..MAX_SUBSCRIPTION_UNIX_SECONDS) }
+            OffsetDateTime.parse(it).toInstant().also { parsed -> require(parsed.epochSecond in 0..SubscriptionUserinfoParser.MAX_UNIX_SECONDS) }
         }
-        return listOfNotNull(unixExpiry, explicitExpiry).minOrNull()
+        return ManualSubscriptionMetadata(listOfNotNull(userinfo?.expiry, explicitExpiry).minOrNull(), userinfo?.usage)
     } catch (_: Exception) { throw ManualSubscriptionMetadataFailure() }
 }
-
-private const val MAX_SUBSCRIPTION_UNIX_SECONDS = 253402300799L // Last second of year 9999.

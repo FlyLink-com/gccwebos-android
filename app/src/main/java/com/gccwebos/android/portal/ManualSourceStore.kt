@@ -24,7 +24,9 @@ class ManualSourceRecord(
     val validUntil: Instant? = null,
     val observedStatus: LocalSubscriptionStatus? = null,
     /** Only a payload-free None may durably block an interrupted full clear across restart. */
-    val clearPending: Boolean = false
+    val clearPending: Boolean = false,
+    /** This remote source's own last reported usage; never account data. Only remote kinds may carry it. */
+    val usage: SubscriptionUsage? = null
 ) : AutoCloseable {
     private var material: ByteArray?
     private var closed = false
@@ -36,6 +38,7 @@ class ManualSourceRecord(
         require(observedStatus == null || observedStatus == LocalSubscriptionStatus.EXPIRED ||
             observedStatus == LocalSubscriptionStatus.INVALID_LINK)
         require(!clearPending || kind == ManualSourceKind.None)
+        require(usage == null || kind in USAGE_KINDS)
         when (kind) {
             ManualSourceKind.LegacyRemote, ManualSourceKind.None ->
                 require(bytes == null && url == null && validUntil == null && observedStatus == null)
@@ -74,7 +77,7 @@ class ManualSourceRecord(
 
     internal fun duplicate(): ManualSourceRecord {
         val raw = copyBytes()
-        try { return ManualSourceRecord(revision, kind, raw, url, validUntil, observedStatus, clearPending) }
+        try { return ManualSourceRecord(revision, kind, raw, url, validUntil, observedStatus, clearPending, usage) }
         finally { raw?.fill(0) }
     }
 
@@ -86,6 +89,7 @@ class ManualSourceRecord(
             try {
                 return revision == other.revision && kind == other.kind && url?.value == other.url?.value &&
                     validUntil == other.validUntil && observedStatus == other.observedStatus && clearPending == other.clearPending &&
+                    usage == other.usage &&
                     contentIdentity == other.contentIdentity &&
                     if (expected == null) actual == null else actual != null && MessageDigest.isEqual(expected, actual)
             } finally { actual?.fill(0) }
@@ -93,6 +97,7 @@ class ManualSourceRecord(
     }
 
     companion object {
+        internal val USAGE_KINDS = setOf(ManualSourceKind.ImportedRemote, ManualSourceKind.ExternalRemote)
         private val REVISION = Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")
         private fun validateUrlShape(value: String) {
             require(value.length in 1..SafeProxyConfig.MAX_BYTES && value.all { it.code in 0x21..0x7e })
@@ -130,12 +135,15 @@ class MemoryManualSourceStore(initial: ManualSourceRecord? = ManualSourceRecord(
     }
 }
 
-/** Strict v1/v2 envelopes; only an explicit ExternalRemote is encoded as v2. */
+/** Strict v1/v2/v4 envelopes. Only an explicit ExternalRemote is encoded as v2; a remote record that carries
+ * subscription-reported usage is encoded as v4 (v3 is the configuration-library envelope). Records without usage
+ * keep their exact v1/v2 bytes, and every v1/v2 record decodes with usage = null. */
 internal object ManualSourceCodec {
     const val MAX_ENCODED_BYTES = SafeProxyConfig.MAX_BYTES * 2 + 256
     private const val MAGIC = 0x474d5331
     private const val LEGACY_VERSION = 1
     private const val EXTERNAL_VERSION = 2
+    const val USAGE_VERSION = 4
     private const val UNREPORTED_EXPIRY = 0
     private const val KNOWN_EXPIRY = 1
 
@@ -145,7 +153,11 @@ internal object ManualSourceCodec {
         try {
             DataOutputStream(buffer).use { output ->
                 output.writeInt(MAGIC)
-                output.writeInt(if (record.kind == ManualSourceKind.ExternalRemote) EXTERNAL_VERSION else LEGACY_VERSION)
+                output.writeInt(when {
+                    record.usage != null -> USAGE_VERSION
+                    record.kind == ManualSourceKind.ExternalRemote -> EXTERNAL_VERSION
+                    else -> LEGACY_VERSION
+                })
                 writeString(output, record.revision, 36)
                 output.writeInt(when (record.kind) {
                     ManualSourceKind.LegacyRemote -> 0
@@ -170,6 +182,10 @@ internal object ManualSourceCodec {
                 })
                 writeString(output, record.contentIdentity, 64)
                 output.writeBoolean(record.clearPending)
+                record.usage?.let { usage ->
+                    output.writeLong(usage.uploadBytes); output.writeLong(usage.downloadBytes); output.writeLong(usage.totalBytes)
+                    output.writeLong(usage.observedAt.epochSecond); output.writeInt(usage.observedAt.nano)
+                }
             }
             require(buffer.size() <= MAX_ENCODED_BYTES)
             return buffer.toByteArray()
@@ -182,7 +198,7 @@ internal object ManualSourceCodec {
         try {
             val input = DataInputStream(ByteArrayInputStream(plain))
             require(input.readInt() == MAGIC)
-            val version = input.readInt().also { require(it == LEGACY_VERSION || it == EXTERNAL_VERSION) }
+            val version = input.readInt().also { require(it == LEGACY_VERSION || it == EXTERNAL_VERSION || it == USAGE_VERSION) }
             val revision = requireNotNull(readString(input, 36))
             val kind = when (input.readInt()) {
                 0 -> ManualSourceKind.LegacyRemote
@@ -192,7 +208,8 @@ internal object ManualSourceCodec {
                 4 -> ManualSourceKind.ExternalRemote
                 else -> throw IllegalArgumentException()
             }
-            require((version == EXTERNAL_VERSION) == (kind == ManualSourceKind.ExternalRemote))
+            if (version == USAGE_VERSION) require(kind in ManualSourceRecord.USAGE_KINDS)
+            else require((version == EXTERNAL_VERSION) == (kind == ManualSourceKind.ExternalRemote))
             val length = input.readInt()
             require(length == -1 || length in 1..SafeProxyConfig.MAX_BYTES)
             if (length != -1) raw = ByteArray(length).also { input.readFully(it) }
@@ -215,8 +232,14 @@ internal object ManualSourceCodec {
             }
             val identity = readString(input, 64)
             val clearPending = input.readUnsignedByte().also { require(it in 0..1) } == 1
+            val usage = if (version == USAGE_VERSION) {
+                val upload = input.readLong(); val download = input.readLong(); val total = input.readLong()
+                val seconds = input.readLong(); val nanos = input.readInt()
+                require(nanos in 0..999_999_999)
+                SubscriptionUsage(upload, download, total, Instant.ofEpochSecond(seconds, nanos.toLong()))
+            } else null
             require(input.available() == 0)
-            val record = ManualSourceRecord(revision, kind, raw, url, expiry, status, clearPending)
+            val record = ManualSourceRecord(revision, kind, raw, url, expiry, status, clearPending, usage)
             try { require(record.contentIdentity == identity); return record }
             catch (failure: Exception) { record.close(); throw failure }
         } catch (_: Exception) {

@@ -16,6 +16,7 @@ import com.gccwebos.android.design.AccountUsagePresentation
 import com.gccwebos.android.design.AccountUsageState
 import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.design.GlassMode
+import com.gccwebos.android.design.SubscriptionUsagePresentation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Rule
@@ -34,6 +35,8 @@ class ConnectionUsageCardUiTest {
         var error by mutableStateOf<String?>(null)
         var showPrimary by mutableStateOf(true)
         var refreshEnabled by mutableStateOf(true)
+        var authenticated by mutableStateOf(true)
+        var subscriptionUsage by mutableStateOf<SubscriptionUsagePresentation?>(null)
         var refreshes = 0
         var primaryActions = 0
     }
@@ -44,11 +47,12 @@ class ConnectionUsageCardUiTest {
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 GccTheme(materialMode = GlassMode.Solid) {
                     Column(Modifier.width(280.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                        ConnectionUsageCard(fixture.presentation, authenticated = true,
+                        ConnectionUsageCard(fixture.presentation, authenticated = fixture.authenticated,
                             onRefresh = { fixture.refreshes++ }, loading = fixture.loading, error = fixture.error,
                             refreshEnabled = fixture.refreshEnabled, primaryLabel = "一键连接", primaryEnabled = true,
                             primaryHint = null, showPrimary = fixture.showPrimary,
-                            onPrimaryAction = { fixture.primaryActions++ })
+                            onPrimaryAction = { fixture.primaryActions++ },
+                            subscriptionUsage = fixture.subscriptionUsage)
                     }
                 }
             }
@@ -109,6 +113,33 @@ class ConnectionUsageCardUiTest {
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("一键连接").assertIsNotEnabled()
             .performTouchInput { click() }
         assertEquals(0, fixture.primaryActions); assertEquals(0, fixture.refreshes)
+    }
+
+    @Test fun signedOutWithoutSubscriptionUsageStillShowsUnknown() {
+        val fixture = Fixture().apply { authenticated = false }
+        show(fixture)
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
+        compose.onNodeWithTag("account-usage-used").assertDoesNotExist()
+        compose.onNodeWithTag("subscription-usage-source").assertDoesNotExist()
+    }
+
+    @Test fun signedOutShowsSubscriptionReportedUsageWithItsSourceLabel() {
+        val fixture = Fixture().apply {
+            authenticated = false
+            subscriptionUsage = SubscriptionUsagePresentation(remainingText = "7 GB", usedText = "3 GB", totalText = "10 GB",
+                progress = .3f, expiresAtText = "2026-11-01 00:00:00 +08:00", serviceExpired = false,
+                sourceText = "订阅提供 · 更新于 2026-10-08 12:34")
+        }
+        show(fixture)
+        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("7 GB")
+        compose.onNodeWithTag("account-usage-used").assertTextEquals("已用 3 GB")
+        compose.onNodeWithTag("account-usage-total").assertTextEquals("总量 10 GB")
+        compose.onNodeWithTag("account-usage-progress").assertExists()
+        compose.onNodeWithTag("account-usage-expiry").assertContentDescriptionEquals("套餐到期 2026-11-01 00:00:00 +08:00")
+        compose.onNodeWithTag("subscription-usage-source").performScrollTo().assertTextEquals("订阅提供 · 更新于 2026-10-08 12:34")
+        // Subscription usage never turns the signed-out primary action into an account refresh.
+        compose.onNodeWithTag("vpn-connect").performScrollTo().performClick()
+        assertEquals(1, fixture.primaryActions); assertEquals(0, fixture.refreshes)
     }
 
     @Test fun pendingUsageNeverInventsZeroProgressOrDates() {

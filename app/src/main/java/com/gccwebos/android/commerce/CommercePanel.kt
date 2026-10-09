@@ -696,7 +696,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
     // The wallet top-up screen draws its own standalone top bar (same "mine-back" tag) whenever it renders.
-    val walletTopBar = view == "recharge" && account.authenticated && !account.restoring && !account.foregroundCheckPending
+    val walletTopBar = (view == "wallet" || view == "recharge") && account.authenticated && !account.restoring && !account.foregroundCheckPending
     if (view != "mine" && !walletTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
     if (view == "about") {
         BrandCard(Modifier.testTag("mine-about")) {

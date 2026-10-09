@@ -151,9 +151,8 @@ internal fun connectionOverviewPresentation(
 }
 
 /**
- * C1: the home button must lead to node selection (not silently pick a random node) when a node list is
- * loaded and ready, offers real choices, and the user has none selected. Pure presentation input: it never
- * issues or blocks a connection command by itself and does not touch admission.
+ * C1: a node list is loaded and ready, offers real choices, and the user has none selected, so the card
+ * explains what 一键连接 will do. Pure presentation input: it never issues or blocks a connection command.
  */
 internal fun connectionNeedsNodeChoice(action: ConnectionPowerAction, commandPending: Boolean, hasNode: Boolean,
     selectionBusy: Boolean, synchronized: Boolean, status: LocalSubscriptionStatus, hasRealChoices: Boolean): Boolean =
@@ -399,16 +398,16 @@ internal fun ConnectionOverview(
                 })
     }
     val connected = control.phase == ConnectionPhase.Connected
-    // C1: a registry that is loaded and has choices, but nothing selected (first run, or the remembered node is
-    // gone). Tapping "一键连接" would pick a random node for the user; instead the button leads to the node page.
-    // Display/navigation only: connect admission is untouched, and the Connect command is simply not issued here.
+    // C1: a loaded list with nothing selected (first run, or the remembered node is gone). "一键连接" keeps its
+    // designed behaviour (use the remembered node, else pick one for the user); the card now says so instead of
+    // showing a bare "未选择". Display only: the connect command and its admission are untouched.
     val needsNodeChoice = connectionNeedsNodeChoice(local.action, control.commandPending || acceptedCommand,
         selectedNode != null || displayedNode != null, account.nodeSelection.busy,
         synchronizedNodeGeneration == account.authSessionGeneration, nodeSnapshot.status,
         nodeSnapshot.choices.any { !it.info })
     val nodeChoiceHint = when {
-        nodeSnapshot.selectionLost && needsNodeChoice -> "请重新选择节点"
-        needsNodeChoice -> "请先选择节点"
+        nodeSnapshot.selectionLost && needsNodeChoice -> "请重新选择节点，或直接一键连接自动选择"
+        needsNodeChoice -> "未选节点，一键连接将自动选择"
         else -> null
     }
     // Zones: (1) the page's light brand header, (2) Hero: state + node + power, (3) plan/usage, (4) multi-platform link.
@@ -439,10 +438,7 @@ internal fun ConnectionOverview(
                 preparationRequest?.let(account::cancelConnectionPreparation)
                 preparationRequest = null
             }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("connection-prepare-cancel")) { Text("取消准备") }
-            if (controlMode && !recoverBeforeConnect && needsNodeChoice) ConnectionActionButton("选择节点",
-                { openNodes() }, enabled = !account.nodeSelection.busy, connected = false,
-                modifier = Modifier.testTag("vpn-choose-node").semantics { contentDescription = "选择节点后再连接" })
-            else if (controlMode && !recoverBeforeConnect) ConnectionActionButton(
+            if (controlMode && !recoverBeforeConnect) ConnectionActionButton(
                 when (local.action) {
                     ConnectionPowerAction.Connect -> "一键连接"
                     ConnectionPowerAction.Cancel -> "取消连接"

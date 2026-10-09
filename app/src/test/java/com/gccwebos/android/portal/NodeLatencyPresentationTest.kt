@@ -37,7 +37,7 @@ class NodeLatencyPresentationTest {
 
     @Test fun unavailableWhileTunnelUpIsSkippedNotBroken() {
         val p = nodeLatencyPresentation(NodeLatencyObservation.Unavailable, tunnelActive = true)
-        assertEquals("断开后可测", p.label)
+        assertEquals("—", p.label)
         assertEquals("节点延迟：已连接时无法测速", nodeLatencyContentDescription(p))
         // A real result is never rewritten, and a running batch still shows the spinner.
         assertEquals("超时", nodeLatencyPresentation(NodeLatencyObservation.NoReply, tunnelActive = true).label)

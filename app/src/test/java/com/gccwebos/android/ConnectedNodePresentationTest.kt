@@ -87,15 +87,15 @@ class ConnectedNodePresentationTest {
     }
 }
 
-/** C1 button gate (display only). */
+/** C1 hint gate (display only). */
 class ConnectionNeedsNodeChoiceTest {
     private fun needs(action: ConnectionPowerAction = ConnectionPowerAction.Connect, pending: Boolean = false,
         hasNode: Boolean = false, busy: Boolean = false, sync: Boolean = true,
         status: com.gccwebos.android.portal.LocalSubscriptionStatus = com.gccwebos.android.portal.LocalSubscriptionStatus.READY,
         choices: Boolean = true) = connectionNeedsNodeChoice(action, pending, hasNode, busy, sync, status, choices)
 
-    @Test fun readyListWithoutASelectionLeadsToNodePicking() = assertTrue(needs())
-    @Test fun aSelectedNodeKeepsTheNormalConnectButton() = assertFalse(needs(hasNode = true))
+    @Test fun readyListWithoutASelectionShowsTheAutoSelectHint() = assertTrue(needs())
+    @Test fun aSelectedNodeShowsNoHint() = assertFalse(needs(hasNode = true))
     @Test fun otherActionsAndPendingCommandsAreUntouched() {
         for (action in ConnectionPowerAction.entries.filter { it != ConnectionPowerAction.Connect }) assertFalse(needs(action = action))
         assertFalse(needs(pending = true))

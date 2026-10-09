@@ -22,7 +22,7 @@ internal const val LatencyFairUpToMs = 150L
  * Maps an observation (and whether a batch is currently running for an empty cell) to UI copy.
  * Thresholds: &lt;80 ms good (green), 80–150 ms fair (amber), &gt;150 ms or timeout poor (red).
  * Untested is "---". While the tunnel is up the node probes cannot run, so a failed read is shown
- * as "断开后可测" (skipped), not as a broken measurement. [measuring] drives a spinner.
+ * as a dash (skipped), not as a broken measurement. [measuring] drives a spinner.
  */
 internal fun nodeLatencyPresentation(
     observation: NodeLatencyObservation?,
@@ -48,7 +48,8 @@ internal fun nodeLatencyPresentation(
         else NodeLatencyPresentation("---", NodeLatencyTone.Neutral)
 }
 
-internal const val LatencySkippedLabel = "断开后可测"
+/** A quiet dash per cell; the toolbar note ([LatencySkippedNote]) and the spoken description carry the reason. */
+internal const val LatencySkippedLabel = "—"
 /** Shown in the toolbar instead of a "last tested" time while the tunnel is up and nothing could be measured. */
 internal const val LatencySkippedNote = "已连接时无法测速，断开后可测"
 

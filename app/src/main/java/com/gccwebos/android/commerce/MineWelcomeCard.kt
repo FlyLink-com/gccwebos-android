@@ -31,7 +31,8 @@ import java.time.Instant
 
 /** Reuses the verified overview; opening Mine never starts another account read. */
 @Composable
-internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = false) {
+internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = false, onLogin: (() -> Unit)? = null) {
+    val signedOut = onLogin != null && !account.authenticated
     val usage by account.accountUsage.state.collectAsState()
     val verifying = account.restoring || account.foregroundCheckPending || usage.verifying
     val verified = account.authenticated && !verifying && !account.clearing && usage.authenticated
@@ -50,7 +51,7 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
                 Column(modifier, verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(title, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.testTag("mine-welcome-title"))
-                    Text(if (account.authenticated) account.displayEmail ?: "账户" else "账户未登录",
+                    if (!signedOut) Text(if (account.authenticated) account.displayEmail ?: "账户" else "账户未登录",
                         color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.testTag("mine-account-identity"))
                     Surface(shape = RoundedCornerShape(9.dp), color = Brand.Cyan.copy(alpha = .09f)) {
@@ -72,7 +73,10 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
                 robot(Modifier)
             }
         }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (signedOut) com.gccwebos.android.design.BrandButton("去登录", { onLogin?.invoke() },
+            enabled = !account.busy && !account.restoring && !account.foregroundCheckPending,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("mine-go-login"))
+        else BoxWithConstraints(Modifier.fillMaxWidth()) {
             val plan = when {
                 !account.authenticated -> "登录后查看套餐"
                 verifying -> "—"

@@ -116,6 +116,7 @@ class RegistrationUiTest {
             }
         }
         compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
         compose.waitUntil(5_000) { accountFixture.questionCalls.get() == 1 && !screen.account.challengeLoading }
         compose.onNodeWithTag("login-register").performScrollTo().performClick()
         compose.onNodeWithTag("registration-form").assertIsDisplayed()

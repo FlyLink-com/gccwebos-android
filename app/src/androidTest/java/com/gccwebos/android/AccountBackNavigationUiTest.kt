@@ -140,6 +140,7 @@ class AccountBackNavigationUiTest {
 
     private fun beginLogin() {
         compose.onNodeWithTag("nav-Profile").performClick()
+        compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
         compose.waitUntil(10_000) { account.challenge != null && !account.challengeLoading }
         compose.runOnIdle {
             account.account = "back.fixture@example.invalid"

@@ -55,6 +55,21 @@ private val bracketedCode = Regex("(?:\\[([A-Za-z]{2})]|\\(([A-Za-z]{2})\\)|【(
 private val prefixCode = Regex("^([A-Z]{2})(?=$|[^\\p{L}])")
 private val routeCode = Regex("(?:[-_/|→>]\\s*)([A-Z]{2})(?=$|[^\\p{L}])")
 
+/**
+ * Name for display next to the region badge. The badge already shows the flag, so a leading flag emoji
+ * in the provider's name is dropped here (display only: selection, probing and admission keep the full name).
+ * Names without a recognised region, or consisting only of a flag, are returned unchanged.
+ */
+internal fun nodeDisplayName(name: String): String {
+    if (nodeRegion(name) == null) return name
+    val points = name.codePoints().toArray()
+    var index = 0
+    while (index < points.size && points[index] in 0x1F1E6..0x1F1FF) index++
+    if (index == 0 || index % 2 != 0) return name
+    val rest = String(points, index, points.size - index).trim()
+    return rest.ifEmpty { name }
+}
+
 /** Conservative local matching. Conflicting or malformed flag labels deliberately stay neutral. */
 internal fun nodeRegion(name: String): NodeRegion? = nodeRegion(name) { knownNodeRegionCode(it) }
 

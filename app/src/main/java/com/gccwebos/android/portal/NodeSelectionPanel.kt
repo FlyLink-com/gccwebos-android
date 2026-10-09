@@ -44,6 +44,8 @@ import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
 import com.gccwebos.android.design.NodeRegionIcon
+import com.gccwebos.android.design.nodeDisplayName
+import com.gccwebos.android.design.nodeRegion
 import com.gccwebos.android.usageMotionEnabled
 import com.gccwebos.android.vpn.SafeProxyConfig
 import kotlinx.coroutines.delay
@@ -122,8 +124,16 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
         )
     } else proxyChoices
     val infoLine = formatNodeInfoBarLine(extractNodeInfoBar(infoChoices.map { it.value.name }))
-    val lastAgo = latency?.lastMeasuredAtElapsed()?.let { latency.latencyClockElapsed() - it }
-    val lastLabel = formatLastLatencyTestAgo(lastAgo)
+    val tunnelActive = connectionControl.phase in setOf(
+        ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
+    // Only a real measurement (round trip or timeout) counts as "tested"; a batch that could not run
+    // while the tunnel is up must not read "刚刚" next to a list of unmeasured nodes.
+    val lastAgo = latency?.lastResultAtElapsed()?.let { latency.latencyClockElapsed() - it }
+    val lastLabel = formatLastLatencyTestAgo(lastAgo) ?: if (tunnelActive) LatencySkippedNote else null
+    var query by rememberSaveable { mutableStateOf("") }
+    val searchable = proxyChoices.size >= NodeSearchMinimum
+    val needle = query.trim().takeIf { searchable && it.isNotEmpty() }
+    val shownProxy = if (needle == null) displayProxy else displayProxy.filter { nodeMatchesQuery(it.value.name, needle) }
     val motionEnabled = rememberNodeListMotionEnabled()
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (showAccountAction && !hasCapability) TextButton(onClick = openAccount, enabled = !accountBusy,
@@ -189,15 +199,26 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         NodeRegionIcon(selectedChoice?.name, Modifier.testTag("nodes-selected-region"), size = 24.dp)
-                        Text(selectedChoice?.name ?: "未选择", fontSize = 12.sp,
+                        if (selectedChoice != null) Text(nodeDisplayName(selectedChoice.name), fontSize = 12.sp,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).testTag("nodes-selected-name"))
-                        NodeLatencyBadge(latency?.reading(selectedChoice?.selection),
+                        else Column(Modifier.weight(1f)) {
+                            Text("未选择", fontSize = 12.sp, maxLines = 1, modifier = Modifier.testTag("nodes-selected-name"))
+                            if (proxyChoices.isNotEmpty()) Text(
+                                if (value.selectionLost) "原来选的节点已不在配置里，请重新选择节点" else "请点选下方一个节点，连接时将使用它",
+                                fontSize = 11.sp, color = Brand.Amber, maxLines = 2,
+                                modifier = Modifier.testTag("nodes-select-prompt"))
+                        }
+                        if (selectedChoice != null) NodeLatencyBadge(latency?.reading(selectedChoice.selection),
                             Modifier.testTag("nodes-selected-latency"),
-                            measuring = latency?.busy == true && selectedChoice != null &&
-                                latency.reading(selectedChoice.selection) == null)
+                            measuring = latency?.busy == true && latency.reading(selectedChoice.selection) == null,
+                            tunnelActive = tunnelActive)
                     }
-                    displayProxy.forEachIndexed { visibleIndex, indexed ->
+                    if (searchable) NodeSearchField(query) { query = it }
+                    if (needle != null && shownProxy.isEmpty()) Text("没有匹配的节点", color = Brand.Muted, fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp)
+                            .testTag("nodes-search-empty"))
+                    shownProxy.forEachIndexed { visibleIndex, indexed ->
                         val choice = indexed.value
                         val chosen = value.selected === choice.selection
                         if (visibleIndex > 0) HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
@@ -213,6 +234,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             },
                             regionTag = "node-region-${indexed.index}",
                             latencyTag = "node-latency-${indexed.index}",
+                            tunnelActive = tunnelActive,
                             modifier = Modifier.testTag("node-choice-${indexed.index}").semantics { selected = chosen }
                                 .clickable(enabled = !state.busy && !accountBusy, role = Role.RadioButton) {
                                     if (state.select(choice.selection)) onSelected()
@@ -250,6 +272,26 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     }
 }
 
+/** The list is searchable only once it is long enough to need it. */
+internal const val NodeSearchMinimum = 12
+
+/** Case-insensitive substring match on the visible name (flag emoji ignored) or the region's Chinese name. */
+internal fun nodeMatchesQuery(name: String, query: String): Boolean {
+    val wanted = query.trim().lowercase(Locale.ROOT)
+    if (wanted.isEmpty()) return true
+    return nodeDisplayName(name).lowercase(Locale.ROOT).contains(wanted) ||
+        nodeRegion(name)?.displayName?.contains(wanted) == true
+}
+
+@Composable
+private fun NodeSearchField(query: String, onChange: (String) -> Unit) {
+    OutlinedTextField(query, onChange, singleLine = true,
+        placeholder = { Text("搜索节点或地区", fontSize = 12.sp) },
+        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)
+            .heightIn(min = 48.dp).testTag("nodes-search"))
+}
+
 @Composable
 private fun NodeInfoBanner(line: String) {
     Row(
@@ -285,7 +327,7 @@ private fun NodeLatencyToolbar(
             lastLabel ?: " ",
             fontSize = 10.sp,
             color = Brand.Muted.copy(alpha = if (lastLabel == null) 0f else .9f),
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).testTag("nodes-latency-last"),
         )
@@ -379,7 +421,8 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
     observation: NodeLatencyObservation? = null, measuring: Boolean = false,
     onRetestLatency: (() -> Unit)? = null,
     regionTag: String, latencyTag: String,
-    modifier: Modifier = Modifier, inspectionIndex: Int? = null, readOnlyLabel: String = "只读") {
+    modifier: Modifier = Modifier, inspectionIndex: Int? = null, readOnlyLabel: String = "只读",
+    tunnelActive: Boolean = false) {
     val selected = chosen == true
     Row(
         modifier.fillMaxWidth().heightIn(min = 56.dp)
@@ -402,7 +445,8 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
         }
         NodeRegionIcon(name, Modifier.testTag(regionTag), size = 26.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            // The region badge already shows the flag; drop the duplicate flag emoji from the visible name.
+            Text(nodeDisplayName(name), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-name-$it") } ?: Modifier)
             // Protocol chip only; multiplier is omitted when the payload has no such field.
@@ -425,6 +469,7 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
             Modifier.testTag(latencyTag),
             measuring = measuring,
             onRetest = onRetestLatency,
+            tunnelActive = tunnelActive,
         )
         if (chosen == null) Text(readOnlyLabel, color = Brand.Muted, fontSize = 10.sp)
         else Box(

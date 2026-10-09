@@ -32,8 +32,9 @@ internal fun NodeLatencyBadge(
     modifier: Modifier = Modifier,
     measuring: Boolean = false,
     onRetest: (() -> Unit)? = null,
+    tunnelActive: Boolean = false,
 ) {
-    val presentation = nodeLatencyPresentation(observation, measuring)
+    val presentation = nodeLatencyPresentation(observation, measuring, tunnelActive)
     val description = nodeLatencyContentDescription(presentation)
     val color = when (presentation.tone) {
         NodeLatencyTone.Good -> Brand.Green

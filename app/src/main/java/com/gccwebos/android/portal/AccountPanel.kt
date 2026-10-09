@@ -77,7 +77,8 @@ internal fun productionRepository(context: Context): PortalRepository {
     return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime,
         sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context),
         allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME,
-        manualSources = EncryptedManualSourceStore(context))
+        manualSources = EncryptedManualSourceStore(context),
+        nodeChoices = EncryptedNodeChoiceStore(context))
 }
 
 /** Process-local ownership only; identity contains no account label or bearer data. */

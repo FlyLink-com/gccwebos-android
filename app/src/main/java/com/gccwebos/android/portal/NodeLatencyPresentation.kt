@@ -14,25 +14,33 @@ internal data class NodeLatencyPresentation(
     val measuring: Boolean = false,
 )
 
+/** Latency tone thresholds (ms). Calibrated so typical 100–200 ms nodes no longer all read as one colour. */
+internal const val LatencyGoodBelowMs = 80L
+internal const val LatencyFairUpToMs = 150L
+
 /**
  * Maps an observation (and whether a batch is currently running for an empty cell) to UI copy.
- * Thresholds: &lt;100 ms good, 100–200 ms fair, &gt;200 ms or timeout poor. Untested is "---".
+ * Thresholds: &lt;80 ms good (green), 80–150 ms fair (amber), &gt;150 ms or timeout poor (red).
+ * Untested is "---". While the tunnel is up the node probes cannot run, so a failed read is shown
+ * as "断开后可测" (skipped), not as a broken measurement. [measuring] drives a spinner.
  */
 internal fun nodeLatencyPresentation(
     observation: NodeLatencyObservation?,
     measuring: Boolean = false,
+    tunnelActive: Boolean = false,
 ): NodeLatencyPresentation = when (observation) {
     is NodeLatencyObservation.Success -> {
         val ms = observation.milliseconds
         when {
-            ms < 100L -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Good)
-            ms <= 200L -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Fair)
+            ms < LatencyGoodBelowMs -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Good)
+            ms <= LatencyFairUpToMs -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Fair)
             else -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Poor)
         }
     }
     NodeLatencyObservation.NoReply -> NodeLatencyPresentation("超时", NodeLatencyTone.Poor)
     NodeLatencyObservation.Unavailable ->
         if (measuring) NodeLatencyPresentation("", NodeLatencyTone.Neutral, measuring = true)
+        else if (tunnelActive) NodeLatencyPresentation(LatencySkippedLabel, NodeLatencyTone.Neutral)
         else NodeLatencyPresentation("不可测", NodeLatencyTone.Neutral)
     NodeLatencyObservation.NetworkChanged -> NodeLatencyPresentation("网络变化", NodeLatencyTone.Neutral)
     null ->
@@ -40,11 +48,16 @@ internal fun nodeLatencyPresentation(
         else NodeLatencyPresentation("---", NodeLatencyTone.Neutral)
 }
 
+internal const val LatencySkippedLabel = "断开后可测"
+/** Shown in the toolbar instead of a "last tested" time while the tunnel is up and nothing could be measured. */
+internal const val LatencySkippedNote = "已连接时无法测速，断开后可测"
+
 /** Compact spoken description for accessibility; never invents a millisecond value. */
 internal fun nodeLatencyContentDescription(presentation: NodeLatencyPresentation): String = when {
     presentation.measuring -> "节点延迟：测试中"
     presentation.label == "---" -> "节点延迟：未测试"
     presentation.label == "超时" -> "节点延迟：超时"
+    presentation.label == LatencySkippedLabel -> "节点延迟：已连接时无法测速"
     presentation.label.endsWith(" ms") ->
         "节点延迟 ${presentation.label.removeSuffix(" ms")} 毫秒"
     else -> "节点延迟：${presentation.label}"
@@ -88,9 +101,41 @@ private val InfoWebsite = Regex(
 )
 private val LeadingEmoji = Regex("""^[\p{So}\p{Sk}\s]+""")
 
+private const val OfficialSiteHost = "gccwebos.com"
+
+/**
+ * True only when [value] is a bare host or http(s) URL whose parsed host is exactly gccwebos.com or one
+ * of its subdomains. Compared on the parsed host, never by substring; anything unparsable is not official.
+ */
+internal fun isOfficialSiteValue(value: String): Boolean {
+    val text = value.trim()
+    if (text.isEmpty() || text.any { it.isWhitespace() || it.isISOControl() }) return false
+    val schemeEnd = text.indexOf("://")
+    val rest = if (schemeEnd >= 0) {
+        val scheme = text.substring(0, schemeEnd).lowercase()
+        if (scheme != "http" && scheme != "https") return false
+        text.substring(schemeEnd + 3)
+    } else text
+    val authority = rest.substringBefore('/').substringBefore('?').substringBefore('#')
+    // Userinfo ("gccwebos.com@evil.tld") makes the real host ambiguous to a reader: not official.
+    if (authority.contains('@') || authority.isEmpty()) return false
+    val hostPort = authority
+    var host = hostPort
+    val colon = hostPort.lastIndexOf(':')
+    if (colon >= 0) {
+        val port = hostPort.substring(colon + 1)
+        if (port.isEmpty() || !port.all { it in '0'..'9' }) return false
+        host = hostPort.substring(0, colon)
+    }
+    host = host.trimEnd('.').lowercase()
+    if (host.isEmpty() || host.any { it !in 'a'..'z' && it !in '0'..'9' && it != '.' && it != '-' }) return false
+    return host == OfficialSiteHost || host.endsWith(".$OfficialSiteHost")
+}
+
 /**
  * Derives compact info-bar fields from provider notice display names only. Never invents values;
- * unknown notice shapes are ignored. First match wins per field.
+ * unknown notice shapes are ignored. First match wins per field. A website notice is kept only
+ * when it points at gccwebos.com; any other (or unparsable) site is dropped entirely.
  */
 internal fun extractNodeInfoBar(infoNames: Iterable<String>): NodeInfoBarParts {
     var traffic: String? = null
@@ -102,8 +147,9 @@ internal fun extractNodeInfoBar(infoNames: Iterable<String>): NodeInfoBarParts {
             ?.let { traffic = it }
         if (expiry == null) InfoExpiry.find(name)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
             ?.let { expiry = it }
-        if (website == null) InfoWebsite.find(name)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
-            ?.let { website = it }
+        // Only gccwebos's own site may be shown. A third-party provider's site is never promoted here.
+        if (website == null) InfoWebsite.find(name)?.groupValues?.getOrNull(1)?.trim()
+            ?.takeIf { it.isNotEmpty() && isOfficialSiteValue(it) }?.let { website = it }
     }
     return NodeInfoBarParts(traffic, expiry, website)
 }

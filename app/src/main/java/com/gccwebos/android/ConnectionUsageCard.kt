@@ -162,13 +162,8 @@ private fun ConnectionRemaining(value: String, motion: UsageMotion, amounts: Acc
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("剩余流量", color = Brand.Muted, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f))
-            // Used share on the right replaces the old "已用 X GB" line; the GB amount stays in the spoken description.
-            amounts?.let {
-                Text(connectionUsedSummary(it.usedText, it.progress), color = Brand.Muted, fontSize = 12.sp,
-                    lineHeight = 18.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.testTag("account-usage-used")
-                        .semantics { contentDescription = connectionUsedDescription(it.usedText, it.progress) })
-            }
+            // The used share now sits right under the bar it describes (see ConnectionUsageAmounts), so the
+            // headline (remaining) and the bar (used) are no longer read as one measure.
         }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val density = LocalDensity.current
@@ -206,6 +201,11 @@ private fun ConnectionUsageAmounts(presentation: AccountUsagePresentation, motio
             val severity = usageSeverity(progress, presentation.expiresAt, presentation.serviceExpired, now)
             ConnectionUsageProgress(progress, severity, motion)
         }
+        // The bar fills with what has been used; say so right under it, next to its own number.
+        Text(connectionUsedSummary(presentation.usedText, presentation.progress), color = Brand.Muted, fontSize = 12.sp,
+            lineHeight = 18.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 6.dp).testTag("account-usage-used")
+                .semantics { contentDescription = connectionUsedDescription(presentation.usedText, presentation.progress) })
         // One quiet meta row under the bar: the period label and the plan total (kept, never dropped).
         val period: @Composable () -> Unit = {
             presentation.periodText?.let {
@@ -319,8 +319,10 @@ private fun ConnectionDateRow(summary: String, full: String, tag: String,
             modifier = Modifier.weight(1f, fill = false))
         onDetails?.let {
             // A full touch target preserves the compact chevron without a tiny interactive area.
-            IconButton(it, interactionSource = interactionSource, modifier = Modifier.size(48.dp).testTag("account-usage-time-details")
-                .semantics { contentDescription = "查看完整时间" }) { Text("›", fontSize = 18.sp) }
+            // Labelled so the destination is clear: it opens the full cycle / expiry times.
+            TextButton(it, interactionSource = interactionSource, contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.heightIn(min = 48.dp).testTag("account-usage-time-details")
+                    .semantics { contentDescription = "查看完整时间" }) { Text("详情 ›", fontSize = 11.sp, color = Brand.Cyan) }
         }
     }
 }

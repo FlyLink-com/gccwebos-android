@@ -77,6 +77,8 @@ internal data class ConnectedNodePresentation(
     val latencyKnown: Boolean,
     val throughputDescription: String,
     val latencyDescription: String,
+    /** No traffic is flowing (both directions unknown or zero): show "等待流量" instead of "↓ 0 ↑ 0". */
+    val trafficIdle: Boolean = false,
 )
 
 /** Only a Connected owner snapshot carrying the prepared node produces a connected card.
@@ -91,12 +93,13 @@ internal fun connectedNodePresentation(control: ConnectionControlState, throughp
     val up = formatThroughput(throughput.upBytesPerSecond)
     val latencyText = formatConnectedLatency(latency)
     val latencyKnown = latency is NodeLatencyObservation.Success
+    val idle = (throughput.downBytesPerSecond ?: 0L) <= 0L && (throughput.upBytesPerSecond ?: 0L) <= 0L
     fun spoken(text: String) = if (text == "–") "未知" else text
     return ConnectedNodePresentation(node.selection, name, protocol, "已连接", down, up, latencyText, latencyKnown,
-        "下载速度 ${spoken(down)}，上传速度 ${spoken(up)}",
+        if (idle) "等待流量" else "下载速度 ${spoken(down)}，上传速度 ${spoken(up)}",
         when (latency) {
             is NodeLatencyObservation.Success -> "节点延迟 ${latency.milliseconds} 毫秒"
             NodeLatencyObservation.NoReply -> "节点延迟：超时"
             else -> "节点延迟：未知"
-        })
+        }, idle)
 }

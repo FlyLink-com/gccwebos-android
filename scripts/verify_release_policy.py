@@ -29,8 +29,8 @@ FLAGS = {
 def verify_configuration(source: str) -> None:
     """Deliberately narrow checks for this project's single release build type."""
     assert re.search(r'applicationId\s*=\s*"com\.gccwebos\.android"', source), "Official package changed"
-    assert re.search(r'versionCode\s*=\s*8\b', source), "Stable versionCode must be 8"
-    assert re.search(r'versionName\s*=\s*"0\.4\.1"', source), "Stable versionName must be 0.4.1"
+    assert re.search(r'versionCode\s*=\s*9\b', source), "Stable versionCode must be 9"
+    assert re.search(r'versionName\s*=\s*"0\.4\.2"', source), "Stable versionName must be 0.4.2"
     # The release block must stay unconditional; nested property-controlled gates are rejected.
     match = re.search(r'\brelease\s*\{([^{}]*)\}', source)
     assert match, "Missing unconditional release build type"

@@ -17,9 +17,11 @@ class ReleasePolicyTests(unittest.TestCase):
         policy.verify_configuration(self.source)
 
     def test_release_cannot_revert_to_previous_or_candidate_version(self):
-        for old, new in [('versionCode = 8', 'versionCode = 7'),
-                         ('versionName = "0.4.1"', 'versionName = "0.4.0"'),
-                         ('versionName = "0.4.1"', 'versionName = "0.4.0-rc.1"')]:
+        for old, new in [('versionCode = 9', 'versionCode = 8'),
+                         ('versionCode = 9', 'versionCode = 7'),
+                         ('versionName = "0.4.2"', 'versionName = "0.4.1"'),
+                         ('versionName = "0.4.2"', 'versionName = "0.4.0"'),
+                         ('versionName = "0.4.2"', 'versionName = "0.4.0-rc.1"')]:
             with self.subTest(new=new), self.assertRaises(AssertionError):
                 policy.verify_configuration(self.source.replace(old, new))
 

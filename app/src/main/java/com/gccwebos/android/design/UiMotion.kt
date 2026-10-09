@@ -198,7 +198,8 @@ internal data class SlidingTab(val title: String, val tag: String)
 
 /**
  * Capsule segmented row: equal cells, one sliding highlight. Each cell keeps Role.Tab, selected/disabled
- * semantics, its test tag and a ≥48 dp touch target. [onSelect] runs only for a user tap on another tab.
+ * semantics, its test tag and a ≥48 dp touch target. [onSelect] runs for every user tap (as the former chips did);
+ * the haptic fires only when the tab actually changes.
  */
 @Composable
 internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: Boolean, onSelect: (Int) -> Unit,
@@ -220,7 +221,7 @@ internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: 
                     interactionSource = press.interactionSource, indication = androidx.compose.material3.ripple(),
                     onClick = {
                         if (tabTapHaptic(selectedIndex, index, userInitiated = true)) haptic(UiHaptic.Tab)
-                        if (!selected) onSelect(index)
+                        onSelect(index) // callers keep their former re-tap behaviour
                     })
                 .testTag(tab.tag).padding(horizontal = 6.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
                 Text(tab.title, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelLarge,

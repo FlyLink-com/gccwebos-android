@@ -131,9 +131,19 @@ class NodeSelectionControllerTest {
         assertEquals(1, f.reads); assertSame(selected, f.selected())
     }
 
-    @Test fun identicalFreshReadsKeepSelectionButEveryContentChangeRequiresReselection() = runTest {
-        val mutations = listOf(yaml("192.0.2.11", "192.0.2.10"), yaml("192.0.2.12"),
-            (yaml().toString(Charsets.UTF_8) + "# new comment\n").toByteArray(),
+    @Test fun reorderedOrCosmeticChangesKeepTheSameSelectedNode() = runTest {
+        for (changed in listOf(yaml("192.0.2.11", "192.0.2.10"), (yaml().toString(Charsets.UTF_8) + "# new comment\n").toByteArray())) {
+            val f = Fixture(this)
+            f.controller.refresh(); runCurrent(); f.selectSecond()
+            val old = f.selected()!!
+            f.bytes = changed; f.controller.refresh(); runCurrent()
+            assertSame(old, f.selected()); assertEquals(2, f.reads)
+            assertTrue(f.controller.snapshot.choices.any { it.selection === old })
+        }
+    }
+
+    @Test fun identicalFreshReadsKeepSelectionButEveryNodeChangeRequiresReselection() = runTest {
+        val mutations = listOf(yaml("192.0.2.10", "192.0.2.12"),
             yaml().toString(Charsets.UTF_8).replace("synthetic-only", "new-synthetic").toByteArray())
         for (changed in mutations) {
             val f = Fixture(this)

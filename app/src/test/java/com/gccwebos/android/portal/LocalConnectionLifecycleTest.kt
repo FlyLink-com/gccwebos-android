@@ -89,18 +89,31 @@ class LocalConnectionLifecycleTest {
     }
     @Test fun contentChangesRequireReselectionAndNeverGuessDuplicateNames() = runTest {
         val replacements = listOf(
-            "proxies:\n" + node(host = "192.0.2.11") + node(),
             "proxies:\n" + node(),
             yaml.toString(Charsets.UTF_8).replace("password: synthetic-only", "password: new-synthetic"),
             yaml.toString(Charsets.UTF_8).replace("port: 443", "port: 444"),
-            yaml.toString(Charsets.UTF_8).replace("same name", "renamed"),
-            yaml.toString(Charsets.UTF_8) + "# comment\n")
+            yaml.toString(Charsets.UTF_8).replace("same name", "renamed"))
         for (replacement in replacements) {
             val f = Fixture()
             try {
                 val selected = f.choices()[1].selection; f.bytes = replacement.toByteArray()
                 assertTrue(f.gateway.prepare(SelectionIntent.Selected(selected)) is ConfigPreparation.SelectionRequired)
                 assertEquals(0, f.directory.listFiles()!!.size)
+            } finally { f.directory.deleteRecursively() }
+        }
+    }
+    @Test fun reorderedOrCosmeticallyChangedContentKeepsTheSameDuplicateNamedNode() = runTest {
+        val replacements = listOf(
+            "proxies:\n" + node(host = "192.0.2.11") + node(),
+            yaml.toString(Charsets.UTF_8) + "# comment\n")
+        for (replacement in replacements) {
+            val f = Fixture()
+            try {
+                val selected = f.choices()[1].selection; f.bytes = replacement.toByteArray()
+                val ready = f.gateway.prepare(SelectionIntent.Selected(selected)) as ConfigPreparation.Ready
+                val material = ready.config.copyMaterial().toString(Charsets.UTF_8)
+                assertTrue(material.contains("192.0.2.11")); assertFalse(material.contains("192.0.2.10"))
+                ready.config.close()
             } finally { f.directory.deleteRecursively() }
         }
     }
@@ -368,7 +381,7 @@ class LocalConnectionLifecycleTest {
             val f = Fixture()
             try {
                 val selected = f.choices()[0].selection
-                f.bytes = (yaml.toString(Charsets.UTF_8) + "# changed\n").toByteArray()
+                f.bytes = yaml.toString(Charsets.UTF_8).replace("password: synthetic-only", "password: changed").toByteArray()
                 val observer = if (otherManager) LocalSubscriptionManager(f.delivery, f.profiles, f.source,
                     f.policy, { now }, f.authority) else f.manager
                 observer.refresh(); f.bytes = yaml

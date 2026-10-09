@@ -187,6 +187,19 @@ class ConfigurationLibraryUiTest {
         assertNoSourceMutation()
     }
 
+    @Test fun refreshedOperationHandlesKeepAnExpandedInactiveGroupOpen() {
+        launch()
+        compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertExists()
+        val replacement = ConfigurationHandle(owner, "synthetic-next-revision", "synthetic-second", 0)
+        compose.runOnIdle {
+            snapshot = snapshot.copy(items = snapshot.items.map { if (it.handle === second) it.copy(handle = replacement) else it })
+        }
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasNoClickAction()
+        compose.onNodeWithTag("configuration-activate-2").performScrollTo().performClick()
+        compose.runOnIdle { assertSame(replacement, activations.single()) }
+    }
+
     @Test fun doubledFontInactiveRowsAndActivationStayInsideTheViewport() {
         launch(fontScale = 2f)
         compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()

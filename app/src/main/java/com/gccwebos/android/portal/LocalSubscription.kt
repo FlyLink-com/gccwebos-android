@@ -85,6 +85,8 @@ class LocalSubscriptionAuthority {
     internal var selectionSchema = -1
     internal var selectionClearVersion = -1L
     internal var choices = emptyList<ConnectionChoice>()
+    /** Memory-only node identities aligned with [choices]; digested, never logged or persisted. */
+    internal var choiceKeys = emptyList<String>()
     internal var selected: ConnectionSelection? = null
     internal var selectionStatus: LocalSubscriptionStatus? = null
     internal var selectionUntil: Instant? = null
@@ -576,7 +578,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             val edit: (ConfigurationLibrary) -> ConfigurationLibrary = { library ->
                 val record = requireNotNull(staged)
                 if (replacement == null) {
-                    ConfigurationEntry(record.revision, "配置 ${library.entries.size + 1}", record).use { entry ->
+                    ConfigurationEntry(record.revision, nextConfigurationName(library.entries.map { it.name }), record).use { entry ->
                         ConfigurationLibrary(entries = library.entries + entry, selector = ConfigurationSelector.Entry,
                             selectedEntryId = entry.id, selectorRevision = record.revision)
                     }
@@ -688,7 +690,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     /** Object identity from the current validated registry only. This does not perform HTTP or prepare. */
     fun selectNode(selection: ConnectionSelection): Boolean = synchronized(lock) {
         val current = nodeSelectionSnapshot()
-        if (current.status != LocalSubscriptionStatus.READY || current.choices.none { it.selection === selection }) return@synchronized false
+        if (current.status != LocalSubscriptionStatus.READY || current.choices.none { it.selection === selection && !it.info }) return@synchronized false
         if (authority.selected !== selection) revision++
         authority.selected = selection
         true
@@ -701,7 +703,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (revision != expected.epoch || expected.snapshot.selected != null) return@synchronized null
         val current = nodeSelectionSnapshot()
         if (revision != expected.epoch || current.status != LocalSubscriptionStatus.READY || current.selected != null ||
-            current.choices != expected.snapshot.choices || current.choices.none { it.selection === selection }) return@synchronized null
+            current.choices != expected.snapshot.choices || current.choices.none { it.selection === selection && !it.info }) return@synchronized null
         authority.selected = selection
         ++revision
     }
@@ -711,7 +713,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             val endpoints = SafeProxyConfig.probeEndpoints(raw)
             if (endpoints.size != choices.size || endpoints.indices.any { endpoints[it].protocol != choices[it].protocol })
                 return@withNodeProbeArtifact emptyList()
-            choices.mapIndexed { index, choice ->
+            choices.mapIndexedNotNull { index, choice ->
+                if (choice.info) return@mapIndexedNotNull null // Provider notices are never measured or auto-picked.
                 val endpoint = endpoints[index]
                 NodeProbeTarget(choice.selection, endpoint.endpoint, endpoint.protocol, endpoint.port, probeTransport(endpoint))
             }
@@ -719,7 +722,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** Recheck results before publication; a target never renews a removed or changed registry. */
     internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget): Boolean = synchronized(lock) {
-        if (authority.choices.none { it.selection === target.selection }) return@synchronized false
+        if (authority.choices.none { it.selection === target.selection && !it.info }) return@synchronized false
         withNodeProbeArtifact { raw, choices ->
             val index = choices.indexOfFirst { it.selection === target.selection }
             if (index < 0 || choices[index].protocol != target.protocol) return@withNodeProbeArtifact false
@@ -851,17 +854,30 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         kind: ManualSourceKind = ManualSourceKind.LegacyRemote, sourceRevision: String? = null) {
         val observedRevision = if (sourceRevision != null) sourceRevision else readManualSource()?.use { it.revision }
         val digest = MessageDigest.getInstance("SHA-256").digest(raw)
-        if (authority.selectionBinding != binding || authority.selectionClearVersion != authority.clearVersion ||
-            authority.selectionSourceKind != kind || authority.selectionSourceRevision != observedRevision ||
-            authority.selectionSchema != SafeProxyConfig.SCHEMA_VERSION ||
-            authority.selectionRevision?.contentEquals(digest) != true) {
+        val sameSource = authority.selectionBinding == binding && authority.selectionClearVersion == authority.clearVersion &&
+            authority.selectionSourceKind == kind && authority.selectionSourceRevision == observedRevision &&
+            authority.selectionSchema == SafeProxyConfig.SCHEMA_VERSION
+        if (!sameSource || authority.selectionRevision?.contentEquals(digest) != true) {
+            // Some providers reorder keys or rewrite notice entries on every download. The raw digest
+            // still fences stored content; a node whose normalized identity is unchanged keeps its
+            // opaque selection, and the user's choice survives while that node exists.
+            val keys = try { SafeProxyConfig.selectionKeys(raw).takeIf { it.size == nodes.size } }
+                catch (_: Exception) { null }
+            val previous = if (sameSource && keys != null) uniqueKeys(authority.choiceKeys, authority.choices) else emptyMap()
+            val reusable = keys?.groupingBy { it }?.eachCount()
             authority.selectionRevision?.fill(0)
             authority.selectionRevision = digest
             authority.selectionBinding = binding
             authority.selectionSchema = SafeProxyConfig.SCHEMA_VERSION
             authority.selectionClearVersion = authority.clearVersion
-            authority.choices = nodes.map { ConnectionChoice(ConnectionSelection(), it.name, it.protocol) }
-            authority.selected = null
+            authority.choices = nodes.mapIndexed { index, node ->
+                val key = keys?.get(index)?.takeIf { reusable?.get(it) == 1 }
+                val old = key?.let(previous::get)?.takeIf { it.protocol == node.protocol && !node.info }
+                ConnectionChoice(old?.selection ?: ConnectionSelection(), node.name, node.protocol, node.info)
+            }
+            authority.choiceKeys = keys ?: emptyList()
+            val selected = authority.selected
+            authority.selected = if (selected != null && authority.choices.any { it.selection === selected && !it.info }) selected else null
         } else digest.fill(0)
         authority.selectionStatus = LocalSubscriptionStatus.READY
         authority.selectionSourceKind = kind
@@ -869,9 +885,15 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         authority.selectionUntil = until
         authority.selectionRequiresRefresh = false
     }
+    /** Only a key that is unique in the old registry can carry its selection forward. */
+    private fun uniqueKeys(keys: List<String>, choices: List<ConnectionChoice>): Map<String, ConnectionChoice> {
+        if (keys.size != choices.size) return emptyMap()
+        val counts = keys.groupingBy { it }.eachCount()
+        return keys.indices.filter { counts[keys[it]] == 1 && !choices[it].info }.associate { keys[it] to choices[it] }
+    }
     private fun invalidateSelections(status: LocalSubscriptionStatus? = null, until: Instant? = null) {
         authority.selectionRevision?.fill(0); authority.selectionRevision = null
-        authority.selectionBinding = null; authority.choices = emptyList()
+        authority.selectionBinding = null; authority.choices = emptyList(); authority.choiceKeys = emptyList()
         authority.selected = null
         authority.selectionStatus = status; authority.selectionUntil = until
         if (status != null) authority.selectionRequiresRefresh = true
@@ -1246,7 +1268,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 val snapshot = refreshLocked(expectedEpoch) { fresh, raw, freshBinding, freshEpoch ->
                     if (fresh.status != LocalSubscriptionStatus.READY) return@refreshLocked
                     val selected = (intent as? SelectionIntent.Selected)?.selection
-                    index = authority.choices.indexOfFirst { it.selection === selected }
+                    index = authority.choices.indexOfFirst { it.selection === selected && !it.info }
                     if (index < 0) {
                         result = ConfigPreparation.SelectionRequired(authority.choices.toList()); return@refreshLocked
                     }
@@ -1387,4 +1409,11 @@ class LocalSubscriptionConfigGateway(private val manager: LocalSubscriptionManag
     override fun invalidatePending() = manager.invalidatePending()
     override fun clearPreparedMaterial() = files.clear()
     override fun observeClear(onClear: () -> Unit): Closeable = manager.observeClear(onClear)
+}
+
+/** Default names continue after the highest existing "配置 N"; existing names are never changed. */
+internal fun nextConfigurationName(existing: List<String>): String {
+    val pattern = Regex("配置 ([1-9][0-9]{0,8})")
+    val highest = existing.mapNotNull { pattern.matchEntire(it)?.groupValues?.get(1)?.toIntOrNull() }.maxOrNull()
+    return "配置 ${(highest ?: existing.size).toLong() + 1}"
 }

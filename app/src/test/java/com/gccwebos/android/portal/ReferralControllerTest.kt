@@ -114,6 +114,34 @@ class ReferralControllerTest {
         assertTrue(fixture.controller.copied); assertEquals(2, fixture.calls.size)
     }
 
+    @Test fun shareMessageCopyNeedsAConfirmedLinkAndSendsNoRequests() = runTest {
+        val fixture = Fixture(this) { path, _ ->
+            assertNotEquals(ReferralJson.LINK, path)
+            WireResponse(200, if (path == ReferralJson.PROFILE) profile() else statistics)
+        }
+        fixture.controller.load(); runCurrent()
+        assertNull(fixture.controller.shareUrl())
+        fixture.controller.copyShareMessage()
+        assertTrue(fixture.copied.isEmpty()); assertFalse(fixture.controller.copiedMessage)
+        assertNotNull(fixture.controller.error)
+
+        val linked = Fixture(this) { path, _ ->
+            assertNotEquals(ReferralJson.LINK, path)
+            WireResponse(200, if (path == ReferralJson.PROFILE) profile(linkPath) else statistics)
+        }
+        linked.controller.load(); runCurrent()
+        val url = "https://portal.gccwebos.com$linkPath"
+        assertEquals(url, linked.controller.shareUrl())
+        linked.controller.copyShareMessage()
+        assertEquals(listOf(ReferralPresentation.shareMessage(url)), linked.copied)
+        assertTrue(linked.controller.copiedMessage); assertFalse(linked.controller.copied)
+        linked.controller.copyLink()
+        assertTrue(linked.controller.copied); assertFalse(linked.controller.copiedMessage)
+        assertEquals(2, linked.calls.size)
+        linked.controller.dispose()
+        assertNull(linked.controller.shareUrl()); assertFalse(linked.controller.copied)
+    }
+
     @Test fun repeatedExplicitGenerationSendsOnePostWithExactEmptyObject() = runTest {
         val release = CompletableDeferred<Unit>()
         val fixture = Fixture(this) { path, body ->

@@ -47,6 +47,9 @@ internal class ReferralController(
         private set
     var copied by mutableStateOf(false)
         private set
+    /** True after the share message (not the bare link) was copied. */
+    var copiedMessage by mutableStateOf(false)
+        private set
 
     private val epoch = account.authSessionGeneration
     private var repo = initialRepository
@@ -108,9 +111,29 @@ internal class ReferralController(
         }
     }
 
+    /** The confirmed share URL, or null whenever copying would be refused. */
+    fun shareUrl(): String? = if (canCopy) profile?.linkPath?.let { runCatching { ReferralJson.shareUrl(it) }.getOrNull() } else null
+
+    fun copyShareMessage() {
+        if (busy || !ready()) return
+        val url = shareUrl()
+        if (url == null) {
+            copiedMessage = false
+            error = "邀请链接尚未确认，请先读取或生成邀请链接。"
+            return
+        }
+        try {
+            copy(ReferralPresentation.shareMessage(url))
+            if (ready()) { copiedMessage = true; copied = false; error = null }
+        } catch (_: Exception) {
+            if (ready()) { copiedMessage = false; error = "邀请文案未能复制，请重试。" }
+        }
+    }
+
     fun copyLink() {
         if (busy || !ready()) return
         val current = profile
+        copiedMessage = false
         if (!canCopy || current?.linkPath == null) {
             copied = false
             error = "邀请链接尚未确认，请先读取或生成邀请链接。"
@@ -130,7 +153,7 @@ internal class ReferralController(
         requestId++
         task?.cancel(); task = null
         busy = false; error = null; profile = null; performance = null
-        profileError = null; performanceError = null; copied = false
+        profileError = null; performanceError = null; copied = false; copiedMessage = false
     }
 
     private fun ready() = !disposed && scope.isActive && account.authenticated &&
@@ -171,7 +194,7 @@ internal class ReferralController(
     private fun run(generating: Boolean = false, action: suspend (ReferralRepository, Long) -> Unit) {
         if (busy || !ready()) return
         val request = ++requestId
-        busy = true; error = null; copied = false
+        busy = true; error = null; copied = false; copiedMessage = false
         task = scope.launch {
             try {
                 ensureCurrent(request)
@@ -215,7 +238,7 @@ internal class ReferralController(
 
     private fun expireSessionIfNeeded(failure: Exception) {
         if (failure is PortalFailure && failure.reason == PortalFailure.Reason.SESSION_EXPIRED) {
-            profile = null; performance = null; copied = false
+            profile = null; performance = null; copied = false; copiedMessage = false
             account.commerceSessionExpired()
         }
     }

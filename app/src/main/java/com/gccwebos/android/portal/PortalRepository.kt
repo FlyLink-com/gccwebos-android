@@ -299,7 +299,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 ?: return@guarded ImportSnapshot(resource, ImportStatus.WAITING_DELIVERY)
             checkGeneration(epoch); activeSession()
             onDeliveryReceived()
-            val raw = subscription.download(requireNotNull(record.url))
+            val read = subscription.read(requireNotNull(record.url))
+            val raw = read.bytes
+            // Display-only report from this download's own response; null is unknown.
+            val usage = read.usage?.let { SubscriptionUsage.observed(it, now()) }
             try {
                 checkGeneration(epoch); activeSession(); currentCoroutineContext().ensureActive()
                 if (resource.validUntil <= now()) return@guarded ImportSnapshot(resource, ImportStatus.EXPIRED)
@@ -328,10 +331,10 @@ class PortalRepository(private val transport: PortalTransport, private val store
                         else {
                             checkImportObservation(overview, epoch, clearVersion)
                             if (recovery?.journal != null) {
-                                localSubscriptions.rememberRecoveredLegacy(raw, recovery.journal, resource.validUntil) {
+                                localSubscriptions.rememberRecoveredLegacy(raw, recovery.journal, resource.validUntil, usage) {
                                     context.ensureActive(); checkImportObservation(overview, epoch, clearVersion)
                                 }
-                            } else localSubscriptions.remember(raw, requireNotNull(record.url), resource.validUntil)
+                            } else localSubscriptions.remember(raw, requireNotNull(record.url), resource.validUntil, usage)
                             invalidateImport()
                             // Hostname profiles remain original artifacts. Resolution belongs only
                             // to the fresh physical-network connection attempt, never this preview.

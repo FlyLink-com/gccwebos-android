@@ -2,9 +2,16 @@ name: Native VPN isolated build
 on:
   workflow_dispatch:
   pull_request:
+    # Native engine inputs plus the app files that load, configure or accept-test it.
+    # Ordinary app/UI changes are covered by the Android M0 build workflow.
     paths:
       - 'native/**'
-      - 'app/**'
+      - 'app/build.gradle.kts'
+      - 'app/src/main/java/com/gccwebos/android/vpn/**'
+      - 'app/src/test/java/com/gccwebos/android/vpn/**'
+      - 'app/src/debug/**'
+      - 'app/src/acceptanceTest/**'
+      - 'app/src/acceptanceFixtures/**'
       - 'scripts/verify_source.py'
       - 'scripts/verify_release_policy.py'
       - 'scripts/test_release_policy.py'
@@ -34,6 +41,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
       - name: Verify source boundary and record identity
         run: |
           set -euo pipefail
@@ -169,9 +177,12 @@ jobs:
             .build-output/native/fresh-runtime-apks-before.sha256
           include-hidden-files: true
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
+      # Full lab bundle is ~230 MB per run. Keep it when something failed, or for an
+      # explicit manual run (e.g. to produce a new pinned JNI reuse artifact, which
+      # scripts/materialize-native-libraries.py reads by fixed artifact id).
       - name: Retain source, native and Android evidence
-        if: always()
+        if: failure() || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: gccwebos-native-vpn-lab-${{ github.event.pull_request.head.sha || github.sha }}
@@ -188,4 +199,4 @@ jobs:
             native/notices/
           include-hidden-files: true
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 14 || 3 }}

@@ -122,18 +122,18 @@ internal fun ReferralPanel(account: AccountController, autoLoad: Boolean = true,
                     pair.forEach { StatCell(it, Modifier.weight(1f).fillMaxHeight()) }
                 }
             }
-            if (p.reconciliationRequired) SupportingText("奖励对账中", Modifier.testTag("referral-reconciliation"))
         } ?: Spacer(Modifier.height(8.dp))
     }
 
     if (profile?.eligible == true) {
-        BrandCard(Modifier.testTag("referral-steps")) {
+        if (policy != null) BrandCard(Modifier.testTag("referral-steps")) {
             Text("如何获得奖励", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             ReferralPresentation.steps(policy).forEachIndexed { index, step -> StepRow(index + 1, step) }
         }
-        BrandCard(Modifier.testTag("referral-rules")) {
+        val rules = ReferralPresentation.rules(profile)
+        if (rules.isNotEmpty()) BrandCard(Modifier.testTag("referral-rules")) {
             Text("规则说明", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            ReferralPresentation.rules(profile).forEach { rule ->
+            rules.forEach { rule ->
                 Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.testTag("referral-rule-${rule.key}"),
                     verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(rule.title, color = Brand.Cyan, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)

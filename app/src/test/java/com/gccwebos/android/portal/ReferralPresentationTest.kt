@@ -11,50 +11,51 @@ class ReferralPresentationTest {
         ReferralPolicy("policy_fixture", 3, Instant.parse("2026-09-30T00:00:00Z"), rate, rounding, attribution, confirmation)
     private val performance = ReferralPerformance(4, 1, 17, 3, 5, 2, .25, false)
 
+    private val forbidden = listOf("永久", "实时", "首次", "首充", "提现", "舍去", "四舍五入", "退款", "扣回", "撤回", "对账", "只计", "一次")
+    private fun assertPositiveCopy(text: String) = forbidden.forEach { assertFalse("'$it' in: $text", text.contains(it)) }
+
     @Test fun percentAndHeroComeFromThePolicy() {
         assertEquals("7.35", ReferralPresentation.percent(735))
         assertEquals("20", ReferralPresentation.percent(2000))
-        assertEquals("当前奖励比例 7.35%", ReferralPresentation.rateLabel(policy()))
+        assertEquals("奖励比例 7.35%", ReferralPresentation.rateLabel(policy()))
         val hero = ReferralPresentation.hero(policy(rate = 2000))
-        assertEquals("邀请好友 · 赚 20% 首充奖励", hero.title)
-        assertTrue(hero.subtitle.contains("首充 Coins 的 20%"))
-        assertTrue(hero.subtitle.contains("每位好友计一次"))
+        assertEquals("邀请好友 · 赚 Coins 奖励", hero.title)
+        assertPositiveCopy(hero.title + hero.subtitle)
         assertThrows(IllegalArgumentException::class.java) { ReferralPresentation.percent(0) }
     }
 
     @Test fun missingPolicyNeverPromisesARewardOrDefaultsNumbers() {
         val hero = ReferralPresentation.hero(null)
-        val all = hero.title + hero.subtitle + ReferralPresentation.steps(null).joinToString { it.title + it.body }
-        assertFalse(Regex("\\d").containsMatchIn(all))
-        assertFalse(all.contains("永久")); assertFalse(all.contains("实时"))
+        assertFalse(Regex("\\d").containsMatchIn(hero.title + hero.subtitle))
+        assertFalse((hero.title + hero.subtitle).contains("奖励"))
         val rules = ReferralPresentation.rules(ReferralProfile(true, null, null, 30))
-        assertEquals(listOf("attribution", "usage"), rules.map { it.key })
+        assertEquals(listOf("attribution"), rules.map { it.key })
         assertEquals("30 天有效追踪", rules.first().title)
-        assertEquals(listOf("usage"), ReferralPresentation.rules(ReferralProfile(true, null, null, null)).map { it.key })
+        assertTrue(ReferralPresentation.rules(ReferralProfile(true, null, null, null)).isEmpty())
     }
 
-    @Test fun rulesUseServerWindowsAndRounding() {
-        val rules = ReferralPresentation.rules(ReferralProfile(true, null, policy(), 47)).associateBy { it.key }
-        assertEquals("47 天有效追踪", rules.getValue("attribution").title)
-        assertTrue(rules.getValue("attribution").body.contains("47 天内完成注册"))
-        assertEquals("9 天确认期", rules.getValue("confirmation").title)
-        assertTrue(rules.getValue("confirmation").body.contains("首次充值到账 9 天后"))
-        assertTrue(rules.getValue("basis").body.contains("7.35%"))
-        assertTrue(rules.getValue("basis").body.contains("舍去"))
-        assertTrue(ReferralPresentation.rules(ReferralProfile(true, null, policy(rounding = "half_up"), 47))
-            .first { it.key == "basis" }.body.contains("四舍五入"))
+    @Test fun rulesAndStepsUseServerDaysInShortPositiveCopy() {
+        val rules = ReferralPresentation.rules(ReferralProfile(true, null, policy(), 47))
+        assertEquals(listOf("attribution", "confirmation", "usage"), rules.map { it.key })
+        val byKey = rules.associateBy { it.key }
+        assertEquals("47 天有效追踪", byKey.getValue("attribution").title)
+        assertTrue(byKey.getValue("attribution").body.contains("47 天内完成注册"))
+        assertEquals("9 天确认期", byKey.getValue("confirmation").title)
+        assertTrue(byKey.getValue("confirmation").body.contains("9 天后"))
+        rules.forEach { assertPositiveCopy(it.title + it.body) }
         val instant = ReferralPresentation.rules(ReferralProfile(true, null, policy(confirmation = 0), 47)).first { it.key == "confirmation" }
         assertEquals("确认后到账", instant.title); assertFalse(instant.body.contains("0 天"))
-        assertEquals("9 天确认期后自动转为可用", ReferralPresentation.steps(policy()).last().body)
-        assertTrue(rules.getValue("usage").body.contains("不能提现"))
+        val steps = ReferralPresentation.steps(policy())
+        assertEquals(listOf("发送邀请", "好友充值", "自动到账"), steps.map { it.title })
+        assertEquals("9 天确认期后奖励自动到账", steps.last().body)
+        steps.forEach { assertPositiveCopy(it.title + it.body) }
     }
 
-    @Test fun statsMirrorReportedFieldsWithoutDerivedTotals() {
+    @Test fun statsMirrorReportedPositiveFieldsOnly() {
         val stats = ReferralPresentation.stats(performance)
-        assertEquals(listOf("invites", "available", "pending", "reversed"), stats.map { it.key })
-        assertEquals(listOf("4", "5", "3", "2"), stats.map { it.value })
-        assertEquals("首次充值 1 人", stats[0].note)
-        assertTrue(stats.none { it.label.contains("累计总") })
+        assertEquals(listOf("invites", "recharged", "available", "pending"), stats.map { it.key })
+        assertEquals(listOf("4", "1", "5", "3"), stats.map { it.value })
+        stats.forEach { assertPositiveCopy(it.label + it.note) }
     }
 
     @Test fun maskedLinkAndShareUrlsEncodeTheFullLink() {

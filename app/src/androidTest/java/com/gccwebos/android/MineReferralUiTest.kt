@@ -149,13 +149,15 @@ class MineReferralUiTest {
     }
     @Test fun dynamicPolicyReadAndUserCopyDoNotGenerateLinksOrChangeWallet() {
         launchReferral({ """{"profile":{"eligible":true,"linkPath":"$path","policy":{"policyRef":"referral_ui_policy","version":3,"effectiveAt":"2026-09-30T00:00:00.000Z","rateBps":735,"rounding":"floor","attributionDays":47,"confirmationDays":9},"attributionDays":47}}""" })
-        compose.onNodeWithTag("referral-policy-rate").assertTextEquals("当前奖励比例 7.35%")
+        compose.onNodeWithTag("referral-policy-rate").assertTextEquals("奖励比例 7.35%")
         compose.onNodeWithTag("referral-refresh").assertDoesNotExist()
-        compose.onNodeWithTag("referral-available-reward").performScrollTo().assertTextEquals("可用奖励", "5", "Coins", "已到账，尚未使用")
-        compose.onNodeWithTag("referral-stat-invites").performScrollTo().assertTextEquals("累计邀请", "4", "人", "首次充值 1 人")
+        compose.onNodeWithTag("referral-available-reward").performScrollTo().assertTextEquals("可用奖励", "5", "Coins", "已到账")
+        compose.onNodeWithTag("referral-stat-invites").performScrollTo().assertTextEquals("累计邀请", "4", "人", "已注册好友")
         compose.onNodeWithTag("referral-stat-pending").performScrollTo().assertTextContains("3")
-        compose.onNodeWithTag("referral-stat-reversed").performScrollTo().assertTextContains("2")
-        compose.onNodeWithTag("referral-hero-title").assertTextEquals("邀请好友 · 赚 7.35% 首充奖励")
+        compose.onNodeWithTag("referral-stat-recharged").performScrollTo().assertTextEquals("好友充值", "1", "人", "已完成充值")
+        compose.onNodeWithTag("referral-stat-reversed").assertDoesNotExist()
+        compose.onNodeWithTag("referral-step-3").performScrollTo().assertTextEquals("自动到账", "9 天确认期后奖励自动到账")
+        compose.onNodeWithTag("referral-hero-title").assertTextEquals("邀请好友 · 赚 Coins 奖励")
         compose.onNodeWithTag("referral-rule-attribution").performScrollTo().assertTextContains("47 天有效追踪")
         compose.onNodeWithTag("referral-rule-confirmation").performScrollTo().assertTextContains("9 天确认期")
         compose.onNodeWithTag("referral-link-masked").performScrollTo().assertTextEquals("portal.gccwebos.com/r/" + path.removePrefix("/r/").take(4) + "…" + path.takeLast(4))
@@ -168,6 +170,7 @@ class MineReferralUiTest {
         val url = "https://portal.gccwebos.com$path"
         compose.onNodeWithTag("referral-policy-rate").assertDoesNotExist()
         compose.onNodeWithTag("referral-rule-confirmation").assertDoesNotExist()
+        compose.onNodeWithTag("referral-steps").assertDoesNotExist()
         compose.onNodeWithTag("referral-share-telegram").performScrollTo().performClick()
         compose.onNodeWithTag("referral-share-x").performScrollTo().performClick()
         compose.onNodeWithTag("referral-share-system").performScrollTo().performClick()

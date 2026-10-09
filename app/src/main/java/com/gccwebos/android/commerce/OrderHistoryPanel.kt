@@ -23,8 +23,6 @@ import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
 import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /** Details are an explicit read. The list composition, cursor, filter, and scroll survive return. */
 @Composable
@@ -34,12 +32,18 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
     val details = detailOverride ?: remember(account.authSessionGeneration, state) {
         OrderDetailController(account, scope, state::historyDetail)
     }
+    // null = 全部 (display-only composition of already-loaded purchase + recharge lists).
     var chosenCategory by remember(account.authSessionGeneration, state) { mutableStateOf<String?>(null) }
-    val category = when {
-        chosenCategory == "recharge" -> "recharge"
-        state.commerceModel == CommerceModel.LEGACY -> "orders"
-        state.commerceModel == CommerceModel.WALLET_FIRST -> "plans"
-        else -> null
+    val purchaseKey = when (state.commerceModel) {
+        CommerceModel.LEGACY -> "orders"
+        CommerceModel.WALLET_FIRST -> "plans"
+        null -> null
+    }
+    val category = when (chosenCategory) {
+        "recharge" -> "recharge"
+        "all" -> "all"
+        "orders", "plans" -> chosenCategory
+        else -> purchaseKey // default: 套餐购买 for the active commerce model
     }
     DisposableEffect(details) { onDispose { details.dispose() } }
     BackHandler(enabled = details.visible, onBack = details::back)
@@ -47,28 +51,36 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
         "orders" -> state.orderPage?.orders?.size
         "plans" -> state.transitions?.size
         "recharge" -> state.rechargeHistory?.size
+        "all" -> {
+            val purchases = when (state.commerceModel) {
+                CommerceModel.LEGACY -> state.orderPage?.orders?.size
+                CommerceModel.WALLET_FIRST -> state.transitions?.size
+                null -> null
+            }
+            val recharges = state.rechargeHistory?.size
+            if (purchases == null && recharges == null) null else (purchases ?: 0) + (recharges ?: 0)
+        }
         else -> null
     }
     val listError = historyReadError(selectedRows, state.busy,
-        if (category == "recharge") state.rechargeHistoryError else state.purchaseHistoryError, state.error)
+        if (category == "recharge") state.rechargeHistoryError
+        else if (category == "all") state.purchaseHistoryError ?: state.rechargeHistoryError
+        else state.purchaseHistoryError, state.error)
 
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("订单", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f))
-    }
     CommerceReadNotice(state, listError, "history-error")
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        val purchaseCategory = when (state.commerceModel) {
-            CommerceModel.LEGACY -> "orders" to "商城"
-            CommerceModel.WALLET_FIRST -> "plans" to "套餐计划"
-            null -> null
+    Row(Modifier.fillMaxWidth().testTag("orders-secondary-tabs"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (purchaseKey != null) {
+            FilterChip(selected = category == purchaseKey, onClick = { chosenCategory = purchaseKey },
+                label = { Text("套餐购买") },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("orders-$purchaseKey"))
         }
-        listOfNotNull(purchaseCategory, "recharge" to "充值").forEach { (key, label) ->
-            FilterChip(selected = category == key, onClick = { chosenCategory = key },
-                label = { Text(label) }, modifier = Modifier.heightIn(min = 48.dp).testTag("orders-$key"))
-        }
+        FilterChip(selected = category == "recharge", onClick = { chosenCategory = "recharge" },
+            label = { Text("代币充值") }, modifier = Modifier.heightIn(min = 48.dp).testTag("orders-recharge"))
+        FilterChip(selected = category == "all", onClick = { chosenCategory = "all" },
+            label = { Text("全部") }, modifier = Modifier.heightIn(min = 48.dp).testTag("orders-all"))
     }
-    BrandCard(Modifier.testTag("orders-state-separation"), contentPadding = PaddingValues(12.dp)) {
+    HistoryListCard(Modifier.testTag("orders-state-separation"), contentPadding = PaddingValues(12.dp)) {
         when (category) {
             "orders" -> {
                 val page = state.orderPage
@@ -77,8 +89,8 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                     val selection = HistorySelection(HistoryKind.Legacy, order.ref)
                     HistorySummary("history-order-${order.ref}", historyOfferTitle(order.offer),
                         formatCoins(order.amountUnits), if (order.offer.category == "data_pack") "流量包购买" else "套餐购买",
-                        purchaseStatePairs(order), null,
-                        order.ref, order.createdAt, com.gccwebos.android.R.drawable.brand_receipt,
+                        listOf(OrderHistoryPresentation.purchaseListStatus(order)),
+                        null, order.ref, order.createdAt, com.gccwebos.android.R.drawable.brand_receipt,
                         details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
                 }
                 if (page?.nextCursor != null) BrandButton("加载更早订单", state::moreOrders, enabled = !state.busy,
@@ -89,8 +101,9 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                 HistoryGroups(state.transitions.orEmpty(), { it.createdAt }) { order ->
                     val selection = HistorySelection(HistoryKind.Deferred, order.ref)
                     HistorySummary("history-order-${order.ref}", historyOfferTitle(order.offer),
-                        formatCoins(order.amountUnits), "套餐计划", purchaseStatePairs(order), null,
-                        order.ref, order.createdAt, com.gccwebos.android.R.drawable.brand_receipt,
+                        formatCoins(order.amountUnits), "套餐计划",
+                        listOf(OrderHistoryPresentation.purchaseListStatus(order)),
+                        null, order.ref, order.createdAt, com.gccwebos.android.R.drawable.brand_receipt,
                         details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
                 }
             }
@@ -100,7 +113,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                     val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
                     HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
                         formatMoney(order.amountMinor, order.currency, order.currencyExponent), "支付充值",
-                        listOf("充值" to historyRechargeStatus(order.status), "到账" to historyCreditState(order.status)),
+                        listOf(OrderHistoryPresentation.rechargeListStatus(order.status)),
                         "预计 ${formatCoins(order.expectedPaidCoinUnits)}", order.orderRef, order.createdAt,
                         com.gccwebos.android.R.drawable.brand_wallet,
                         details.selected == selection, !state.busy && !details.busy) {
@@ -108,10 +121,65 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                     }
                 }
             }
+            "all" -> {
+                val purchases: List<PurchaseResult> = when (state.commerceModel) {
+                    CommerceModel.LEGACY -> state.orderPage?.orders.orEmpty()
+                    CommerceModel.WALLET_FIRST -> state.transitions.orEmpty()
+                    null -> emptyList()
+                }
+                val recharges = state.rechargeHistory
+                val ready = state.commerceModel != null || recharges != null
+                val combined = buildList {
+                    purchases.forEach { add(AllHistoryItem.Purchase(it)) }
+                    recharges.orEmpty().forEach { add(AllHistoryItem.Recharge(it)) }
+                }.sortedByDescending { it.createdAt }
+                HistoryReadState(if (!ready) null else combined.size, state.busy, "订单")
+                combined.forEachIndexed { index, item ->
+                    if (index > 0) HorizontalDivider(color = Brand.RowDivider)
+                    val day = OrderHistoryPresentation.dayKey(item.createdAt)
+                    if (index == 0 || day != OrderHistoryPresentation.dayKey(combined[index - 1].createdAt)) {
+                        Text(OrderHistoryPresentation.dateHeading(item.createdAt), color = Brand.Muted,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(top = 6.dp, start = 4.dp).testTag("history-date-$day"))
+                    }
+                    when (item) {
+                        is AllHistoryItem.Purchase -> {
+                            val order = item.value
+                            val selection = when (order) {
+                                is PurchaseResult.Order -> HistorySelection(HistoryKind.Legacy, order.ref)
+                                is PurchaseResult.Deferred -> HistorySelection(HistoryKind.Deferred, order.ref)
+                            }
+                            val type = when {
+                                order is PurchaseResult.Order && order.offer.category == "data_pack" -> "流量包购买"
+                                order is PurchaseResult.Deferred -> "套餐计划"
+                                else -> "套餐购买"
+                            }
+                            HistorySummary("history-order-${order.ref}", historyOfferTitle(order.offer),
+                                formatCoins(order.amountUnits), type,
+                                listOf(OrderHistoryPresentation.purchaseListStatus(order)),
+                                null, order.ref, item.createdAt, com.gccwebos.android.R.drawable.brand_receipt,
+                                details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
+                        }
+                        is AllHistoryItem.Recharge -> {
+                            val order = item.value
+                            val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
+                            HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
+                                formatMoney(order.amountMinor, order.currency, order.currencyExponent), "支付充值",
+                                listOf(OrderHistoryPresentation.rechargeListStatus(order.status)),
+                                "预计 ${formatCoins(order.expectedPaidCoinUnits)}", order.orderRef, order.createdAt,
+                                com.gccwebos.android.R.drawable.brand_wallet,
+                                details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
+                        }
+                    }
+                }
+            }
             else -> HistoryReadState(null, state.busy, "订单类型")
         }
     }
-    if (details.visible) OrderDetailsDialog(details)
+    if (details.visible) OrderDetailsDialog(details, onSyncResources = {
+        account.refreshSubscription()
+        details.back()
+    })
 }
 
 @Composable
@@ -140,10 +208,11 @@ private fun <T> HistoryGroups(rows: List<T>, createdAt: (T) -> Instant, content:
     // Preserve the server's cursor/order. Only consecutive rows on the same local day share a heading.
     rows.forEachIndexed { index, row ->
         val timestamp = createdAt(row)
-        val day = historyDay(timestamp)
+        val day = OrderHistoryPresentation.dayKey(timestamp)
         if (index > 0) HorizontalDivider(color = Brand.RowDivider)
-        if (index == 0 || day != historyDay(createdAt(rows[index - 1]))) {
-            Text(historyDateHeading(timestamp), color = Brand.Muted, style = MaterialTheme.typography.labelLarge,
+        if (index == 0 || day != OrderHistoryPresentation.dayKey(createdAt(rows[index - 1]))) {
+            Text(OrderHistoryPresentation.dateHeading(timestamp), color = Brand.Muted,
+                style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 6.dp, start = 4.dp).testTag("history-date-$day"))
         }
         content(row)
@@ -152,7 +221,7 @@ private fun <T> HistoryGroups(rows: List<T>, createdAt: (T) -> Instant, content:
 
 @Composable
 private fun HistorySummary(tag: String, title: String, amount: String, type: String,
-    states: List<Pair<String, String>>, expected: String?, ref: String, createdAt: Instant, icon: Int,
+    states: List<String>, expected: String?, ref: String, createdAt: Instant, icon: Int,
     isSelected: Boolean, enabled: Boolean, onDetail: () -> Unit) {
     Surface(Modifier.fillMaxWidth().testTag(tag).semantics { selected = isSelected },
         shape = RoundedCornerShape(14.dp), color = Color.Transparent,
@@ -179,10 +248,10 @@ private fun HistorySummary(tag: String, title: String, amount: String, type: Str
                             fontWeight = FontWeight.Bold)
                         HistoryAmount(amount, "$tag-amount")
                     }
-                    Text("${historyClock(createdAt)} · $type", color = Brand.Muted,
+                    Text("${OrderHistoryPresentation.clock(createdAt)} · $type", color = Brand.Muted,
                         style = MaterialTheme.typography.labelMedium, modifier = Modifier.testTag("$tag-time"))
-                    states.forEachIndexed { index, (label, value) ->
-                        Text("$label · $value", color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+                    states.forEachIndexed { index, value ->
+                        Text(value, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.testTag("$tag-state-$index"))
                     }
                     expected?.let { Text(it, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
@@ -203,7 +272,7 @@ private fun HistoryAmount(amount: String, tag: String) {
 }
 
 @Composable
-private fun OrderDetailsDialog(state: OrderDetailController) {
+private fun OrderDetailsDialog(state: OrderDetailController, onSyncResources: () -> Unit) {
     AlertDialog(onDismissRequest = state::back,
         title = { Text("订单详情", modifier = Modifier.testTag("history-detail-title")) },
         text = {
@@ -212,7 +281,7 @@ private fun OrderDetailsDialog(state: OrderDetailController) {
                 state.selected?.let { DetailField("记录", it.ref) }
                 CommerceReadNotice(state, state.error?.takeUnless { state.busy }, "history-detail-error")
                 when (val detail = state.value) {
-                    is HistoryDetail.Purchase -> PurchaseDetails(detail.value)
+                    is HistoryDetail.Purchase -> PurchaseDetails(detail.value, onSyncResources)
                     is HistoryDetail.Recharge -> RechargeDetails(detail.value)
                     null -> Unit
                 }
@@ -223,7 +292,7 @@ private fun OrderDetailsDialog(state: OrderDetailController) {
 }
 
 @Composable
-private fun PurchaseDetails(value: PurchaseResult) {
+private fun PurchaseDetails(value: PurchaseResult, onSyncResources: () -> Unit) {
     DetailField("商品", value.offer.title.zh)
     DetailField("订单金额", formatCoins(value.amountUnits))
     DetailField("商品交付", if (value.offer.category == "data_pack") "${value.offer.trafficGb} GB 独立流量包"
@@ -231,25 +300,28 @@ private fun PurchaseDetails(value: PurchaseResult) {
     value.offer.importantNotices.zh.forEach { SupportingText(it) }
     when (value) {
         is PurchaseResult.Order -> {
-            DetailField("支付状态", paymentState(value.paymentStatus), "history-payment-state")
-            DetailField("资源交付", fulfillmentState(value.fulfillmentStatus), "history-fulfillment-state")
+            DetailField("支付状态", OrderHistoryPresentation.paymentDetail(value.paymentStatus), "history-payment-state")
+            DetailField("资源交付", OrderHistoryPresentation.fulfillmentDetail(value.fulfillmentStatus), "history-fulfillment-state")
             value.fulfillmentSafeCode?.let { DetailField("交付核对代码", it) }
             value.allocation.forEach { DetailField("${coinTypeLabel(it.coinType)}分配", formatCoins(it.amountUnits)) }
-            DetailField("可取消窗口截至", historyTime(value.cancelUntil))
-            DetailField("创建时间", historyTime(value.createdAt))
-            DetailField("更新时间", historyTime(value.updatedAt))
+            DetailField("可取消窗口截至", OrderHistoryPresentation.detailTime(value.cancelUntil))
+            DetailField("创建时间", OrderHistoryPresentation.detailTime(value.createdAt))
+            DetailField("更新时间", OrderHistoryPresentation.detailTime(value.updatedAt))
         }
         is PurchaseResult.Deferred -> {
-            DetailField("计划状态", deferredState(value.state), "history-transition-state")
+            DetailField("计划状态", OrderHistoryPresentation.deferredDetail(value.state), "history-transition-state")
             DetailField("计划类型", if (value.flowKind == "initial_activation") "首次启用" else "计划切换")
-            DetailField("计划生效时间", historyTime(value.scheduledFor), "history-scheduled-for")
-            DetailField("预留时间", historyTime(value.reservedAt))
-            DetailField("结算时间", value.settledAt?.let(::historyTime) ?: "服务器未提供")
+            DetailField("计划生效时间", OrderHistoryPresentation.detailTime(value.scheduledFor), "history-scheduled-for")
+            DetailField("预留时间", OrderHistoryPresentation.detailTime(value.reservedAt))
+            DetailField("结算时间", value.settledAt?.let(OrderHistoryPresentation::detailTime) ?: "尚未提供")
             value.safeCode?.let { DetailField("核对代码", it) }
-            DetailField("创建时间", historyTime(value.createdAt))
-            DetailField("更新时间", historyTime(value.updatedAt))
-            SupportingText("计划安排与结算状态不代表本机已有可用订阅，请另行同步资源。")
+            DetailField("创建时间", OrderHistoryPresentation.detailTime(value.createdAt))
+            DetailField("更新时间", OrderHistoryPresentation.detailTime(value.updatedAt))
         }
+    }
+    if (OrderHistoryPresentation.offersResourceSync(value)) {
+        TextButton(onClick = onSyncResources, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .testTag("history-sync-resources")) { Text("同步节点") }
     }
 }
 
@@ -257,12 +329,17 @@ private fun PurchaseDetails(value: PurchaseResult) {
 private fun RechargeDetails(value: RechargeOrder) {
     DetailField("充值金额", formatMoney(value.amountMinor, value.currency, value.currencyExponent))
     DetailField("预计到账", formatCoins(value.expectedPaidCoinUnits))
-    DetailField("充值状态", rechargeStatus(value.status), "history-recharge-state")
-    DetailField("Coins 到账", historyCreditState(value.status), "history-credit-state")
+    DetailField("充值状态", OrderHistoryPresentation.rechargeDetail(value.status), "history-recharge-state")
+    // Keep a separate credit hint only while payment is verified but coins are not yet available.
+    if (value.status == "payment_verified") {
+        DetailField("到账进度", "确认中", "history-credit-state")
+    } else if (value.status == "credited") {
+        DetailField("到账进度", "已到账", "history-credit-state")
+    }
     DetailField("支付方式", when (value.paymentMethod) { "alipay" -> "支付宝"; "wechat_pay" -> "微信支付"; else -> "PayPal" })
-    DetailField("订单有效至", historyTime(value.expiresAt))
-    DetailField("创建时间", historyTime(value.createdAt))
-    DetailField("更新时间", historyTime(value.updatedAt))
+    DetailField("订单有效至", OrderHistoryPresentation.detailTime(value.expiresAt))
+    DetailField("创建时间", OrderHistoryPresentation.detailTime(value.createdAt))
+    DetailField("更新时间", OrderHistoryPresentation.detailTime(value.updatedAt))
 }
 
 @Composable
@@ -274,39 +351,25 @@ private fun DetailField(label: String, value: String, tag: String? = null) {
     }
 }
 
-internal fun paymentState(value: String) = when (value) {
-    "held" -> "Coins 已预留"; "capture_pending" -> "扣款处理中"; "captured" -> "已扣款"
-    "cancelled" -> "已取消"; "capture_failed" -> "扣款未完成"; else -> "需要对账"
+// Kept for any remaining callers/tests that still import the old names; delegate to presentation.
+internal fun paymentState(value: String) = OrderHistoryPresentation.paymentDetail(value)
+internal fun fulfillmentState(value: String) = OrderHistoryPresentation.fulfillmentDetail(value)
+internal fun deferredState(value: String) = OrderHistoryPresentation.deferredDetail(value)
+private fun coinTypeLabel(value: String) = when (value) {
+    "paid_coins" -> "充值 Coins"; "bonus_coins" -> "赠送 Coins"; else -> "奖励 Coins"
 }
-internal fun fulfillmentState(value: String) = when (value) {
-    "not_requested" -> "尚未开始"; "pending" -> "等待发放"; "processing" -> "发放中"
-    "delivered" -> "已发放，请同步资源"; else -> "发放失败，需核对"
-}
-internal fun deferredState(value: String) = when (value) {
-    "reserved" -> "已预留，等待生效"; "processing" -> "处理中"; "effect_applied" -> "权益已处理，等待结算"
-    "settled" -> "已结算，请同步资源"; "requote_required" -> "需要重新报价，请先核对原记录"
-    "cancelled" -> "已取消"; else -> "需要对账，请勿重复购买"
-}
-private fun coinTypeLabel(value: String) = when (value) { "paid_coins" -> "充值 Coins"; "bonus_coins" -> "赠送 Coins"; else -> "奖励 Coins" }
 private fun historyOfferTitle(offer: Offer) = if (offer.category == "plan" && offer.durationDays != null)
     "${offer.durationDays} 天套餐" else offer.title.zh
-private fun purchaseStatePairs(value: PurchaseResult): List<Pair<String, String>> = when (value) {
-    is PurchaseResult.Order -> listOf("扣币" to paymentState(value.paymentStatus),
-        "交付" to fulfillmentState(value.fulfillmentStatus))
-    is PurchaseResult.Deferred -> listOf("计划" to deferredState(value.state))
+
+private sealed class AllHistoryItem {
+    abstract val createdAt: Instant
+    data class Purchase(val value: PurchaseResult) : AllHistoryItem() {
+        override val createdAt: Instant get() = when (val row = value) {
+            is PurchaseResult.Order -> row.createdAt
+            is PurchaseResult.Deferred -> row.createdAt
+        }
+    }
+    data class Recharge(val value: RechargeOrder) : AllHistoryItem() {
+        override val createdAt: Instant get() = value.createdAt
+    }
 }
-private fun historyRechargeStatus(status: String) = when (status) {
-    "created" -> "订单已创建"; "entry_ready" -> "等待付款"; "pending" -> "等待支付确认"
-    "payment_verified" -> "支付已核验"; "credited" -> "充值已到账"
-    "failed_no_charge" -> "服务器确认未扣款"; "expired" -> "订单已过期"
-    else -> "需要对账，请勿重复付款"
-}
-private fun historyCreditState(status: String) = when (status) {
-    "credited" -> "Coins 已到账"; "payment_verified" -> "等待 Coins 到账"; else -> "未记为到账"
-}
-private fun historyDay(value: Instant) = value.atZone(ZoneId.systemDefault()).toLocalDate().toString()
-private fun historyDateHeading(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd z")
-    .withZone(ZoneId.systemDefault()).format(value)
-private fun historyClock(value: Instant) = DateTimeFormatter.ofPattern("HH:mm")
-    .withZone(ZoneId.systemDefault()).format(value)
-private fun historyTime(value: Instant) = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm z").withZone(ZoneId.systemDefault()).format(value)

@@ -24,3 +24,12 @@ class ConnectionUsageCardHiddenTest {
             status = LocalSubscriptionStatus.MISSING))
     }
 }
+
+class ConnectionNodeLatencyLabelTest {
+    @org.junit.Test fun realReadingIsLabelledAsLastMeasuredOthersAsPlainLatency() {
+        org.junit.Assert.assertEquals("上次测速", connectionNodeLatencyLabel(
+            com.gccwebos.android.portal.NodeLatencyObservation.Success(228L, 1L)))
+        org.junit.Assert.assertEquals("延迟", connectionNodeLatencyLabel(null))
+        org.junit.Assert.assertEquals("延迟", connectionNodeLatencyLabel(com.gccwebos.android.portal.NodeLatencyObservation.NoReply))
+    }
+}

@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -411,8 +412,14 @@ internal fun ConnectionOverview(
         else -> null
     }
     // Zones: (1) the page's light brand header, (2) Hero: state + node + power, (3) plan/usage, (4) multi-platform link.
-    Column(Modifier.fillMaxWidth().padding(bottom = homeBottomSpacer()).testTag("connection-overview"),
-        verticalArrangement = Arrangement.spacedBy(HomeSpacing.CardGap)) {
+    // C11: with the usage card hidden the page is only the hero and the secondary banner, which hugged the top and left
+    // the lower half bare. Give the page a floor height and centre the pair in it (no new content, no new numbers).
+    val usageHidden = connectionUsageCardHidden(account.authenticated, manualSource, subscriptionUsage != null, snapshot.status)
+    val pageFloor = if (usageHidden) (LocalConfiguration.current.screenHeightDp * ConnectionBalancedPageFraction).dp else 0.dp
+    Column(Modifier.fillMaxWidth().heightIn(min = pageFloor).padding(bottom = homeBottomSpacer())
+        .testTag("connection-overview"),
+        verticalArrangement = if (usageHidden) Arrangement.spacedBy(HomeSpacing.CardGap, Alignment.CenterVertically)
+            else Arrangement.spacedBy(HomeSpacing.CardGap)) {
         HomeCard(Modifier.testTag("connection-hero"),
             // Static rim tint while connected; the only breathing glow stays on the usage bar (#36 rules).
             edge = if (connected) Brand.Green.copy(alpha = .38f) else HomeCardEdge) {
@@ -459,7 +466,7 @@ internal fun ConnectionOverview(
         // C10: a local configuration that reports no verified usage (no Subscription-Userinfo) has nothing honest to put
         // on this card; "暂未获取" next to the node page's info-row text read as a contradiction. Info-row text is
         // third-party display text and is never promoted to a usage figure here.
-        if (!connectionUsageCardHidden(account.authenticated, manualSource, subscriptionUsage != null, snapshot.status)) {
+        if (!usageHidden) {
         HomeCard(Modifier.testTag("connection-account-surface")) {
             ConnectionUsageCard(display, authenticated = account.authenticated,
                 subscriptionUsage = subscriptionUsage,
@@ -631,8 +638,16 @@ private fun ConnectionNodeRow(
                                 style = MaterialTheme.typography.bodySmall, maxLines = 1,
                                 modifier = Modifier.testTag("connection-node-protocol")) }
                         }
-                        if (displayedNode != null) NodeLatencyBadge(account.nodeLatency.reading(selectedNode?.selection),
-                            Modifier.testTag("connection-node-latency"))
+                        if (displayedNode != null) {
+                            val reading = account.nodeLatency.reading(selectedNode?.selection)
+                            // C12: an idle latency number needs a name; the badge keeps the threshold colour rule.
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(connectionNodeLatencyLabel(reading), color = Brand.Muted, fontSize = 11.sp, maxLines = 1,
+                                    modifier = Modifier.testTag("connection-node-latency-label"))
+                                NodeLatencyBadge(reading, Modifier.testTag("connection-node-latency"))
+                            }
+                        }
                         else nodeChoiceHint?.let { Text(it, color = Brand.Amber, fontSize = 11.sp, maxLines = 2,
                             modifier = Modifier.testTag("connection-node-hint")) }
                     }
@@ -659,3 +674,10 @@ internal fun connectionUsageCardHidden(
     hasSubscriptionUsage: Boolean,
     status: LocalSubscriptionStatus,
 ): Boolean = (!authenticated || manualSource) && !hasSubscriptionUsage && status != LocalSubscriptionStatus.MISSING
+
+/** C11: share of the screen height the connect page is padded out to while its usage card is hidden. */
+internal const val ConnectionBalancedPageFraction = 0.66f
+
+/** C12: "上次测速" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
+internal fun connectionNodeLatencyLabel(observation: NodeLatencyObservation?): String =
+    if (observation is NodeLatencyObservation.Success) "上次测速" else "延迟"

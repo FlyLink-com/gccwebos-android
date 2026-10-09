@@ -104,19 +104,36 @@ class MineReferralUiTest {
         compose.onNodeWithTag("mine-welcome-title").assertDoesNotExist()
         compose.onNodeWithTag("mine-plan-expiry").assertTextContains("会员", substring = true)
         // Wallet, list groups and the invite banner are siblings, not nested in one container.
-        val sections = listOf("mine-welcome", "wallet-card", "mine-menu", "mine-referral-banner", "mine-functions")
+        val sections = listOf("mine-welcome", "wallet-card", "mine-referral-banner", "mine-menu", "mine-functions")
         for (outer in sections) for (inner in sections) if (outer != inner)
             compose.onNodeWithTag(inner).assert(hasAnyAncestor(hasTestTag(outer)).not())
         compose.onNodeWithTag("mine-referral").assert(hasAnyAncestor(hasTestTag("mine-referral-banner")))
         compose.onNodeWithTag("mine-referral-cta", useUnmergedTree = true).assertTextEquals("立即邀请")
-        compose.onNodeWithTag("mine-telegram").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        // ① invite banner, ② 服务与记录, ③ 系统与设置, top to bottom; no duplicate wallet row.
+        val tops = sections.map { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot.top }
+        assertEquals(tops.sorted(), tops)
+        compose.onNodeWithTag("mine-wallet").assertDoesNotExist()
+        compose.onNodeWithTag("mine-history").assert(hasAnyAncestor(hasTestTag("mine-menu")))
+        compose.onNodeWithTag("mine-telegram").assert(hasAnyAncestor(hasTestTag("mine-menu")))
+        compose.onNodeWithTag("mine-security").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.onNodeWithTag("mine-more").assert(hasAnyAncestor(hasTestTag("mine-functions")))
         compose.onNodeWithTag("mine-signout").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.onNodeWithTag("mine-group-service").assertTextEquals("服务与记录")
+        compose.onNodeWithTag("mine-group-system").assertTextEquals("系统与设置")
+        compose.onNodeWithText("15%", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("在线客服", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("应用设置", substring = true).assertDoesNotExist()
+        compose.onNodeWithTag("mine-avatar").assertExists()
+        compose.onNodeWithTag("mine-topbar-title").assertTextEquals("我的")
+        compose.onNodeWithTag("mine-more").assertTextContains("当前版本 v", substring = true)
         compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(copied.isEmpty()) }
     }
 
     @Test fun oldSessionIsNeutralAndUnknownBalanceCannotBecomeResourceDerivedZero() {
         launchMine()
-        compose.onNodeWithTag("mine-account-identity").assertTextEquals("账户")
+        // No email and no accepted account ID in this fixture: a neutral title, no copy button.
+        compose.onNodeWithTag("mine-account-identity").assertTextEquals("我的账户")
+        compose.onNodeWithTag("mine-copy-id").assertDoesNotExist()
         compose.onNodeWithTag("wallet-balance").assertTextEquals("— Coins")
         compose.runOnIdle { commerce.walletError = "合成余额读取失败" }
         compose.onNodeWithTag("wallet-error").assertTextEquals("合成余额读取失败")
@@ -127,7 +144,7 @@ class MineReferralUiTest {
     }
     @Test fun largeFontMenusKeepMinimumTouchAndTelegramUsesOnlyTheExactChannelOnClick() {
         launchMine(font = 2f)
-        for (tag in listOf("mine-wallet", "mine-security", "mine-referral", "mine-more", "mine-telegram", "mine-signout")) {
+        for (tag in listOf("mine-history", "mine-security", "mine-referral", "mine-more", "mine-telegram", "mine-signout")) {
             val node = compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().fetchSemanticsNode()
             assertTrue(node.boundsInRoot.height / density >= 48f)
         }

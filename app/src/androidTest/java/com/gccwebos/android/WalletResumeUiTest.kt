@@ -91,7 +91,7 @@ class WalletResumeUiTest {
         }
         compose.waitUntil(5000) { ::account.isInitialized && account.authenticated && !account.busy }
         compose.onNodeWithTag("nav-Profile").performClick()
-        compose.onNodeWithTag("mine-wallet").performScrollTo().performClick()
+        compose.onNodeWithTag("mine-recharge").performScrollTo().performClick()
         compose.waitUntil(5000) { compose.onAllNodesWithTag("wallet-balance").fetchSemanticsNodes().isNotEmpty() }
     }
     private fun createPending() {

@@ -692,12 +692,11 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         recoveryOverride ?: FileCommerceRecovery(context.applicationContext), includeHistory = true) }
     var view by remember(sessionOwner) { mutableStateOf("mine") }
     var historyTab by remember(sessionOwner) { mutableStateOf("orders") }
-    var telegramUnavailable by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
     // The wallet top-up screen draws its own standalone top bar (same "mine-back" tag) whenever it renders.
-    val walletTopBar = (view == "wallet" || view == "recharge") && account.authenticated && !account.restoring && !account.foregroundCheckPending
+    val walletTopBar = view == "recharge" && account.authenticated && !account.restoring && !account.foregroundCheckPending
     if (view != "mine" && !walletTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
     if (view == "about") {
         BrandCard(Modifier.testTag("mine-about")) {
@@ -724,7 +723,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         val mode = when(view) {
             "history" -> if (historyTab == "ledger") CommerceMode.Ledger else CommerceMode.Orders
             "ledger" -> CommerceMode.Ledger
-            "wallet", "recharge" -> CommerceMode.Wallet
+            "recharge" -> CommerceMode.Wallet
             else -> CommerceMode.Mine
         }
         CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener, refreshRequest = refreshRequest,
@@ -736,36 +735,35 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
     if (view == "mine") Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        MineWelcomeCard(account)
+        val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
+        MineTopBar()
+        MineWelcomeCard(account, onRenew = onReturnToPlans?.takeIf { account.authenticated }, copyOverride = copyOverride)
         CommercePanel(account, CommerceMode.Mine, state, autoLoad, paymentOpener = paymentOpener, embeddedWallet = true, refreshRequest = refreshRequest,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
             onLedger = { if (account.authenticated) {
                 view = "history"; historyTab = "ledger"
             } else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
+        // ① Invite banner. Neutral copy: any reward rate belongs to the server policy on the referral screen.
+        MineInviteBanner("mine-referral", !account.busy) {
+            view = if (account.authenticated) "referral" else "security"
+        }
+        // ② 服务与记录. The wallet has no separate row: the balance card's 钱包充值 / 账单明细 cover it.
+        MineGroupLabel("服务与记录", "mine-group-service")
         MineCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
-            MineMenuRow("我的订单", "mine-history", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending,
-                subtitle = "商品订单与充值记录") {
+            MineMenuRow("我的订单", "mine-history", !state.busy && idle, subtitle = "商品订单与充值记录") {
                 view = if (account.authenticated) "history" else "security"
                 historyTab = "orders"
             }
             MineRowDivider()
-            MineMenuRow("我的钱包", "mine-wallet", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending) { view = if (account.authenticated) "wallet" else "security" }
-            MineRowDivider()
-            MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
+            MineOfficialChannelRow(MINE_OFFICIAL_CHANNEL_URL, telegramOpener) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         }
-        MineInviteBanner("mine-referral", !account.busy) {
-            view = if (account.authenticated) "referral" else "security"
-        }
+        // ③ 系统与设置.
+        MineGroupLabel("系统与设置", "mine-group-system")
         MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
-            MineMenuRow("官方频道", "mine-telegram", subtitle = "@flylinevpn") {
-                telegramUnavailable = false
-                try { (telegramOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) })("https://t.me/flylinevpn") }
-                catch (_: Exception) { telegramUnavailable = true }
-            }
-            if (telegramUnavailable) SupportingText("暂时无法打开 Telegram 频道，请稍后重试。")
+            MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
             MineRowDivider()
-            MineMenuRow("关于与更新", "mine-more") { view = "about" }
+            MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { view = "about" }
             if (account.authenticated) {
                 MineRowDivider()
                 MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, onClick = account::logout)
@@ -780,7 +778,6 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
     telegramOpener: ((String) -> Unit)?, refreshRequest: Int) {
     val context = LocalContext.current
     var about by remember { mutableStateOf(false) }
-    var telegramUnavailable by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = about) { about = false }
     if (about) {
         TextButton(onClick = { about = false }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
@@ -792,6 +789,7 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
     }
     val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
     Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        MineTopBar()
         Column(Modifier.fillMaxWidth().testTag("mine-signed-out"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         MineWelcomeCard(account, onLogin = onLogin)
         MineWalletCard(Modifier.testTag("wallet-card")) {
@@ -804,25 +802,19 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
             // Shown for layout parity only: disabled, so they expose disabled semantics and accept no click.
             MineWalletActions(enabled = false, onRecharge = {}, onLedger = {})
         }
+        MineInviteBanner("mine-referral", idle, onClick = onLogin)
+        MineGroupLabel("服务与记录", "mine-group-service")
         MineCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
             MineMenuRow("我的订单", "mine-history", idle, subtitle = "商品订单与充值记录", onClick = onLogin)
             MineRowDivider()
-            MineMenuRow("我的钱包", "mine-wallet", idle, onClick = onLogin)
-            MineRowDivider()
-            MineMenuRow("账户与安全", "mine-security", idle, onClick = onLogin)
+            MineOfficialChannelRow(MINE_OFFICIAL_CHANNEL_URL, telegramOpener) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         }
-        MineInviteBanner("mine-referral", idle, onClick = onLogin)
+        MineGroupLabel("系统与设置", "mine-group-system")
         MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
-            MineMenuRow("官方频道", "mine-telegram", subtitle = "@flylinevpn") {
-                telegramUnavailable = false
-                try { (telegramOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) })("https://t.me/flylinevpn") }
-                catch (_: Exception) { telegramUnavailable = true }
-            }
-            if (telegramUnavailable) SupportingText("暂时无法打开 Telegram 频道，请稍后重试。")
+            MineMenuRow("账户与安全", "mine-security", idle, onClick = onLogin)
             MineRowDivider()
-            MineMenuRow("关于与更新", "mine-more") { about = true }
+            MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { about = true }
         }
         }
     }
 }
-

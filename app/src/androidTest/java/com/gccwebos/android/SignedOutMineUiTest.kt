@@ -66,7 +66,15 @@ class SignedOutMineUiTest {
         compose.onNodeWithTag("mine-signout").assertDoesNotExist()
         // Redesigned cards keep the signed-out invite banner routing to login like the other entries.
         compose.onNodeWithTag("mine-referral").assert(hasAnyAncestor(hasTestTag("mine-referral-banner")))
-        compose.onNodeWithTag("mine-telegram").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.onNodeWithTag("mine-telegram").assert(hasAnyAncestor(hasTestTag("mine-menu")))
+        compose.onNodeWithTag("mine-security").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.onNodeWithTag("mine-wallet").assertDoesNotExist() // The balance card already covers the wallet.
+        compose.onNodeWithTag("mine-copy-id").assertDoesNotExist()
+        compose.onNodeWithTag("mine-renew").assertDoesNotExist()
+        compose.onNodeWithTag("mine-avatar").assertExists()
+        compose.onNodeWithTag("mine-avatar-initial", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("mine-topbar-title").assertTextEquals("我的")
+        compose.onNodeWithTag("brand-name").assertDoesNotExist()
         compose.waitForIdle()
         // Only the anonymous startup paths may run: no wallet, ledger, order, referral or overview read.
         val forbidden = listOf("wallet", "ledger", "order", "recharge", "referral", "overview", "commerce")
@@ -90,7 +98,7 @@ class SignedOutMineUiTest {
 
     @Test fun signedOutMenuEntriesThatNeedAnAccountOpenTheLoginForm() {
         launch()
-        compose.onNodeWithTag("mine-wallet").performScrollTo().performClick()
+        compose.onNodeWithTag("mine-history").performScrollTo().performClick()
         compose.onNodeWithTag("login-screen").assertExists()
     }
 }

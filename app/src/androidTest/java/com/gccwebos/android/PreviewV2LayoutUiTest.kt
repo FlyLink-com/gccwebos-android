@@ -284,7 +284,12 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("mine-welcome").assertExists()
         compose.onNodeWithTag("mine-welcome-title").assertDoesNotExist() // Signed-in header: identity + plan capsule only.
         compose.onNodeWithTag("mine-welcome").assert(hasAnyAncestor(hasTestTag("mine-surface")))
-        compose.onNodeWithTag("mine-account-identity").assertTextEquals("账户")
+        // A restored session has no login email in memory: the shortened server account ID is the title.
+        compose.onNodeWithTag("mine-account-identity").assertTextEquals("ID synt…ccount")
+        compose.onNodeWithTag("mine-copy-id").assertExists()
+        compose.onNodeWithTag("mine-renew").assertExists()
+        compose.onNodeWithTag("mine-wallet").assertDoesNotExist()
+        compose.onNodeWithTag("brand-name").assertDoesNotExist()
         compose.onNodeWithTag("mine-current-plan").assertTextEquals("30天套餐")
         compose.onNodeWithTag("mine-plan-expiry").assertTextContains("会员有效期至：2099.09.", substring = true)
         compose.onNodeWithTag("wallet-balance").assertTextEquals("31 Coins")
@@ -298,7 +303,7 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("mine-functions").assertDoesNotExist()
         compose.onNodeWithTag("checkUpdate").assertDoesNotExist() // Offline fixture never reads a manifest.
         reachable("mine-back").performClick()
-        reachable("mine-wallet").performClick()
+        reachable("mine-recharge").performClick()
         compose.onNodeWithTag("wallet-topbar-title").assertTextEquals("钱包充值")
         reachable("wallet-balance-details").performClick()
         compose.onNodeWithTag("wallet-paid").assertTextEquals("17 Coins")

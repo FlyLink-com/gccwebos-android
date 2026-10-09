@@ -3,6 +3,7 @@ package com.gccwebos.android.commerce
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -26,7 +27,7 @@ import java.time.Instant
 @Composable
 internal fun WalletPanel(account: AccountController, state: CommerceController, mode: CommerceMode,
     now: Instant, paymentOpener: (String) -> Unit, onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null,
-    embeddedBalance: Boolean = false) {
+    embeddedBalance: Boolean = false, onBack: (() -> Unit)? = null, onRechargeRecords: (() -> Unit)? = null) {
     val opener by rememberUpdatedState(paymentOpener)
     val flow = remember(account.authSessionGeneration, state, mode) { RechargeFlowController(account, state) { opener(it) } }
     DisposableEffect(flow) { onDispose { flow.dispose() } }
@@ -35,6 +36,9 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     var selectedRechargeOffer by remember(account.authSessionGeneration, state, state.rechargeOffers, state.currentSession()) {
         mutableStateOf<RechargeOffer?>(null)
     }
+    var selectedRechargeMethod by remember(account.authSessionGeneration, state) { mutableStateOf<RechargePaymentMethod?>(null) }
+    // First directory loaded on this visit; only it may receive a default highlighted tile.
+    var initialRechargeDirectory by remember(account.authSessionGeneration, state) { mutableStateOf<List<RechargeOffer>?>(null) }
     val displayOwner = account.commerceSessionIdentity ?: account.authSessionGeneration
     var lastDisplayedWallet by remember(state, displayOwner) { mutableStateOf<Wallet?>(null) }
     var lastDisplayedOffers by remember(state, displayOwner) { mutableStateOf<List<RechargeOffer>>(emptyList()) }
@@ -48,14 +52,18 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     SideEffect {
         if (state.currentSession() && state.wallet != null) lastDisplayedWallet = state.wallet
         if (state.currentSession() && state.rechargeOffersLoaded) lastDisplayedOffers = state.rechargeOffers
+        if (state.currentSession() && state.rechargeOffersLoaded && initialRechargeDirectory == null &&
+            state.rechargeOffers.isNotEmpty()) initialRechargeDirectory = state.rechargeOffers
     }
     val walletFailure = state.walletError ?: state.error?.takeIf { !state.walletLoaded && !state.busy }
     val offersFailure = state.rechargeOffersError ?: state.error?.takeIf { !state.rechargeOffersLoaded && !state.busy }
+    var balanceDetails by remember(account.authSessionGeneration, state) { mutableStateOf(false) }
+    if (mode == CommerceMode.Wallet) WalletTopBar("钱包充值", onBack, onRechargeRecords, enabled = !state.busy)
     BalanceCard(Modifier.testTag("wallet-card"), embedded = embeddedBalance) {
         if (mode == CommerceMode.Mine) {
             MineBalanceHeading()
             MineSpendableBalance(wallet)
-        } else WalletBalanceMetrics(wallet)
+        } else WalletTopUpBalance(wallet, onDetails = { balanceDetails = true }, enabled = true)
         CommerceReadNotice(state, walletFailure?.takeUnless { state.busy }, "wallet-error")
         wallet?.let { w ->
             if (w.status != "active") SupportingText(when (w.status) {
@@ -70,36 +78,32 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     if (mode != CommerceMode.Wallet) return
     flow.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recharge-flow-error")) }
     if (!state.pendingRecharge) {
-        Text("选择充值额度", style = MaterialTheme.typography.titleMedium)
+        val methods = availableRechargeMethods(displayOffers)
+        val method = selectedRechargeMethod?.takeIf { it in methods } ?: methods.firstOrNull()
+        val effectiveOffer = effectiveRechargeSelection(displayOffers, selectedRechargeOffer, method,
+            defaultAllowed = rechargeDefaultAllowed(initialRechargeDirectory, displayOffers))
+        BrandCard(Modifier.testTag("recharge-amount-card"), contentPadding = PaddingValues(12.dp)) {
+        Text("选择充值额度", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         CommerceReadNotice(state, offersFailure?.takeUnless { state.busy }, "recharge-offers-error")
         when {
             displayOffers.isEmpty() && (!state.rechargeOffersLoaded || state.busy || offersFailure != null) -> Unit
-            displayOffers.isEmpty() -> BrandCard(Modifier.testTag("recharge-offers-empty")) { Text("当前暂无充值档位") }
+            displayOffers.isEmpty() -> Text("当前暂无充值档位", modifier = Modifier.testTag("recharge-offers-empty"))
             else -> BoxWithConstraints(Modifier.fillMaxWidth().testTag("recharge-offer-grid")) {
                 val columns = when {
                     LocalDensity.current.fontScale > 1.6f || maxWidth < 230.dp -> 1
                     LocalDensity.current.fontScale > 1.15f || maxWidth < 280.dp -> 2
                     else -> 3
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     displayOffers.chunked(columns).forEach { row ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             row.forEach { offer ->
-                                val chosen = selectedRechargeOffer == offer
-                                BrandCard(modifier = Modifier.weight(1f).heightIn(min = 64.dp)
-                                    .testTag("recharge-select-${offer.offerRef}")
-                                    .selectable(selected = chosen, role = Role.Button,
-                                        enabled = state.rechargeOffersLoaded && !state.busy && state.canOperate() && "alipay" in offer.paymentMethods,
-                                        onClick = { selectedRechargeOffer = offer }),
-                                    selected = chosen, contentPadding = PaddingValues(10.dp)) {
-                                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(formatCoins(offer.paidCoinUnits), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                        Text(formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent), style = MaterialTheme.typography.bodySmall,
-                                            color = Brand.Cyan)
-                                        if ("alipay" !in offer.paymentMethods) SupportingText("暂不支持支付宝")
-                                    }
-                                }
+                                RechargeAmountTile(offer, selected = effectiveOffer == offer,
+                                    enabled = state.rechargeOffersLoaded && !state.busy && state.canOperate() &&
+                                        rechargeOfferPayable(offer, method) && "alipay" in offer.paymentMethods,
+                                    unsupportedNote = if ("alipay" !in offer.paymentMethods) "暂不支持支付宝" else null,
+                                    onClick = { selectedRechargeOffer = offer },
+                                    modifier = Modifier.weight(1f).testTag("recharge-select-${offer.offerRef}"))
                             }
                             repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                         }
@@ -107,12 +111,18 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                 }
             }
         }
-        val payableSelection = selectedRechargeOffer?.takeIf { selected ->
-            state.rechargeOffersLoaded && offersFailure == null && state.rechargeOffers.any { it == selected } &&
-                "alipay" in selected.paymentMethods && state.canOperate()
         }
-        AlipayButton("支付宝支付", { payableSelection?.let(flow::select) },
-            enabled = !state.busy && payableSelection != null, modifier = Modifier.testTag("recharge-selected-pay"))
+        if (methods.isNotEmpty()) BrandCard(Modifier.testTag("recharge-method-card"), contentPadding = PaddingValues(12.dp)) {
+            Text("支付方式", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            RechargePaymentMethodSelector(methods, method, enabled = !state.busy) { selectedRechargeMethod = it }
+        }
+        val payableSelection = effectiveOffer?.takeIf { selected ->
+            state.rechargeOffersLoaded && offersFailure == null && state.rechargeOffers.any { it == selected } &&
+                rechargeOfferPayable(selected, method) && "alipay" in selected.paymentMethods && state.canOperate()
+        }
+        // Same guarded handler as before: selection -> local confirmation dialog -> idempotent order creation.
+        RechargeCheckoutBar(payable = payableSelection?.let(::rechargePriceText),
+            enabled = !state.busy && payableSelection != null, onSubmit = { payableSelection?.let(flow::select) })
     } else BrandCard(Modifier.testTag("recharge-order")) {
         val order = state.recharge
         Text("当前充值", style = MaterialTheme.typography.titleMedium)
@@ -156,6 +166,14 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                 enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },
             dismissButton = { TextButton(onClick = flow::dismissPayment, modifier = Modifier.testTag("payment-open-cancel")) { Text("暂不付款") } })
     }
+    if (balanceDetails && mode == CommerceMode.Wallet) AlertDialog(onDismissRequest = { balanceDetails = false },
+        containerColor = Brand.SurfaceRaised, shape = Brand.Shape, modifier = Modifier.testTag("wallet-balance-details-dialog"),
+        title = { Text("余额明细") },
+        text = { Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            WalletBalanceMetrics(wallet)
+            SupportingText("订单预留和待确认奖励不计入可用余额。")
+        } },
+        confirmButton = { TextButton(onClick = { balanceDetails = false }, modifier = Modifier.testTag("wallet-balance-details-close")) { Text("知道了") } })
     if (recoveryConfirmation) AlertDialog(onDismissRequest = { recoveryConfirmation = false }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("恢复原创建请求？") },
         text = { Text("仅沿用本机原幂等记录。未获得订单编号时可能重发原创建请求；这不是付款或到账确认。") },
         confirmButton = { TextButton(onClick = { recoveryConfirmation = false; state.queryRecharge() }, enabled = !state.busy,
@@ -193,7 +211,7 @@ private fun MineSpendableBalance(wallet: Wallet?) {
 @Composable
 private fun WalletBalanceMetrics(wallet: Wallet?) {
     val metrics = listOf(
-        Triple("总可用", wallet?.spendableUnits, "wallet-balance"),
+        Triple("总可用", wallet?.spendableUnits, "wallet-detail-total"),
         Triple("已购可用", wallet?.paidCoins, "wallet-paid"),
         Triple("赠送可用", wallet?.bonusCoins, "wallet-bonus"),
         Triple("奖励可用", wallet?.rewardCoins, "wallet-reward"),
@@ -213,9 +231,9 @@ private fun WalletBalanceMetrics(wallet: Wallet?) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(metric.first, style = MaterialTheme.typography.labelMedium, color = Brand.Muted)
                             Text(metric.second?.let(::formatCoins) ?: "— Coins",
-                                style = if (metric.third == "wallet-balance") MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
-                                fontSize = if (metric.third == "wallet-balance") 20.sp else 16.sp,
-                                color = if (metric.third == "wallet-balance") Brand.Cyan else Brand.Text,
+                                style = if (metric.third == "wallet-detail-total") MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+                                fontSize = if (metric.third == "wallet-detail-total") 20.sp else 16.sp,
+                                color = if (metric.third == "wallet-detail-total") Brand.Cyan else Brand.Text,
                                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag(metric.third))
                         }
                     }

@@ -60,6 +60,12 @@ data class RechargeOffer(
     val currency: String,
     val currencyExponent: Int,
     val paymentMethods: List<String>,
+    /**
+     * UI hook only: the current server projection (v1/v2) has no bonus or promotion fields and
+     * [CommerceJson.rechargeOffers] never sets these. They stay null until a server contract adds them.
+     */
+    val bonusCoinUnits: Long? = null,
+    val promotion: RechargePromotion? = null,
 )
 
 /** Payment URLs must remain transient and must not appear in generated debug strings. */

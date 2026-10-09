@@ -12,8 +12,14 @@ sealed interface SelectionIntent {
     data class Selected(val selection: ConnectionSelection) : SelectionIntent
 }
 enum class PreparationFailure { MISSING, EXPIRED, INVALID_LINK, NETWORK, TIMEOUT, UNSUPPORTED, STORAGE, STALE }
+/** Display-only label of the node a Ready config was prepared for. It is copied from the validated
+ * registry at preparation time so the connection page can show the node actually in use even after
+ * the process-local UI selection is cleared. Never admission, never persisted, redacted in logs. */
+class PreparedNodeLabel(val selection: ConnectionSelection, val name: String, val protocol: String) {
+    override fun toString() = "PreparedNodeLabel(<redacted>)"
+}
 sealed interface ConfigPreparation {
-    data class Ready(val config: AuthorizedConfig) : ConfigPreparation
+    data class Ready(val config: AuthorizedConfig, val node: PreparedNodeLabel? = null) : ConfigPreparation
     data class Unavailable(val reason: PreparationFailure) : ConfigPreparation
     data class SelectionRequired(val choices: List<ConnectionChoice>) : ConfigPreparation
 }

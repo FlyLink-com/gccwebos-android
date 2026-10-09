@@ -49,6 +49,44 @@ class OneClickConfigGatewayTest {
         val gateway = OneClickConfigGateway(manager, PreparedConfigStore { writes++ })
     }
 
+    private fun namedArtifact(vararg nodes: Pair<String, String>) = ("proxies:\n" + nodes.joinToString("") { (name, host) -> """  - name: "$name"
+    type: ss
+    server: $host
+    port: 443
+    cipher: aes-128-gcm
+    password: synthetic-only
+""" }).toByteArray()
+
+    @Test fun readyCarriesDisplayLabelOfTheExactPreparedNode() = runTest {
+        val f = Fixture(); f.bytes = namedArtifact("🇺🇸 美国 01" to "192.0.2.10", "🇯🇵 日本 02" to "192.0.2.11")
+        f.manager.refresh()
+        val selected = f.manager.nodeSelectionSnapshot().choices[1].selection
+        assertTrue(f.manager.selectNode(selected))
+        val prepared = f.gateway.prepare(SelectionIntent.Choose) as ConfigPreparation.Ready
+        prepared.config.use {
+            val node = requireNotNull(prepared.node)
+            assertSame(selected, node.selection)
+            assertEquals("🇯🇵 日本 02", node.name)
+            assertEquals("ss", node.protocol)
+            assertFalse("Labels are redacted in logs", node.toString().contains("日本"))
+        }
+    }
+
+    @Test fun oneClickAutoPickLabelSurvivesALaterClearedUiSelection() = runTest {
+        val f = Fixture(); f.bytes = namedArtifact("🇺🇸 美国 01" to "192.0.2.10", "🇯🇵 日本 02" to "192.0.2.11")
+        val prepared = f.gateway.prepare(SelectionIntent.Choose) as ConfigPreparation.Ready
+        prepared.config.use {
+            val snapshot = f.manager.nodeSelectionSnapshot()
+            val picked = snapshot.choices.first { it.selection === snapshot.selected }
+            val node = requireNotNull(prepared.node)
+            assertSame(picked.selection, node.selection)
+            assertEquals(picked.name, node.name)
+            f.manager.invalidateNodeSelection() // e.g. account change / refresh clears the UI selection
+            assertNull(f.manager.nodeSelectionSnapshot().selected)
+            assertEquals(picked.name, node.name)
+        }
+    }
+
     @Test fun soleFreshChoiceIsExplicitlySelectedAndPreparedFromAnotherFreshRead() = runTest {
         val f = Fixture()
         val prepared = f.gateway.prepare(SelectionIntent.Choose)

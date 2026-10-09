@@ -18,6 +18,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.*
@@ -29,7 +30,9 @@ import com.gccwebos.android.portal.LocalSubscriptionStatus
 import com.gccwebos.android.portal.NodeLatencyBadge
 import java.time.Instant
 import java.time.Duration
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 internal enum class ConnectionVisualTone { Neutral, Connecting, Connected, Error }
 internal enum class ConnectionPhase { Unavailable, Disconnected, Connecting, Connected, Disconnecting, Failed }
@@ -48,6 +51,8 @@ internal data class ConnectionControlState(
     val canDisconnect: Boolean = false,
     val commandPending: Boolean = false,
     val revision: Long = 0,
+    /** Display-only: the node the running session was prepared for. Published only with Connected. */
+    val activeNode: com.gccwebos.android.core.PreparedNodeLabel? = null,
 )
 
 internal data class ConnectionOverviewPresentation(
@@ -230,6 +235,7 @@ internal fun ConnectionOverview(
     onPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
     openRegistration: () -> Unit = openAccount,
     nowSource: () -> Instant = Instant::now,
+    trafficSampler: () -> TrafficCounterSample = ::readAppTrafficCounters,
 ) {
     val snapshot = account.localSubscription
     val usage by account.accountUsage.state.collectAsState()
@@ -267,15 +273,35 @@ internal fun ConnectionOverview(
             nodeSnapshot.status == LocalSubscriptionStatus.READY && nodeSnapshot.validUntil?.let { until -> until > now } != false
     }
     val local = connectionOverviewPresentation(snapshot, now, control)
-    LaunchedEffect(account, selectedNode?.selection, account.busy, account.restoring,
+    // The owner reports the node the running session was prepared for. It survives a cleared UI
+    // selection (process restart, refresh, one-click auto pick). Latency is only measured while that
+    // node is still in the current validated registry; otherwise it stays unknown.
+    val activeNode = control.activeNode?.takeIf { control.phase == ConnectionPhase.Connected }
+    val activeInRegistry = activeNode != null && nodeSnapshot.status == LocalSubscriptionStatus.READY &&
+        nodeSnapshot.choices.any { it.selection === activeNode.selection && !it.info }
+    val latencySelection = if (activeNode != null) activeNode.selection.takeIf { activeInRegistry } else selectedNode?.selection
+    LaunchedEffect(account, latencySelection, account.busy, account.restoring,
         account.foregroundCheckPending, account.nodeLatency.foreground) {
-        if (selectedNode != null && account.nodeLatency.foreground && !account.busy && !account.restoring &&
+        if (latencySelection != null && account.nodeLatency.foreground && !account.busy && !account.restoring &&
             !account.foregroundCheckPending && !account.clearing) while (true) {
             account.nodeLatency.pruneExpired()
-            account.nodeLatency.ensureMeasured(selectedNode.selection)
+            account.nodeLatency.ensureMeasured(latencySelection)
             delay(1_000)
         }
     }
+    val latestSampler by rememberUpdatedState(trafficSampler)
+    val throughput by produceState(TunnelThroughput.Unknown, activeNode != null) {
+        value = TunnelThroughput.Unknown
+        if (activeNode == null) return@produceState
+        val meter = TunnelThroughputMeter()
+        while (true) {
+            val sample = try { withContext(Dispatchers.IO) { latestSampler() } } catch (_: Exception) { null }
+            value = if (sample == null) TunnelThroughput.Unknown.also { meter.reset() } else meter.update(sample)
+            delay(TunnelThroughputMeter.SampleIntervalMillis)
+        }
+    }
+    val connectedNode = connectedNodePresentation(control, throughput,
+        latencySelection?.takeIf { activeNode != null }?.let(account.nodeLatency::reading))
     // A retained name is display-only while the selection controller reads. Its old opaque
     // identity never reaches Ping or connection admission through this fallback.
     val displayedNode = selectedNode ?: nodeSnapshot.choices.firstOrNull { it.selection === nodeSnapshot.selected }?.takeIf {
@@ -415,15 +441,13 @@ internal fun ConnectionOverview(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
                     val summary: @Composable (Modifier) -> Unit = { modifier ->
-                        Row(modifier, verticalAlignment = Alignment.CenterVertically,
+                        if (connectedNode != null) ConnectedNodeSummary(connectedNode, snapshot.sourceKind, modifier)
+                        else Row(modifier, verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             NodeRegionIcon(name = displayedNode?.name, size = 39.dp, emphasized = true)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
-                                if (snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ImportedLocal)
-                                    Text("本地配置", color = Brand.Cyan, fontSize = 10.sp, modifier = Modifier.testTag("connection-local-source"))
-                                if (snapshot.sourceKind == com.gccwebos.android.portal.ManualSourceKind.ExternalRemote)
-                                    Text("第三方订阅", color = Brand.Cyan, fontSize = 10.sp, modifier = Modifier.testTag("connection-external-source"))
+                                SourceKindLabel(snapshot.sourceKind)
                                 Text(displayedNode?.name ?: "未选择",
                                     color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                                     modifier = Modifier.testTag("connection-node-name"))
@@ -465,6 +489,58 @@ internal fun ConnectionOverview(
             TextButton({ showGuestChoice = false; openRegistration() }, modifier = Modifier.heightIn(min = 48.dp)
                 .testTag("usage-guest-register")) { Text("注册") }
         } }, dismissButton = { TextButton({ showGuestChoice = false }) { Text("取消") } })
+}
+
+@Composable
+private fun SourceKindLabel(kind: com.gccwebos.android.portal.ManualSourceKind) {
+    if (kind == com.gccwebos.android.portal.ManualSourceKind.ImportedLocal)
+        Text("本地配置", color = Brand.Cyan, fontSize = 10.sp, modifier = Modifier.testTag("connection-local-source"))
+    if (kind == com.gccwebos.android.portal.ManualSourceKind.ExternalRemote)
+        Text("第三方订阅", color = Brand.Cyan, fontSize = 10.sp, modifier = Modifier.testTag("connection-external-source"))
+}
+
+/** Connected layout: three short lines, no taller than the idle card. Static text, no looping motion. */
+@Composable
+private fun ConnectedNodeSummary(node: ConnectedNodePresentation, kind: com.gccwebos.android.portal.ManualSourceKind,
+    modifier: Modifier) {
+    Row(modifier.testTag("connection-active-node"), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        NodeRegionIcon(name = node.name, size = 39.dp, emphasized = true)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
+                SourceKindLabel(kind)
+                Box(Modifier.size(5.dp).background(Brand.Green, CircleShape))
+                Text(node.stateText, color = Brand.Green, fontSize = 10.sp,
+                    modifier = Modifier.testTag("connection-node-state"))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(node.name, color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).testTag("connection-node-name"))
+                if (node.protocol.isNotBlank()) Text(node.protocol, color = Brand.Cyan, fontSize = 9.sp, lineHeight = 12.sp,
+                    maxLines = 1, modifier = Modifier.border(1.dp, Brand.Cyan.copy(alpha = .4f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 5.dp, vertical = 1.dp).testTag("connection-node-protocol"))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("↓ ${node.downText}  ↑ ${node.upText}", color = Brand.Muted, fontSize = 11.sp, maxLines = 1,
+                    modifier = Modifier.testTag("connection-node-throughput")
+                        .semantics { contentDescription = node.throughputDescription })
+                Text(" · ", color = Brand.Muted, fontSize = 11.sp)
+                Text(node.latencyText, color = if (node.latencyKnown) Brand.Green else Brand.Muted, fontSize = 11.sp,
+                    maxLines = 1, modifier = Modifier.testTag("connection-node-latency")
+                        .semantics { contentDescription = node.latencyDescription })
+            }
+        }
+    }
+}
+
+/** This app's UID byte counters from the OS. The VPN core's protected sockets carry the tunnel's
+ * encrypted traffic, so the delta approximates tunnel throughput (including protocol overhead). */
+internal fun readAppTrafficCounters(): TrafficCounterSample {
+    val uid = android.os.Process.myUid()
+    return TrafficCounterSample(android.os.SystemClock.elapsedRealtime(),
+        android.net.TrafficStats.getUidRxBytes(uid), android.net.TrafficStats.getUidTxBytes(uid))
 }
 
 /** One brief read/setup failure announcement. It cannot retry, prepare or start a tunnel. */

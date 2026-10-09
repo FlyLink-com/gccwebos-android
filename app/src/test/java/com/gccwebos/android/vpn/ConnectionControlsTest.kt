@@ -28,4 +28,14 @@ class ConnectionControlsTest {
         assertTrue(connected.canDisconnect)
         assertFalse(connected.canConnect)
     }
+    @Test fun activeNodeLabelIsPublishedOnlyWithConnected() {
+        val label = com.gccwebos.android.core.PreparedNodeLabel(com.gccwebos.android.core.ConnectionSelection(),
+            "🇺🇸 美国 01", "hysteria2")
+        assertSame(label, connectionControls(ConnectionState.Connected("synthetic"), 11, label).activeNode)
+        assertNull(connectionControls(ConnectionState.Working(Step.TUNNEL), 12, label).activeNode)
+        assertNull(connectionControls(ConnectionState.Disconnecting, 13, label).activeNode)
+        assertNull(connectionControls(ConnectionState.Disconnected, 14, label).activeNode)
+        assertNull(connectionControls(ConnectionState.Failed(Failure.ENGINE_DIED), 15, label).activeNode)
+        assertFalse(connectionControls(ConnectionState.Connected("synthetic"), 16, label).toString().contains("美国"))
+    }
 }

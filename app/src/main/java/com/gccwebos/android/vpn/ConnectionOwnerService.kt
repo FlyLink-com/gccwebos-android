@@ -50,6 +50,8 @@ internal class ConnectionOwnerService : Service() {
     private var revision = 0L
     private var commandEpoch = 0L
     private var materialClearFailed = false
+    /** Display-only label of the last Ready preparation for the current command epoch. */
+    private var preparedNode: com.gccwebos.android.core.PreparedNodeLabel? = null
     private var destroyed = false
     private val controls = MutableStateFlow(ConnectionControlState())
     private val binder = LocalBinder()
@@ -108,6 +110,7 @@ internal class ConnectionOwnerService : Service() {
                 val epoch = synchronized(publication) { commandEpoch }
                 val result = gateway.prepare(intent)
                 synchronized(publication) { if (!destroyed && result is ConfigPreparation.Ready && commandEpoch == epoch) {
+                    preparedNode = result.node
                     expiryTask?.cancel()
                     result.config.validUntil?.let { until ->
                         expiryTask = scope.launch {
@@ -124,7 +127,7 @@ internal class ConnectionOwnerService : Service() {
             override fun invalidatePending() = gateway.invalidatePending()
             override fun clearPreparedMaterial() = gateway.clearPreparedMaterial()
             override fun observeClear(onClear: () -> Unit) = gateway.observeClear {
-                synchronized(publication) { commandEpoch++; expiryTask?.cancel(); expiryTask = null }
+                synchronized(publication) { commandEpoch++; expiryTask?.cancel(); expiryTask = null; preparedNode = null }
                 try {
                     files.clear()
                     synchronized(publication) { materialClearFailed = false }
@@ -157,9 +160,11 @@ internal class ConnectionOwnerService : Service() {
                             else -> state.javaClass.simpleName
                         })
                         controls.value = if (BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30)
-                            connectionControls(if (materialClearFailed) ConnectionState.Failed(Failure.CLEANUP_FAILED) else state, ++revision)
+                            connectionControls(if (materialClearFailed) ConnectionState.Failed(Failure.CLEANUP_FAILED) else state, ++revision,
+                                preparedNode)
                             else ConnectionControlState(revision = ++revision)
                         if (state == ConnectionState.Disconnected || state is ConnectionState.Failed || state is ConnectionState.Blocked) {
+                            preparedNode = null
                             expiryTask?.cancel(); expiryTask = null
                             stopSelf()
                         }
@@ -179,7 +184,7 @@ internal class ConnectionOwnerService : Service() {
             when (action) {
                 ConnectionPowerAction.Connect -> {
                     if (!controls.value.canConnect) return
-                    commandEpoch++; expiryTask?.cancel(); expiryTask = null
+                    commandEpoch++; expiryTask?.cancel(); expiryTask = null; preparedNode = null
                     try {
                         startService(Intent(this, ConnectionOwnerService::class.java))
                         val selected = repository.localSubscriptions.nodeSelectionSnapshot().selected
@@ -221,11 +226,14 @@ internal class ConnectionOwnerService : Service() {
     companion object { const val ACTION_HOLD = "com.gccwebos.android.vpn.OWNER_HOLD" }
 }
 
-internal fun connectionControls(state: ConnectionState, revision: Long): ConnectionControlState = when (state) {
+/** [activeNode] is attached only to Connected; every other phase drops it so stale labels never show. */
+internal fun connectionControls(state: ConnectionState, revision: Long,
+    activeNode: com.gccwebos.android.core.PreparedNodeLabel? = null): ConnectionControlState = when (state) {
     ConnectionState.Disconnected -> ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true, revision = revision)
     ConnectionState.Disconnecting -> ConnectionControlState(ConnectionPhase.Disconnecting, revision = revision)
     is ConnectionState.Working -> ConnectionControlState(ConnectionPhase.Connecting, canCancel = true, revision = revision)
-    is ConnectionState.Connected -> ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true, revision = revision)
+    is ConnectionState.Connected -> ConnectionControlState(ConnectionPhase.Connected, canDisconnect = true, revision = revision,
+        activeNode = activeNode)
     is ConnectionState.Blocked -> ConnectionControlState(ConnectionPhase.Failed, ConnectionFailure.ResourceUnavailable,
         canConnect = true, revision = revision)
     is ConnectionState.Failed -> ConnectionControlState(ConnectionPhase.Failed,

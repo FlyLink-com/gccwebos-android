@@ -100,10 +100,10 @@ class AccountBackNavigationUiTest {
             compose.runOnIdle { assertNotNull(fixture.sessions.read()); assertEquals(0, fixture.clears.get()); gate.complete(Unit) }
             compose.waitUntil(10_000) { fixture.overviewReads.get() == 2 }
             compose.onNodeWithTag("nav-Profile").performClick()
-            compose.onNodeWithTag("mine-login-status").assertTextEquals("已登录")
+            compose.onNodeWithTag("mine-account-identity").assertExists(); compose.onNodeWithTag("mine-login-status").assertDoesNotExist()
             restoration.emulateSavedInstanceStateRestore()
             compose.waitUntil(10_000) { fixture.overviewReads.get() == 4 }
-            compose.onNodeWithTag("mine-login-status").assertTextEquals("已登录")
+            compose.onNodeWithTag("mine-account-identity").assertExists(); compose.onNodeWithTag("mine-login-status").assertDoesNotExist()
             compose.onNodeWithTag("login-submit").assertDoesNotExist()
             assertEquals(0, fixture.passwordReads.get())
             assertEquals(0, fixture.clears.get())
@@ -130,7 +130,7 @@ class AccountBackNavigationUiTest {
             compose.runOnIdle { assertNotNull(fixture.sessions.read()); assertEquals(0, fixture.clears.get()); gate.complete(Unit) }
             compose.waitUntil(10_000) { account.authenticated && !account.busy }
             compose.onNodeWithTag("nav-Profile").performClick()
-            compose.onNodeWithTag("mine-login-status").assertTextEquals("已登录")
+            compose.onNodeWithTag("mine-account-identity").assertExists(); compose.onNodeWithTag("mine-login-status").assertDoesNotExist()
             compose.onNodeWithTag("login-submit").assertDoesNotExist()
             assertEquals(0, fixture.passwordReads.get())
             assertEquals(0, fixture.clears.get())

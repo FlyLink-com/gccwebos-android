@@ -1,9 +1,9 @@
 package com.gccwebos.android.commerce
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -12,24 +12,30 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gccwebos.android.R
 import com.gccwebos.android.connectionDateSummary
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
 import com.gccwebos.android.design.Brand
-import com.gccwebos.android.design.BrandCard
 import com.gccwebos.android.design.accountUsagePresentation
 import com.gccwebos.android.design.subscriptionTitle
 import com.gccwebos.android.portal.AccountController
 import java.time.Instant
 
-/** Reuses the verified overview; opening Mine never starts another account read. */
+/**
+ * Reuses the verified overview; opening Mine never starts another account read.
+ * Signed in: masked account identity + plan capsule + one membership-expiry line.
+ * Signed out (onLogin set): 我的账户 / 未登录 / 去登录, unchanged from #35.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = false, onLogin: (() -> Unit)? = null) {
     val signedOut = onLogin != null && !account.authenticated
@@ -38,77 +44,78 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
     val verified = account.authenticated && !verifying && !account.clearing && usage.authenticated
     val resource = if (verified) usage.resource else null
     val display = accountUsagePresentation(resource, Instant.now(), usage.notUpdated)
-    val title = subscriptionTitle(resource) ?: display.planText ?: "我的账户"
-    val status = when {
-        verifying -> "—"
-        account.authenticated && !account.clearing -> "已登录"
-        else -> "未登录"
-    }
+    val signedIn = account.authenticated && !account.clearing
     val content: @Composable ColumnScope.() -> Unit = {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val compact = maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.5f
-            val greeting: @Composable (Modifier) -> Unit = { modifier ->
-                Column(modifier, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Text(title, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.testTag("mine-welcome-title"))
-                    if (!signedOut) Text(if (account.authenticated) account.displayEmail ?: "账户" else "账户未登录",
-                        color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag("mine-account-identity"))
-                    Surface(shape = RoundedCornerShape(9.dp), color = Brand.Cyan.copy(alpha = .09f)) {
-                        Text(status, color = Brand.Cyan, style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp).testTag("mine-login-status"))
+            val details: @Composable (Modifier) -> Unit = { modifier ->
+                Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (signedIn) {
+                        val plan = if (verifying) "—" else display.planText ?: subscriptionTitle(resource) ?: display.statusText ?: "—"
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+                            itemVerticalAlignment = Alignment.CenterVertically) {
+                            Text(account.displayEmail?.let(::maskAccountEmail) ?: "账户", fontSize = 18.sp, lineHeight = 24.sp,
+                                fontWeight = FontWeight.Bold, color = Brand.Text, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("mine-account-identity"))
+                            PlanCapsule(plan)
+                        }
+                        val expiry = display.expiresAtText
+                        val line = when {
+                            verifying || expiry == null -> "会员有效期至：—"
+                            display.serviceExpired -> "会员已到期：${connectionDateSummary(expiry)}"
+                            else -> "会员有效期至：${connectionDateSummary(expiry)}"
+                        }
+                        Text(line, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("mine-plan-expiry").semantics {
+                                contentDescription = when {
+                                    verifying || expiry == null -> line
+                                    display.serviceExpired -> "会员已到期 $expiry"
+                                    else -> "会员有效期至 $expiry"
+                                }
+                            })
+                    } else {
+                        Text(if (signedOut) "我的账户" else "账户未登录", fontSize = 20.sp, lineHeight = 26.sp,
+                            fontWeight = FontWeight.Bold, modifier = Modifier.testTag("mine-welcome-title"))
+                        Surface(shape = RoundedCornerShape(9.dp), color = Brand.Cyan.copy(alpha = .09f)) {
+                            Text("未登录", color = Brand.Cyan, style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp).testTag("mine-login-status"))
+                        }
                     }
                 }
             }
-            val robot: @Composable (Modifier) -> Unit = { modifier ->
-                Image(painterResource(R.drawable.brand_robot_welcome), contentDescription = null,
-                    modifier = modifier.size(64.dp))
+            val mascot: @Composable (Modifier) -> Unit = { modifier ->
+                Box(modifier.size(72.dp).mascotRingBase(), contentAlignment = Alignment.TopCenter) {
+                    Image(painterResource(R.drawable.brand_robot_welcome), contentDescription = null,
+                        modifier = Modifier.size(62.dp))
+                }
             }
             if (compact) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                greeting(Modifier.fillMaxWidth())
-                robot(Modifier.align(Alignment.End))
+                details(Modifier.fillMaxWidth())
+                mascot(Modifier.align(Alignment.End))
             } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                greeting(Modifier.weight(1f))
-                robot(Modifier)
+                details(Modifier.weight(1f))
+                mascot(Modifier)
             }
         }
         if (signedOut) com.gccwebos.android.design.BrandButton("去登录", { onLogin?.invoke() },
             enabled = !account.busy && !account.restoring && !account.foregroundCheckPending,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("mine-go-login"))
-        else BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val plan = when {
-                !account.authenticated -> "登录后查看套餐"
-                verifying -> "—"
-                else -> display.planText ?: display.statusText ?: "—"
-            }
-            val expiry = display.expiresAtText?.let {
-                if (display.serviceExpired) "已到期 ${connectionDateSummary(it)}" else "到期 ${connectionDateSummary(it)}"
-            } ?: "—"
-            val planText: @Composable (Modifier) -> Unit = { modifier ->
-                Text(plan, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-                    modifier = modifier.testTag("mine-current-plan"))
-            }
-            val expiryText: @Composable (Modifier) -> Unit = { modifier ->
-                Text(expiry, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-                    modifier = modifier.testTag("mine-plan-expiry").semantics {
-                        contentDescription = display.expiresAtText?.let { if (display.serviceExpired) "已到期 $it" else "到期 $it" } ?: expiry
-                    })
-            }
-            if (maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.3f) {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    planText(Modifier.fillMaxWidth())
-                    expiryText(Modifier.fillMaxWidth())
-                }
-            } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                planText(Modifier.weight(1f))
-                expiryText(Modifier.weight(1.5f))
-            }
-        }
         if (verified && usage.notUpdated) Text("套餐信息未更新", color = Brand.Muted,
             style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("mine-plan-not-updated"))
     }
     if (embedded) Column(Modifier.fillMaxWidth().testTag("mine-welcome"),
         verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
-    else BrandCard(Modifier.testTag("mine-welcome"), content = content)
+    else MineCard(Modifier.testTag("mine-welcome"), contentPadding = PaddingValues(16.dp), content = content)
+}
+
+/** Highlighted plan name from the verified overview; never a hard-coded tier. */
+@Composable
+private fun PlanCapsule(plan: String) {
+    Surface(shape = RoundedCornerShape(50), color = Brand.Cyan.copy(alpha = .14f),
+        border = BorderStroke(1.dp, Brush.horizontalGradient(listOf(Brand.Cyan.copy(alpha = .75f), Brand.Blue.copy(alpha = .55f))))) {
+        Text(plan, color = Brand.Cyan, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp).testTag("mine-current-plan"))
+    }
 }

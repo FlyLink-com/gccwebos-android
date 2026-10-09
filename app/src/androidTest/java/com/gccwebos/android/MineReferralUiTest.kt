@@ -95,6 +95,23 @@ class MineReferralUiTest {
         compose.onNodeWithTag("mine-return-purchase").assertDoesNotExist()
     }
 
+    @Test fun signedInSectionsAreSeparateCardsWithoutRedundantStatusOrInventedCopy() {
+        launchMine()
+        // Header: identity + plan capsule + expiry line; the redundant 已登录 tag is gone.
+        compose.onNodeWithTag("mine-login-status").assertDoesNotExist()
+        compose.onNodeWithTag("mine-welcome-title").assertDoesNotExist()
+        compose.onNodeWithTag("mine-plan-expiry").assertTextContains("会员", substring = true)
+        // Wallet, list groups and the invite banner are siblings, not nested in one container.
+        val sections = listOf("mine-welcome", "wallet-card", "mine-menu", "mine-referral-banner", "mine-functions")
+        for (outer in sections) for (inner in sections) if (outer != inner)
+            compose.onNodeWithTag(inner).assert(hasAnyAncestor(hasTestTag(outer)).not())
+        compose.onNodeWithTag("mine-referral").assert(hasAnyAncestor(hasTestTag("mine-referral-banner")))
+        compose.onNodeWithTag("mine-referral-cta", useUnmergedTree = true).assertTextEquals("立即邀请")
+        compose.onNodeWithTag("mine-telegram").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.onNodeWithTag("mine-signout").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(copied.isEmpty()) }
+    }
+
     @Test fun oldSessionIsNeutralAndUnknownBalanceCannotBecomeResourceDerivedZero() {
         launchMine()
         compose.onNodeWithTag("mine-account-identity").assertTextEquals("账户")

@@ -810,45 +810,41 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             } else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
-    if (view == "mine") BrandCard(Modifier.testTag("mine-surface")) {
-        MineWelcomeCard(account, embedded = true)
-        HorizontalDivider(color = Brand.RowDivider)
+    if (view == "mine") Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        MineWelcomeCard(account)
         CommercePanel(account, CommerceMode.Mine, state, autoLoad, paymentOpener = paymentOpener, embeddedWallet = true, refreshRequest = refreshRequest,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
             onLedger = { if (account.authenticated) {
                 view = "history"; historyTab = "ledger"
             } else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
-        HorizontalDivider(color = Brand.RowDivider)
-        Column(Modifier.testTag("mine-menu")) {
-        MineMenuRow("我的订单", "mine-history", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending,
-            subtitle = "商品订单与充值记录") {
-            view = if (account.authenticated) "history" else "security"
-            historyTab = "orders"
+        MineCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
+            MineMenuRow("我的订单", "mine-history", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending,
+                subtitle = "商品订单与充值记录") {
+                view = if (account.authenticated) "history" else "security"
+                historyTab = "orders"
+            }
+            MineRowDivider()
+            MineMenuRow("我的钱包", "mine-wallet", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending) { view = if (account.authenticated) "wallet" else "security" }
+            MineRowDivider()
+            MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
         }
-        HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
-        MineMenuRow("我的钱包", "mine-wallet", !state.busy && !account.busy && !account.restoring && !account.foregroundCheckPending) { view = if (account.authenticated) "wallet" else "security" }
-        HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
-        MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
-        }
-        HorizontalDivider(color = Brand.RowDivider)
-        MineMenuRow("分享一份好连接", "mine-referral", !account.busy, subtitle = "邀请好友 · 查看推荐与奖励") {
+        MineInviteBanner("mine-referral", !account.busy) {
             view = if (account.authenticated) "referral" else "security"
         }
-        HorizontalDivider(color = Brand.RowDivider)
-        Column(Modifier.testTag("mine-functions")) {
-        MineMenuRow("关于与更新", "mine-more") { view = "about" }
-        HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
-        MineMenuRow("官方频道", "mine-telegram", subtitle = "@flylinevpn") {
-            telegramUnavailable = false
-            try { (telegramOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) })("https://t.me/flylinevpn") }
-            catch (_: Exception) { telegramUnavailable = true }
-        }
-        if (telegramUnavailable) SupportingText("暂时无法打开 Telegram 频道，请稍后重试。")
-        if (account.authenticated) {
-            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
-            MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, onClick = account::logout)
-        }
+        MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
+            MineMenuRow("官方频道", "mine-telegram", subtitle = "@flylinevpn") {
+                telegramUnavailable = false
+                try { (telegramOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) })("https://t.me/flylinevpn") }
+                catch (_: Exception) { telegramUnavailable = true }
+            }
+            if (telegramUnavailable) SupportingText("暂时无法打开 Telegram 频道，请稍后重试。")
+            MineRowDivider()
+            MineMenuRow("关于与更新", "mine-more") { view = "about" }
+            if (account.authenticated) {
+                MineRowDivider()
+                MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, onClick = account::logout)
+            }
         }
     }
 }
@@ -870,72 +866,38 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
         return
     }
     val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
-    BrandCard(Modifier.testTag("mine-surface")) {
+    Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.fillMaxWidth().testTag("mine-signed-out"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        MineWelcomeCard(account, embedded = true, onLogin = onLogin)
-        HorizontalDivider(color = Brand.RowDivider)
-        Column(Modifier.fillMaxWidth().testTag("wallet-card"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("可用余额", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f))
-                androidx.compose.foundation.Image(painterResource(com.gccwebos.android.R.drawable.brand_wallet_coin),
-                    contentDescription = null, modifier = Modifier.size(32.dp))
+        MineWelcomeCard(account, onLogin = onLogin)
+        MineWalletCard(Modifier.testTag("wallet-card")) {
+            MineBalanceHeading()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CoinIcon(30.dp, enabled = false)
+                Text("登录查看你的余额", style = MaterialTheme.typography.titleMedium, color = Brand.Muted,
+                    modifier = Modifier.weight(1f).testTag("wallet-balance-signed-out"))
             }
-            Text("登录查看你的余额", style = MaterialTheme.typography.titleMedium, color = Brand.Muted,
-                modifier = Modifier.fillMaxWidth().testTag("wallet-balance-signed-out"))
             // Shown for layout parity only: disabled, so they expose disabled semantics and accept no click.
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BrandButton("钱包充值", {}, enabled = false,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("mine-recharge"))
-                OutlinedButton(onClick = {}, enabled = false, shape = androidx.compose.foundation.shape.RoundedCornerShape(17.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("mine-ledger")) { Text("账单明细") }
-            }
+            MineWalletActions(enabled = false, onRecharge = {}, onLedger = {})
         }
-        HorizontalDivider(color = Brand.RowDivider)
-        Column(Modifier.testTag("mine-menu")) {
+        MineCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
             MineMenuRow("我的订单", "mine-history", idle, subtitle = "商品订单与充值记录", onClick = onLogin)
-            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+            MineRowDivider()
             MineMenuRow("我的钱包", "mine-wallet", idle, onClick = onLogin)
-            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+            MineRowDivider()
             MineMenuRow("账户与安全", "mine-security", idle, onClick = onLogin)
         }
-        HorizontalDivider(color = Brand.RowDivider)
-        MineMenuRow("分享一份好连接", "mine-referral", idle, subtitle = "邀请好友 · 查看推荐与奖励", onClick = onLogin)
-        HorizontalDivider(color = Brand.RowDivider)
-        Column(Modifier.testTag("mine-functions")) {
-            MineMenuRow("关于与更新", "mine-more") { about = true }
-            HorizontalDivider(color = Brand.Border.copy(alpha = .55f))
+        MineInviteBanner("mine-referral", idle, onClick = onLogin)
+        MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
             MineMenuRow("官方频道", "mine-telegram", subtitle = "@flylinevpn") {
                 telegramUnavailable = false
                 try { (telegramOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) })("https://t.me/flylinevpn") }
                 catch (_: Exception) { telegramUnavailable = true }
             }
             if (telegramUnavailable) SupportingText("暂时无法打开 Telegram 频道，请稍后重试。")
+            MineRowDivider()
+            MineMenuRow("关于与更新", "mine-more") { about = true }
         }
         }
     }
 }
 
-@Composable
-private fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, subtitle: String? = null, onClick: () -> Unit) {
-    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(tag)) {
-        val icon = when (tag) {
-            "mine-wallet" -> com.gccwebos.android.R.drawable.brand_wallet
-            "mine-history" -> com.gccwebos.android.R.drawable.brand_receipt
-            "mine-security" -> com.gccwebos.android.R.drawable.brand_lock
-            "mine-referral" -> com.gccwebos.android.R.drawable.brand_share
-            "mine-telegram" -> com.gccwebos.android.R.drawable.brand_telegram
-            "mine-more" -> com.gccwebos.android.R.drawable.brand_refresh
-            else -> com.gccwebos.android.R.drawable.brand_arrow
-        }
-        Icon(painterResource(icon), null, tint = if (enabled) Brand.Cyan else Brand.Muted, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, color = Brand.Text)
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Brand.Muted) }
-        }
-        Spacer(Modifier.width(8.dp)); Text("›")
-    }
-}

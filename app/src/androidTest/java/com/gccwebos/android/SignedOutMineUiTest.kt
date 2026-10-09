@@ -64,6 +64,9 @@ class SignedOutMineUiTest {
         compose.onNodeWithText("钱包充值").assertExists()
         compose.onNodeWithText("账单明细").assertExists()
         compose.onNodeWithTag("mine-signout").assertDoesNotExist()
+        // Redesigned cards keep the signed-out invite banner routing to login like the other entries.
+        compose.onNodeWithTag("mine-referral").assert(hasAnyAncestor(hasTestTag("mine-referral-banner")))
+        compose.onNodeWithTag("mine-telegram").assert(hasAnyAncestor(hasTestTag("mine-functions")))
         compose.waitForIdle()
         // Only the anonymous startup paths may run: no wallet, ledger, order, referral or overview read.
         val forbidden = listOf("wallet", "ledger", "order", "recharge", "referral", "overview", "commerce")

@@ -723,7 +723,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         val mode = when(view) {
             "history" -> if (historyTab == "ledger") CommerceMode.Ledger else CommerceMode.Orders
             "ledger" -> CommerceMode.Ledger
-            "recharge" -> CommerceMode.Wallet
+            "wallet", "recharge" -> CommerceMode.Wallet
             else -> CommerceMode.Mine
         }
         CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener, refreshRequest = refreshRequest,

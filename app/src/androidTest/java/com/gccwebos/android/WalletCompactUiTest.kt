@@ -29,7 +29,8 @@ class WalletCompactUiTest {
     private var ledgerNavigations = 0
     private val calls = mutableListOf<String>()
     private val opened = mutableListOf<String>()
-    private val tags = listOf("wallet-balance", "wallet-paid", "wallet-bonus", "wallet-reward", "wallet-held", "wallet-pending")
+    // Top-up screen: only the spendable balance is on the card; all six figures live in 余额明细.
+    private val tags = listOf("wallet-detail-total", "wallet-paid", "wallet-bonus", "wallet-reward", "wallet-held", "wallet-pending")
     private val confirmed = Wallet("active", 1, 17, 9, 5, 31, 7, 11)
     private val offer = RechargeOffer("compact_fixture", 9, 73, 2345, "CNY", 2, listOf("alipay"))
 
@@ -78,35 +79,41 @@ class WalletCompactUiTest {
         }
     }
 
-    private fun assertConfirmedFields() {
+    private fun openDetails() { compose.onNodeWithTag("wallet-balance-details").performScrollTo().performClick() }
+    private fun closeDetails() { compose.onNodeWithTag("wallet-balance-details-close").performClick() }
+    private fun assertAllFields(text: (Int) -> String) {
+        compose.onNodeWithTag("wallet-balance").assertTextEquals(text(31))
+        openDetails()
         tags.zip(listOf(31, 17, 9, 5, 7, 11)).forEach { (tag, amount) ->
-            compose.onNodeWithTag(tag).assertTextEquals("$amount Coins")
+            compose.onNodeWithTag(tag).assertTextEquals(text(amount))
         }
+        closeDetails()
+        compose.onNodeWithTag("wallet-balance-details-dialog").assertDoesNotExist()
     }
+    private fun assertConfirmedFields() = assertAllFields { "$it Coins" }
+    private fun assertUnknownFields() = assertAllFields { "— Coins" }
     private fun assertNoSideEffects() = compose.runOnIdle {
         assertTrue(calls.isEmpty()); assertTrue(opened.isEmpty()); assertNull(state.recharge); assertFalse(state.pendingRecharge)
     }
 
-    @Test fun sixAuthoritativeFieldsUseThreeColumnsAndDoNotAddHeldOrPendingToAvailability() {
+    @Test fun cardShowsSpendableAndCompositionWhileDetailKeepsSixFieldsWithoutAddingHeldOrPending() {
         launch { wallet = confirmed; walletLoaded = true }
         assertConfirmedFields()
+        compose.onNodeWithTag("wallet-composition").assertTextEquals("含 已购 17 · 赠送 9 · 奖励 5")
+        listOf("wallet-held", "wallet-pending", "wallet-paid").forEach { compose.onNodeWithTag(it).assertDoesNotExist() }
+        openDetails()
         listOf("总可用", "已购可用", "赠送可用", "奖励可用", "订单预留", "待确认奖励").forEach {
             compose.onNodeWithText(it).assertExists()
         }
         compose.onNodeWithText("49 Coins").assertDoesNotExist()
-        val bounds = tags.map { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
-        assertEquals(bounds[0].top, bounds[1].top, 1f)
-        assertEquals(bounds[1].top, bounds[2].top, 1f)
-        assertTrue(bounds[3].top > bounds[0].bottom)
-        assertEquals(bounds[3].top, bounds[4].top, 1f)
-        assertEquals(bounds[4].top, bounds[5].top, 1f)
+        closeDetails()
         compose.onNodeWithTag("wallet-status").assertDoesNotExist()
         assertNoSideEffects()
     }
 
     @Test fun unknownFailureAndBusyNeverBecomeConfirmedZero() {
         launch()
-        tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
+        assertUnknownFields()
         compose.runOnIdle { state.walletError = "合成读取失败"; state.busy = true }
         compose.onNodeWithTag("wallet-error").assertDoesNotExist()
         compose.runOnIdle {
@@ -116,7 +123,7 @@ class WalletCompactUiTest {
         compose.onNodeWithTag("wallet-loading").assertDoesNotExist()
         compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
-        tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
+        assertUnknownFields()
         compose.onNodeWithText("0 Coins").assertDoesNotExist()
         compose.runOnIdle {
             state.busy = false; state.walletError = null; state.walletLoaded = true
@@ -153,7 +160,7 @@ class WalletCompactUiTest {
         assertConfirmedFields()
         compose.onNodeWithTag("wallet-error").assertTextEquals("合成刷新失败")
         compose.runOnIdle { owner.authSessionGeneration++ }
-        tags.forEach { compose.onNodeWithTag(it).assertTextEquals("— Coins") }
+        assertUnknownFields()
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").assertDoesNotExist()
         assertNoSideEffects()
     }
@@ -180,6 +187,8 @@ class WalletCompactUiTest {
         launch(width = 320, fontScale = 2f) {
             wallet = confirmed; walletLoaded = true; rechargeOffers = listOf(offer); rechargeOffersLoaded = true
         }
+        compose.onNodeWithTag("wallet-balance").performScrollTo().assertIsDisplayed().assertTextEquals("31 Coins")
+        openDetails()
         tags.zip(listOf(31, 17, 9, 5, 7, 11)).forEach { (tag, amount) ->
             compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().assertTextEquals("$amount Coins")
         }
@@ -188,6 +197,7 @@ class WalletCompactUiTest {
         val second = compose.onNodeWithTag(tags[1]).fetchSemanticsNode().boundsInRoot
         assertTrue(second.top > first.bottom)
         assertEquals(first.left, second.left, 1f)
+        closeDetails()
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
         compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsDisplayed().performClick()
@@ -217,9 +227,12 @@ class WalletCompactUiTest {
         assertNoSideEffects()
     }
 
-    @Test fun singleCtaHasNoDefaultAndChangedDirectoryOrAccountDiscardsLocalChoice() {
+    @Test fun firstDirectoryHasDefaultTileButChangedDirectoryOrAccountDiscardsLocalChoice() {
         launch { rechargeOffers = listOf(offer); rechargeOffersLoaded = true }
-        compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
+        // Default highlight for the first directory of this visit; selecting still creates nothing.
+        compose.onNodeWithTag("recharge-select-${offer.offerRef}").assertIsSelected()
+        compose.onNodeWithTag("recharge-selected-pay").assertIsEnabled()
+        compose.onNodeWithTag("recharge-payable-amount").assertTextEquals("应付金额：￥23.45")
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick().assertIsSelected()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
         compose.onNodeWithTag("recharge-selected-pay").assertIsEnabled()

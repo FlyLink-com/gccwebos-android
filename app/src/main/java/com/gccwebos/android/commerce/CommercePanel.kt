@@ -421,7 +421,8 @@ private fun CatalogCategoryChip(selected: Boolean, enabled: Boolean, title: Stri
 internal fun CommercePanel(account: AccountController, mode: CommerceMode, stateOverride: CommerceController? = null, autoLoad: Boolean = true,
     onRecharge: (() -> Unit)? = null, onLedger: (() -> Unit)? = null, paymentOpener: ((String) -> Unit)? = null,
     embeddedWallet: Boolean = false, defaultSelectionRequest: Int = 0, refreshRequest: Int = 0,
-    catalogDisplayCache: CatalogDisplayCache? = null) {
+    catalogDisplayCache: CatalogDisplayCache? = null, onWalletBack: (() -> Unit)? = null,
+    onRechargeRecords: (() -> Unit)? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state = stateOverride ?: remember(account.authSessionGeneration) { CommerceController(account, scope, FileCommerceRecovery(context.applicationContext), includeHistory = mode == CommerceMode.Orders) }
@@ -587,7 +588,8 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
     }
     if (walletMode) {
-        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger, embeddedWallet)
+        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger, embeddedWallet,
+            onBack = onWalletBack, onRechargeRecords = onRechargeRecords)
         return // Wallet never inherits a retained purchase confirmation from another destination.
     } else if (mode == CommerceMode.Plans) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -768,7 +770,9 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
-    if (view != "mine") TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
+    // The wallet top-up screen draws its own standalone top bar (same "mine-back" tag) whenever it renders.
+    val walletTopBar = (view == "wallet" || view == "recharge") && account.authenticated && !account.restoring && !account.foregroundCheckPending
+    if (view != "mine" && !walletTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
     if (view == "about") {
         BrandCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -798,6 +802,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             else -> CommerceMode.Mine
         }
         CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener, refreshRequest = refreshRequest,
+            onWalletBack = { view = "mine" }, onRechargeRecords = { view = "history"; historyTab = "orders" },
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
             onLedger = { if (account.authenticated) {
                 view = "history"; historyTab = "ledger"

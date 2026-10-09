@@ -554,7 +554,10 @@ class MobileParityUiTest {
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-recharge").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-select-recharge_synthetic").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("recharge-selected-pay").assertTextEquals("支付宝支付").assertIsNotEnabled()
+        // Top-up screen: first tile is highlighted by default; payment method and submit are separate.
+        compose.onNodeWithTag("recharge-select-recharge_synthetic").assertIsSelected()
+        compose.onNodeWithTag("recharge-method-alipay").assertIsSelected()
+        compose.onNodeWithTag("recharge-selected-pay").assertTextEquals("立即充值").assertIsEnabled()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
         compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
         capture("synthetic-alipay-recharge")

@@ -507,11 +507,17 @@ class SubscriptionWalletUiTest {
             commerce.wallet = Wallet("active", 1, 12, 5, 3, 20, 3, 4)
         }
         compose.onNodeWithTag("wallet-balance").performScrollTo().assertTextEquals("20 Coins")
+        compose.onNodeWithTag("wallet-composition").assertTextEquals("含 已购 12 · 赠送 5 · 奖励 3")
+        compose.onNodeWithTag("wallet-held").assertDoesNotExist()
+        compose.onNodeWithTag("wallet-balance-details").performScrollTo().performClick()
+        compose.onNodeWithTag("wallet-detail-total").assertTextEquals("20 Coins")
         compose.onNodeWithTag("wallet-paid").assertTextEquals("12 Coins")
         compose.onNodeWithTag("wallet-bonus").assertTextEquals("5 Coins")
         compose.onNodeWithTag("wallet-reward").assertTextEquals("3 Coins")
         compose.onNodeWithTag("wallet-held").assertTextEquals("3 Coins")
         compose.onNodeWithTag("wallet-pending").assertTextEquals("4 Coins")
+        capture("wallet-balance-details-fixture")
+        compose.onNodeWithTag("wallet-balance-details-close").performClick()
         capture("wallet-confirmed-fixture")
         compose.runOnIdle { account.authenticated = false }
         compose.onNodeWithTag("commerce-signed-out").performScrollTo().assertIsDisplayed()

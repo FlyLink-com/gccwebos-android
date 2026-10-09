@@ -240,6 +240,7 @@ internal fun BrandBackdrop(modifier: Modifier = Modifier, loginPage: Boolean = f
 @Composable
 internal fun GlassSurface(modifier: Modifier = Modifier, shape: Shape = Brand.Shape,
                           kind: GlassSurfaceKind = GlassSurfaceKind.Card, selected: Boolean = false,
+                          edge: BorderStroke? = null, tint: Brush? = null,
                           content: @Composable () -> Unit) {
     val state = LocalGlassBackdrop.current
     val requested = LocalGlassMode.current
@@ -277,7 +278,8 @@ internal fun GlassSurface(modifier: Modifier = Modifier, shape: Shape = Brand.Sh
         // misalign the sampled backdrop and leave a sharp transparent edge inside a tall card.
         bounds = Rect(it.positionInWindow(), Size(it.size.width.toFloat(), it.size.height.toFloat()))
     }, shape = shape, color = Color.Transparent,
-        border = BorderStroke(if (selected) 2.dp else 1.dp, Brand.GlassBorder.copy(alpha = if (selected) .72f else if (frosted) .44f else .38f)),
+        // An explicit edge replaces the default rim; unchanged for every existing caller.
+        border = edge ?: BorderStroke(if (selected) 2.dp else 1.dp, Brand.GlassBorder.copy(alpha = if (selected) .72f else if (frosted) .44f else .38f)),
         shadowElevation = 8.dp) {
         Box(Modifier.drawWithCache {
             val reflection = Brush.verticalGradient(listOf(Color.White.copy(alpha = .12f), Color.Transparent),
@@ -288,6 +290,8 @@ internal fun GlassSurface(modifier: Modifier = Modifier, shape: Shape = Brand.Sh
                     dstOffset = IntOffset(placement.left, placement.top),
                     dstSize = IntSize(placement.width, placement.height))
                 drawRect(brush)
+                // Optional static gradient wash (no blur, no animation) drawn over the shared material.
+                tint?.let { drawRect(it) }
                 drawRect(reflection)
             }
         }) { content() }

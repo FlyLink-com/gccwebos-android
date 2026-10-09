@@ -1,6 +1,5 @@
 package com.gccwebos.android.commerce
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -12,7 +11,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -20,7 +18,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.gccwebos.android.R
 import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
 import java.time.Instant
@@ -56,12 +53,7 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     val offersFailure = state.rechargeOffersError ?: state.error?.takeIf { !state.rechargeOffersLoaded && !state.busy }
     BalanceCard(Modifier.testTag("wallet-card"), embedded = embeddedBalance) {
         if (mode == CommerceMode.Mine) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("可用余额", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f))
-                Image(painterResource(R.drawable.brand_wallet_coin), contentDescription = null, modifier = Modifier.size(32.dp))
-            }
+            MineBalanceHeading()
             MineSpendableBalance(wallet)
         } else WalletBalanceMetrics(wallet)
         CommerceReadNotice(state, walletFailure?.takeUnless { state.busy }, "wallet-error")
@@ -72,26 +64,8 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                 else -> "钱包已关闭"
             }, Modifier.testTag("wallet-status"))
         }
-        if (mode == CommerceMode.Mine) {
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val recharge: @Composable (Modifier) -> Unit = { modifier ->
-                    BrandButton("钱包充值", { onRecharge?.invoke() }, enabled = !state.busy,
-                        modifier = modifier.heightIn(min = 48.dp).testTag("mine-recharge"))
-                }
-                val ledger: @Composable (Modifier) -> Unit = { modifier ->
-                    OutlinedButton(onClick = { onLedger?.invoke() }, enabled = !state.busy,
-                        shape = RoundedCornerShape(17.dp),
-                        modifier = modifier.heightIn(min = 48.dp).testTag("mine-ledger")) { Text("账单明细") }
-                }
-                if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        recharge(Modifier.fillMaxWidth()); ledger(Modifier.fillMaxWidth())
-                    }
-                } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    recharge(Modifier.weight(1f)); ledger(Modifier.weight(1f))
-                }
-            }
-        }
+        if (mode == CommerceMode.Mine) MineWalletActions(enabled = !state.busy,
+            onRecharge = { onRecharge?.invoke() }, onLedger = { onLedger?.invoke() })
     }
     if (mode != CommerceMode.Wallet) return
     flow.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recharge-flow-error")) }
@@ -191,7 +165,8 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
 
 @Composable
 private fun BalanceCard(modifier: Modifier, embedded: Boolean, content: @Composable ColumnScope.() -> Unit) {
-    if (embedded) Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    // Mine: a standalone wallet card (blue/gold glass wash), separate from the header card.
+    if (embedded) MineWalletCard(modifier, content)
     else BrandCard(modifier, contentPadding = PaddingValues(12.dp), content = content)
 }
 
@@ -200,15 +175,18 @@ private fun BalanceCard(modifier: Modifier, embedded: Boolean, content: @Composa
 private fun MineSpendableBalance(wallet: Wallet?) {
     val formatted = wallet?.spendableUnits?.let(::formatCoins) ?: "— Coins"
     val amount = formatted.removeSuffix(" Coins")
-    Text(buildAnnotatedString {
-        withStyle(SpanStyle(fontSize = if (amount.length > 9) 28.sp else 34.sp, fontWeight = FontWeight.Bold)) {
-            append(amount)
-        }
-        withStyle(SpanStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Brand.Muted)) {
-            append(" Coins")
-        }
-    }, style = MaterialTheme.typography.headlineLarge.copy(lineHeight = 42.sp),
-        color = Brand.Text, modifier = Modifier.fillMaxWidth().testTag("wallet-balance"))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        CoinIcon(30.dp)
+        Text(buildAnnotatedString {
+            withStyle(SpanStyle(fontSize = if (amount.length > 9) 30.sp else 38.sp, fontWeight = FontWeight.ExtraBold)) {
+                append(amount)
+            }
+            withStyle(SpanStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MineStyle.Gold)) {
+                append(" Coins")
+            }
+        }, style = MaterialTheme.typography.headlineLarge.copy(lineHeight = 46.sp),
+            color = Brand.Text, modifier = Modifier.weight(1f).testTag("wallet-balance"))
+    }
 }
 
 /** Each figure is a separate authoritative field. Held and pending funds are never added to availability. */

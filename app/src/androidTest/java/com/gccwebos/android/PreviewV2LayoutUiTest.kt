@@ -282,11 +282,11 @@ class PreviewV2LayoutUiTest {
         open("Profile")
         compose.onNodeWithTag("plan-purchase-dock").assertDoesNotExist()
         compose.onNodeWithTag("mine-welcome").assertExists()
-        compose.onNodeWithTag("mine-welcome-title").assertTextEquals("Go 订阅")
+        compose.onNodeWithTag("mine-welcome-title").assertDoesNotExist() // Signed-in header: identity + plan capsule only.
         compose.onNodeWithTag("mine-welcome").assert(hasAnyAncestor(hasTestTag("mine-surface")))
         compose.onNodeWithTag("mine-account-identity").assertTextEquals("账户")
         compose.onNodeWithTag("mine-current-plan").assertTextEquals("30天套餐")
-        compose.onNodeWithTag("mine-plan-expiry").assertTextContains("2099.09.", substring = true)
+        compose.onNodeWithTag("mine-plan-expiry").assertTextContains("会员有效期至：2099.09.", substring = true)
         compose.onNodeWithTag("wallet-balance").assertTextEquals("31 Coins")
         compose.onNodeWithTag("wallet-paid").assertDoesNotExist()
         capture("$prefix-mine")

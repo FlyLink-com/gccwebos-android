@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.GccTheme
 import com.gccwebos.android.manualimport.*
 import kotlinx.coroutines.CompletableDeferred
@@ -65,7 +66,7 @@ class ManualImportHostUiTest {
         try {
             compose.onNodeWithTag("manual-import-scan").performClick()
             compose.waitUntil(5000) { entered.isCompleted }
-            listOf("scan", "document", "link", "clipboard").forEach {
+            listOf("scan", "document", "link").forEach {
                 compose.onNodeWithTag("manual-import-$it").assertIsNotEnabled()
             }
             compose.runOnIdle { assertEquals(1, starts); assertTrue(platform.starts.isEmpty()); assertTrue(tickets.isEmpty()) }
@@ -118,7 +119,7 @@ class ManualImportHostUiTest {
     }
     @Test fun allImportEntriesAreExplicitAndLinkSubmitsOnlyOnceWithTheIssuedTicket() {
         launch()
-        listOf("scan", "document", "link", "clipboard").forEach {
+        listOf("scan", "document", "link").forEach {
             compose.onNodeWithTag("manual-import-$it").assertIsDisplayed().assertIsEnabled()
         }
         compose.runOnIdle { assertTrue(platform.starts.isEmpty()); assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
@@ -214,54 +215,16 @@ class ManualImportHostUiTest {
         compose.runOnIdle { assertTrue(submissions.isEmpty()) }
     }
 
-    @Test fun clipboardMenuShowsAHintWhenEmptyOrNotALinkAndNeverSubmits() {
-        clipboard(null)
+    @Test fun pasteIsATrailingIconInsideTheFieldAndTheMenuHasNoClipboardEntry() {
         launch()
-        compose.onNodeWithTag("manual-import-clipboard").assertIsDisplayed().performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-clipboard-hint").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("manual-clipboard-hint").assertTextEquals("剪贴板中没有可导入的内容")
-        compose.onNodeWithTag("manual-clipboard-confirm").assertDoesNotExist()
-        compose.runOnIdle { assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
-
-        clipboard("hello world")
-        compose.onNodeWithTag("manual-import-clipboard").performClick()
-        compose.waitUntil(5000) {
-            compose.onAllNodesWithTag("manual-clipboard-hint").fetchSemanticsNodes().any { node ->
-                node.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }
-                    .any { it.text == "剪贴板内容不是订阅链接" }
-            }
-        }
-        compose.onNodeWithTag("manual-clipboard-hint").assertTextEquals("剪贴板内容不是订阅链接")
-        compose.onNodeWithTag("manual-clipboard-confirm").assertDoesNotExist()
+        compose.onNodeWithText("从剪贴板导入").assertDoesNotExist()
+        compose.onNodeWithTag("manual-import-link").performClick()
+        compose.onNodeWithText("粘贴").assertDoesNotExist()
+        compose.onNodeWithContentDescription("从剪贴板粘贴").assertIsDisplayed().assertHasClickAction()
+        compose.onNodeWithTag("manual-link-paste", useUnmergedTree = true).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        val field = compose.onNodeWithTag("manual-link-input").fetchSemanticsNode().boundsInRoot
+        val icon = compose.onNodeWithTag("manual-link-paste", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("paste icon must sit inside the field", field.contains(icon.center))
         compose.runOnIdle { assertTrue(submissions.isEmpty()) }
-    }
-
-    @Test fun clipboardMenuConfirmsAnHttpsLinkThenImportsAsLink() {
-        clipboard("  https://sub.invalid/sub/a/synthetic\n")
-        launch()
-        compose.onNodeWithTag("manual-import-clipboard").performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-clipboard-confirm").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("manual-clipboard-confirm-message")
-            .assertTextEquals("检测到剪贴板中有订阅链接，是否导入到配置？")
-        compose.onNodeWithTag("manual-clipboard-hint").assertDoesNotExist()
-        compose.runOnIdle { assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
-        compose.onNodeWithTag("manual-clipboard-confirm").assertIsEnabled().performClick()
-        compose.waitUntil(5000) { submissions.isNotEmpty() }
-        compose.runOnIdle {
-            assertEquals(listOf(ManualImportInputKind.Link), submissions)
-            assertEquals(1, tickets.size)
-            assertTrue(platform.starts.isEmpty())
-        }
-    }
-
-    @Test fun clipboardConfirmBackReturnsToMenuWithoutImporting() {
-        clipboard("https://sub.invalid/sub/a/synthetic")
-        launch()
-        compose.onNodeWithTag("manual-import-clipboard").performClick()
-        compose.waitUntil(5000) { compose.onAllNodesWithTag("manual-clipboard-back").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("manual-clipboard-back").performClick()
-        compose.onNodeWithTag("manual-import-clipboard").assertIsDisplayed()
-        compose.onNodeWithTag("manual-clipboard-confirm").assertDoesNotExist()
-        compose.runOnIdle { assertTrue(submissions.isEmpty()); assertTrue(tickets.isEmpty()) }
     }
 }

@@ -84,6 +84,10 @@ internal fun ReferralPanel(account: AccountController, autoLoad: Boolean = true,
     BrandCard(Modifier.testTag("referral-profile")) {
         Text("我的专属邀请", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         when {
+            // First profile read in flight: a placeholder for the link field and copy button.
+            profile == null && state.busy && state.profileError == null ->
+                SkeletonCards(count = 2, cardHeight = 48.dp, spacing = 8.dp, shape = RoundedCornerShape(14.dp), lines = 0,
+                    modifier = Modifier.testTag("referral-profile-skeleton"))
             profile == null -> Spacer(Modifier.height(8.dp))
             !profile.eligible -> Text("当前账户暂不具备推荐资格", modifier = Modifier.testTag("referral-profile-status"))
             else -> {

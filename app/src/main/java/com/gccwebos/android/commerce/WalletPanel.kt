@@ -86,9 +86,13 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
         Text("选择充值额度", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         CommerceReadNotice(state, offersFailure?.takeUnless { state.busy }, "recharge-offers-error")
         when {
+            // First read in flight with nothing to show: skeleton tiles; the grid then fades in.
+            displayOffers.isEmpty() && state.busy && offersFailure == null ->
+                SkeletonCards(count = 2, cardHeight = 64.dp, spacing = 10.dp, shape = RoundedCornerShape(16.dp), lines = 1,
+                    modifier = Modifier.testTag("recharge-offer-skeleton"))
             displayOffers.isEmpty() && (!state.rechargeOffersLoaded || state.busy || offersFailure != null) -> Unit
             displayOffers.isEmpty() -> Text("当前暂无充值档位", modifier = Modifier.testTag("recharge-offers-empty"))
-            else -> BoxWithConstraints(Modifier.fillMaxWidth().testTag("recharge-offer-grid")) {
+            else -> BoxWithConstraints(Modifier.fillMaxWidth().enterMotion(rememberEnterMotion()).testTag("recharge-offer-grid")) {
                 val columns = when {
                     LocalDensity.current.fontScale > 1.6f || maxWidth < 230.dp -> 1
                     LocalDensity.current.fontScale > 1.15f || maxWidth < 280.dp -> 2
@@ -166,14 +170,16 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                 enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },
             dismissButton = { TextButton(onClick = flow::dismissPayment, modifier = Modifier.testTag("payment-open-cancel")) { Text("暂不付款") } })
     }
-    if (balanceDetails && mode == CommerceMode.Wallet) AlertDialog(onDismissRequest = { balanceDetails = false },
-        containerColor = Brand.SurfaceRaised, shape = Brand.Shape, modifier = Modifier.testTag("wallet-balance-details-dialog"),
-        title = { Text("余额明细") },
-        text = { Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    // Read-only breakdown: a swipe-dismissable bottom sheet over the top-up page (same tags and fields).
+    if (balanceDetails && mode == CommerceMode.Wallet) GccBottomSheet(onDismissRequest = { balanceDetails = false },
+        modifier = Modifier.testTag("wallet-balance-details-dialog"), title = "余额明细") { close ->
+        Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             WalletBalanceMetrics(wallet)
             SupportingText("订单预留和待确认奖励不计入可用余额。")
-        } },
-        confirmButton = { TextButton(onClick = { balanceDetails = false }, modifier = Modifier.testTag("wallet-balance-details-close")) { Text("知道了") } })
+        }
+        TextButton(onClick = close, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)
+            .testTag("wallet-balance-details-close")) { Text("知道了") }
+    }
     if (recoveryConfirmation) AlertDialog(onDismissRequest = { recoveryConfirmation = false }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("恢复原创建请求？") },
         text = { Text("仅沿用本机原幂等记录。未获得订单编号时可能重发原创建请求；这不是付款或到账确认。") },
         confirmButton = { TextButton(onClick = { recoveryConfirmation = false; state.queryRecharge() }, enabled = !state.busy,

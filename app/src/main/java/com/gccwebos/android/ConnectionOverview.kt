@@ -438,8 +438,9 @@ internal fun ConnectionOverview(
                     })
             }
         }
-        GlassSurface(shape = RoundedCornerShape(23.dp)) {
-            TextButton(onClick = openNodes, shape = RoundedCornerShape(23.dp),
+        val nodesPress = rememberPressFeedback()
+        GlassSurface(Modifier.pressFeedback(nodesPress), shape = RoundedCornerShape(23.dp)) {
+            TextButton(onClick = openNodes, shape = RoundedCornerShape(23.dp), interactionSource = nodesPress.interactionSource,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("connection-nodes")) {
                 BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -483,15 +484,16 @@ internal fun ConnectionOverview(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(it.second)) { Text(it.first) } }
         }
     }
-    if (showGuestChoice && !account.authenticated) AlertDialog(
-        modifier = Modifier.testTag("usage-guest-guidance"), onDismissRequest = { showGuestChoice = false },
-        title = { Text("开通飞连vpn") }, text = { Text("登录或注册后查看套餐") },
-        confirmButton = { Column {
-            TextButton({ showGuestChoice = false; openAccount() }, modifier = Modifier.heightIn(min = 48.dp)
-                .testTag("usage-guest-login")) { Text("登录") }
-            TextButton({ showGuestChoice = false; openRegistration() }, modifier = Modifier.heightIn(min = 48.dp)
-                .testTag("usage-guest-register")) { Text("注册") }
-        } }, dismissButton = { TextButton({ showGuestChoice = false }) { Text("取消") } })
+    // A light navigation-only choice: bottom sheet (swipe/scrim/back dismiss). Same tags, texts and actions.
+    if (showGuestChoice && !account.authenticated) GccBottomSheet(onDismissRequest = { showGuestChoice = false },
+        modifier = Modifier.testTag("usage-guest-guidance"), title = "开通飞连vpn") { close ->
+        Text("登录或注册后查看套餐", color = Brand.Muted)
+        BrandButton("登录", { showGuestChoice = false; openAccount() }, haptic = UiHaptic.Primary,
+            modifier = Modifier.testTag("usage-guest-login"))
+        TextButton({ showGuestChoice = false; openRegistration() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .testTag("usage-guest-register")) { Text("注册") }
+        TextButton(close, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("取消") }
+    }
 }
 
 @Composable

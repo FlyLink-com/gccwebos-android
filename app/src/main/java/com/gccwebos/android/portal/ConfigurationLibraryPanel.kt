@@ -104,8 +104,10 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             activeContent(item) { itemMenu(item, activeIndex) }
         } else if (!snapshot.storageError) Text("未选择配置", color = Brand.Muted,
             modifier = Modifier.testTag("configuration-unselected"))
+        // Inactive groups follow the saved entry, not the per-refresh handle, so a background
+        // refresh cannot collapse a group the user expanded.
         snapshot.items.forEachIndexed { index, item ->
-            if (index != activeIndex) key(item.handle) {
+            if (index != activeIndex) key(item.displayKey) {
                 InactiveConfigurationGroup(item, index, actionsBlocked, { onActivate(item.handle) }) { itemMenu(item, index) }
             }
         }
@@ -183,7 +185,7 @@ private fun ConfigurationItemMenu(item: ConfigurationItem, index: Int, busy: Boo
 @Composable
 private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy: Boolean,
     onActivate: () -> Unit, menu: @Composable () -> Unit) {
-    var expanded by remember(item.handle) { mutableStateOf(false) }
+    var expanded by remember(item.displayKey) { mutableStateOf(false) }
     GlassSurface(Modifier.fillMaxWidth().testTag("configuration-group-$index"), shape = RoundedCornerShape(20.dp)) {
         Column {
             Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -220,6 +222,10 @@ private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy
         }
     }
 }
+
+/** The account subscription has no entry id; saved entries keep their id across refreshes. */
+private object AccountConfigurationKey
+private val ConfigurationItem.displayKey: Any get() = handle.entryId ?: AccountConfigurationKey
 
 private fun configurationKindLabel(kind: ManualSourceKind): String = when (kind) {
     ManualSourceKind.LegacyRemote -> "账户订阅"

@@ -62,14 +62,17 @@ internal fun <T : Any> ManualImportHost(
     var submitted by remember { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(false) }
     var pasteHint by remember { mutableStateOf<String?>(null) }
-    DisposableEffect(owner) { onDispose { link = ""; owner.close() } }
-    fun dismiss() { link = ""; owner.close(); onDismiss() }
+    var menuHint by remember { mutableStateOf<String?>(null) }
+    var pendingClipboardLink by remember { mutableStateOf<String?>(null) }
+    DisposableEffect(owner) { onDispose { link = ""; pendingClipboardLink = null; owner.close() } }
+    fun dismiss() { link = ""; pendingClipboardLink = null; menuHint = null; owner.close(); onDismiss() }
     fun fail(ticket: T, reason: ManualImportFailure) {
         failure = reason
         failureLatest(ticket, reason)
     }
     fun begin(kind: ManualImportInputKind) {
         if (busyLatest || preparing || owner.closed || owner.ticket != null) return
+        menuHint = null
         preparing = true
         val work = scope.launch(start = CoroutineStart.LAZY) {
             var acquired: T? = null
@@ -155,12 +158,71 @@ internal fun <T : Any> ManualImportHost(
                 }
             }
         }
+        // Menu entry: clipboard is read only on this tap, never on resume or focus.
+        fun readClipboardFromMenu() {
+            if (busyLatest || preparing || owner.closed || owner.ticket != null || mode != ManualHostMode.Menu) return
+            scope.launch {
+                val raw = try {
+                    clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)
+                } catch (_: Exception) { null }
+                if (owner.closed || mode != ManualHostMode.Menu || owner.ticket != null) return@launch
+                val text = clipboardLinkText(raw)
+                when {
+                    text == null -> menuHint = "剪贴板中没有可导入的内容"
+                    text.length > ManualInputBytes.Limit -> menuHint = ManualImportFailure.TooLarge.caption
+                    !looksLikeSubscriptionLink(text) -> menuHint = "剪贴板内容不是订阅链接"
+                    else -> {
+                        menuHint = null
+                        pendingClipboardLink = text
+                        mode = ManualHostMode.ClipboardConfirm
+                    }
+                }
+            }
+        }
+        fun confirmClipboardImport() {
+            val text = pendingClipboardLink ?: return
+            if (busyLatest || preparing || submitted || owner.closed || owner.ticket != null) return
+            if (mode != ManualHostMode.ClipboardConfirm) return
+            preparing = true
+            val work = scope.launch(start = CoroutineStart.LAZY) {
+                var acquired: T? = null
+                var adopted = false
+                try {
+                    val ticket = beginLatest() ?: return@launch
+                    acquired = ticket
+                    coroutineContext.ensureActive()
+                    if (owner.closed || busyLatest || owner.ticket != null) return@launch
+                    if (mode != ManualHostMode.ClipboardConfirm || pendingClipboardLink != text) return@launch
+                    owner.ticket = ticket
+                    adopted = true
+                    owner.kind = ManualImportInputKind.Link
+                    failure = null
+                    val bytes = try { ManualInputBytes.fromText(text) }
+                    catch (invalid: ManualInputException) { fail(ticket, invalid.failure); return@launch }
+                    pendingClipboardLink = null
+                    link = ""
+                    submitted = true
+                    try { onSubmit(ticket, bytes, ManualImportInputKind.Link) }
+                    catch (_: Exception) {
+                        bytes.fill(0)
+                        fail(ticket, ManualImportFailure.InvalidInput)
+                    }
+                } finally {
+                    if (!adopted) acquired?.let { cancelLatest(it) }
+                    owner.preparation = null
+                    preparing = false
+                }
+            }
+            owner.preparation = work
+            work.start()
+        }
         GlassSurface(Modifier.padding(20.dp).widthIn(max = 420.dp).fillMaxWidth().testTag("manual-import-host")) {
             Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(when (mode) {
                     ManualHostMode.Menu -> "导入配置"
                     ManualHostMode.Link -> "订阅链接"
                     ManualHostMode.Remove -> "移除导入配置？"
+                    ManualHostMode.ClipboardConfirm -> "从剪贴板导入"
                     else -> "导入配置"
                 }, style = MaterialTheme.typography.titleMedium)
                 if (mode == ManualHostMode.Menu) {
@@ -170,6 +232,10 @@ internal fun <T : Any> ManualImportHost(
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-document"))
                     BrandButton("导入订阅链接", { begin(ManualImportInputKind.Link) }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-link"))
+                    BrandButton("从剪贴板导入", ::readClipboardFromMenu, enabled = !busy && !preparing,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-import-clipboard"))
+                    menuHint?.let { Text(it, color = Brand.Muted,
+                        modifier = Modifier.testTag("manual-clipboard-hint")) }
                     if (canUseAccount || canRemove) HorizontalDivider(color = Brand.RowDivider)
                     if (canUseAccount) TextButton({ if (!busy && !preparing) onUseAccount() }, enabled = !busy && !preparing,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-use-account")) { Text("使用账户订阅") }
@@ -178,6 +244,19 @@ internal fun <T : Any> ManualImportHost(
                 } else if (mode == ManualHostMode.Remove) {
                     BrandButton("确认移除", { if (!busy) onRemove() }, enabled = !busy,
                         modifier = Modifier.fillMaxWidth().testTag("manual-remove-confirm"))
+                } else if (mode == ManualHostMode.ClipboardConfirm) {
+                    Text("检测到剪贴板中有订阅链接，是否导入到配置？", color = Brand.Muted,
+                        modifier = Modifier.testTag("manual-clipboard-confirm-message"))
+                    BrandButton("导入", ::confirmClipboardImport, enabled = !busy && !preparing && !submitted,
+                        modifier = Modifier.fillMaxWidth().testTag("manual-clipboard-confirm"))
+                    TextButton({
+                        if (!busy && !preparing && !submitted) {
+                            pendingClipboardLink = null; menuHint = null; mode = ManualHostMode.Menu
+                        }
+                    }, enabled = !busy && !preparing && !submitted,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("manual-clipboard-back")) {
+                        Text("返回")
+                    }
                 } else {
                     if (mode == ManualHostMode.Link) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -205,7 +284,7 @@ internal fun <T : Any> ManualImportHost(
     }
 }
 
-private enum class ManualHostMode { Menu, Link, External, Confirm, Remove }
+private enum class ManualHostMode { Menu, Link, External, Confirm, Remove, ClipboardConfirm }
 private class ManualHostOwner<T : Any>(private val cancel: (T) -> Unit) {
     var ticket: T? = null
     var kind: ManualImportInputKind? = null
@@ -227,3 +306,12 @@ private class ManualHostOwner<T : Any>(private val cancel: (T) -> Unit) {
 
 /** Clipboard text for the link field: trimmed, or null when there is nothing usable to paste. */
 internal fun clipboardLinkText(raw: CharSequence?): String? = raw?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+
+/**
+ * Shape-only check aligned with ManualImportController.isHttpsLink: an https:// prefix after
+ * leading whitespace. Origin and path authority still run after the user confirms.
+ */
+internal fun looksLikeSubscriptionLink(text: String): Boolean {
+    val start = text.indexOfFirst { !it.isWhitespace() }
+    return start >= 0 && text.regionMatches(start, "https://", 0, 8, ignoreCase = false)
+}

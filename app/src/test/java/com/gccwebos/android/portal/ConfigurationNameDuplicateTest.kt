@@ -1,6 +1,7 @@
 package com.gccwebos.android.portal
 
 import com.gccwebos.android.manualimport.clipboardLinkText
+import com.gccwebos.android.manualimport.looksLikeSubscriptionLink
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -40,5 +41,15 @@ class ConfigurationNameDuplicateTest {
         assertNull(clipboardLinkText(""))
         assertNull(clipboardLinkText(" \n\t "))
         assertEquals("https://sub.invalid/a", clipboardLinkText("  https://sub.invalid/a\n"))
+    }
+
+    @Test fun clipboardSubscriptionLinksNeedAnHttpsPrefix() {
+        assertTrue(looksLikeSubscriptionLink("https://sub.invalid/sub/a/synthetic"))
+        assertTrue(looksLikeSubscriptionLink("  https://sub.invalid/a\n"))
+        assertFalse(looksLikeSubscriptionLink(""))
+        assertFalse(looksLikeSubscriptionLink("http://sub.invalid/a"))
+        assertFalse(looksLikeSubscriptionLink("HTTPS://sub.invalid/a")) // same case rule as the controller
+        assertFalse(looksLikeSubscriptionLink("not a link"))
+        assertFalse(looksLikeSubscriptionLink("ss://synthetic"))
     }
 }

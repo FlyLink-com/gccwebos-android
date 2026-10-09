@@ -698,10 +698,14 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     onReturnToPlans: (() -> Unit)? = null, telegramOpener: ((String) -> Unit)? = null,
     referralOverride: ReferralController? = null, copyOverride: ((String) -> Unit)? = null,
     recoveryOverride: CommerceRecovery? = null, paymentOpener: ((String) -> Unit)? = null, refreshRequest: Int = 0,
-    onLogin: (() -> Unit)? = null) {
+    onLogin: (() -> Unit)? = null,
+    routingMode: com.gccwebos.android.vpn.RoutingMode = com.gccwebos.android.vpn.RoutingMode.Global,
+    onRoutingModeChange: ((com.gccwebos.android.vpn.RoutingMode) -> Unit)? = null,
+    routingConnected: Boolean = false) {
     if (onLogin != null && !account.authenticated && !account.retainingCommerceSession) {
         // Signed out: no commerce controller exists, so no wallet, ledger or order read can start.
-        MineSignedOutPanel(account, onLogin, autoLoad, telegramOpener, refreshRequest)
+        MineSignedOutPanel(account, onLogin, autoLoad, telegramOpener, refreshRequest,
+            routingMode, onRoutingModeChange, routingConnected)
         return
     }
     val context = LocalContext.current
@@ -724,6 +728,8 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             com.gccwebos.android.update.UpdatePanel(autoCheck = autoLoad, refreshRequest = refreshRequest)
         }
+    } else if (view == "routing") {
+        com.gccwebos.android.vpn.RoutingModePanel(routingMode, { onRoutingModeChange?.invoke(it) }, routingConnected)
     } else if (view == "security") {
         com.gccwebos.android.portal.AccountPanel(account, compactLogin = true)
         com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad, refreshRequest)
@@ -784,6 +790,8 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
             MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
             MineRowDivider()
+            MineMenuRow("路由模式", "mine-routing", subtitle = "全球 / 局域网直连") { view = "routing" }
+            MineRowDivider()
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { view = "about" }
             if (account.authenticated) {
                 MineRowDivider()
@@ -796,16 +804,27 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
 /** Same layout as the signed-in Mine page; account data is replaced by login prompts and wallet actions are inert. */
 @Composable
 private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, autoLoad: Boolean,
-    telegramOpener: ((String) -> Unit)?, refreshRequest: Int) {
+    telegramOpener: ((String) -> Unit)?, refreshRequest: Int,
+    routingMode: com.gccwebos.android.vpn.RoutingMode = com.gccwebos.android.vpn.RoutingMode.Global,
+    onRoutingModeChange: ((com.gccwebos.android.vpn.RoutingMode) -> Unit)? = null,
+    routingConnected: Boolean = false) {
     val context = LocalContext.current
     var about by remember { mutableStateOf(false) }
-    androidx.activity.compose.BackHandler(enabled = about) { about = false }
+    var routing by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = about || routing) {
+        about = false; routing = false
+    }
     if (about) {
         TextButton(onClick = { about = false }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
         BrandCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             com.gccwebos.android.update.UpdatePanel(autoCheck = autoLoad, refreshRequest = refreshRequest)
         }
+        return
+    }
+    if (routing) {
+        TextButton(onClick = { routing = false }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
+        com.gccwebos.android.vpn.RoutingModePanel(routingMode, { onRoutingModeChange?.invoke(it) }, routingConnected)
         return
     }
     val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
@@ -833,6 +852,8 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
         MineGroupLabel("系统与设置", "mine-group-system")
         MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
             MineMenuRow("账户与安全", "mine-security", idle, onClick = onLogin)
+            MineRowDivider()
+            MineMenuRow("路由模式", "mine-routing", subtitle = "全球 / 局域网直连") { routing = true }
             MineRowDivider()
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { about = true }
         }

@@ -1,4 +1,4 @@
-# Offline protocol contract v1
+# Offline protocol contract v2
 
 This contract projects a bounded set of subscription shapes into an independently validated native DTO. The [one-click candidate](one-click-vpn-connection.md) has an Activity/owner/service/JNI connection path; this offline contract does not itself grant connection authority or establish endpoint interoperability. The 2026-10-04 follow-up accepts six TUIC v5 options only at proven default-equivalent values. Fresh source-matching binaries and runtime acceptance remain required before promoting that follow-up.
 
@@ -12,7 +12,7 @@ The fixtures preserve complete ordinary Clash and Mihomo inline renderer output,
 
 ## Versioned sanitized DTO
 
-The internal JSON root is exactly `schemaVersion: 1`, a single normalized `GCC_SELECTED_PROXY` in `proxies`, and `rules: ["MATCH,GCC_SELECTED_PROXY"]`. This is not a public Mihomo config. Native independently rejects unknown, missing, duplicate, case-aliased, null or mistyped fields. It constructs a fresh safe core map and owned DNS/route configuration; neither JSON nor YAML options are forwarded wholesale.
+The internal JSON root is `schemaVersion: 2`, a single normalized `GCC_SELECTED_PROXY` in `proxies`, `rules: ["MATCH,GCC_SELECTED_PROXY"]`, and `routingMode` (`global` default, or `rule` for product-owned LAN DIRECT). This is not a public Mihomo config. Native independently rejects unknown, missing, duplicate, case-aliased, null or mistyped fields; unknown/missing `routingMode` fails closed to global. It constructs a fresh safe core map and owned DNS/route configuration; neither JSON nor YAML options are forwarded wholesale. See [LAN DIRECT routing mode](lan-direct-routing-mode.md).
 
 The native DTO and ordinary offline `project` require canonical IPv4 endpoints, ports 1..65535, no unspecified/multicast address, byte-bounded credentials, and non-secret errors. Candidate-only `CONNECTION_ENDPOINT_HOSTNAME` enables a separate preparation path: `validateForPreparation` validates every node with a bounded ASCII hostname, then `AndroidConfigAddressPreparer` resolves TYPE_A on the reserved physical INTERNET/NOT_VPN network and projects only the selected IPv4 address. It retains the original TLS verification name and uses a finite network lease through admission/start; that deadline is not a connected-session TTL. Ordinary debug and release keep the hostname feature disabled. IPv6 endpoints remain unsupported. Input size is 64 KiB, YAML nesting/event/node counts are bounded, and anchors, aliases, explicit tags, duplicate keys, malformed UTF-8 and multiple documents are rejected.
 

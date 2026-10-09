@@ -11,6 +11,8 @@ import com.gccwebos.android.core.PreparationFailure
 import com.gccwebos.android.core.SelectionIntent
 import java.security.MessageDigest
 import java.io.Closeable
+import com.gccwebos.android.vpn.RoutingMode
+import com.gccwebos.android.vpn.RoutingModeSource
 import com.gccwebos.android.vpn.SafeProxyConfig
 import com.gccwebos.android.vpn.UnsafeProxyConfiguration
 import java.time.Instant
@@ -143,7 +145,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     private val authority: LocalSubscriptionAuthority = LocalSubscriptionAuthority.process,
     private val allowHostnamePreparation: Boolean = false,
     private val manualSources: ManualSourceStore? = null,
-    private val externalSource: SubscriptionSource? = null) {
+    private val externalSource: SubscriptionSource? = null,
+    private val routingModes: RoutingModeSource = RoutingModeSource { RoutingMode.Global }) {
     private val mutex get() = authority.mutex
     private val lock get() = authority.lock
     private var revision: Long
@@ -1275,7 +1278,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 if (snapshot.status != LocalSubscriptionStatus.READY) return@refreshLocked
                 val selected = resolver.resolve(snapshot, requested) ?: return@refreshLocked
                 require(requested == null || requested == selected.lineId)
-                val bytes = SafeProxyConfig.project(raw, selected.index)
+                val bytes = SafeProxyConfig.project(raw, selected.index, routingModes.current())
                 try {
                     var consumed = false
                     prepared = AuthorizedConfig(selected.lineId, bytes, snapshot.validUntil) { action -> synchronized(lock) {
@@ -1296,7 +1299,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** No cached activation, no implicit first entry, and no cross-revision name matching. */
     suspend fun prepare(intent: SelectionIntent, files: PreparedConfigStore,
-        addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer): ConfigPreparation =
+        addressPreparer: ConfigAddressPreparer = LiteralConfigAddressPreparer()): ConfigPreparation =
         prepareChecked(intent, files, addressPreparer, expectedEpoch = null)
 
     internal suspend fun prepareAtEpoch(intent: SelectionIntent, files: PreparedConfigStore,

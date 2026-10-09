@@ -142,7 +142,9 @@ class MainActivity : ComponentActivity() {
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
                     nodeLatencyProbe = nodeProbe,
                     sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,
-                    onConnectionPowerAction = { action -> current.power(action) })
+                    onConnectionPowerAction = { action -> current.power(action) },
+                    routingMode = current.routingMode(),
+                    onRoutingModeChange = current::setRoutingMode)
             }
             }
         }
@@ -224,6 +226,8 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     paymentOpenerOverride: ((String) -> Unit)? = null,
     connectionControlState: ConnectionControlState = ConnectionControlState(),
     onConnectionPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
+    routingMode: com.gccwebos.android.vpn.RoutingMode = com.gccwebos.android.vpn.RoutingMode.Global,
+    onRoutingModeChange: ((com.gccwebos.android.vpn.RoutingMode) -> Unit)? = null,
     repositoryOverride: PortalRepository? = null,
     glassMode: GlassMode? = null,
     nodeLatencyProbe: com.gccwebos.android.portal.NodeLatencyProbe? = null,
@@ -375,7 +379,8 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         startRegistration = startRegistration, registrationOpener = registrationOpener,
                         loginStartupReady = loginStartupReady, registrationOverride = registrationOverride,
                         plansVisit = plansVisit, navigationRequest = navigationRequest, autoRefreshPages = autoRefreshPages,
-                        catalogDisplayCache = catalogDisplayCache) } }
+                        catalogDisplayCache = catalogDisplayCache,
+                        routingMode = routingMode, onRoutingModeChange = onRoutingModeChange) } }
                 }
                 }
 
@@ -414,7 +419,9 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                   registrationOpener: ((String) -> Unit)?, loginStartupReady: Boolean,
                   registrationOverride: RegistrationController?, plansVisit: Int, navigationRequest: Int,
                   autoRefreshPages: Boolean,
-                  catalogDisplayCache: com.gccwebos.android.commerce.CatalogDisplayCache) {
+                  catalogDisplayCache: com.gccwebos.android.commerce.CatalogDisplayCache,
+                  routingMode: com.gccwebos.android.vpn.RoutingMode = com.gccwebos.android.vpn.RoutingMode.Global,
+                  onRoutingModeChange: ((com.gccwebos.android.vpn.RoutingMode) -> Unit)? = null) {
     val latestControl by rememberUpdatedState(connectionControlState)
     DisposableEffect(account, destination) {
         onDispose { if (destination == Destination.Lines) account.manualImport.cancel() }
@@ -523,7 +530,10 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 Destination.Profile -> {
                     com.gccwebos.android.commerce.MinePanel(account, autoLoadCommerce, commerceOverride, onReturnToPlans = openPlans,
                         recoveryOverride = commerceRecoveryOverride, paymentOpener = paymentOpenerOverride,
-                        refreshRequest = navigationRequest, onLogin = requestLogin)
+                        refreshRequest = navigationRequest, onLogin = requestLogin,
+                        routingMode = routingMode, onRoutingModeChange = onRoutingModeChange,
+                        routingConnected = connectionControlState.phase == ConnectionPhase.Connected ||
+                            connectionControlState.phase == ConnectionPhase.Connecting)
                 }
             }
             if (!compact) Text(stringResource(R.string.build_stage), color = Brand.Muted,

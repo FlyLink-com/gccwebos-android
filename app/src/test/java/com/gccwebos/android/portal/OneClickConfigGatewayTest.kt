@@ -266,7 +266,7 @@ class OneClickConfigGatewayTest {
         assertTrue(f.manager.selectNode(manual))
         try {
             f.manager.prepareAtEpoch(SelectionIntent.Selected(random), PreparedConfigStore { f.writes++ },
-                LiteralConfigAddressPreparer, epoch)
+                LiteralConfigAddressPreparer(), epoch)
             fail("A manual selection must revoke the random intent before fresh read admission")
         } catch (_: CancellationException) { }
         assertSame(manual, f.manager.nodeSelectionSnapshot().selected)

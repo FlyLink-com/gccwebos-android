@@ -91,6 +91,7 @@ internal fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, su
             "mine-telegram" -> R.drawable.brand_paper_plane
             "mine-channel" -> R.drawable.brand_link
             "mine-more" -> R.drawable.brand_refresh
+            "mine-routing" -> R.drawable.brand_globe
             else -> R.drawable.brand_arrow
         }
         MineGlowIcon(icon, enabled)

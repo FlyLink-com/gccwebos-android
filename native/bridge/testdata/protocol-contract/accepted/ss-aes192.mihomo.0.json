@@ -1,1 +1,1 @@
-{"schemaVersion":1,"proxies":[{"cipher":"aes-192-gcm","udp":true,"server":"192.0.2.10","password":"synthetic-only","port":443,"name":"GCC_SELECTED_PROXY","type":"ss"}],"rules":["MATCH,GCC_SELECTED_PROXY"]}
+{"schemaVersion":2,"proxies":[{"cipher":"aes-192-gcm","udp":true,"server":"192.0.2.10","password":"synthetic-only","port":443,"name":"GCC_SELECTED_PROXY","type":"ss"}],"rules":["MATCH,GCC_SELECTED_PROXY"],"routingMode":"global"}

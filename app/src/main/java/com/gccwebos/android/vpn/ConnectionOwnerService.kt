@@ -45,6 +45,7 @@ internal class ConnectionOwnerService : Service() {
     private lateinit var tunnel: AndroidVpnTunnel
     private lateinit var handoff: ConnectionOwnerHandoff
     private lateinit var preparedFiles: AtomicPreparedConfigStore
+    private lateinit var routingModes: AndroidRoutingModeStore
     private var expiryTask: Job? = null
     private val publication = Any()
     private var revision = 0L
@@ -61,6 +62,28 @@ internal class ConnectionOwnerService : Service() {
         val permission: ActivityVpnPermission get() = this@ConnectionOwnerService.permission
         val control: StateFlow<ConnectionControlState> get() = controls
         fun power(action: ConnectionPowerAction) = submit(action)
+        fun routingMode(): RoutingMode = routingModes.current()
+        /** Persist mode; if connected, rebuild the :vpn process with a fresh projection. */
+        fun setRoutingMode(mode: RoutingMode) {
+            if (!routingModes.set(mode)) return
+            synchronized(publication) {
+                if (destroyed || scope.coroutineContext[Job]?.isActive != true) return
+                val coordinator = (handoff.state.value as? ConnectionOwnerAvailability.Ready)?.owner ?: return
+                if (controls.value.phase == ConnectionPhase.Connected ||
+                    controls.value.phase == ConnectionPhase.Connecting) {
+                    commandEpoch++; expiryTask?.cancel(); expiryTask = null; preparedNode = null
+                    try {
+                        startService(Intent(this@ConnectionOwnerService, ConnectionOwnerService::class.java))
+                        coordinator.restart()
+                    } catch (_: Exception) {
+                        controls.value = connectionControls(ConnectionState.Failed(Failure.TUNNEL_FAILED), ++revision)
+                        stopSelf()
+                    }
+                } else {
+                    controls.value = controls.value.copy(revision = ++revision)
+                }
+            }
+        }
         suspend fun clearLocalData() = repository.clearLocalData(cleanup = {
             val coordinator = synchronized(publication) {
                 check(!destroyed) { "Connection owner is unavailable" }
@@ -102,8 +125,10 @@ internal class ConnectionOwnerService : Service() {
         val files = AtomicPreparedConfigStore(directory)
         preparedFiles = files
         tunnel = AndroidVpnTunnel(applicationContext, binder, connectionNetworkProbe(), files::clear)
-        val addresses = if (BuildConfig.CONNECTION_ENDPOINT_HOSTNAME) AndroidConfigAddressPreparer(applicationContext)
-            else LiteralConfigAddressPreparer
+        routingModes = AndroidRoutingModeStore(applicationContext)
+        val addresses = if (BuildConfig.CONNECTION_ENDPOINT_HOSTNAME)
+            AndroidConfigAddressPreparer(applicationContext, routingModes)
+            else LiteralConfigAddressPreparer(routingModes)
         val gateway = OneClickConfigGateway(repository.localSubscriptions, files, addresses)
         val ownedGateway = object : LocalConfigGateway {
             override suspend fun prepare(intent: SelectionIntent): ConfigPreparation {

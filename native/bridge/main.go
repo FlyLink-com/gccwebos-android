@@ -105,7 +105,19 @@ func makeConfig(input inputConfig) (*config.Config, error) {
 	raw.DNS.DirectNameServer = nil
 	raw.Proxy = []map[string]any{proxy}
 	raw.ProxyGroup = nil
-	raw.Rule = []string{"IP-CIDR6,::/0,REJECT,no-resolve", "MATCH,GCC_SELECTED_PROXY", "MATCH,REJECT"}
+	// Product-owned rules only. Subscription rules never reach this layer.
+	rules := []string{"IP-CIDR6,::/0,REJECT,no-resolve"}
+	if effectiveRoutingMode(input) == "rule" {
+		rules = append(rules,
+			"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+			"IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+			"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+			"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+			"IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+		)
+	}
+	rules = append(rules, "MATCH,GCC_SELECTED_PROXY", "MATCH,REJECT")
+	raw.Rule = rules
 	cfg, err := config.ParseRawConfig(raw)
 	if err != nil {
 		return nil, errConfig // Never return upstream errors containing config or secrets.

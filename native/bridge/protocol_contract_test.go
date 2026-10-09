@@ -21,7 +21,7 @@ var protocolTestProxies = map[string]string{
 }
 
 func protocolDocument(proxy string) []byte {
-	return []byte(`{"schemaVersion":1,"proxies":[` + proxy + `],"rules":["MATCH,GCC_SELECTED_PROXY"]}`)
+	return []byte(`{"schemaVersion":2,"proxies":[` + proxy + `],"rules":["MATCH,GCC_SELECTED_PROXY"],"routingMode":"global"}`)
 }
 
 func changedProxy(t *testing.T, kind, key string, value any, remove bool) []byte {
@@ -306,21 +306,22 @@ func assertRejected(t *testing.T, data []byte) {
 func TestNativeContractEnvelopeAndDuplicates(t *testing.T) {
 	base := string(protocolDocument(protocolTestProxies["ss"]))
 	for name, input := range map[string]string{
-		"version_missing":   strings.Replace(base, `"schemaVersion":1,`, "", 1),
-		"version_future":    strings.Replace(base, `"schemaVersion":1`, `"schemaVersion":2`, 1),
-		"version_string":    strings.Replace(base, `"schemaVersion":1`, `"schemaVersion":"1"`, 1),
-		"version_float":     strings.Replace(base, `"schemaVersion":1`, `"schemaVersion":1.0`, 1),
+		"version_missing":   strings.Replace(base, `"schemaVersion":2,`, "", 1),
+		"version_future":    strings.Replace(base, `"schemaVersion":2`, `"schemaVersion":3`, 1),
+		"version_obsolete":  strings.Replace(base, `"schemaVersion":2`, `"schemaVersion":1`, 1),
+		"version_string":    strings.Replace(base, `"schemaVersion":2`, `"schemaVersion":"2"`, 1),
+		"version_float":     strings.Replace(base, `"schemaVersion":2`, `"schemaVersion":2.0`, 1),
 		"version_case":      strings.Replace(base, `"schemaVersion"`, `"SchemaVersion"`, 1),
 		"root_case":         strings.Replace(base, `"proxies"`, `"Proxies"`, 1),
 		"proxy_case":        strings.Replace(base, `"server"`, `"Server"`, 1),
-		"duplicate_root":    strings.Replace(base, `"schemaVersion":1`, `"schemaVersion":1,"schemaVersion":1`, 1),
+		"duplicate_root":    strings.Replace(base, `"schemaVersion":2`, `"schemaVersion":2,"schemaVersion":2`, 1),
 		"duplicate_proxy":   strings.Replace(base, `"udp":false`, `"udp":false,"udp":true`, 1),
 		"escaped_duplicate": strings.Replace(base, `"udp":false`, `"udp":false,"\u0075dp":true`, 1),
 		"second_document":   base + base,
 		"wrong_rule":        strings.Replace(base, "MATCH,GCC_SELECTED_PROXY", "MATCH,DIRECT", 1),
 		"empty_rule":        strings.Replace(base, `"MATCH,GCC_SELECTED_PROXY"`, "", 1),
 		"root_null":         "null", "root_array": "[]", "missing_all": "{}", "empty": "",
-		"secret_unknown": strings.Replace(base, `"schemaVersion":1`, `"secret":"sentinel-secret","schemaVersion":1`, 1),
+		"secret_unknown": strings.Replace(base, `"schemaVersion":2`, `"secret":"sentinel-secret","schemaVersion":2`, 1),
 	} {
 		t.Run(name, func(t *testing.T) { assertRejected(t, []byte(input)) })
 	}
@@ -398,11 +399,11 @@ func TestNativeSafeMapIsFreshAndMakeConfigRevalidates(t *testing.T) {
 	if in.Proxies[0].ALPN[0] != "h3" || second["alpn"].([]string)[0] != "h3" || second["server"] != "192.0.2.10" {
 		t.Fatal("safe map aliases input or another config")
 	}
-	in.SchemaVersion = 2
+	in.SchemaVersion = 3
 	if _, err := makeConfig(in); err != errConfig {
 		t.Fatal("makeConfig bypassed version validation")
 	}
-	in.SchemaVersion = 1
+	in.SchemaVersion = 2
 	in.Proxies[0].Server = "0.0.0.0"
 	if _, err := makeConfig(in); err != errConfig {
 		t.Fatal("makeConfig bypassed endpoint validation")

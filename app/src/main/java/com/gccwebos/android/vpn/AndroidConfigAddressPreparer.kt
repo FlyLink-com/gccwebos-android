@@ -31,15 +31,18 @@ internal interface AddressPreparationNetwork : Closeable {
 }
 
 class AndroidConfigAddressPreparer internal constructor(
-    private val reserveNetwork: suspend () -> AddressPreparationNetwork) : ConfigAddressPreparer {
-    constructor(context: Context) : this({
+    private val reserveNetwork: suspend () -> AddressPreparationNetwork,
+    private val routingModes: RoutingModeSource = RoutingModeSource { RoutingMode.Global },
+) : ConfigAddressPreparer {
+    constructor(context: Context) : this(context, RoutingModeSource { RoutingMode.Global })
+    constructor(context: Context, routingModes: RoutingModeSource) : this({
         var allocated: AndroidAddressPreparationNetwork? = null
         try {
             withContext(Dispatchers.IO) {
                 AndroidAddressPreparationNetwork(AndroidPhysicalNetworkLease.reserve(context)).also { allocated = it }
             }
         } catch (failure: Throwable) { allocated?.close(); throw failure }
-    })
+    }, routingModes)
     override suspend fun prepare(raw: ByteArray, index: Int): PreparedAddressConfig {
         val endpoint = SafeProxyConfig.selectedEndpoint(raw, index)
         currentCoroutineContext().ensureActive()
@@ -56,7 +59,7 @@ class AndroidConfigAddressPreparer internal constructor(
                 if (!reserved.lease.isCurrent() || !reserved.readbackCurrent()) throw PreparationRejected(PreparationFailure.STALE)
                 answers.firstOrNull(::canonicalIpv4) ?: throw PreparationRejected(PreparationFailure.NETWORK)
             } else endpoint
-            val bytes = SafeProxyConfig.projectResolved(raw, index, ipv4)
+            val bytes = SafeProxyConfig.projectResolved(raw, index, ipv4, routingModes.current())
             projected = bytes
             currentCoroutineContext().ensureActive()
             if (!reserved.lease.isCurrent() || !reserved.readbackCurrent()) throw PreparationRejected(PreparationFailure.STALE)

@@ -26,7 +26,7 @@ func TestNativeBBRProfilesRoundTrip(t *testing.T) {
 					t.Fatal("exact BBR profile rejected")
 				}
 				out, err := safeProxyMap(in.Proxies[0])
-				if err != nil || out["bbr-profile"] != profile || in.SchemaVersion != 1 {
+				if err != nil || out["bbr-profile"] != profile || in.SchemaVersion != 2 {
 					t.Fatal("BBR profile or schema changed")
 				}
 				delete(out, "bbr-profile")

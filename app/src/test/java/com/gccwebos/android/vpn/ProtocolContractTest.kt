@@ -82,8 +82,9 @@ class ProtocolContractTest {
     }
     @Test fun rootActionsAndGlobalRoutesCannotReachNativeDto() {
         val result = project(String(resource("renderer/mixed.mihomo.yaml")), 1)
-        assertEquals(setOf("schemaVersion", "proxies", "rules"), result.keys().asSequence().toSet())
-        assertEquals(1, result.getInt("schemaVersion"))
+        assertEquals(setOf("schemaVersion", "proxies", "rules", "routingMode"), result.keys().asSequence().toSet())
+        assertEquals(2, result.getInt("schemaVersion"))
+        assertEquals("global", result.getString("routingMode"))
         assertEquals("MATCH,GCC_SELECTED_PROXY", result.getJSONArray("rules").getString(0))
         for (secret in listOf("gstatic", "GLOBAL", "url-test", "store-selected", "mixed-port")) assertFalse(result.toString().contains(secret))
         // Known inert application settings are covered by exact DTO-equivalence tests.

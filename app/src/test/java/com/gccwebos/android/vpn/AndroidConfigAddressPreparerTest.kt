@@ -50,7 +50,7 @@ class AndroidConfigAddressPreparerTest {
     @Test fun hostnameProjectsOnlySelectedAddressAndTransfersOneLease() = runTest {
         val network = Network(); var reservations = 0
         val original = raw.copyOf()
-        val result = AndroidConfigAddressPreparer { reservations++; network }.prepare(raw, 0)
+        val result = AndroidConfigAddressPreparer(reserveNetwork = { reservations++; network }).prepare(raw, 0)
         val bytes = result.bytes
         try {
             val node = JSONObject(String(bytes, Charsets.UTF_8)).getJSONArray("proxies").getJSONObject(0)
@@ -65,7 +65,7 @@ class AndroidConfigAddressPreparerTest {
     }
     @Test fun literalStillReservesAndTransfersPhysicalLeaseWithoutDns() = runTest {
         val network = Network(); var reservations = 0
-        AndroidConfigAddressPreparer { reservations++; network }.prepare(
+        AndroidConfigAddressPreparer(reserveNetwork = { reservations++; network }).prepare(
             String(raw).replace(host, "192.0.2.19").replace("sni: 192.0.2.19", "sni: $host").toByteArray(), 0).use {
             assertSame(network.lease, it.lease); assertEquals(1, reservations); assertEquals(0, network.calls)
         }
@@ -75,7 +75,7 @@ class AndroidConfigAddressPreparerTest {
         var reservations = 0
         val second = String(raw).substringAfter("proxies:\n") + "\n    hop-interval: 10"
         try {
-            AndroidConfigAddressPreparer { reservations++; Network() }.prepare((String(raw) + "\n" + second).toByteArray(), 0)
+            AndroidConfigAddressPreparer(reserveNetwork = { reservations++; Network() }).prepare((String(raw) + "\n" + second).toByteArray(), 0)
             fail("Other incompatible node must block before reservation")
         } catch (_: UnsafeProxyConfiguration) { }
         assertEquals(0, reservations)
@@ -83,42 +83,42 @@ class AndroidConfigAddressPreparerTest {
     @Test fun noAOrOnlyInvalidAResultsCannotReturnPreparedMaterial() = runTest {
         for (answers in listOf(emptyList(), listOf("0.0.0.0", "224.0.0.1", "01.2.3.4", "2001:db8::1"))) {
             val network = Network().apply { lookup = { answers } }
-            failure(PreparationFailure.NETWORK) { AndroidConfigAddressPreparer { network }.prepare(raw, 0) }
+            failure(PreparationFailure.NETWORK) { AndroidConfigAddressPreparer(reserveNetwork = { network }).prepare(raw, 0) }
             assertEquals(1, network.calls); assertEquals(1, network.lease.closes)
         }
     }
     @Test fun staleBeforeDnsClosesReservationWithoutLookup() = runTest {
         val network = Network().apply { lease.current = false }
-        failure(PreparationFailure.STALE) { AndroidConfigAddressPreparer { network }.prepare(raw, 0) }
+        failure(PreparationFailure.STALE) { AndroidConfigAddressPreparer(reserveNetwork = { network }).prepare(raw, 0) }
         assertEquals(0, network.calls); assertEquals(1, network.lease.closes)
     }
     @Test fun networkSwitchDuringLookupDiscardsAnswerAndClosesLease() = runTest {
         val network = Network().apply { lookup = { readback = false; listOf("192.0.2.19") } }
-        failure(PreparationFailure.STALE) { AndroidConfigAddressPreparer { network }.prepare(raw, 0) }
+        failure(PreparationFailure.STALE) { AndroidConfigAddressPreparer(reserveNetwork = { network }).prepare(raw, 0) }
         assertEquals(1, network.lease.closes)
     }
     @Test fun leaseExpiryDuringLookupDiscardsAnswer() = runTest {
         val network = Network().apply { lookup = { lease.current = false; listOf("192.0.2.19") } }
-        failure(PreparationFailure.STALE) { AndroidConfigAddressPreparer { network }.prepare(raw, 0) }
+        failure(PreparationFailure.STALE) { AndroidConfigAddressPreparer(reserveNetwork = { network }).prepare(raw, 0) }
         assertEquals(1, network.lease.closes)
     }
     @Test fun timeoutCancelsLookupAndClosesLeaseWithFixedFailure() = runTest {
         val pending = CompletableDeferred<List<String>>()
         var returned = false
         val network = Network().apply { lookup = { try { pending.await() } finally { returned = true } } }
-        failure(PreparationFailure.TIMEOUT) { AndroidConfigAddressPreparer { network }.prepare(raw, 0) }
+        failure(PreparationFailure.TIMEOUT) { AndroidConfigAddressPreparer(reserveNetwork = { network }).prepare(raw, 0) }
         assertTrue(returned); assertEquals(1, network.lease.closes)
     }
     @Test fun cancellationCannotReturnLateAnswerOrRetainLease() = runTest {
         val pending = CompletableDeferred<List<String>>()
         val network = Network().apply { lookup = { pending.await() } }
-        val work = async { AndroidConfigAddressPreparer { network }.prepare(raw, 0) }
+        val work = async { AndroidConfigAddressPreparer(reserveNetwork = { network }).prepare(raw, 0) }
         runCurrent(); work.cancel(); work.join(); pending.complete(listOf("192.0.2.19")); runCurrent()
         assertTrue(work.isCancelled); assertEquals(1, network.lease.closes)
     }
     @Test fun resolverExceptionDoesNotExposeOriginalMessageOrCause() = runTest {
         val network = Network().apply { lookup = { error("synthetic-private-resolution-marker") } }
-        failure(PreparationFailure.NETWORK) { AndroidConfigAddressPreparer { network }.prepare(raw, 0) }
+        failure(PreparationFailure.NETWORK) { AndroidConfigAddressPreparer(reserveNetwork = { network }).prepare(raw, 0) }
         assertEquals(1, network.lease.closes)
     }
 }

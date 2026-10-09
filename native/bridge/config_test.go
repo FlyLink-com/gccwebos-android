@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-const fixtureConfig = `{"schemaVersion":1,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"]}`
+const fixtureConfig = `{"schemaVersion":2,"proxies":[{"name":"GCC_SELECTED_PROXY","type":"ss","server":"127.0.0.1","port":18388,"cipher":"aes-128-gcm","password":"lab-only-password","udp":true}],"rules":["MATCH,GCC_SELECTED_PROXY"],"routingMode":"global"}`
 
 func TestStrictConfig(t *testing.T) {
 	if _, err := parseInput([]byte(fixtureConfig)); err != nil {
@@ -134,5 +134,57 @@ func TestTunSafetyDefaults(t *testing.T) {
 	}
 	if len(cfg.Rules) != 3 || cfg.Rules[0].Adapter() != "REJECT" || cfg.Rules[1].Adapter() != "GCC_SELECTED_PROXY" || cfg.Rules[2].Adapter() != "REJECT" {
 		t.Fatal("missing fail-closed IPv6 and final REJECT rules")
+	}
+}
+
+func TestRuleModeLanDirect(t *testing.T) {
+	rule := strings.Replace(fixtureConfig, `"routingMode":"global"`, `"routingMode":"rule"`, 1)
+	in, err := parseInput([]byte(rule))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := makeConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules) != 8 {
+		t.Fatalf("expected 8 rules in rule mode, got %d", len(cfg.Rules))
+	}
+	if cfg.Rules[0].Adapter() != "REJECT" {
+		t.Fatal("IPv6 REJECT must stay first")
+	}
+	for i := 1; i <= 5; i++ {
+		if cfg.Rules[i].Adapter() != "DIRECT" {
+			t.Fatalf("LAN DIRECT missing at %d: %s", i, cfg.Rules[i].Adapter())
+		}
+	}
+	if cfg.Rules[6].Adapter() != "GCC_SELECTED_PROXY" || cfg.Rules[7].Adapter() != "REJECT" {
+		t.Fatal("MATCH proxy and final REJECT missing")
+	}
+	// Unknown mode fails closed to global (3 rules).
+	unknown := strings.Replace(fixtureConfig, `"routingMode":"global"`, `"routingMode":"bypass-all"`, 1)
+	in, err = parseInput([]byte(unknown))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = makeConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules) != 3 || cfg.Rules[1].Adapter() != "GCC_SELECTED_PROXY" {
+		t.Fatal("unknown routingMode must fail closed to global")
+	}
+	// Missing routingMode also fail-closed global.
+	missing := strings.Replace(fixtureConfig, `,"routingMode":"global"`, "", 1)
+	in, err = parseInput([]byte(missing))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = makeConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules) != 3 {
+		t.Fatal("missing routingMode must fail closed to global")
 	}
 }

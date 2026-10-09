@@ -31,6 +31,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** One-shot :vpn owner of native/TUN resources. Binder admission never executes JNI.
  * Full IPv4 routing; all IPv6 is captured and rejected by the independently fixed native rules.
+ * Routing mode (global vs LAN DIRECT) is embedded in the projected DTO at start; switching modes
+ * always stops this process and starts a fresh :vpn incarnation — never an in-process reload.
  */
 class ProductionVpnService : VpnService(), SocketProtector {
     private fun trace(phase: String) { if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=$phase") }

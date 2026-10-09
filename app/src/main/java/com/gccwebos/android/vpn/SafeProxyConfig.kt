@@ -34,7 +34,10 @@ object SafeProxyConfig {
     const val SCHEMA_VERSION = 1
     private val settings = LoadSettings.builder().setAllowDuplicateKeys(false)
         .setAllowRecursiveKeys(false).setMaxAliasesForCollections(0)
-        .setCodePointLimit(MAX_BYTES).setUseMarks(false).setSchema(JsonSchema()).build()
+        .setCodePointLimit(MAX_BYTES).setUseMarks(false).setSchema(JsonSchema())
+        // snakeyaml-engine's chunked StreamReader throws when a surrogate pair (e.g. a flag emoji)
+        // straddles its default 1024-char read buffer; read the whole bounded input in one pass.
+        .setBufferSize(MAX_BYTES + 1).build()
     // Recognized subscription application settings remain bounded inert metadata. Only inline
     // proxies are imported; none of these settings, providers, paths or URLs enters the native DTO.
     private val inertApplicationKeys = setOf("external-controller", "find-process-mode", "geo-auto-update",

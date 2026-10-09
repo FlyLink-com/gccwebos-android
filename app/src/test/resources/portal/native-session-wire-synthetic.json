@@ -1,0 +1,66 @@
+{
+  "fixture": "synthetic in-memory service output; grant strings normalized after rotation; no real account or credential",
+  "exchange": {
+    "session": {
+      "sessionRef": "portal_session_contract_synthetic_1",
+      "accountId": "acct_contract_synthetic",
+      "authMethod": "password",
+      "status": "active",
+      "issuedAt": "2026-10-06T12:00:00.000Z",
+      "expiresAt": "2026-10-06T12:30:00.000Z",
+      "safety": {
+        "totpCodeReturned": false,
+        "encryptedTotpSecretReturned": false,
+        "rawEntryTokenReturned": false,
+        "runtimeDbMutated": false
+      }
+    },
+    "refreshGrant": {
+      "refreshToken": "pnr1_AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "issuedAt": "2026-10-06T12:00:00.000Z",
+      "expiresAt": "2026-10-13T12:00:00.000Z"
+    }
+  },
+  "refresh": {
+    "session": {
+      "sessionRef": "portal_session_contract_synthetic_2",
+      "accountId": "acct_contract_synthetic",
+      "authMethod": "password",
+      "status": "active",
+      "issuedAt": "2026-10-06T12:31:00.000Z",
+      "expiresAt": "2026-10-06T13:01:00.000Z",
+      "safety": {
+        "totpCodeReturned": false,
+        "encryptedTotpSecretReturned": false,
+        "rawEntryTokenReturned": false,
+        "runtimeDbMutated": false
+      }
+    },
+    "refreshGrant": {
+      "refreshToken": "pnr1_AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+      "issuedAt": "2026-10-06T12:00:00.000Z",
+      "expiresAt": "2026-10-13T12:00:00.000Z"
+    }
+  },
+  "finalSecond": {
+    "session": {
+      "sessionRef": "portal_session_contract_synthetic_3",
+      "accountId": "acct_contract_synthetic",
+      "authMethod": "password",
+      "status": "active",
+      "issuedAt": "2026-10-13T11:59:59.000Z",
+      "expiresAt": "2026-10-13T12:00:00.000Z",
+      "safety": {
+        "totpCodeReturned": false,
+        "encryptedTotpSecretReturned": false,
+        "rawEntryTokenReturned": false,
+        "runtimeDbMutated": false
+      }
+    },
+    "refreshGrant": {
+      "refreshToken": "pnr1_AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+      "issuedAt": "2026-10-06T12:00:00.000Z",
+      "expiresAt": "2026-10-13T12:00:00.000Z"
+    }
+  }
+}

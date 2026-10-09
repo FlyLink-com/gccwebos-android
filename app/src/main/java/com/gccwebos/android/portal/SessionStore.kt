@@ -4,7 +4,6 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
-import org.json.JSONObject
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -47,20 +46,11 @@ class EncryptedSessionStore(context: Context) : SessionStore {
         cipher.updateAAD("gccwebos.session.v1".toByteArray(Charsets.UTF_8))
         val plain = cipher.doFinal(bytes.copyOfRange(12, bytes.size))
         try {
-            val value = JSONObject(plain.toString(Charsets.UTF_8))
-            require(value.keys().asSequence().toSet() == setOf("version", "token", "account", "expires", "remaining", "savedAt", "elapsed"))
-            require(value.get("version") == 1)
-            fun text(key: String) = value.get(key) as String
-            fun number(key: String): Long { val n = value.get(key); require(n is Int || n is Long); return (n as Number).toLong() }
-            SavedSession(Secret(text("token")), text("account"), java.time.Instant.parse(text("expires")),
-                number("remaining"), java.time.Instant.parse(text("savedAt")), number("elapsed"))
+            SessionRecordJson.decode(plain.toString(Charsets.UTF_8))
         } finally { plain.fill(0) }
     }
     override fun save(record: SavedSession) = storage(StoreTarget.Session, StoreOperation.Save) {
-        val plain = JSONObject().put("version", 1).put("token", record.token.value).put("account", record.accountId)
-            .put("expires", record.expiresAt.toString()).put("remaining", record.remainingMillis)
-            .put("savedAt", record.savedAt.toString()).put("elapsed", record.savedElapsed)
-            .toString().toByteArray(Charsets.UTF_8)
+        val plain = SessionRecordJson.encode(record).toByteArray(Charsets.UTF_8)
         try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key())
             cipher.updateAAD("gccwebos.session.v1".toByteArray(Charsets.UTF_8))
@@ -76,7 +66,8 @@ class EncryptedSessionStore(context: Context) : SessionStore {
             val received = read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
             require(received.accountId == record.accountId && received.token.value == record.token.value &&
                 received.expiresAt == record.expiresAt && received.remainingMillis == record.remainingMillis &&
-                received.savedAt == record.savedAt && received.savedElapsed == record.savedElapsed)
+                received.savedAt == record.savedAt && received.savedElapsed == record.savedElapsed &&
+                (record.refreshGrant?.sameRecord(received.refreshGrant) ?: (received.refreshGrant == null)))
         } finally { plain.fill(0) }
     }
     override fun clear() = storage(StoreTarget.Session, StoreOperation.Clear) {

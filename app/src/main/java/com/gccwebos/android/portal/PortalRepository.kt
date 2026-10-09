@@ -31,7 +31,8 @@ class PortalRepository(private val transport: PortalTransport, private val store
     profiles: LocalProfileStore = MemoryLocalProfileStore(),
     private val allowHostnamePreparation: Boolean = false,
     manualSources: ManualSourceStore? = null,
-    externalSubscription: SubscriptionSource = ManualSubscriptionTransport()) {
+    externalSubscription: SubscriptionSource = ManualSubscriptionTransport(),
+    private val nativeSessionRenewal: Boolean = false) {
     val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now,
         allowHostnamePreparation = allowHostnamePreparation, manualSources = manualSources, externalSource = externalSubscription)
     private val mutex = Mutex()
@@ -39,6 +40,12 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private val activationLock = Any()
     private var configurationGeneration = 0L
     @Volatile private var session: Session? = null
+    private class RestorationFlight(val epoch: Long, val result: kotlinx.coroutines.CompletableDeferred<Session?>)
+    private var restorationFlight: RestorationFlight? = null
+    private var renewalRequired = false
+    fun hasRenewableSession(): Boolean = synchronized(activationLock) {
+        nativeSessionRenewal && sessions.read()?.refreshGrant?.valid(now(), elapsed()) == true
+    }
     // Memory-only evidence of actual parsed reads, including the legacy import path.
     private var overviewRevision = 0L
     private var overviewIssuedSequence = 0L
@@ -81,9 +88,9 @@ class PortalRepository(private val transport: PortalTransport, private val store
                 expect(response, setOf(200, 202), false)
                 val context = currentCoroutineContext()
                 context.ensureActive()
-                synchronized(activationLock) {
+                if (response.status == 202) synchronized(activationLock) {
                     checkGeneration(epoch)
-                    if (response.status == 202) {
+                    run {
                         val value = JSONObject(response.body).getJSONObject("challenge")
                         require(value.getString("status") == "second_factor_required")
                         val factors = value.getJSONArray("availableFactors")
@@ -93,8 +100,8 @@ class PortalRepository(private val transport: PortalTransport, private val store
                         require(ttl > 0)
                         totpExpiry = reference to (elapsed() + minOf(ttl, 300000))
                         LoginResult.TotpRequired(reference)
-                    } else acceptSession(response.body, epoch, context)
-                }
+                    }
+                } else acceptSession(response.body, epoch, context)
             }
         }
     }
@@ -114,54 +121,105 @@ class PortalRepository(private val transport: PortalTransport, private val store
             }
         }
     }
-    private fun acceptSession(body: String, epoch: Long, context: CoroutineContext): LoginResult.Authenticated = synchronized(activationLock) {
-        context.ensureActive()
-        checkGeneration(epoch)
-        invalidateImport()
+    private suspend fun acceptSession(body: String, epoch: Long, context: CoroutineContext): LoginResult.Authenticated {
         val value = PortalJson.session(JSONObject(body), elapsed())
         require(value.valid(now(), elapsed()))
+        // Persist the already successful short login even when the optional exchange is unavailable.
+        publishSession(value, null, epoch, context)
+        if (nativeSessionRenewal) {
+            val pair = try {
+                val response = transport.request("/api/portal/native-session", "{}", value.token)
+                context.ensureActive(); checkGeneration(epoch)
+                if (response.status != 200) null else PortalJson.nativeSession(response.body, now(), elapsed()).also {
+                    require(it.first.token.value == value.token.value && it.first.accountId == value.accountId &&
+                        it.first.expiresAt == value.expiresAt && it.first.lifetimeMillis == value.lifetimeMillis)
+                    require(it.second.issuedAt == Instant.parse(JSONObject(body).getJSONObject("session").getString("issuedAt")))
+                }
+            } catch (failure: CancellationException) { throw failure }
+              catch (_: Exception) { null } // A grant is optional; the original access authority is unchanged.
+            if (pair != null) publishSession(value, pair.second, epoch, context)
+        }
+        context.ensureActive(); checkGeneration(epoch)
+        return LoginResult.Authenticated(value)
+    }
+    private fun publishSession(value: Session, grant: NativeRefreshGrant?, epoch: Long, context: CoroutineContext) = synchronized(activationLock) {
+        context.ensureActive(); checkGeneration(epoch)
+        invalidateImport()
         localSubscriptions.whenLegacySource {
             val prior = store.read()
             context.ensureActive()
-            if (prior != null && prior.accountId != value.accountId) { store.clear() }
+            if (prior != null && prior.accountId != value.accountId) store.clear()
         }
-        context.ensureActive()
         totpExpiry = null
-        try {
-            sessions.save(SavedSession.capture(value, now(), elapsed()))
-            context.ensureActive(); checkGeneration(epoch)
-        } catch (failure: Throwable) { sessions.clear(); throw failure }
+        try { sessions.save(SavedSession.capture(value, now(), elapsed(), grant)) }
+        catch (failure: Throwable) { session = null; sessions.clear(); throw failure }
+        // A cancelled owner may leave a committed pair, but cannot expose it or erase a newer login.
+        context.ensureActive(); checkGeneration(epoch)
+        renewalRequired = false
         session = value
-        LoginResult.Authenticated(value)
     }
-    /** Read-only server validation before a saved native token can expose authenticated UI. */
-    suspend fun restoreSession(): Session? {
-        val epoch = synchronized(activationLock) { generation.incrementAndGet().also { session = null; totpExpiry = null } }
-        return mutex.withLock { guarded {
-            checkGeneration(epoch); invalidateImport()
-            val saved = sessions.read() ?: return@guarded null
-            val value = saved.restore(now(), elapsed())
-            if (value == null) { sessions.clear(); return@guarded null }
-            val response = transport.request("/api/portal/resources/current/overview", session = value.token)
-            expectCurrent(response, setOf(200), epoch)
-            PortalJson.resource(response.body) // Unknown/malformed data never admits a saved session.
-            val context = currentCoroutineContext(); context.ensureActive()
-            synchronized(activationLock) {
-                checkGeneration(epoch)
-                if (!value.valid(now(), elapsed())) { sessions.clear(); throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED) }
-                localSubscriptions.whenLegacySource {
-                    val prior = store.read()
-                    if (prior != null && prior.accountId != value.accountId) { store.clear() }
-                }
-                try {
-                    sessions.save(SavedSession.capture(value, now(), elapsed()))
-                } catch (failure: Throwable) { sessions.clear(); throw failure }
-                // A cancelled UI owner must not delete an already saved, still-valid session.
-                context.ensureActive(); checkGeneration(epoch)
-                session = value
+    /** Single-flight restoration/rotation. No protected mutation is ever replayed here. */
+    suspend fun restoreSession(forceRenewal: Boolean = false): Session? {
+        var owner = false
+        val flight = synchronized(activationLock) {
+            restorationFlight?.takeIf { it.epoch == generation.get() } ?: RestorationFlight(
+                generation.incrementAndGet(), kotlinx.coroutines.CompletableDeferred()).also {
+                restorationFlight = it; session = null; totpExpiry = null; owner = true
             }
-            value
-        } }
+        }
+        if (!owner) return flight.result.await()
+        try {
+            val result = mutex.withLock { guarded { restoreLocked(flight.epoch, forceRenewal) } }
+            flight.result.complete(result)
+            return result
+        } catch (failure: Throwable) {
+            flight.result.completeExceptionally(failure)
+            throw failure
+        } finally { synchronized(activationLock) { if (restorationFlight === flight) restorationFlight = null } }
+    }
+    private suspend fun restoreLocked(epoch: Long, forceRenewal: Boolean): Session? {
+        checkGeneration(epoch); invalidateImport()
+        val saved = sessions.read() ?: return null
+        val grant = saved.refreshGrant?.takeIf { nativeSessionRenewal && it.valid(now(), elapsed()) }
+        var value = saved.restore(now(), elapsed())
+        var activeGrant = grant
+        var rotated = false
+        if (grant != null && (value == null || forceRenewal || renewalRequired ||
+                java.time.Duration.between(now(), value.expiresAt).toMillis() <= 60000)) {
+            val pair = rotateSession(saved, grant, epoch)
+            value = pair.first; activeGrant = pair.second; rotated = true
+        }
+        if (value == null) { synchronized(activationLock) { checkGeneration(epoch); sessions.clear() }; return null }
+        var response = transport.request("/api/portal/resources/current/overview", session = value.token)
+        checkGeneration(epoch)
+        if (response.status == 401 && grant != null && !rotated) {
+            val pair = rotateSession(saved, grant, epoch)
+            value = pair.first; activeGrant = pair.second
+            response = transport.request("/api/portal/resources/current/overview", session = value.token)
+        }
+        expectCurrent(response, setOf(200), epoch)
+        PortalJson.resource(response.body)
+        publishSession(value, activeGrant, epoch, currentCoroutineContext())
+        return value
+    }
+    private suspend fun rotateSession(saved: SavedSession, grant: NativeRefreshGrant, epoch: Long): Pair<Session, NativeRefreshGrant> {
+        val response = transport.request("/api/portal/native-session/refresh",
+            JSONObject().put("refreshToken", grant.token.value).toString())
+        currentCoroutineContext().ensureActive(); checkGeneration(epoch)
+        if (response.status == 401) {
+            synchronized(activationLock) { checkGeneration(epoch); invalidateSession(clearGrant = true) }
+            throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED)
+        }
+        expect(response, setOf(200), false)
+        val pair = PortalJson.nativeSession(response.body, now(), elapsed())
+        require(pair.first.accountId == saved.accountId && pair.first.token.value != saved.token.value)
+        require(pair.second.token.value != grant.token.value && pair.second.issuedAt == grant.issuedAt && pair.second.expiresAt == grant.expiresAt)
+        synchronized(activationLock) {
+            checkGeneration(epoch)
+            // Commit the complete pair before another read. A lost overview does not lose a rotated grant.
+            sessions.save(SavedSession.capture(pair.first, now(), elapsed(), pair.second))
+        }
+        return pair
     }
 
     suspend fun security(): AccountSecurity = mutex.withLock { guarded {
@@ -576,12 +634,15 @@ class PortalRepository(private val transport: PortalTransport, private val store
 
     /** Cancels authentication without destroying an earlier durable subscription. */
     suspend fun cancelAuthentication() {
-        synchronized(activationLock) {
-            generation.incrementAndGet(); session = null; totpExpiry = null; invalidateImport()
+        val epoch = synchronized(activationLock) {
+            val admitted = generation.incrementAndGet(); session = null; totpExpiry = null; invalidateImport()
             sessions.clear() // Synchronous admission: caller cancellation cannot skip token removal.
+            admitted
         }
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-            mutex.withLock { invalidateImport(); session = null; totpExpiry = null; sessions.clear() }
+            mutex.withLock { synchronized(activationLock) {
+                if (generation.get() == epoch) { invalidateImport(); session = null; totpExpiry = null; sessions.clear() }
+            } }
         }
     }
     /** Local sign-out only. There is no verified native server revocation endpoint. */
@@ -605,13 +666,23 @@ class PortalRepository(private val transport: PortalTransport, private val store
         }
     }
     /** Account logout does not unlink a previously acknowledged local subscription capability. */
-    suspend fun signOutAccount() = cancelAuthentication()
+    suspend fun signOutAccount() {
+        val grant = synchronized(activationLock) {
+            try { sessions.read()?.refreshGrant?.token } catch (_: Exception) { null }
+        }
+        cancelAuthentication()
+        if (nativeSessionRenewal && grant != null) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            try { transport.request("/api/portal/native-session/logout", JSONObject().put("refreshToken", grant.value).toString()) }
+            catch (_: Exception) { /* Local removal already succeeded; server expiry remains bounded. */ }
+        }
+    }
 
-    private fun invalidateSession() = synchronized(activationLock) {
+    private fun invalidateSession(clearGrant: Boolean = false) = synchronized(activationLock) {
         generation.incrementAndGet()
         invalidateImport()
         session = null
-        sessions.clear()
+        renewalRequired = true
+        if (clearGrant || !hasRenewableSession()) sessions.clear()
     }
     private fun activeSession(): Session = synchronized(activationLock) {
         val value = session ?: throw PortalFailure(PortalFailure.Reason.SESSION_EXPIRED)

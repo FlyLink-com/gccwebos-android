@@ -307,7 +307,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                 val signedOutMine = selected == Destination.Profile && showsSignedOutMine(account, loginRequested || startRegistration)
                 val loginPage = selected == Destination.Profile && !account.authenticated && !account.retainingCommerceSession && !signedOutMine
                 val backdropModifier = if (loginPage) Modifier.fillMaxSize() else Modifier.widthIn(max = 680.dp).fillMaxSize()
-                BrandBackdrop(backdropModifier, loginPage = loginPage)
+                BrandBackdrop(backdropModifier, loginPage = loginPage, strongScrim = selected == Destination.Plans)
                 CompositionLocalProvider(LocalCatalogPurchaseDock provides catalogDock) {
                 Scaffold(containerColor = Color.Transparent, bottomBar = {
                     Column(Modifier.fillMaxWidth().navigationBarsPadding()
@@ -499,17 +499,9 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                 }
                 Destination.Plans -> {
                     if (!account.authenticated && !account.retainingCommerceSession) {
-                        BrandCard(Modifier.testTag("commerce-signed-out")) {
-                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text("∞", color = Brand.Cyan, style = MaterialTheme.typography.displayLarge,
-                                    modifier = Modifier.clearAndSetSemantics {})
-                                Text("选择适合你的套餐", style = MaterialTheme.typography.titleLarge)
-                                BrandButton("登录查看当前套餐", openAccount,
-                                    enabled = !account.busy && !account.restoring && !account.foregroundCheckPending,
-                                    modifier = Modifier.testTag("anonymous-plans-login"))
-                            }
-                        }
+                        com.gccwebos.android.commerce.SignedOutPlansPanel(
+                            loginEnabled = !account.busy && !account.restoring && !account.foregroundCheckPending,
+                            onLogin = openAccount, onImport = openNodes)
                     } else {
                         CommercePanel(account, CommerceMode.Plans, stateOverride = commerceOverride, autoLoad = autoLoadCommerce,
                             onRecharge = openAccount, defaultSelectionRequest = plansVisit, refreshRequest = navigationRequest,

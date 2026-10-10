@@ -817,22 +817,25 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
             MineBalanceHeading()
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CoinIcon(30.dp, enabled = false)
-                Text("登录查看你的余额", style = MaterialTheme.typography.titleMedium, color = Brand.Muted,
-                    modifier = Modifier.weight(1f).testTag("wallet-balance-signed-out"))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("登录后查看余额", style = MaterialTheme.typography.titleMedium, color = Brand.Muted,
+                        modifier = Modifier.testTag("wallet-balance-signed-out"))
+                    Text("充值与账单明细登录后使用", style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
+                        modifier = Modifier.testTag("wallet-signed-out-hint"))
+                }
             }
-            // Shown for layout parity only: disabled, so they expose disabled semantics and accept no click.
-            MineWalletActions(enabled = false, onRecharge = {}, onLedger = {})
+            // No recharge / ledger buttons while signed out: 去登录 above is the single action.
         }
-        MineInviteBanner("mine-referral", idle, onClick = onLogin)
+        // The invite banner and its 立即邀请 action appear after login (referral needs an account).
         MineGroupLabel("服务与记录", "mine-group-service")
         MineCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
-            MineMenuRow("我的订单", "mine-history", idle, subtitle = "商品订单与充值记录", onClick = onLogin)
+            MineMenuRow("我的订单", "mine-history", idle, subtitle = "登录后查看订单与充值记录", onClick = onLogin)
             MineRowDivider()
             MineOfficialChannelRow(MINE_OFFICIAL_CHANNEL_URL, telegramOpener) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         }
         MineGroupLabel("系统与设置", "mine-group-system")
         MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
-            MineMenuRow("账户与安全", "mine-security", idle, onClick = onLogin)
+            MineMenuRow("账户与安全", "mine-security", idle, subtitle = "登录后管理账户与安全", onClick = onLogin)
             MineRowDivider()
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { about = true }
         }

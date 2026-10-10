@@ -2,6 +2,7 @@ package com.gccwebos.android.manualimport
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +46,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.BrandButton
+import com.gccwebos.android.design.GlassMaterialPolicy
 import com.gccwebos.android.design.GlassSurface
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -155,6 +157,8 @@ internal fun <T : Any> ManualImportHost(
             sheetState = sheetState,
             containerColor = Brand.SurfaceRaised,
             contentColor = Brand.Text,
+            // The scrim also swallows touches, so the page behind cannot scroll while the sheet is up.
+            scrimColor = Color.Black.copy(alpha = GlassMaterialPolicy.SheetScrimAlpha),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             modifier = Modifier.testTag("manual-import-host"),
         ) {
@@ -165,20 +169,21 @@ internal fun <T : Any> ManualImportHost(
             ) {
                 Text("导入配置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 ManualImportMenuRow(
+                    title = "导入订阅链接",
+                    subtitle = "粘贴订阅链接导入",
+                    enabled = menuEnabled,
+                    testTag = "manual-import-link",
+                    onClick = { begin(ManualImportInputKind.Link) },
+                    primary = true,
+                    icon = { ManualImportLinkIcon() },
+                )
+                ManualImportMenuRow(
                     title = "扫描二维码",
                     subtitle = "使用摄像头扫描订阅二维码",
                     enabled = menuEnabled,
                     testTag = "manual-import-scan",
                     onClick = { begin(ManualImportInputKind.Scan) },
                     icon = { ManualImportScanIcon() },
-                )
-                ManualImportMenuRow(
-                    title = "导入订阅链接",
-                    subtitle = "粘贴订阅链接导入",
-                    enabled = menuEnabled,
-                    testTag = "manual-import-link",
-                    onClick = { begin(ManualImportInputKind.Link) },
-                    icon = { ManualImportLinkIcon() },
                 )
                 ManualImportMenuRow(
                     title = "导入配置文件",
@@ -283,10 +288,14 @@ private fun ManualImportMenuRow(
     testTag: String,
     onClick: () -> Unit,
     icon: @Composable () -> Unit,
+    primary: Boolean = false,
 ) {
+    // The subscription-link row is the main path: heavier fill, cyan rim and a taller target.
+    val shape = RoundedCornerShape(14.dp)
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp)
-            .background(Brand.Cyan.copy(alpha = if (enabled) .08f else .04f), RoundedCornerShape(14.dp))
+        Modifier.fillMaxWidth().heightIn(min = if (primary) 68.dp else 56.dp)
+            .then(if (primary) Modifier.border(1.dp, Brand.Cyan.copy(alpha = if (enabled) .65f else .25f), shape) else Modifier)
+            .background(Brand.Cyan.copy(alpha = if (primary) (if (enabled) .20f else .08f) else if (enabled) .08f else .04f), shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp)
             .testTag(testTag),
@@ -295,7 +304,8 @@ private fun ManualImportMenuRow(
     ) {
         Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { icon() }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = if (enabled) Brand.Text else Brand.DisabledText)
+            Text(title, fontWeight = FontWeight.SemiBold, fontSize = if (primary) 16.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+                color = if (enabled) Brand.Text else Brand.DisabledText)
             Text(subtitle, fontSize = 12.sp, color = Brand.Muted)
         }
     }

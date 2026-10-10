@@ -1,6 +1,7 @@
 package com.gccwebos.android.commerce
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -148,8 +149,11 @@ internal fun MineRenewLink(enabled: Boolean, onClick: () -> Unit) {
 /** Small group label above a grouped glass card. */
 @Composable
 internal fun MineGroupLabel(title: String, tag: String) {
-    Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Brand.Muted,
-        modifier = Modifier.padding(start = 6.dp, top = 2.dp).semantics { heading() }.testTag(tag))
+    // A small dark glass plate keeps the label readable over the busy backdrop artwork (review M4).
+    Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Brand.Text,
+        modifier = Modifier.padding(start = 2.dp, top = 2.dp).semantics { heading() }.testTag(tag)
+            .background(Brand.Background.copy(alpha = .78f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp))
 }
 
 /** 官方频道 row: Telegram paper plane + @handle for a Telegram URL, otherwise a neutral link row. */

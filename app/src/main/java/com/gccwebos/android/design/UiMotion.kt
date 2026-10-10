@@ -89,10 +89,17 @@ import kotlinx.coroutines.launch
 internal fun rememberUiMotionEnabled(): Boolean {
     val context = LocalContext.current
     val state by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
-    return remember(state, context) {
-        uiMotionEnabled(Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f))
+    val override = LocalAnimatorScaleOverride.current
+    return remember(state, context, override) {
+        uiMotionEnabled(override ?: Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f))
     }
 }
+
+/**
+ * Test seam only (null in production): lets an instrumented test render the "remove animations" case on a device
+ * where the system animation scale cannot be changed from adb. It never changes what the real setting means.
+ */
+internal val LocalAnimatorScaleOverride = androidx.compose.runtime.staticCompositionLocalOf<Float?> { null }
 
 /** Light tick for user-initiated taps only (tab switch, primary CTA). Call it from an onClick, never from an effect. */
 @Composable

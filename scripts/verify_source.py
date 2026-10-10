@@ -39,7 +39,11 @@ assert {p.get(android + 'name') for p in manifest.findall('uses-permission')} ==
     'android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE',
     'android.permission.CAMERA',
     'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED',
-    'android.permission.POST_NOTIFICATIONS'}
+    'android.permission.POST_NOTIFICATIONS', 'android.permission.RECEIVE_BOOT_COMPLETED'}
+# The only receiver re-arms/handles the daily renewal alarm; it is never exported.
+receivers = {r.get(android + 'name'): r for r in manifest.findall('.//receiver')}
+assert set(receivers) == {'.renewal.RenewalReminderReceiver'}
+assert all(r.get(android + 'exported') == 'false' for r in receivers.values())
 camera = manifest.find("uses-feature[@android:name='android.hardware.camera.any']",
                        {'android': 'http://schemas.android.com/apk/res/android'})
 assert camera is not None and camera.get(android + 'required') == 'false'

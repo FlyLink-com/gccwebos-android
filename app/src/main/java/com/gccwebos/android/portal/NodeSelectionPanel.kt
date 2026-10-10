@@ -366,7 +366,7 @@ private fun NodeLatencyToolbar(
             contentPadding = PaddingValues(horizontal = 8.dp),
             modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-latency-one-tap"),
         ) {
-            // The title lightning is the only spinning indicator. This control stays static.
+            // The title lightning is the only pulsing indicator. This control stays static.
             NodesLightningIcon(busy = false, motionEnabled = motionEnabled, enabled = canMeasure && !measuring,
                 size = 16.dp)
             Spacer(Modifier.width(4.dp))
@@ -445,8 +445,9 @@ private fun NodesLightningIcon(busy: Boolean, motionEnabled: Boolean, enabled: B
 private fun rememberNodeListMotionEnabled(): Boolean {
     val context = LocalContext.current
     val state by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
-    return remember(state, context) {
-        val scale = Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+    val override = com.gccwebos.android.design.LocalAnimatorScaleOverride.current
+    return remember(state, context, override) {
+        val scale = override ?: Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
         usageMotionEnabled(scale)
     }
 }

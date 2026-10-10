@@ -639,7 +639,7 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                 else -> null
             }, Modifier.testTag("account-read-error"))
             TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅与登录") }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text(CLEAR_LOCAL_LABEL) }
             TextButton(onClick = state::logout, enabled = !state.clearing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-signout")) { Text("退出账户（保留本地订阅）") }
         } else if (state.factorReference != null) {
             SupportingText("请输入身份验证器中的 TOTP 验证码")
@@ -672,14 +672,21 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
     if (confirmReset) ClearLocalDialog(onConfirm = { confirmReset = false; state.clearLocal() }, onDismiss = { confirmReset = false })
 }
 
+/** 账户与安全 bottom action and its confirmation: plain words, local device only, server account untouched. */
+internal const val CLEAR_LOCAL_LABEL = "退出登录并清除当前设备订阅配置"
+internal const val CLEAR_LOCAL_TITLE = "退出登录并清除当前设备订阅配置？"
+internal const val CLEAR_LOCAL_BODY = "将退出登录，并清除保存在这台设备上的订阅配置。只影响当前设备，不会删除或更改服务器上的账户。" +
+    "已领取的订阅清除后，可能需要重新登录获取，或联系客服恢复。"
+internal const val CLEAR_LOCAL_CONFIRM = "退出并清除"
+
 @Composable
 private fun ClearLocalDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("清除本地登录与订阅？") },
+        title = { Text(CLEAR_LOCAL_TITLE, modifier = Modifier.testTag("reset-title")) },
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            Text("已领取的订阅删除后可能需要联系客服恢复。此操作仅清除本机材料，不会撤销服务器会话或凭据。")
+            Text(CLEAR_LOCAL_BODY, modifier = Modifier.testTag("reset-body"))
         } },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("reset-confirm")) { Text("确认清除") } },
+        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("reset-confirm")) { Text(CLEAR_LOCAL_CONFIRM) } },
         dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("reset-cancel")) { Text("取消") } })
 }
 
@@ -887,7 +894,7 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
         HorizontalDivider(color = Brand.Border.copy(alpha = .35f))
         TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) {
-            Text("清除本地订阅与登录", style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
+            Text(CLEAR_LOCAL_LABEL, style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
         }
     }
     if (status == null && !state.busy) {

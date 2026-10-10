@@ -304,8 +304,9 @@ class MobileParityUiTest {
         }
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
-        // The signed-out compact form intentionally omits reset. Reset belongs to the
-        // authenticated account panel, so reach it through a fresh offline login.
+        // The signed-out compact form has no logout/reset action; 退出登录 lives in the authenticated account panel,
+        // so reach it through a fresh offline login.
+        compose.onNodeWithTag("account-logout").assertDoesNotExist()
         compose.onNodeWithTag("account-reset").assertDoesNotExist()
         compose.waitUntil(10_000) { state.challenge != null && !state.challengeLoading }
         compose.onNodeWithTag("login-account").performScrollTo().performTextInput("fixture@example.invalid")
@@ -314,15 +315,23 @@ class MobileParityUiTest {
         compose.onNodeWithTag("login-submit").performScrollTo().performClick()
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
         compose.onNodeWithTag("mine-security").performScrollTo().performClick()
-        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
+        compose.onNodeWithTag("account-logout").performScrollTo().assertTextEquals("退出登录")
+        compose.onNodeWithText("清除本地订阅与登录").assertDoesNotExist()
+        compose.onNodeWithTag("account-logout").performClick()
+        compose.onNodeWithTag("logout-title").assertTextEquals("是否退出登录并清除当前设备订阅配置？")
+        compose.onNodeWithTag("logout-confirm").assertTextEquals("退出登录")
+        compose.onNodeWithTag("logout-cancel").assertTextEquals("取消")
+        compose.onNodeWithTag("logout-body").assertTextContains("只影响当前设备", substring = true)
+        compose.onNodeWithTag("logout-body").assertTextContains("不会删除或更改服务器上的账户", substring = true)
+        compose.onNodeWithTag("logout-body").assertTextContains("你自己导入的配置会保留", substring = true)
         compose.runOnIdle { assertTrue(state.localSubscription.hasProfile); assertNotNull(saved.read()) }
-        compose.onNodeWithTag("reset-cancel").performClick()
+        compose.onNodeWithTag("logout-cancel").performClick()
         compose.runOnIdle {
             assertTrue(state.authenticated); assertTrue(state.localSubscription.hasProfile)
             assertNotNull(profiles.read()?.also { it.close() }); assertNotNull(saved.read())
         }
-        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
-        compose.onNodeWithTag("reset-confirm").performClick()
+        compose.onNodeWithTag("account-logout").performScrollTo().performClick()
+        compose.onNodeWithTag("logout-confirm").performClick()
         compose.waitUntil(10_000) { !state.localSubscription.hasProfile && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("login-screen").assertExists()
@@ -542,10 +551,9 @@ class MobileParityUiTest {
         capture("server-empty-data-packs")
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-history").performScrollTo().performClick()
-        compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
-        compose.onNodeWithTag("history-read-title").assertTextEquals("暂无充值记录")
-        compose.onNodeWithTag("orders-loading").assertDoesNotExist()
-        compose.onNodeWithTag("history-error").assertDoesNotExist()
+        // 订单明细 is one flat 流水 (no 消费订单 / 充值记录 split).
+        compose.onNodeWithTag("wallet-topbar-title").assertTextEquals("订单明细")
+        compose.onNodeWithTag("orders-recharge").assertDoesNotExist()
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
         capture("server-empty-order-history")
         compose.onNodeWithTag("mine-back").performScrollTo().performClick()

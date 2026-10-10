@@ -87,6 +87,15 @@ class ConfigurationLibraryFlowUiTest {
         submitPlatformReturn(yaml(name, count + 10), kind)
         awaitItems(count)
         compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+        dismissNamePrompt()
+    }
+
+    /** A new subscription asks for a name first; keep the default name ("跳过") so the page has a single root again. */
+    private fun dismissNamePrompt() {
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("configuration-dialog").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("configuration-dialog-cancel").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("configuration-dialog").fetchSemanticsNodes().isEmpty() }
+        awaitIdle()
     }
 
     private fun submitPlatformReturn(bytes: ByteArray, kind: ManualImportInputKind) {
@@ -133,15 +142,15 @@ class ConfigurationLibraryFlowUiTest {
             assertFalse(items[0].active); assertTrue(items[1].active)
             assertEquals(2, commits.get())
         }
-        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("配置 2")
+        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("节点列表")
         compose.onNodeWithTag("configuration-name-0", useUnmergedTree = true).assertTextEquals("配置 1")
-        compose.onNodeWithTag("configuration-toggle-0").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasNoClickAction()
-        // A background library refresh replaces every opaque handle; an expanded group must stay open.
+        // Both saved configurations are rows of the one list; the inactive one is chosen with a single tap.
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasClickAction()
+        // A background library refresh replaces every opaque handle; the rows must stay.
         val before = compose.runOnIdle { account.configurationLibrary.snapshot.items[0].handle }
         compose.runOnIdle { account.configurationLibrary.refresh() }
         compose.waitUntil(10_000) { idle() && account.configurationLibrary.snapshot.items[0].handle !== before }
-        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasNoClickAction()
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasClickAction()
         compose.onNodeWithText("Synthetic Alpha", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("Synthetic Beta", useUnmergedTree = true).assertExists()
         assertNoExternalEffects()

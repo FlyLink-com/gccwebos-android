@@ -32,10 +32,11 @@ class PortalRepository(private val transport: PortalTransport, private val store
     private val allowHostnamePreparation: Boolean = false,
     manualSources: ManualSourceStore? = null,
     externalSubscription: SubscriptionSource = ManualSubscriptionTransport(),
-    nodeChoices: NodeChoiceStore? = null) {
+    nodeChoices: NodeChoiceStore? = null,
+    nodeOverrides: NodeOverrideStore? = null) {
     val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now,
         allowHostnamePreparation = allowHostnamePreparation, manualSources = manualSources, externalSource = externalSubscription,
-        nodeChoices = nodeChoices)
+        nodeChoices = nodeChoices, nodeOverrides = nodeOverrides)
     private val mutex = Mutex()
     private val generation = AtomicLong()
     private val activationLock = Any()
@@ -604,6 +605,23 @@ class PortalRepository(private val transport: PortalTransport, private val store
                     invalidateImport(); session = null; totpExpiry = null; sessions.clear()
                 } } finally { cleanup() }
             }, commitFence = commitFence)
+        }
+    }
+    /**
+     * 退出登录: revoke the local session and forget this device's account subscription (cached config, delivery
+     * record, remembered account node). Manually imported configurations stay. There is no verified server
+     * revocation endpoint, so the server account is not touched.
+     */
+    suspend fun logoutClearingAccountSubscription(ownerCleanup: suspend () -> Unit = {},
+        commitFence: ((() -> Unit) -> Unit) = { it() }) {
+        synchronized(activationLock) {
+            generation.incrementAndGet(); session = null; totpExpiry = null; invalidateImport()
+            try { sessions.clear() } catch (_: Exception) { }
+        }
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            try { mutex.withLock { invalidateImport(); session = null; totpExpiry = null; sessions.clear() } }
+            catch (_: PortalFailure) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
+            localSubscriptions.clearAccountSubscription(ownerCleanup, commitFence)
         }
     }
     /** Account logout does not unlink a previously acknowledged local subscription capability. */

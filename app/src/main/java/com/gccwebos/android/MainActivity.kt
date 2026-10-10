@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
                 val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodeLatencyProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
                     nodeLatencyProbe = nodeProbe,
-                    sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,
+                    sourceCommitFence = current::commitSourceChange, logoutClearingAccount = current::logoutClearingAccountSubscription,
                     onConnectionPowerAction = { action -> current.power(action) })
             }
             }
@@ -215,6 +215,13 @@ internal fun showsSignedOutMine(account: AccountController, loginRequested: Bool
     showsSignedOutMine(account.authenticated, account.retainingCommerceSession, loginRequested, account.restoring,
         account.foregroundCheckPending, account.restorationPending, account.factorReference != null, account.busy)
 
+/**
+ * 「使用账户订阅」 is offered whenever an account is signed in and the account is not already the active source.
+ * It used to require sourceKind == None, which hid it for anyone who had imported a configuration first.
+ */
+internal fun canUseAccountSource(authenticated: Boolean, sourceKind: ManualSourceKind): Boolean =
+    authenticated && sourceKind != ManualSourceKind.LegacyRemote
+
 @Composable
 internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommerce: Boolean = true,
     commerceOverride: com.gccwebos.android.commerce.CommerceController? = null,
@@ -229,7 +236,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     nodeLatencyProbe: com.gccwebos.android.portal.NodeLatencyProbe? = null,
     autoRefreshPages: Boolean = autoLoadCommerce,
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
-    clearLocalData: (suspend () -> Unit)? = null) {
+    logoutClearingAccount: (suspend () -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
@@ -238,7 +245,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
             val repository = repositoryOverride ?: productionRepository(context)
             accountOverride ?: AccountController(repository, scope,
                 nodeLatencyProbe = nodeLatencyProbe, sourceCommitFence = sourceCommitFence,
-                clearLocalData = clearLocalData ?: { repository.clearLocalData() })
+                logoutClearingAccount = logoutClearingAccount ?: { repository.logoutClearingAccountSubscription() })
         }
     }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
@@ -442,8 +449,9 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
                 }
                 else if (account.authenticated) account.refreshAccountUsage()
-                snapshotFlow { !account.busy && !account.nodeSelection.busy }.first { it }
-                account.nodeLatency.refresh()
+                // Do not force a latency sweep on entry. The nodes panel starts a non-forced
+                // pass after the first frame. A connected visit stays on the local rebuild
+                // below and must not gain a probe from this effect.
             } else if (!account.nodeSelection.busy && connectionActive &&
                 account.localSubscription.hasCapability && account.nodeSelection.snapshot.choices.isEmpty()) {
                 // Login/foreground revoked opaque handles while the tunnel stayed up. Rebuild from
@@ -491,7 +499,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
                             account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
                         error = importer.error,
-                        canUseAccount = account.authenticated && account.localSubscription.sourceKind == ManualSourceKind.None,
+                        canUseAccount = canUseAccountSource(account.authenticated, account.localSubscription.sourceKind),
                         canRemove = false,
                         onDismiss = importer::cancel, onBegin = importer::beginAsync, onSubmit = importer::submit,
                         onCancel = importer::cancel, onFailure = importer::failure,

@@ -67,4 +67,28 @@ class LedgerPresentationTest {
         assertEquals("+30 Coins", LedgerPresentation.signedCoins(30))
         assertEquals("-200 Coins", LedgerPresentation.signedCoins(-200))
     }
+
+    @Test fun flatRowTimeShowsMonthDayThisYearAndFullDateOtherwise() {
+        val zone = ZoneOffset.ofHours(8)
+        val today = LocalDate.of(2026, 10, 10)
+        val thisYear = LocalDate.of(2026, 3, 5).atTime(9, 7).toInstant(zone)
+        val lastYear = LocalDate.of(2025, 12, 31).atTime(23, 59).toInstant(zone)
+        assertEquals("03-05 09:07", LedgerPresentation.rowTime(thisYear, today, zone))
+        assertEquals("2025-12-31 23:59", LedgerPresentation.rowTime(lastYear, today, zone))
+    }
+
+    @Test fun flatListKeepsOneLinePerBalanceChangeInServerOrderWithoutInventingRows() {
+        val t = Instant.parse("2026-10-09T01:00:00Z")
+        val rows = listOf(
+            entry("p1", "credit", "paid_coins", 30, 30, null, null, null, "o1", t),
+            entry("p2", "credit", "bonus_coins", 5, 5, null, null, null, "o1", t),
+            entry("h1", "available_to_held", "paid_coins", 10, 0, -10, 0, 10, "o2", t),
+            entry("c1", "held_to_consumed", "paid_coins", 10, -10, 0, 0, -10, "o2", t),
+        )
+        val groups = LedgerPresentation.displayGroups(rows)
+        // The reserve line is bookkeeping (nets to zero), the same-order split collapses to one net change.
+        assertEquals(listOf("p1", "c1"), groups.map { it.id })
+        assertEquals(listOf(35L, -10L), groups.map { it.netTotalDeltaUnits })
+        assertEquals(rows.sumOf { it.totalDeltaUnits }, groups.sumOf { it.netTotalDeltaUnits })
+    }
 }

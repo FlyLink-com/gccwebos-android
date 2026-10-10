@@ -4,6 +4,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -24,8 +27,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.ConnectionControlState
+import com.gccwebos.android.ConnectionPhase
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
+import com.gccwebos.android.design.NodeRegionIcon
+import com.gccwebos.android.design.nodeDisplayName
 import com.gccwebos.android.vpn.SafeProxyConfig
 
 /** All saved sources are visible; only the active source receives opaque node choices. */
@@ -39,21 +45,49 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     onImport: () -> Unit, onReplace: (ConfigurationHandle) -> Unit, openAccount: () -> Unit) {
     LaunchedEffect(library) { library.refresh() }
     val busy = library.busy || accountBusy || library.snapshot.storageError
+    val tunnelActive = connectionControl.phase in setOf(
+        ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
+    // A signed-in account whose nodes are not loaded yet loads itself once per visit, but only while that
+    // cannot discard anything: no tunnel, and no node the user already chose in another source.
+    var autoLoadTried by remember(authenticated) { mutableStateOf(false) }
+    LaunchedEffect(authenticated, library.snapshot, library.busy, accountBusy, tunnelActive, state.snapshot.selected) {
+        val account = accountToAutoLoad(authenticated && !autoLoadTried && !busy && !tunnelActive, library.snapshot.items,
+            state.snapshot.selected != null) ?: return@LaunchedEffect
+        autoLoadTried = true
+        library.activate(account.handle)
+    }
     val active = library.snapshot.items.any { it.active }
     val canMeasure = active && !busy && !state.busy && latency != null && !latency.busy &&
         latency.foreground && state.snapshot.status == LocalSubscriptionStatus.READY && state.snapshot.choices.isNotEmpty()
     ConfigurationLibraryContent(library.snapshot, busy, library.error, canMeasure,
         measuring = latency?.busy == true,
         onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
+        onChooseNode = library::activateAndChoose,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
+        onRenameNode = library::renameNode, onDeleteNode = library::deleteNode, onRestoreNode = library::restoreNode,
+        tunnelActive = tunnelActive,
         namingEntryId = namingEntryId, onNamingDone = onNamingDone,
-        activeContent = { item, menu ->
+        activeContent = { item, list ->
             NodeSelectionPanel(state, nodes, resource, hasCapability, busy, authenticated, connectionControl,
-                onSelected = onSelected, latency = latency, groupTitle = item.name,
-                showTools = false, showAccountAction = false, headerActions = { menu() }, openAccount = openAccount)
+                onSelected = onSelected, latency = latency, groupTitle = UnifiedListTitle,
+                showTools = false, showAccountAction = false,
+                sourceLabel = list.sourceLabel, rowTrailing = list.rowTrailing, extraCount = list.extraCount,
+                showSourceRows = list.showSourceRows, extraRows = list.extraRows, openAccount = openAccount)
         })
     if (!hasCapability && !authenticated) TextButton(openAccount, enabled = !busy,
         modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-account")) { Text("登录") }
+}
+
+/**
+ * The signed-in account's own subscription row, when it should load by itself: it is listed but empty, nothing is
+ * busy or connected, and it would not displace a node the user already chose in another source.
+ */
+internal fun accountToAutoLoad(idle: Boolean, items: List<ConfigurationItem>, nodeChosen: Boolean): ConfigurationItem? {
+    if (!idle) return null
+    val account = items.firstOrNull { it.kind == ManualSourceKind.LegacyRemote } ?: return null
+    if (account.active || account.status != LocalSubscriptionStatus.MISSING) return null
+    if (items.any { it.active } && nodeChosen) return null
+    return account
 }
 
 private enum class LibraryDialog { Details, Rename, Remove, Name }
@@ -64,14 +98,23 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     canMeasure: Boolean, measuring: Boolean = false, onMeasure: () -> Unit, onImport: () -> Unit,
     onActivate: (ConfigurationHandle) -> Unit, onRename: (ConfigurationHandle, String) -> Unit,
     onRemove: (ConfigurationHandle) -> Unit, onReplace: (ConfigurationHandle) -> Unit,
+    onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit = { _, _ -> },
+    onRenameNode: (ConfigurationItem, Int, String) -> Unit = { _, _, _ -> },
+    onDeleteNode: (ConfigurationItem, Int) -> Unit = { _, _ -> },
+    onRestoreNode: (ConfigurationItem, Int) -> Unit = { _, _ -> },
+    /** While a tunnel is up or changing, nodes of another source cannot be chosen (that would switch the source). */
+    tunnelActive: Boolean = false,
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
-    activeContent: @Composable (ConfigurationItem, @Composable () -> Unit) -> Unit) {
+    activeContent: @Composable (ConfigurationItem, UnifiedList) -> Unit) {
     val actionsBlocked = busy || snapshot.storageError
     val activeIndex = snapshot.items.indexOfFirst { it.active }
     val canMeasureActive = canMeasure && activeIndex >= 0
     var dialogHandle by remember { mutableStateOf<ConfigurationHandle?>(null) }
     var dialog by remember { mutableStateOf<LibraryDialog?>(null) }
     var name by remember { mutableStateOf("") }
+    var nodeEdit by remember { mutableStateOf<NodeEdit?>(null) }
+    var nodeName by remember { mutableStateOf("") }
+    var filterKey by remember { mutableStateOf<Any?>(null) }
     // The post-import naming dialog follows its saved entry id, because the import's own settle
     // refresh replaces every handle right after the dialog opens.
     val target = snapshot.items.firstOrNull { it.handle === dialogHandle } ?: if (dialog == LibraryDialog.Name)
@@ -96,14 +139,8 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                 .testTag("configuration-library-header"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val activeItem = snapshot.items.firstOrNull { it.active }
-            val headerLabel = when {
-                activeItem != null -> {
-                    val n = activeItem.nodes.count { !it.info }
-                    "${activeItem.name}（${n}个节点）"
-                }
-                else -> "配置"
-            }
+            val total = snapshot.items.sumOf { item -> item.nodes.count { !it.info } }
+            val headerLabel = if (snapshot.items.isEmpty()) "配置" else "全部节点（${total}个节点）"
             Text(
                 headerLabel,
                 fontSize = 15.sp,
@@ -133,19 +170,91 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                 dialogHandle = item.handle; dialog = LibraryDialog.Remove
             })
         }
-        // A local metadata refresh replaces operation handles. Keep the active panel in one
-        // stable slot so that refresh cannot dispose/cancel its independent node-read task.
-        if (activeIndex >= 0) {
-            val item = snapshot.items[activeIndex]
-            activeContent(item) { itemMenu(item, activeIndex) }
-        } else if (!snapshot.storageError) Text("未选择配置", color = Brand.Muted,
+        if (activeIndex < 0 && !snapshot.storageError) Text("未选择配置", color = Brand.Muted,
             modifier = Modifier.testTag("configuration-unselected"))
-        // Inactive groups follow the saved entry, not the per-refresh handle, so a background
-        // refresh cannot collapse a group the user expanded.
-        snapshot.items.forEachIndexed { index, item ->
-            if (index != activeIndex) key(item.displayKey) {
-                InactiveConfigurationGroup(item, index, actionsBlocked, { onActivate(item.handle) }) { itemMenu(item, index) }
+        // Source filter: only worth a row once there is more than one source.
+        if (filterKey != null && snapshot.items.none { it.displayKey == filterKey }) filterKey = null
+        if (snapshot.items.size >= 2) SourceFilterChips(snapshot.items, filterKey) { filterKey = it }
+        // One list for every source. Nodes of the active source keep latency and selection; nodes of the
+        // other sources sit in the same list and one tap makes their source active and selects exactly that node.
+        val others = snapshot.items.withIndex().filter { (index, item) ->
+            index != activeIndex && (filterKey == null || item.displayKey == filterKey)
+        }
+        val unified = UnifiedList(
+            sourceLabel = snapshot.items.getOrNull(activeIndex)?.let(::nodeSourceLabel),
+            rowTrailing = snapshot.items.getOrNull(activeIndex)?.takeIf { item -> item.nodeKeys.isNotEmpty() }?.let { item ->
+                { position: Int ->
+                    if (item.canEditNode(position)) NodeRowMenu("active-$position", actionsBlocked, deleteBlocked = tunnelActive,
+                        onRename = { nodeEdit = NodeEdit(item.handle.entryId, position, false); nodeName = item.nodes[position].name },
+                        onDelete = { nodeEdit = NodeEdit(item.handle.entryId, position, true) })
+                }
+            },
+            extraCount = others.sumOf { it.value.nodes.count { node -> !node.info } },
+            showSourceRows = filterKey == null || snapshot.items.getOrNull(activeIndex)?.displayKey == filterKey,
+            extraRows = {
+                OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode) { item, position, delete ->
+                    nodeEdit = NodeEdit(item.handle.entryId, position, delete); nodeName = item.nodes[position].name
+                }
+            })
+        if (activeIndex >= 0) {
+            // Stable slot: a local metadata refresh replaces handles and must not dispose/cancel the node-read task.
+            activeContent(snapshot.items[activeIndex], unified)
+        } else if (others.isNotEmpty()) {
+            GlassSurface(Modifier.fillMaxWidth().testTag("nodes-configuration-group"), shape = RoundedCornerShape(20.dp)) {
+                Column { unified.extraRows(this) }
             }
+        }
+        // Locally deleted nodes: collapsed at the bottom of the list, only when there are any. They can only be restored.
+        val deleted = snapshot.items.withIndex().filter { (_, item) -> filterKey == null || item.displayKey == filterKey }
+            .flatMap { (index, item) -> item.nodeDeleted.sorted().map { position -> Triple(index, item, position) } }
+        if (deleted.isNotEmpty()) DeletedNodesSection(deleted, actionsBlocked, onRestoreNode)
+        // Where every node comes from; also the place for source-level actions (rename / replace / delete).
+        if (snapshot.items.isNotEmpty()) SourceList(snapshot.items) { item, index ->
+            ConfigurationItemMenu(item, index, actionsBlocked, onDetails = {
+                dialogHandle = item.handle; dialog = LibraryDialog.Details
+            }, onRename = {
+                dialogHandle = item.handle; name = item.name; dialog = LibraryDialog.Rename
+            }, onReplace = { onReplace(item.handle) }, onRemove = {
+                dialogHandle = item.handle; dialog = LibraryDialog.Remove
+            })
+        }
+    }
+    nodeEdit?.let { edit ->
+        val item = snapshot.items.firstOrNull { it.handle.entryId == edit.entryId }
+        val node = item?.nodes?.getOrNull(edit.position)
+        if (item == null || node == null || !item.canEditNode(edit.position)) { nodeEdit = null } else {
+            val tooLong = nodeName.codePointCount(0, nodeName.length) > ConfigurationName.MAX_CODE_POINTS
+            val done = { nodeEdit = null; nodeName = "" }
+            AlertDialog(onDismissRequest = { if (!actionsBlocked) done() }, containerColor = Brand.SurfaceRaised,
+                shape = Brand.Shape, properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn),
+                modifier = Modifier.testTag("node-dialog"),
+                title = { Text(if (edit.delete) "删除节点？" else "重命名节点") },
+                text = {
+                    if (edit.delete) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(node.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("node-dialog-name"))
+                        Text("只在本机删除，不会改动订阅本身；订阅更新后仍保持删除。可在列表底部的「已删除节点」里恢复。",
+                            color = Brand.Muted, fontSize = 12.sp)
+                    } else Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(nodeName, { if (it.codePointCount(0, it.length) <= ConfigurationName.MAX_CODE_POINTS) nodeName = it },
+                            label = { Text("节点名称") }, singleLine = true, enabled = !actionsBlocked,
+                            modifier = Modifier.fillMaxWidth().testTag("node-name-input"))
+                        Text("只改本机显示的名称，留空可恢复原名。", color = Brand.Muted, fontSize = 12.sp)
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (!actionsBlocked) {
+                            val typed = nodeName
+                            done()
+                            if (edit.delete) onDeleteNode(item, edit.position) else onRenameNode(item, edit.position, typed)
+                        }
+                    }, enabled = !actionsBlocked && !tooLong, modifier = Modifier.testTag("node-dialog-confirm")) {
+                        Text(if (edit.delete) "删除" else "保存")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = done, enabled = !actionsBlocked, modifier = Modifier.testTag("node-dialog-cancel")) { Text("取消") }
+                })
         }
     }
     if (target != null && dialog != null) {
@@ -228,51 +337,170 @@ private fun ConfigurationItemMenu(item: ConfigurationItem, index: Int, busy: Boo
     }
 }
 
+internal const val UnifiedListTitle = "节点列表"
+
+/** Slots the unified list hands to the active source's card. */
+internal class UnifiedList(val sourceLabel: String?, val rowTrailing: (@Composable (Int) -> Unit)?,
+    val extraCount: Int, val showSourceRows: Boolean, val extraRows: @Composable ColumnScope.() -> Unit)
+
+private data class NodeEdit(val entryId: String?, val position: Int, val delete: Boolean)
+
+/** "来源" caption of one node: the saved source's name and kind; the account subscription says it is read-only. */
+internal fun nodeSourceLabel(item: ConfigurationItem): String =
+    if (item.kind == ManualSourceKind.LegacyRemote) "账户订阅 · 只读" else "${item.name} · ${configurationKindLabel(item.kind)}"
+
 @Composable
-private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy: Boolean,
-    onActivate: () -> Unit, menu: @Composable () -> Unit) {
-    var expanded by remember(item.displayKey) { mutableStateOf(false) }
-    GlassSurface(Modifier.fillMaxWidth().testTag("configuration-group-$index"), shape = RoundedCornerShape(20.dp)) {
-        Column {
-            Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f).heightIn(min = 48.dp).testTag("configuration-toggle-$index")
-                    .semantics { contentDescription = if (expanded) "收起配置节点" else "展开配置节点" }
-                    .clickable(role = Role.Button) { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Canvas(Modifier.size(14.dp)) {
-                        val first = if (expanded) Offset(size.width * .15f, size.height * .35f) else Offset(size.width * .35f, size.height * .15f)
-                        val middle = if (expanded) Offset(size.width * .5f, size.height * .7f) else Offset(size.width * .7f, size.height * .5f)
-                        val last = if (expanded) Offset(size.width * .85f, size.height * .35f) else Offset(size.width * .35f, size.height * .85f)
-                        drawLine(Brand.Cyan, first, middle, 1.7.dp.toPx(), StrokeCap.Round)
-                        drawLine(Brand.Cyan, middle, last, 1.7.dp.toPx(), StrokeCap.Round)
-                    }
-                    Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
-                        Text(item.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("configuration-name-$index"))
-                        Text("${item.nodes.count { !it.info }} 条 · ${configurationStatusLabel(item)}", fontSize = 10.sp,
-                            color = Brand.Muted, modifier = Modifier.testTag("configuration-status-$index"))
-                    }
+private fun SourceFilterChips(items: List<ConfigurationItem>, selected: Any?, onSelect: (Any?) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("unified-filter"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected == null, { onSelect(null) }, label = { Text("全部") },
+            modifier = Modifier.heightIn(min = 48.dp).testTag("unified-filter-all"))
+        items.forEachIndexed { index, item ->
+            FilterChip(selected == item.displayKey, { onSelect(if (selected == item.displayKey) null else item.displayKey) },
+                label = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("unified-filter-$index"))
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationItem>>, busy: Boolean, tunnelActive: Boolean,
+    onActivate: (ConfigurationHandle) -> Unit, onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit,
+    onEdit: (ConfigurationItem, Int, Boolean) -> Unit) {
+    if (others.isEmpty()) return
+    if (tunnelActive && others.any { it.value.nodes.any { node -> !node.info } }) Text(
+        "已连接时只能选用当前来源的节点；要用其他来源的节点，请先断开连接。",
+        fontSize = 11.sp, color = Brand.Amber, modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
+            .testTag("unified-connected-hint"))
+    others.forEach { (index, item) ->
+        val label = nodeSourceLabel(item)
+        val visible = item.nodes.withIndex().filterNot { it.value.info }
+        if (visible.isEmpty()) {
+            HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+            val loadable = item.kind == ManualSourceKind.LegacyRemote && item.status == LocalSubscriptionStatus.MISSING
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("configuration-empty-$index")
+                .then(if (loadable) Modifier.clickable(enabled = !busy && !tunnelActive, role = Role.Button,
+                    onClickLabel = "加载账户节点") { onActivate(item.handle) } else Modifier)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(item.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (loadable) "节点还没加载，点一下加载账户订阅的节点" else "没有可选节点 · ${configurationStatusLabel(item)}",
+                        fontSize = 11.sp, color = Brand.Muted)
                 }
-                menu()
             }
-            if (expanded) {
-                val infoLine = formatNodeInfoBarLine(extractNodeInfoBar(item.nodes.filter { it.info }.map { it.name }))
-                infoLine?.let { line ->
-                    HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
-                    Text(line, fontSize = 11.sp, color = Brand.Muted,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-                            .testTag("configuration-info-$index"))
+        } else visible.forEach { (position, node) ->
+            HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+            // One tap chooses this node as the egress: its source becomes active first (same fenced
+            // activation as 选择配置) and the node is then selected if it is still present.
+            val choosable = node.supported && !busy && !tunnelActive
+            NodeChoiceRow(node.name, node.protocol, node.supported, chosen = false,
+                regionTag = "configuration-region-$index-$position", latencyTag = "configuration-latency-$index-$position",
+                sourceLabel = label,
+                trailing = if (item.canEditNode(position)) ({
+                    NodeRowMenu("$index-$position", busy, deleteBlocked = false,
+                        onRename = { onEdit(item, position, false) }, onDelete = { onEdit(item, position, true) })
+                }) else null,
+                modifier = Modifier.testTag("configuration-node-$index-$position")
+                    .clickable(enabled = choosable, role = Role.Button, onClickLabel = "选择此节点") {
+                        onChooseNode(item.handle, NodeTarget(position, node.name, node.protocol))
+                    })
+        }
+    }
+}
+
+@Composable
+private fun DeletedNodesSection(deleted: List<Triple<Int, ConfigurationItem, Int>>, busy: Boolean,
+    onRestore: (ConfigurationItem, Int) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    GlassSurface(Modifier.fillMaxWidth().testTag("unified-deleted"), shape = RoundedCornerShape(20.dp)) {
+        Column {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("unified-deleted-toggle")
+                .semantics { contentDescription = if (expanded) "收起已删除节点" else "展开已删除节点" }
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Canvas(Modifier.size(14.dp)) {
+                    val first = if (expanded) Offset(size.width * .15f, size.height * .35f) else Offset(size.width * .35f, size.height * .15f)
+                    val middle = if (expanded) Offset(size.width * .5f, size.height * .7f) else Offset(size.width * .7f, size.height * .5f)
+                    val last = if (expanded) Offset(size.width * .85f, size.height * .35f) else Offset(size.width * .35f, size.height * .85f)
+                    drawLine(Brand.Muted, first, middle, 1.7.dp.toPx(), StrokeCap.Round)
+                    drawLine(Brand.Muted, middle, last, 1.7.dp.toPx(), StrokeCap.Round)
                 }
-                item.nodes.withIndex().filterNot { it.value.info }.forEach { indexed ->
-                    val node = indexed.value
-                    val nodeIndex = indexed.index
-                    HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
-                    NodeChoiceRow(node.name, node.protocol, node.supported, chosen = null,
-                        regionTag = "configuration-region-$index-$nodeIndex", latencyTag = "configuration-latency-$index-$nodeIndex",
-                        modifier = Modifier.testTag("configuration-node-$index-$nodeIndex"))
+                Text("已删除节点", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Brand.Muted, modifier = Modifier.weight(1f))
+                Text("${deleted.size} 条", fontSize = 10.sp, color = Brand.Muted, modifier = Modifier.testTag("unified-deleted-count"))
+            }
+            if (expanded) deleted.forEach { (index, item, position) ->
+                HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("deleted-node-$index-$position")
+                    .padding(start = 15.dp, end = 12.dp, top = 7.dp, bottom = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NodeRegionIcon(item.nodes[position].name, Modifier, size = 26.dp)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(nodeDisplayName(item.nodes[position].name), fontSize = 13.sp, color = Brand.Muted,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(nodeSourceLabel(item), fontSize = 10.sp, color = Brand.Muted, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                    var open by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { open = true }, enabled = !busy,
+                            modifier = Modifier.size(40.dp).testTag("deleted-menu-$index-$position")
+                                .semantics { contentDescription = "已删除节点操作" }) {
+                            Canvas(Modifier.size(18.dp)) {
+                                listOf(.2f, .5f, .8f).forEach { drawCircle(Brand.Muted, radius = 1.5.dp.toPx(), center = Offset(size.width * .5f, size.height * it)) }
+                            }
+                        }
+                        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                            DropdownMenuItem(text = { Text("恢复") }, enabled = !busy,
+                                onClick = { open = false; onRestore(item, position) },
+                                modifier = Modifier.testTag("deleted-restore-$index-$position"))
+                        }
+                    }
                 }
-                TextButton(onClick = { if (!busy) onActivate() }, enabled = !busy,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("configuration-activate-$index")) { Text("选择配置") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NodeRowMenu(tag: String, busy: Boolean, deleteBlocked: Boolean, onRename: () -> Unit, onDelete: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, enabled = !busy,
+            modifier = Modifier.size(40.dp).testTag("node-menu-$tag").semantics { contentDescription = "节点操作" }) {
+            Canvas(Modifier.size(18.dp)) {
+                listOf(.2f, .5f, .8f).forEach { drawCircle(Brand.Muted, radius = 1.5.dp.toPx(), center = Offset(size.width * .5f, size.height * it)) }
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("重命名") }, enabled = !busy,
+                onClick = { open = false; onRename() }, modifier = Modifier.testTag("node-rename-$tag"))
+            DropdownMenuItem(text = { Text(if (deleteBlocked) "删除（断开连接后可用）" else "删除") }, enabled = !busy && !deleteBlocked,
+                onClick = { open = false; onDelete() }, modifier = Modifier.testTag("node-delete-$tag"))
+        }
+    }
+}
+
+@Composable
+private fun SourceList(items: List<ConfigurationItem>,
+    menu: @Composable (ConfigurationItem, Int) -> Unit) {
+    GlassSurface(Modifier.fillMaxWidth().testTag("unified-sources"), shape = RoundedCornerShape(20.dp)) {
+        Column {
+            Text("来源", fontSize = 12.sp, color = Brand.Muted, modifier = Modifier.padding(start = 14.dp, top = 10.dp, end = 14.dp))
+            items.forEachIndexed { index, item ->
+                key(item.displayKey) {
+                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp).testTag("configuration-group-$index"),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                            Text(item.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("configuration-name-$index"))
+                            Text(groupCaption(item), fontSize = 10.sp, color = Brand.Muted,
+                                modifier = Modifier.testTag("configuration-status-$index"))
+                        }
+                        menu(item, index)
+                    }
+                }
             }
         }
     }
@@ -282,7 +510,11 @@ private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy
 private object AccountConfigurationKey
 private val ConfigurationItem.displayKey: Any get() = handle.entryId ?: AccountConfigurationKey
 
-private fun configurationKindLabel(kind: ManualSourceKind): String = when (kind) {
+/** Source label shown next to the node count, so every group says where its nodes come from. */
+internal fun groupCaption(item: ConfigurationItem): String =
+    "${item.nodes.count { !it.info }} 条 · ${configurationKindLabel(item.kind)} · ${configurationStatusLabel(item)}"
+
+internal fun configurationKindLabel(kind: ManualSourceKind): String = when (kind) {
     ManualSourceKind.LegacyRemote -> "账户订阅"
     ManualSourceKind.ImportedRemote -> "订阅配置"
     ManualSourceKind.ImportedLocal -> "本地文件"
@@ -290,10 +522,11 @@ private fun configurationKindLabel(kind: ManualSourceKind): String = when (kind)
     ManualSourceKind.None -> "未选择"
 }
 
-private fun configurationStatusLabel(item: ConfigurationItem): String = when (item.status) {
+internal fun configurationStatusLabel(item: ConfigurationItem): String = when (item.status) {
     LocalSubscriptionStatus.READY -> if (item.active) "使用中" else "可用"
     LocalSubscriptionStatus.EXPIRED -> "已到期"
-    LocalSubscriptionStatus.MISSING -> "未导入"
+    // The signed-in account row exists before its first download: selecting it loads the nodes.
+    LocalSubscriptionStatus.MISSING -> if (item.kind == ManualSourceKind.LegacyRemote) "待加载" else "未导入"
     LocalSubscriptionStatus.RETRY_REQUIRED -> "待更新"
     LocalSubscriptionStatus.INVALID_LINK -> "链接不可用"
     LocalSubscriptionStatus.UNSUPPORTED -> "格式不支持"

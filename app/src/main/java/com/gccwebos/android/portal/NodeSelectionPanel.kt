@@ -39,8 +39,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import com.gccwebos.android.ConnectionControlState
-import com.gccwebos.android.core.ConnectionChoice
 import com.gccwebos.android.ConnectionPhase
+import com.gccwebos.android.core.ConnectionChoice
 import com.gccwebos.android.R
 import com.gccwebos.android.design.BoltPulseSpec
 import com.gccwebos.android.design.Brand
@@ -65,6 +65,9 @@ internal fun nodeConnectionStatus(control: ConnectionControlState): String? = wh
     ConnectionPhase.Failed -> "未连接"
 }
 
+/** Draw the nodes page before a non-forced latency pass. Not a VPN probe gate. */
+private const val NodeLatencyEntryDelayMillis = 300L
+
 private val NodeSelectedFill = Brand.Cyan.copy(alpha = .12f)
 private val NodeSelectedBorder = Brand.Cyan.copy(alpha = .85f)
 private val NodeRowShape = RoundedCornerShape(12.dp)
@@ -81,6 +84,14 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     showTools: Boolean = true,
     showAccountAction: Boolean = true,
     headerActions: @Composable RowScope.() -> Unit = {},
+    /** Unified list: where this source's nodes come from, shown on every row. */
+    sourceLabel: String? = null,
+    /** Unified list: per-node actions of this source (the rename/delete menu); null for a read-only source. */
+    rowTrailing: (@Composable (Int) -> Unit)? = null,
+    /** Unified list: nodes of the other saved sources, rendered in this same list below this source's rows. */
+    extraCount: Int = 0,
+    showSourceRows: Boolean = true,
+    extraRows: (@Composable ColumnScope.() -> Unit)? = null,
     openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.expireIfNeeded() }
     val latestAccountBusy by rememberUpdatedState(accountBusy)
@@ -117,9 +128,20 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     val canMeasure = value.status == LocalSubscriptionStatus.READY && proxyChoices.isNotEmpty() &&
         !accountBusy && !state.busy && latency?.foreground != false
     // A measurement completion must not itself trigger another batch. Selection stays independent.
+    // Cancel stays immediate. The start waits one frame plus a short delay so opening the page
+    // does not compete with the transition. This effect does not run while the page cannot measure,
+    // including when the controller is absent; it never force-refreshes.
     LaunchedEffect(latency, value.status, value.choices, accountBusy, state.busy, latency?.foreground) {
-        if (canMeasure) latency?.ensureMeasured() else latency?.cancel()
+        if (!canMeasure || latency == null) {
+            latency?.cancel()
+            return@LaunchedEffect
+        }
+        withFrameNanos { }
+        delay(NodeLatencyEntryDelayMillis)
+        latency.ensureMeasured()
     }
+    // Sorting is the only parent read of per-node results. The default order does not subscribe
+    // the card to the latency map; each row reads its own selection.
     val displayProxy = if (sortByLatency && latency != null) {
         proxyChoices.sortedWith(
             compareBy<IndexedValue<ConnectionChoice>> {
@@ -130,10 +152,6 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     val infoLine = formatNodeInfoBarLine(extractNodeInfoBar(infoChoices.map { it.value.name }))
     val tunnelActive = connectionControl.phase in setOf(
         ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
-    // Only a real measurement (round trip or timeout) counts as "tested"; a batch that could not run
-    // while the tunnel is up must not read "刚刚" next to a list of unmeasured nodes.
-    val lastAgo = latency?.lastResultAtElapsed()?.let { latency.latencyClockElapsed() - it }
-    val lastLabel = formatLastLatencyTestAgo(lastAgo) ?: if (tunnelActive) LatencySkippedNote else null
     var query by rememberSaveable { mutableStateOf("") }
     val searchable = proxyChoices.size >= NodeSearchMinimum
     val needle = query.trim().takeIf { searchable && it.isNotEmpty() }
@@ -168,7 +186,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("nodes-group-title"))
                             // Count stays "N 条" for existing UI contracts; it excludes info notices.
-                            Text("$proxyCount 条", fontSize = 10.sp, color = Brand.Muted,
+                            Text("${proxyCount + extraCount} 条", fontSize = 10.sp, color = Brand.Muted,
                                 modifier = Modifier.testTag("nodes-count"))
                         }
                     }
@@ -189,7 +207,8 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                     infoLine?.let { NodeInfoBanner(it) }
                     if (latency != null && proxyChoices.isNotEmpty()) {
                         NodeLatencyToolbar(
-                            lastLabel = lastLabel,
+                            latency = latency,
+                            tunnelActive = tunnelActive,
                             canMeasure = canMeasure,
                             measuring = latency.busy,
                             sortByLatency = sortByLatency,
@@ -227,31 +246,25 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                     if (needle != null && shownProxy.isEmpty()) Text("没有匹配的节点", color = Brand.Muted, fontSize = 12.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp)
                             .testTag("nodes-search-empty"))
-                    shownProxy.forEachIndexed { visibleIndex, indexed ->
+                    if (showSourceRows) shownProxy.forEachIndexed { visibleIndex, indexed ->
                         val choice = indexed.value
-                        val chosen = value.selected === choice.selection
                         if (visibleIndex > 0) HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
-                        val observation = latency?.reading(choice.selection)
-                        val measuringCell = latency?.busy == true && observation == null
-                        NodeChoiceRow(choice.name, choice.protocol, true, chosen,
-                            observation = observation,
-                            measuring = measuringCell,
-                            onRetestLatency = latency?.let { controller ->
-                                {
-                                    if (canMeasure && !controller.busy) controller.refresh(choice.selection)
-                                }
-                            },
-                            regionTag = "node-region-${indexed.index}",
-                            latencyTag = "node-latency-${indexed.index}",
+                        MeasuredProxyRow(
+                            choice = choice,
+                            index = indexed.index,
+                            chosen = value.selected === choice.selection,
+                            latency = latency,
+                            canRetest = canMeasure,
                             tunnelActive = tunnelActive,
-                            modifier = Modifier.testTag("node-choice-${indexed.index}").semantics { selected = chosen }
-                                .clickable(enabled = !state.busy && !accountBusy, role = Role.RadioButton) {
-                                    if (state.select(choice.selection)) onSelected()
-                                })
+                            enabled = !state.busy && !accountBusy,
+                            sourceLabel = sourceLabel,
+                            trailing = rowTrailing?.let { menu -> { menu(indexed.index) } },
+                            onClick = { if (state.select(choice.selection)) onSelected() },
+                        )
                     }
                     val connectionActive = connectionControl.phase in setOf(
                         ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
-                    if (readOnlyNodes.isNotEmpty() && connectionActive && displayProxy.isEmpty()) {
+                    if (showSourceRows && readOnlyNodes.isNotEmpty() && connectionActive && displayProxy.isEmpty()) {
                         // Auth/foreground revoked opaque handles while the tunnel stayed up. Avoid the
                         // misleading "只读" rows; MainActivity rebuilds from local cache in this state.
                         Text(
@@ -264,7 +277,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 .padding(horizontal = 14.dp, vertical = 16.dp)
                                 .testTag("nodes-connected-registry-empty"),
                         )
-                    } else {
+                    } else if (showSourceRows) {
                         readOnlyNodes.filterNot { it.info }.forEachIndexed { visibleIndex, node ->
                             if (visibleIndex > 0 || displayProxy.isNotEmpty()) {
                                 HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
@@ -275,6 +288,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 modifier = Modifier.testTag("subscription-node-${node.index}"), inspectionIndex = node.index)
                         }
                     }
+                    extraRows?.invoke(this)
                 }
             }
         }
@@ -318,7 +332,8 @@ private fun NodeInfoBanner(line: String) {
 
 @Composable
 private fun NodeLatencyToolbar(
-    lastLabel: String?,
+    latency: NodeLatencyController,
+    tunnelActive: Boolean,
     canMeasure: Boolean,
     measuring: Boolean,
     sortByLatency: Boolean,
@@ -326,6 +341,11 @@ private fun NodeLatencyToolbar(
     onMeasure: () -> Unit,
     motionEnabled: Boolean,
 ) {
+    // Only a real measurement (round trip or timeout) counts as "tested"; a batch that could not run
+    // while the tunnel is up must not read "刚刚" next to a list of unmeasured nodes.
+    // Read the map here so a new result recomposes the caption, not the whole node card.
+    val lastAgo = latency.lastResultAtElapsed()?.let { latency.latencyClockElapsed() - it }
+    val lastLabel = formatLastLatencyTestAgo(lastAgo) ?: if (tunnelActive) LatencySkippedNote else null
     Row(
         Modifier.fillMaxWidth().testTag("nodes-latency-toolbar")
             .padding(horizontal = 8.dp, vertical = 2.dp),
@@ -346,7 +366,8 @@ private fun NodeLatencyToolbar(
             contentPadding = PaddingValues(horizontal = 8.dp),
             modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-latency-one-tap"),
         ) {
-            NodesLightningIcon(busy = measuring, motionEnabled = motionEnabled, enabled = canMeasure && !measuring,
+            // The title lightning is the only spinning indicator. This control stays static.
+            NodesLightningIcon(busy = false, motionEnabled = motionEnabled, enabled = canMeasure && !measuring,
                 size = 16.dp)
             Spacer(Modifier.width(4.dp))
             Text("一键测速", fontSize = 11.sp)
@@ -430,6 +451,36 @@ private fun rememberNodeListMotionEnabled(): Boolean {
     }
 }
 
+@Composable
+internal fun MeasuredProxyRow(
+    choice: ConnectionChoice,
+    index: Int,
+    chosen: Boolean,
+    latency: NodeLatencyController?,
+    canRetest: Boolean,
+    tunnelActive: Boolean,
+    enabled: Boolean,
+    sourceLabel: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
+) {
+    val observation = latency?.reading(choice.selection)
+    NodeChoiceRow(
+        choice.name, choice.protocol, true, chosen,
+        observation = observation,
+        measuring = latency?.busy == true && observation == null,
+        onRetestLatency = latency?.let { controller ->
+            { if (canRetest && !controller.busy) controller.refresh(choice.selection) }
+        },
+        regionTag = "node-region-$index",
+        latencyTag = "node-latency-$index",
+        tunnelActive = tunnelActive,
+        sourceLabel = sourceLabel, trailing = trailing,
+        modifier = Modifier.testTag("node-choice-$index").semantics { selected = chosen }
+            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick),
+    )
+}
+
 private fun nodeProtocolLabel(protocol: String): String = when (protocol) {
     "hysteria2" -> "Hysteria2"
     else -> protocol.uppercase(Locale.ROOT)
@@ -441,7 +492,11 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
     onRetestLatency: (() -> Unit)? = null,
     regionTag: String, latencyTag: String,
     modifier: Modifier = Modifier, inspectionIndex: Int? = null, readOnlyLabel: String = "只读",
-    tunnelActive: Boolean = false) {
+    tunnelActive: Boolean = false,
+    /** Unified list: the source this node comes from, as a small caption under the name. */
+    sourceLabel: String? = null,
+    /** Unified list: per-node actions (rename / delete), placed after the selection mark. */
+    trailing: (@Composable () -> Unit)? = null) {
     val selected = chosen == true
     Row(
         modifier.fillMaxWidth().heightIn(min = 56.dp)
@@ -468,19 +523,23 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
             Text(nodeDisplayName(name), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-name-$it") } ?: Modifier)
-            // Protocol chip only; multiplier is omitted when the payload has no such field.
-            Box(
-                Modifier.clip(ProtocolChipShape)
-                    .background(Brand.Cyan.copy(alpha = .10f))
-                    .padding(horizontal = 6.dp, vertical = 1.dp),
-            ) {
-                Text(
-                    nodeProtocolLabel(protocol),
-                    fontSize = 10.sp,
-                    color = Brand.Cyan.copy(alpha = .9f),
-                    maxLines = 1,
-                    modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-details-$it") } ?: Modifier,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Protocol chip only; multiplier is omitted when the payload has no such field.
+                Box(
+                    Modifier.clip(ProtocolChipShape)
+                        .background(Brand.Cyan.copy(alpha = .10f))
+                        .padding(horizontal = 6.dp, vertical = 1.dp),
+                ) {
+                    Text(
+                        nodeProtocolLabel(protocol),
+                        fontSize = 10.sp,
+                        color = Brand.Cyan.copy(alpha = .9f),
+                        maxLines = 1,
+                        modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-details-$it") } ?: Modifier,
+                    )
+                }
+                if (sourceLabel != null) Text(sourceLabel, fontSize = 10.sp, color = Brand.Muted, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).testTag("node-source-label"))
             }
         }
         NodeLatencyBadge(
@@ -504,5 +563,6 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
                     Offset(size.width * .85f, size.height * .25f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
             }
         }
+        trailing?.invoke()
     }
 }

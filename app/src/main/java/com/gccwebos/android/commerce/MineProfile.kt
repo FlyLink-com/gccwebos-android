@@ -1,8 +1,10 @@
 package com.gccwebos.android.commerce
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -10,7 +12,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -21,13 +27,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
-import com.gccwebos.android.design.GlassSurface
+import com.gccwebos.android.design.GccShapes
+import com.gccwebos.android.design.GccSpacing
+import com.gccwebos.android.design.GccType
 
 /** The one configured official channel. The Mine rows derive their icon and handle from it. */
 internal const val MINE_OFFICIAL_CHANNEL_URL = "https://t.me/flylinevpn"
@@ -83,22 +89,6 @@ internal fun telegramHandle(url: String): String? {
 internal fun mineVersionLabel(versionName: String?): String? =
     versionName?.trim()?.takeIf { it.isNotEmpty() }?.let { "当前版本 v" + it.removePrefix("v") }
 
-/**
- * Clean page title for the 我的 tab, on a glass strip so the backdrop artwork's own neon wordmark
- * no longer reads as a ghosted second logo behind the header.
- */
-@Composable
-internal fun MineTopBar(title: String = "我的") {
-    GlassSurface(Modifier.fillMaxWidth().testTag("mine-topbar"), shape = RoundedCornerShape(16.dp),
-        edge = MineStyle.Edge, tint = Brush.verticalGradient(listOf(Brand.Background.copy(alpha = .55f), Brand.Background.copy(alpha = .35f)))) {
-        Box(Modifier.fillMaxWidth().heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Brand.Text,
-                textAlign = TextAlign.Center, maxLines = 1,
-                modifier = Modifier.semantics { heading() }.testTag("mine-topbar-title"))
-        }
-    }
-}
-
 /** Drawn default avatar: initial or person glyph on a cyan ring. Decorative; no upload. */
 @Composable
 internal fun MineAvatar(initial: String?, enabled: Boolean, size: Dp = 64.dp) {
@@ -111,18 +101,25 @@ internal fun MineAvatar(initial: String?, enabled: Boolean, size: Dp = 64.dp) {
         drawCircle(Brush.sweepGradient(ring + ring.first(), center), r * .80f, style = Stroke(width = 2.dp.toPx()))
     }, contentAlignment = Alignment.Center) {
         val tint = if (enabled) Brand.Cyan else Brand.Muted
-        if (initial != null) Text(initial, color = tint, fontSize = (size.value * .36f).sp, fontWeight = FontWeight.Bold,
+        if (initial != null) Text(initial, color = tint, style = GccType.avatarGlyph(size),
             modifier = Modifier.testTag("mine-avatar-initial"))
         else Icon(painterResource(R.drawable.brand_user), null, tint = tint, modifier = Modifier.size(size * .42f))
     }
 }
 
-/** Small outlined pill that copies the full account ID; shows 已复制 once used. */
+/**
+ * Square icon button that copies the full account ID. The 32dp rounded-square face sits inside a 48dp
+ * touch target; after a copy the glyph becomes a check for two seconds (a static swap, so it needs no
+ * reduce-motion handling). The clipboard is only ever written, never read.
+ */
 @Composable
 internal fun MineCopyIdButton(accountId: String, copyOverride: ((String) -> Unit)?) {
     val context = LocalContext.current
     var copied by remember(accountId) { mutableStateOf(false) }
-    TextButton(onClick = {
+    LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(2_000); copied = false } }
+    val shape = GccShapes.small
+    val rim = if (copied) Brand.Green else Brand.Cyan
+    Box(Modifier.size(48.dp).clickable(role = Role.Button, onClickLabel = "复制账户 ID") {
         copied = try {
             (copyOverride ?: { value: String ->
                 (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
@@ -130,17 +127,24 @@ internal fun MineCopyIdButton(accountId: String, copyOverride: ((String) -> Unit
             })(accountId)
             true
         } catch (_: Exception) { false }
-    }, shape = RoundedCornerShape(50), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Brand.Cyan.copy(alpha = .45f)),
-        modifier = Modifier.heightIn(min = 48.dp).testTag("mine-copy-id").semantics { contentDescription = if (copied) "账户 ID 已复制" else "复制账户 ID" }) {
-        Text(if (copied) "已复制" else "复制 ID", style = MaterialTheme.typography.labelMedium, color = Brand.Cyan)
+    }.testTag("mine-copy-id").semantics { contentDescription = if (copied) "账户 ID 已复制" else "复制账户 ID" },
+        contentAlignment = Alignment.Center) {
+        Box(Modifier.size(32.dp).clip(shape).background(rim.copy(alpha = .10f))
+            .border(1.dp, rim.copy(alpha = if (copied) .85f else .45f), shape), contentAlignment = Alignment.Center) {
+            if (copied) Canvas(Modifier.size(16.dp).testTag("mine-copy-id-done")) {
+                val w = size.width; val h = size.height; val stroke = 2.dp.toPx()
+                drawLine(rim, Offset(w * .12f, h * .54f), Offset(w * .40f, h * .80f), stroke, StrokeCap.Round)
+                drawLine(rim, Offset(w * .40f, h * .80f), Offset(w * .88f, h * .22f), stroke, StrokeCap.Round)
+            } else com.gccwebos.android.portal.ReferralGlyphIcon(com.gccwebos.android.portal.ReferralGlyph.Copy, rim,
+                Modifier.size(18.dp))
+        }
     }
 }
 
 /** Light "续费 ›" link that opens the existing 套餐 tab; it never starts a purchase. */
 @Composable
 internal fun MineRenewLink(enabled: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = GccSpacing.Small, vertical = 0.dp),
         modifier = Modifier.heightIn(min = 48.dp).testTag("mine-renew")) {
         Text("续费 ›", style = MaterialTheme.typography.labelLarge, color = if (enabled) Brand.Cyan else Brand.Muted)
     }
@@ -151,9 +155,9 @@ internal fun MineRenewLink(enabled: Boolean, onClick: () -> Unit) {
 internal fun MineGroupLabel(title: String, tag: String) {
     // A small dark glass plate keeps the label readable over the busy backdrop artwork (review M4).
     Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Brand.Text,
-        modifier = Modifier.padding(start = 2.dp, top = 2.dp).semantics { heading() }.testTag(tag)
-            .background(Brand.Background.copy(alpha = .78f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 4.dp))
+        modifier = Modifier.padding(start = GccSpacing.ExtraSmall, top = GccSpacing.ExtraSmall).semantics { heading() }.testTag(tag)
+            .background(Brand.Background.copy(alpha = .78f), GccShapes.medium)
+            .padding(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall))
 }
 
 /** 官方频道 row: Telegram paper plane + @handle for a Telegram URL, otherwise a neutral link row. */

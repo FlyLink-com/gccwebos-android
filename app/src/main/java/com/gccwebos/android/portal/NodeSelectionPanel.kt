@@ -1,11 +1,12 @@
 package com.gccwebos.android.portal
 
 import android.provider.Settings
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,7 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -41,9 +42,12 @@ import com.gccwebos.android.ConnectionControlState
 import com.gccwebos.android.core.ConnectionChoice
 import com.gccwebos.android.ConnectionPhase
 import com.gccwebos.android.R
+import com.gccwebos.android.design.BoltPulseSpec
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
 import com.gccwebos.android.design.NodeRegionIcon
+import com.gccwebos.android.design.boltPulseActive
+import com.gccwebos.android.design.boltStaticAlpha
 import com.gccwebos.android.design.nodeDisplayName
 import com.gccwebos.android.design.nodeRegion
 import com.gccwebos.android.usageMotionEnabled
@@ -393,15 +397,25 @@ internal fun NodesImportButton(onClick: () -> Unit, enabled: Boolean = true, mod
 
 @Composable
 private fun NodesLightningIcon(busy: Boolean, motionEnabled: Boolean, enabled: Boolean, size: androidx.compose.ui.unit.Dp) {
-    val spin = if (busy && motionEnabled) {
-        val transition = rememberInfiniteTransition(label = "nodes-latency-spin")
-        transition.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)),
-            label = "nodes-latency-spin-angle").value
-    } else 0f
+    val resumed = LocalLifecycleOwner.current.lifecycle.currentStateAsState().value.isAtLeast(Lifecycle.State.RESUMED)
+    // The bolt never rotates: while busy it pulses from dim to bright. Without motion it stays static and bright.
+    val pulse = boltPulseActive(busy, motionEnabled, resumed)
+    val alpha = if (pulse) {
+        val transition = rememberInfiniteTransition(label = "nodes-latency-pulse")
+        transition.animateFloat(
+            BoltPulseSpec.DimAlpha, BoltPulseSpec.BrightAlpha,
+            infiniteRepeatable(keyframes {
+                durationMillis = BoltPulseSpec.CycleMillis
+                BoltPulseSpec.DimAlpha at 0
+                BoltPulseSpec.BrightAlpha at BoltPulseSpec.RiseMillis using FastOutSlowInEasing
+                BoltPulseSpec.DimAlpha at BoltPulseSpec.CycleMillis using LinearEasing
+            }),
+            label = "nodes-latency-pulse-alpha").value
+    } else boltStaticAlpha(busy)
     Icon(
         painterResource(R.drawable.brand_lightning),
         contentDescription = "测试节点延迟",
-        modifier = Modifier.size(size).then(if (spin != 0f) Modifier.rotate(spin) else Modifier),
+        modifier = Modifier.size(size).graphicsLayer { this.alpha = alpha },
         tint = if (enabled || busy) Brand.Cyan else Brand.Muted,
     )
 }

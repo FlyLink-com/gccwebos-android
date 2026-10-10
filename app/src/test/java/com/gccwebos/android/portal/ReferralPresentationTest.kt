@@ -30,7 +30,7 @@ class ReferralPresentationTest {
         assertFalse((hero.title + hero.subtitle).contains("奖励"))
         val rules = ReferralPresentation.rules(ReferralProfile(true, null, null, 30))
         assertEquals(listOf("attribution"), rules.map { it.key })
-        assertEquals("30 天有效追踪", rules.first().title)
+        assertEquals("30 天内注册有效", rules.first().title)
         assertTrue(ReferralPresentation.rules(ReferralProfile(true, null, null, null)).isEmpty())
     }
 
@@ -38,7 +38,7 @@ class ReferralPresentationTest {
         val rules = ReferralPresentation.rules(ReferralProfile(true, null, policy(), 47))
         assertEquals(listOf("attribution", "confirmation", "usage"), rules.map { it.key })
         val byKey = rules.associateBy { it.key }
-        assertEquals("47 天有效追踪", byKey.getValue("attribution").title)
+        assertEquals("47 天内注册有效", byKey.getValue("attribution").title)
         assertTrue(byKey.getValue("attribution").body.contains("47 天内完成注册"))
         assertEquals("9 天确认期", byKey.getValue("confirmation").title)
         assertTrue(byKey.getValue("confirmation").body.contains("9 天后"))

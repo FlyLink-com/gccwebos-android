@@ -444,7 +444,7 @@ class BrandUiTest {
         capture("connect-font-200")
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-security").performScrollTo().performClick()
-        compose.onNodeWithTag("account-panel").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("account-security-state").performScrollTo().assertIsDisplayed()
         capture("profile-font-200")
         compose.onNodeWithTag("account-reset").performScrollTo().performClick()
         compose.onNodeWithTag("reset-cancel").assertIsDisplayed().performClick()

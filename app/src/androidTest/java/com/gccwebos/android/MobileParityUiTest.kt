@@ -542,10 +542,9 @@ class MobileParityUiTest {
         capture("server-empty-data-packs")
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-history").performScrollTo().performClick()
-        compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
-        compose.onNodeWithTag("history-read-title").assertTextEquals("暂无充值记录")
-        compose.onNodeWithTag("orders-loading").assertDoesNotExist()
-        compose.onNodeWithTag("history-error").assertDoesNotExist()
+        // 订单明细 is one flat 流水 (no 消费订单 / 充值记录 split).
+        compose.onNodeWithTag("wallet-topbar-title").assertTextEquals("订单明细")
+        compose.onNodeWithTag("orders-recharge").assertDoesNotExist()
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
         capture("server-empty-order-history")
         compose.onNodeWithTag("mine-back").performScrollTo().performClick()

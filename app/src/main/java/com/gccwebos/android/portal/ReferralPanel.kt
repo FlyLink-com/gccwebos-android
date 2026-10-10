@@ -77,38 +77,40 @@ internal fun ReferralPanel(account: AccountController, autoLoad: Boolean = true,
     Text("邀请返利", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
         modifier = Modifier.semantics { heading() }.testTag("referral-title"))
     TransientReadError(listOfNotNull(state.profileError, state.performanceError).distinct()
-        .takeIf { it.isNotEmpty() }?.let { "推荐信息暂不可用" }, Modifier.testTag("referral-read-error"))
+        .takeIf { it.isNotEmpty() }?.let { "邀请信息暂时无法获取，请稍后再试" }, Modifier.testTag("referral-read-error"))
 
     ReferralHero(policy)
 
     BrandCard(Modifier.testTag("referral-profile")) {
-        Text("我的专属邀请", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("我的分享链接", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.semantics { heading() }.testTag("referral-link-title"))
         when {
             // First profile read in flight: a placeholder for the link field and copy button.
             profile == null && state.busy && state.profileError == null ->
                 SkeletonCards(count = 2, cardHeight = 48.dp, spacing = 8.dp, shape = RoundedCornerShape(14.dp), lines = 0,
                     modifier = Modifier.testTag("referral-profile-skeleton"))
             profile == null -> Spacer(Modifier.height(8.dp))
-            !profile.eligible -> Text("当前账户暂不具备推荐资格", modifier = Modifier.testTag("referral-profile-status"))
+            !profile.eligible -> Text("当前账户暂时不能邀请好友", modifier = Modifier.testTag("referral-profile-status"))
             else -> {
                 if (state.profileError != null) SupportingText("未更新")
-                if (profile.attributionDays == null) SupportingText("推荐暂不可用",
+                if (profile.attributionDays == null) SupportingText("邀请功能暂时不可用",
                     Modifier.testTag("referral-distribution-unavailable"))
                 val url = profile.linkPath?.let { runCatching { ReferralJson.shareUrl(it) }.getOrNull() }
                 if (profile.linkPath != null) {
+                    SupportingText("这是你的专属链接，可以复制，也可以直接分享给好友。", Modifier.testTag("referral-link-hint"))
                     url?.let { LinkField(ReferralPresentation.maskedLink(it)) }
-                    BrandButton(if (state.copied) "已复制推荐链接" else "复制推荐链接", state::copyLink,
+                    BrandButton(if (state.copied) "已复制链接" else "复制我的链接", state::copyLink,
                         enabled = state.canCopy, modifier = Modifier.testTag("referral-copy"))
-                    Row(Modifier.fillMaxWidth().testTag("referral-share-row"), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(Modifier.fillMaxWidth().testTag("referral-share-row"), horizontalArrangement = Arrangement.spacedBy(GccSpacing.Small)) {
                         val enabled = state.canCopy
-                        ShareAction(if (state.copiedMessage) "已复制" else "复制文案", ReferralGlyph.Text, enabled,
+                        ShareAction(if (state.copiedMessage) "已复制" else "复制邀请语", ReferralGlyph.Text, enabled,
                             "referral-share-text", state::copyShareMessage)
                         ShareAction("Telegram", ReferralGlyph.Telegram, enabled, "referral-share-telegram") { openShare(ReferralShareTarget.Telegram) }
                         ShareAction("X", ReferralGlyph.X, enabled, "referral-share-x") { openShare(ReferralShareTarget.X) }
                         ShareAction("更多", ReferralGlyph.Share, enabled, "referral-share-system") { openShare(ReferralShareTarget.System) }
                     }
                     shareError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("referral-share-error")) }
-                } else BrandButton("生成推荐链接", state::generateLink, enabled = state.canGenerate,
+                } else BrandButton("生成我的分享链接", state::generateLink, enabled = state.canGenerate,
                     modifier = Modifier.testTag("referral-generate"))
             }
         }
@@ -117,7 +119,7 @@ internal fun ReferralPanel(account: AccountController, autoLoad: Boolean = true,
     }
 
     BrandCard(Modifier.testTag("referral-performance")) {
-        Text("推广收益看板", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text("邀请成果", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         state.performance?.let { p ->
             if (state.performanceError != null) SupportingText("未更新")
             val stats = ReferralPresentation.stats(p)
@@ -182,15 +184,15 @@ private fun LinkField(masked: String) {
         .padding(horizontal = 12.dp, vertical = 10.dp)
         .semantics(mergeDescendants = true) { contentDescription = "专属链接 $masked" }.testTag("referral-link"),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ReferralGlyphIcon(ReferralGlyph.Copy, Brand.Cyan, Modifier.size(16.dp))
+        ReferralGlyphIcon(ReferralGlyph.Share, Brand.Cyan, Modifier.size(16.dp))
         Text(masked, color = Brand.Text, maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f).testTag("referral-link-masked"))
     }
 }
 
 @Composable
-private fun ShareAction(label: String, glyph: ReferralGlyph, enabled: Boolean, tag: String, onClick: () -> Unit) {
-    Column(Modifier.widthIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
+private fun RowScope.ShareAction(label: String, glyph: ReferralGlyph, enabled: Boolean, tag: String, onClick: () -> Unit) {
+    Column(Modifier.weight(1f).widthIn(min = 56.dp).clip(RoundedCornerShape(12.dp))
         .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
         .alpha(if (enabled) 1f else .45f).padding(vertical = 4.dp).testTag(tag),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {

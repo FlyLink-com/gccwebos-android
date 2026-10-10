@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,6 +59,10 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Surface
+import com.gccwebos.android.R
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -243,7 +248,7 @@ internal class AccountController(private val repository: PortalRepository, priva
             }
         }
     }
-    fun readSecurity() = run { security = null; security = repository.security() }
+    fun readSecurity() = run { security = repository.security() }
     fun refreshSubscription() {
         if (busy || manualImport.busy || restoring || foregroundCheckPending || clearing) return
         val recoveryPending = try { authenticated && repository.hasPendingLegacyRecovery() }
@@ -664,13 +669,18 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅并重置登录") }
         }
     }
-    if (confirmReset) AlertDialog(onDismissRequest = { confirmReset = false },
+    if (confirmReset) ClearLocalDialog(onConfirm = { confirmReset = false; state.clearLocal() }, onDismiss = { confirmReset = false })
+}
+
+@Composable
+private fun ClearLocalDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss,
         title = { Text("清除本地登录与订阅？") },
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
             Text("已领取的订阅删除后可能需要联系客服恢复。此操作仅清除本机材料，不会撤销服务器会话或凭据。")
         } },
-        confirmButton = { TextButton(onClick = { confirmReset = false; state.clearLocal() }, modifier = Modifier.testTag("reset-confirm")) { Text("确认清除") } },
-        dismissButton = { TextButton(onClick = { confirmReset = false }, modifier = Modifier.testTag("reset-cancel")) { Text("取消") } })
+        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("reset-confirm")) { Text("确认清除") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("reset-cancel")) { Text("取消") } })
 }
 
 internal const val OFFICIAL_REGISTRATION_URL = "https://portal.gccwebos.com/portal/register/"
@@ -857,15 +867,46 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
         }
     }
     if (!state.authenticated || state.restoring || state.foregroundCheckPending) return
-    BrandCard(Modifier.testTag("account-security-state")) {
-        Text("安全状态", style = MaterialTheme.typography.titleMedium)
-        val status = state.security
-        if (status == null) {
-            SupportingText("—")
+    // 账户与安全 has exactly two functions: 通行密钥 and 绑定身份验证器. No account-resource detail here.
+    val status = state.security
+    SectionCard(Modifier.testTag("account-security-state"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall),
+        verticalSpacing = 0.dp) {
+        if (status == null && state.busy) {
+            // First read in flight: the shell is already on screen with placeholders for both rows.
+            SkeletonCards(count = 2, cardHeight = 56.dp, spacing = GccSpacing.Small, shape = GccShapes.medium, lines = 0,
+                modifier = Modifier.padding(vertical = GccSpacing.Small).testTag("security-skeleton"))
         } else {
-            SupportingText("身份验证器：${if (status.authenticatorBound) "已绑定" else "未绑定"}")
-            SupportingText("通行密钥：${if (status.passkeyEnabled) "已启用" else "未启用"}")
-            SupportingText("安全设置：${if (status.setupRequired) "待完成" else "无需补充"}")
+            SecurityRow(R.drawable.brand_lock, "通行密钥", status?.let { if (it.passkeyEnabled) "已启用" else "未启用" },
+                on = status?.passkeyEnabled == true, tag = "security-passkey")
+            HorizontalDivider(color = Brand.Border.copy(alpha = .35f))
+            SecurityRow(R.drawable.brand_shield, "绑定身份验证器", status?.let { if (it.authenticatorBound) "已绑定" else "未绑定" },
+                on = status?.authenticatorBound == true, tag = "security-authenticator")
+        }
+    }
+    if (status == null && !state.busy) {
+        SupportingText("暂时无法读取安全状态。", Modifier.testTag("security-unavailable"))
+        TextButton(onClick = state::readSecurity, modifier = Modifier.heightIn(min = 48.dp).testTag("security-retry")) { Text("重新读取") }
+    }
+    // Kept (not a third feature): the only place a signed-in user can wipe the local login and subscription.
+    var confirmReset by remember { mutableStateOf(false) }
+    TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) {
+        Text("清除本地订阅与登录", style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
+    }
+    if (confirmReset) ClearLocalDialog(onConfirm = { confirmReset = false; state.clearLocal() }, onDismiss = { confirmReset = false })
+}
+
+/** One status line; [value] null means "not read yet" and shows a dash rather than a guess. */
+@Composable
+private fun SecurityRow(icon: Int, title: String, value: String?, on: Boolean, tag: String) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = GccSpacing.ExtraSmall).testTag(tag)
+        .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
+        androidx.compose.material3.Icon(painterResource(icon), null, tint = if (on) Brand.Cyan else Brand.Muted, modifier = Modifier.size(22.dp))
+        Text(title, style = MaterialTheme.typography.bodyLarge, color = Brand.Text, modifier = Modifier.weight(1f))
+        Surface(shape = GccShapes.pill, color = (if (on) Brand.Cyan else Brand.Muted).copy(alpha = .12f)) {
+            Text(value ?: "—", style = MaterialTheme.typography.labelMedium, color = if (on) Brand.Cyan else Brand.Muted,
+                modifier = Modifier.padding(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall).testTag("$tag-status"))
         }
     }
 }

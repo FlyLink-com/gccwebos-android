@@ -27,6 +27,7 @@ class ConfigurationLibraryEvidenceTest {
     private val forbiddenSource = object : SubscriptionSource {
         override suspend fun download(url: Secret): ByteArray { httpCalls.incrementAndGet(); throw AssertionError("no download") }
     }
+    private val profiles = MemoryLocalProfileStore()
     private val repository = PortalRepository(object : PortalTransport {
         override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
             httpCalls.incrementAndGet(); throw AssertionError("no portal access")
@@ -37,8 +38,8 @@ class ConfigurationLibraryEvidenceTest {
         override fun clear() = throw AssertionError("no delivery clear")
     }, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
         { Instant.parse("2026-10-05T00:00:00Z") }, subscription = forbiddenSource,
-        sessions = MemorySessionStore(), profiles = MemoryLocalProfileStore(), manualSources = store,
-        externalSubscription = forbiddenSource)
+        sessions = MemorySessionStore(), profiles = profiles, manualSources = store,
+        externalSubscription = forbiddenSource, nodeChoices = MemoryNodeChoiceStore(), nodeOverrides = MemoryNodeOverrideStore())
 
     private fun yaml(vararg names: String, base: Int) = buildString {
         append("proxies:\n")
@@ -89,7 +90,16 @@ class ConfigurationLibraryEvidenceTest {
         awaitIdle()
     }
 
+    /** A cached account subscription, synthetic: shows read-only account nodes without any sign-in or network. */
+    private fun seedAccountNodes() {
+        val bytes = yaml("账户 东京 01", "账户 洛杉矶 01", base = 70)
+        val source = Secret("https://sub.invalid/sub/a/evidence-fixture")
+        try { CachedSubscription(sessionBinding(source), bytes, Instant.parse("2026-12-01T00:00:00Z"), source).use(profiles::save) }
+        finally { bytes.fill(0) }
+    }
+
     @Test fun unifiedNodePageOnDevice() {
+        seedAccountNodes()
         compose.setContent {
             val scope = rememberCoroutineScope()
             account = remember { AccountController(repository, scope, sourceCommitFence = { action -> action() }) }
@@ -100,46 +110,71 @@ class ConfigurationLibraryEvidenceTest {
         }
         awaitIdle()
         compose.onNodeWithTag("nav-Lines").performClick()
-        awaitItems(0)
-        capture("01-node-page-empty-signed-out")
-        importConfig(yaml("东京 01", "东京 02", "新加坡 01", base = 10), ManualImportInputKind.Scan, 1)
-        importConfig(yaml("香港 A", "美国 洛杉矶", base = 40), ManualImportInputKind.Document, 2)
+        awaitItems(1)
+        capture("01-account-nodes-only-read-only")
+        importConfig(yaml("东京 01", "东京 02", "新加坡 01", base = 10), ManualImportInputKind.Scan, 2)
+        importConfig(yaml("香港 A", "美国 洛杉矶", base = 40), ManualImportInputKind.Document, 3)
         compose.onNodeWithTag("configuration-library").performScrollTo()
-        capture("02-two-sources-source-labels")
-        // Open the inactive source: its nodes are listed and directly tappable (one tap = choose this node).
-        compose.onNodeWithTag("configuration-toggle-0").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-node-0-1").performScrollTo().assertHasClickAction()
-        capture("03-inactive-source-expanded-nodes-tappable")
-        compose.onNodeWithTag("configuration-node-0-1").performClick()
+        capture("02-one-list-three-sources-with-source-labels")
+        // Account nodes carry no edit menu; imported nodes do.
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertExists()
+        compose.onNodeWithTag("node-menu-0-0").assertDoesNotExist()
+        compose.onNodeWithTag("node-menu-1-1").performScrollTo().assertExists()
+        capture("03-account-nodes-read-only-imported-nodes-have-menu")
+        // Filter chip narrows to one source.
+        compose.onNodeWithTag("unified-filter").performScrollTo()
+        compose.onNodeWithTag("unified-filter-1").performClick()
+        compose.onNodeWithTag("configuration-library").performScrollTo()
+        capture("04-filter-one-source")
+        compose.onNodeWithTag("unified-filter-all").performClick()
+        // One tap on a node of another (inactive) source: that source becomes active and exactly this node is selected.
+        compose.onNodeWithTag("configuration-node-1-1").performScrollTo().assertHasClickAction().performClick()
         compose.waitUntil(10_000) { idle() && account.configurationLibrary.snapshot.items.any { it.active && it.name == "配置 1" } }
         compose.runOnIdle {
             assertNull(account.configurationLibrary.error)
             assertNotNull("the tapped node must be the selected one", account.nodeSelection.snapshot.selected)
+            val snapshot = account.nodeSelection.snapshot
+            assertEquals("东京 02", snapshot.choices.single { it.selection === snapshot.selected }.name)
         }
-        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("配置 1")
         compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).performScrollTo()
-        capture("04-after-tapping-node-source-switched-node-selected")
-        // Configuration-level menu: rename / delete exist only for the whole imported configuration.
-        compose.onNodeWithTag("configuration-menu-1").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-rename-1").assertExists()
-        compose.onNodeWithTag("configuration-remove-1").assertExists()
-        captureScreen("05-imported-source-menu-rename-delete")
-        compose.onNodeWithTag("configuration-rename-1").performClick()
-        compose.onNodeWithTag("configuration-name-input").performTextClearance()
-        compose.onNodeWithTag("configuration-name-input").performTextInput("我的备用线路")
-        compose.waitUntil(5_000) { compose.onAllNodesWithTag("configuration-rename-1").fetchSemanticsNodes().isEmpty() }
-        capture("06-rename-dialog", dialog = true)
-        compose.onNodeWithTag("configuration-dialog-confirm").performClick()
+        capture("05-one-tap-selected-node-source-switched")
+        // Per-node menu on the (now active) imported source.
+        compose.onNodeWithTag("node-menu-active-2").performScrollTo().performClick()
+        compose.onNodeWithTag("node-rename-active-2").assertExists()
+        compose.onNodeWithTag("node-delete-active-2").assertExists()
+        captureScreen("06-per-node-menu-rename-delete")
+        compose.onNodeWithTag("node-rename-active-2").performClick()
+        compose.onNodeWithTag("node-name-input").performTextClearance()
+        compose.onNodeWithTag("node-name-input").performTextInput("新加坡 常用")
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("node-rename-active-2").fetchSemanticsNodes().isEmpty() }
+        capture("07-rename-node-dialog", dialog = true)
+        compose.onNodeWithTag("node-dialog-confirm").performClick()
         awaitIdle()
-        compose.waitUntil(10_000) { account.configurationLibrary.snapshot.items.any { it.name == "我的备用线路" } }
-        capture("07-after-rename")
-        compose.onNodeWithTag("configuration-menu-1").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-remove-1").performClick()
-        compose.waitUntil(5_000) { compose.onAllNodesWithTag("configuration-remove-1").fetchSemanticsNodes().isEmpty() }
-        capture("08-delete-confirm-dialog", dialog = true)
-        compose.onNodeWithTag("configuration-dialog-confirm").performClick()
-        awaitItems(1)
-        capture("09-after-delete")
+        compose.waitUntil(10_000) { account.nodeSelection.snapshot.choices.any { it.name == "新加坡 常用" } }
+        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).performScrollTo()
+        capture("08-after-node-rename-local-alias")
+        // Delete the selected node: confirm first, then it is gone and no node is selected.
+        compose.onNodeWithTag("node-menu-active-1").performScrollTo().performClick()
+        compose.onNodeWithTag("node-delete-active-1").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("node-delete-active-1").fetchSemanticsNodes().isEmpty() }
+        capture("09-delete-node-confirm-dialog", dialog = true)
+        compose.onNodeWithTag("node-dialog-confirm").performClick()
+        awaitIdle()
+        compose.waitUntil(10_000) { account.nodeSelection.snapshot.choices.none { !it.info && it.name == "东京 02" } }
+        compose.runOnIdle {
+            assertNull("deleting the selected node leaves nothing selected", account.nodeSelection.snapshot.selected)
+        }
+        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).performScrollTo()
+        capture("10-after-deleting-selected-node")
+        // Delete a node of another source from its row.
+        compose.onNodeWithTag("node-menu-2-0").performScrollTo().performClick()
+        compose.onNodeWithTag("node-delete-2-0").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("node-delete-2-0").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("node-dialog-confirm").performClick()
+        awaitIdle()
+        compose.waitUntil(10_000) { account.configurationLibrary.snapshot.items.last().nodes.none { !it.info && it.name == "香港 A" } }
+        compose.onNodeWithTag("configuration-library").performScrollTo()
+        capture("11-after-deleting-node-of-another-source")
         compose.runOnIdle { assertEquals(0, httpCalls.get()) }
     }
 }

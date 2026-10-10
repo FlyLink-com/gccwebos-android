@@ -1,5 +1,7 @@
 package com.gccwebos.android.portal
 
+import androidx.compose.ui.graphics.Color
+import com.gccwebos.android.design.Brand
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -21,19 +23,37 @@ class NodeLatencyPresentationTest {
         assertEquals("节点延迟：测试中", nodeLatencyContentDescription(p))
     }
 
-    @Test fun successTiersMatchThresholds() {
-        assertEquals(NodeLatencyTone.Good, nodeLatencyPresentation(NodeLatencyObservation.Success(45, 1)).tone)
-        assertEquals(NodeLatencyTone.Good, nodeLatencyPresentation(NodeLatencyObservation.Success(79, 1)).tone)
-        assertEquals(NodeLatencyTone.Fair, nodeLatencyPresentation(NodeLatencyObservation.Success(80, 1)).tone)
-        assertEquals(NodeLatencyTone.Fair, nodeLatencyPresentation(NodeLatencyObservation.Success(150, 1)).tone)
-        assertEquals(NodeLatencyTone.Poor, nodeLatencyPresentation(NodeLatencyObservation.Success(151, 1)).tone)
-        assertEquals("150 ms", nodeLatencyPresentation(NodeLatencyObservation.Success(150, 1)).label)
+    @Test fun successBoundariesAreGreenBlueOrangeRed() {
+        fun shown(ms: Long) = nodeLatencyPresentation(NodeLatencyObservation.Success(ms, 1))
+        assertEquals(NodeLatencyTone.Good, shown(149).tone)
+        assertEquals(NodeLatencyTone.Good, shown(150).tone)
+        assertEquals(NodeLatencyTone.Moderate, shown(151).tone)
+        assertEquals(NodeLatencyTone.Moderate, shown(199).tone)
+        assertEquals(NodeLatencyTone.Slow, shown(200).tone)
+        assertEquals(NodeLatencyTone.Slow, shown(299).tone)
+        assertEquals(NodeLatencyTone.Poor, shown(300).tone)
+        assertEquals("149 ms", shown(149).label)
+        assertEquals("150 ms", shown(150).label)
+        assertEquals("151 ms", shown(151).label)
+        assertEquals("199 ms", shown(199).label)
+        assertEquals("200 ms", shown(200).label)
+        assertEquals("299 ms", shown(299).label)
+        assertEquals("300 ms", shown(300).label)
+        assertEquals("节点延迟 150 毫秒", nodeLatencyContentDescription(shown(150)))
+        assertEquals("节点延迟 200 毫秒", nodeLatencyContentDescription(shown(200)))
+        assertEquals("节点延迟 300 毫秒", nodeLatencyContentDescription(shown(300)))
     }
 
-    @Test fun typicalHundredToTwoHundredMsNodesNoLongerAllShareOneTone() {
-        val tones = listOf(110L, 125L, 148L, 160L, 195L).map {
-            nodeLatencyPresentation(NodeLatencyObservation.Success(it, 1)).tone }.toSet()
-        assertEquals(setOf(NodeLatencyTone.Fair, NodeLatencyTone.Poor), tones)
+    @Test fun successBoundaryColorsUseSemanticConstants() {
+        assertEquals(Brand.Green, LatencyGoodColor)
+        assertEquals(Brand.Blue, LatencyModerateColor)
+        assertEquals(Color(0xFFFF9F43), LatencySlowColor)
+        assertEquals(Color(0xFFFF5D5D), LatencyPoor)
+        assertEquals(LatencyGoodColor, nodeLatencyToneColor(NodeLatencyTone.Good))
+        assertEquals(LatencyModerateColor, nodeLatencyToneColor(NodeLatencyTone.Moderate))
+        assertEquals(LatencySlowColor, nodeLatencyToneColor(NodeLatencyTone.Slow))
+        assertEquals(LatencyPoor, nodeLatencyToneColor(NodeLatencyTone.Poor))
+        assertEquals(Brand.Muted.copy(alpha = .75f), nodeLatencyToneColor(NodeLatencyTone.Neutral))
     }
 
     @Test fun unavailableWhileTunnelUpIsSkippedNotBroken() {
@@ -53,6 +73,8 @@ class NodeLatencyPresentationTest {
         val p = nodeLatencyPresentation(NodeLatencyObservation.NoReply)
         assertEquals("超时", p.label)
         assertEquals(NodeLatencyTone.Poor, p.tone)
+        assertEquals(LatencyPoor, nodeLatencyToneColor(p.tone))
+        assertEquals("节点延迟：超时", nodeLatencyContentDescription(p))
     }
 
     @Test fun unavailableWithoutMeasuringKeepsUnmeasurable() {

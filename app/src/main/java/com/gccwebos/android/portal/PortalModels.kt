@@ -96,9 +96,4 @@ class OriginPolicy(apiOrigin: String, subscriptionOrigins: Set<String>) {
 internal fun sessionBinding(token: Secret): String = java.security.MessageDigest.getInstance("SHA-256")
     .digest(token.value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-/** One-time TOTP enrollment from the server; the key is shown to its owner and never logged. */
-class TotpEnrollment(val enrollmentRef: String, val issuer: String, val manualKey: String, val otpauthUri: String) {
-    override fun toString() = "TotpEnrollment(ref=$enrollmentRef)"
-}
-
 data class AccountSecurity(val authenticatorBound: Boolean, val initialAccount: Boolean, val passkeyEnabled: Boolean, val passkeyExported: Boolean, val setupRequired: Boolean)

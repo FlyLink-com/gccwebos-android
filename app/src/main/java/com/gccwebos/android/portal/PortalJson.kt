@@ -28,22 +28,6 @@ internal object PortalJson {
         return AccountSecurity(value.get("authenticatorBound") as Boolean, value.get("initialAccount") as Boolean,
             value.get("passkeyEnabled") as Boolean, value.get("passkeyExported") as Boolean, value.get("setupRequired") as Boolean)
     }
-    fun totpEnrollment(body: String): TotpEnrollment {
-        val root = JSONObject(body); root.keysExactly("enrollment")
-        val value = root.getJSONObject("enrollment")
-        value.keysExactly("enrollmentRef", "issuer", "accountLabel", "manualKey", "otpauthUri", "expiresAt", "expiresInSeconds", "issuedAt", "safety")
-        val ref = value.text("enrollmentRef"); val key = value.text("manualKey"); val uri = value.text("otpauthUri")
-        require(Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}").matches(ref))
-        require(Regex("[A-Z2-7]{16,128}").matches(key))
-        require(uri.startsWith("otpauth://totp/") && uri.contains("secret=$key"))
-        return TotpEnrollment(ref, value.text("issuer"), key, uri)
-    }
-    /** The bind confirmation must say "bound"; anything else is not a success. */
-    fun totpBound(body: String) {
-        val root = JSONObject(body); root.keysExactly("binding")
-        val value = root.getJSONObject("binding")
-        require(value.get("status") == "bound" && value.get("method") == "totp")
-    }
     fun resource(body: String): Resource {
         val root = JSONObject(body); root.keysExactly("resource")
         val resource = root.getJSONObject("resource")

@@ -172,6 +172,21 @@ class PortalRepository(private val transport: PortalTransport, private val store
         expectCurrent(response, setOf(200), epoch); checkGeneration(epoch); activeSession()
         PortalJson.security(response.body)
     } }
+    /** Starts a 5-minute TOTP enrollment. Nothing is bound until [confirmTotp] succeeds. */
+    suspend fun startTotp(): TotpEnrollment = mutex.withLock { guarded {
+        val epoch = generation.get(); val active = activeSession()
+        val response = transport.request("/api/portal/security/totp/enrollment", "{}", active.token)
+        expectCurrent(response, setOf(201), epoch); checkGeneration(epoch); activeSession()
+        PortalJson.totpEnrollment(response.body)
+    } }
+    suspend fun confirmTotp(enrollmentRef: String, code: String) = mutex.withLock { guarded {
+        require(Regex("\\d{6}").matches(code))
+        val epoch = generation.get(); val active = activeSession()
+        val response = transport.request("/api/portal/security/totp/enrollment/confirm",
+            JSONObject().put("enrollmentRef", enrollmentRef).put("code", code).toString(), active.token)
+        expectCurrent(response, setOf(200), epoch); checkGeneration(epoch); activeSession()
+        PortalJson.totpBound(response.body)
+    } }
     suspend fun refresh(): Resource = mutex.withLock { guarded { refreshLocked() } }
     private suspend fun refreshLocked(epoch: Long = generation.get()): Resource = refreshOverviewLocked(epoch).resource
     /** Existing import refresh semantics, now carrying the identity of that exact read. */

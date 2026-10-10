@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.SystemClock
 import com.gccwebos.android.BuildConfig
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -209,7 +211,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         if (busy || manualImport.busy) return
         clearAccountUsage()
         expiryTask?.cancel()
-        authenticated = false; security = null; resource = null; nodes = emptyList(); importStatus = null; importRejection = null
+        authenticated = false; security = null; totpSetup = null; totpCode = ""; resource = null; nodes = emptyList(); importStatus = null; importRejection = null
         restoring = true; restorationPending = true
         run {
             try {
@@ -231,7 +233,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         if (busy || manualImport.busy || factorReference != null || (authenticated && !force)) return
         accountUsage.suspendForVerification()
         val checkOperation = operation + 1
-        expiryTask?.cancel(); authenticated = false; security = null
+        expiryTask?.cancel(); authenticated = false; security = null; totpSetup = null; totpCode = ""
         restoring = true; restorationPending = true
         run {
             try {
@@ -249,6 +251,46 @@ internal class AccountController(private val repository: PortalRepository, priva
         }
     }
     fun readSecurity() = run { security = repository.security() }
+
+    /** 绑定身份验证器: the enrollment secret lives only here, only while the setup card is open. */
+    var totpSetup by mutableStateOf<TotpEnrollment?>(null)
+        private set
+    var totpCode by mutableStateOf("")
+    var totpError by mutableStateOf<String?>(null)
+        private set
+    fun startTotpSetup() {
+        if (security?.authenticatorBound != false) return
+        totpCode = ""; totpError = null
+        run {
+            try { totpSetup = repository.startTotp() }
+            catch (failure: PortalFailure) {
+                if (failure.reason == PortalFailure.Reason.SESSION_EXPIRED) throw failure
+                totpError = "暂时无法开始绑定，请稍后重试"
+            }
+        }
+    }
+    fun confirmTotpSetup() {
+        val setup = totpSetup ?: return
+        val entered = totpCode.trim()
+        if (!Regex("\\d{6}").matches(entered)) { totpError = "请输入身份验证器中的 6 位数字"; return }
+        totpError = null
+        run {
+            try {
+                repository.confirmTotp(setup.enrollmentRef, entered)
+                totpSetup = null; totpCode = ""
+                security = repository.security()
+            } catch (failure: PortalFailure) {
+                when (failure.reason) {
+                    PortalFailure.Reason.SESSION_EXPIRED -> throw failure
+                    // The server answers 400 for a wrong or stale code and for an expired 5-minute enrollment.
+                    PortalFailure.Reason.LOGIN_FAILED -> { totpCode = ""; totpError = "验证码不正确或已过期，请查看身份验证器里的最新验证码；超过 5 分钟请重新开始" }
+                    PortalFailure.Reason.RATE_LIMITED -> totpError = "尝试过于频繁，请稍后再试"
+                    else -> totpError = "暂时无法完成绑定，请稍后重试"
+                }
+            }
+        }
+    }
+    fun cancelTotpSetup() { totpSetup = null; totpCode = ""; totpError = null }
     fun refreshSubscription() {
         if (busy || manualImport.busy || restoring || foregroundCheckPending || clearing) return
         val recoveryPending = try { authenticated && repository.hasPendingLegacyRecovery() }
@@ -404,7 +446,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                 account = displayEmail.orEmpty()
                 referralGenerationGuard = ReferralGenerationGuard()
                 commerceSessionIdentity = null
-                authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
+                authenticated = false; security = null; totpSetup = null; totpCode = ""; totpError = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
                 emailHint = null; secondFactorEmail = null
                 restoring = false; restorationPending = false; foregroundCheckPending = false
                 error = "登录已到期，请重新登录"
@@ -468,7 +510,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
-    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; totpSetup = null; totpCode = ""; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource(onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
         val expectedUsage = usageAuthentication
@@ -526,7 +568,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
         referralGenerationGuard = ReferralGenerationGuard()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
-        authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
+        authenticated = false; security = null; totpSetup = null; totpCode = ""; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -560,7 +602,7 @@ internal class AccountController(private val repository: PortalRepository, priva
                     emailHint = null; secondFactorEmail = null
                 }
                 error = when(failure.reason) {
-                    PortalFailure.Reason.SESSION_EXPIRED -> { clearAccountUsage(); commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; "登录已到期，请重新登录" }
+                    PortalFailure.Reason.SESSION_EXPIRED -> { clearAccountUsage(); commerceSessionIdentity = null; nodeSelection.invalidate(); restorationPending = false; authenticated = false; security = null; totpSetup = null; totpCode = ""; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; "登录已到期，请重新登录" }
                     PortalFailure.Reason.LOGIN_FAILED -> { challenge = null; factorReference = null; "验证失败，请刷新题目后重试" }
                     PortalFailure.Reason.RECONCILIATION -> "资源正在对账，请稍后重试"
                     PortalFailure.Reason.RECOVERY_REQUIRED -> when (failure.recoveryCause) {
@@ -870,6 +912,8 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
     // 账户与安全 has exactly two functions: 通行密钥 and 绑定身份验证器. No account-resource detail here.
     val status = state.security
     var confirmReset by remember { mutableStateOf(false) }
+    val setup = state.totpSetup
+    if (setup != null) { TotpSetupCard(state, setup); return }
     SectionCard(Modifier.testTag("account-security-state"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall),
         verticalSpacing = 0.dp) {
         if (status == null && state.busy) {
@@ -881,7 +925,10 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
                 on = status?.passkeyEnabled == true, tag = "security-passkey")
             HorizontalDivider(color = Brand.Border.copy(alpha = .35f))
             SecurityRow(R.drawable.brand_shield, "绑定身份验证器", status?.let { if (it.authenticatorBound) "已绑定" else "未绑定" },
-                on = status?.authenticatorBound == true, tag = "security-authenticator")
+                on = status?.authenticatorBound == true, tag = "security-authenticator",
+                // Bind only when the server says "not bound": a second enrollment would add a second credential.
+                onClick = if (status?.authenticatorBound == false && !state.busy) state::startTotpSetup else null,
+                actionLabel = "开始绑定身份验证器")
         }
         // Kept (not a third feature): the only place a signed-in user can wipe the local login and subscription.
         HorizontalDivider(color = Brand.Border.copy(alpha = .35f))
@@ -899,8 +946,11 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
 
 /** One status line; [value] null means "not read yet" and shows a dash rather than a guess. */
 @Composable
-private fun SecurityRow(icon: Int, title: String, value: String?, on: Boolean, tag: String) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = GccSpacing.ExtraSmall).testTag(tag)
+private fun SecurityRow(icon: Int, title: String, value: String?, on: Boolean, tag: String,
+                        onClick: (() -> Unit)? = null, actionLabel: String? = null) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp)
+        .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = actionLabel, onClick = onClick) else Modifier)
+        .padding(horizontal = GccSpacing.ExtraSmall).testTag(tag)
         .semantics(mergeDescendants = true) {},
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         androidx.compose.material3.Icon(painterResource(icon), null, tint = if (on) Brand.Cyan else Brand.Muted, modifier = Modifier.size(22.dp))
@@ -909,6 +959,8 @@ private fun SecurityRow(icon: Int, title: String, value: String?, on: Boolean, t
             Text(value ?: "—", style = MaterialTheme.typography.labelMedium, color = if (on) Brand.Cyan else Brand.Muted,
                 modifier = Modifier.padding(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall).testTag("$tag-status"))
         }
+        if (onClick != null) Text("去绑定 ›", style = MaterialTheme.typography.labelMedium, color = Brand.Cyan,
+            modifier = Modifier.testTag("$tag-action"))
     }
 }
 

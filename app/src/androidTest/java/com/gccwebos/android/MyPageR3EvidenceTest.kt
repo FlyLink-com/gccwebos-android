@@ -49,6 +49,12 @@ class MyPageR3EvidenceTest {
     private val expiry = Instant.parse("2099-09-30T00:00:00Z")
     private var seedLocalChoices: (() -> Unit)? = null
 
+    private val totpConfirms = AtomicInteger()
+    @Volatile private var totpBound = false
+    private val totpEnrollment = """{"enrollment":{"enrollmentRef":"totp_enroll_s1","issuer":"GlobalCircle","accountLabel":"synthetic",
+        "manualKey":"JBSWY3DPEHPK3PXP","otpauthUri":"otpauth://totp/GlobalCircle:synthetic?secret=JBSWY3DPEHPK3PXP&issuer=GlobalCircle",
+        "expiresAt":"2099-01-01T00:05:00.000Z","expiresInSeconds":300,"issuedAt":"2099-01-01T00:00:00.000Z",
+        "safety":{"noAdminApi":true,"noPublicAdmin":true,"noDbMutationBeforeConfirm":true}}}"""
     private fun forbidden(): Nothing {
         forbiddenActions.incrementAndGet()
         throw AssertionError("Preview fixture forbids network, external actions and persistent writes")
@@ -90,6 +96,16 @@ class MyPageR3EvidenceTest {
         assertEquals(30L, (parsed as Resource.Available).durationDays)
         val transport = object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                // Synthetic TOTP enrollment only (the public RFC example key); nothing here touches a real account.
+                if (path == "/api/portal/security/totp/enrollment") return WireResponse(201, totpEnrollment)
+                if (path == "/api/portal/security/totp/enrollment/confirm") {
+                    totpConfirms.incrementAndGet()
+                    return if (org.json.JSONObject(requireNotNull(body)).getString("code") == "123456")
+                        WireResponse(200, """{"binding":{"status":"bound","method":"totp","boundAt":"2026-09-30T00:01:00.000Z"}}""")
+                    else WireResponse(400, """{"error":"validation_error"}""")
+                }
+                if (path == "/api/portal/security/current") return WireResponse(200,
+                    """{"security":{"authenticatorBound":${totpConfirms.get() > 0 && totpBound},"initialAccount":false,"passkeyEnabled":false,"passkeyExported":false,"setupRequired":false,"safety":{"noAdminApi":true,"noPublicAdmin":true,"noRawSecretReturned":true}}}""")
                 if (path != "/api/portal/resources/current/overview") forbidden()
                 assertNull(body)
                 assertEquals(token.value, requireNotNull(session).value)
@@ -284,6 +300,36 @@ class MyPageR3EvidenceTest {
         compose.onNodeWithTag("security-authenticator-status", useUnmergedTree = true).assertTextEquals("已绑定")
         capture("05-account-security-two-functions")
         assertNoActions()
+    }
+
+    @Test fun authenticatorBindingFlow() {
+        launch(390)
+        open("Profile")
+        compose.runOnIdle { account.security = AccountSecurity(authenticatorBound = false, initialAccount = false,
+            passkeyEnabled = false, passkeyExported = false, setupRequired = false) }
+        compose.onNodeWithTag("mine-security").performScrollTo().performClick()
+        compose.onNodeWithTag("security-authenticator-status", useUnmergedTree = true).assertTextEquals("未绑定")
+        compose.onNodeWithTag("security-authenticator-action", useUnmergedTree = true).assertExists()
+        capture("08-security-authenticator-unbound")
+        compose.onNodeWithTag("security-authenticator").performClick()
+        compose.waitUntil(5_000) { account.totpSetup != null }
+        compose.onNodeWithTag("totp-setup").assertExists()
+        compose.onNodeWithTag("totp-qr").assertExists()
+        compose.onNodeWithTag("totp-manual-key", useUnmergedTree = true).assertTextEquals("JBSW Y3DP EHPK 3PXP")
+        compose.onNodeWithTag("totp-setup-confirm").assertIsNotEnabled()
+        capture("09-authenticator-setup-secret-and-qr")
+        compose.onNodeWithTag("totp-setup-code").performTextInput("000000")
+        compose.onNodeWithTag("totp-setup-confirm").performClick()
+        compose.waitUntil(5_000) { account.totpError != null }
+        compose.onNodeWithTag("totp-setup-error").assertExists()
+        capture("10-authenticator-wrong-code")
+        compose.onNodeWithTag("totp-setup-code").performTextInput("123456")
+        totpBound = true
+        compose.onNodeWithTag("totp-setup-confirm").performClick()
+        compose.waitUntil(5_000) { account.totpSetup == null && account.security?.authenticatorBound == true }
+        compose.onNodeWithTag("security-authenticator-status", useUnmergedTree = true).assertTextEquals("已绑定")
+        compose.onNodeWithTag("security-authenticator-action", useUnmergedTree = true).assertDoesNotExist()
+        capture("11-authenticator-bound")
     }
 
     @Test fun shareLinkPageAfterRound3() {

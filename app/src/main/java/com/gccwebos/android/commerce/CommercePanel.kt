@@ -729,8 +729,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         // Signed in: only 通行密钥 and 绑定身份验证器 (no account-resource detail). Otherwise the login form.
         if (!account.authenticated) com.gccwebos.android.portal.AccountPanel(account, compactLogin = true)
         else {
-            Text("账户与安全", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
-                modifier = Modifier.semantics { heading() }.testTag("security-title"))
+            MineGroupLabel("账户与安全", "security-title")
             com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad, refreshRequest)
         }
     } else if (view == "referral") {

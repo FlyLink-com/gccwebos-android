@@ -869,6 +869,7 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
     if (!state.authenticated || state.restoring || state.foregroundCheckPending) return
     // 账户与安全 has exactly two functions: 通行密钥 and 绑定身份验证器. No account-resource detail here.
     val status = state.security
+    var confirmReset by remember { mutableStateOf(false) }
     SectionCard(Modifier.testTag("account-security-state"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall),
         verticalSpacing = 0.dp) {
         if (status == null && state.busy) {
@@ -882,16 +883,16 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
             SecurityRow(R.drawable.brand_shield, "绑定身份验证器", status?.let { if (it.authenticatorBound) "已绑定" else "未绑定" },
                 on = status?.authenticatorBound == true, tag = "security-authenticator")
         }
+        // Kept (not a third feature): the only place a signed-in user can wipe the local login and subscription.
+        HorizontalDivider(color = Brand.Border.copy(alpha = .35f))
+        TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) {
+            Text("清除本地订阅与登录", style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
+        }
     }
     if (status == null && !state.busy) {
         SupportingText("暂时无法读取安全状态。", Modifier.testTag("security-unavailable"))
         TextButton(onClick = state::readSecurity, modifier = Modifier.heightIn(min = 48.dp).testTag("security-retry")) { Text("重新读取") }
-    }
-    // Kept (not a third feature): the only place a signed-in user can wipe the local login and subscription.
-    var confirmReset by remember { mutableStateOf(false) }
-    TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) {
-        Text("清除本地订阅与登录", style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
     }
     if (confirmReset) ClearLocalDialog(onConfirm = { confirmReset = false; state.clearLocal() }, onDismiss = { confirmReset = false })
 }

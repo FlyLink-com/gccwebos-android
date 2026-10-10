@@ -7,7 +7,10 @@ package com.gccwebos.android.portal
 
 internal enum class NodeLatencyTone { Neutral, Good, Fair, Poor }
 
-/** Label + severity for a single node latency cell. [measuring] drives a spinner in the UI. */
+/**
+ * Label + severity for a single node latency cell. [measuring] keeps the spoken "测试中" state.
+ * Rows draw the label as static text; the page header owns the only progress indicator.
+ */
 internal data class NodeLatencyPresentation(
     val label: String,
     val tone: NodeLatencyTone,
@@ -22,7 +25,8 @@ internal const val LatencyFairUpToMs = 150L
  * Maps an observation (and whether a batch is currently running for an empty cell) to UI copy.
  * Thresholds: &lt;80 ms good (green), 80–150 ms fair (amber), &gt;150 ms or timeout poor (red).
  * Untested is "---". While the tunnel is up the node probes cannot run, so a failed read is shown
- * as a dash (skipped), not as a broken measurement. [measuring] drives a spinner.
+ * as a dash (skipped), not as a broken measurement. [measuring] keeps the same static dash and
+ * only changes the spoken description; it does not draw a per-row spinner.
  */
 internal fun nodeLatencyPresentation(
     observation: NodeLatencyObservation?,
@@ -39,13 +43,11 @@ internal fun nodeLatencyPresentation(
     }
     NodeLatencyObservation.NoReply -> NodeLatencyPresentation("超时", NodeLatencyTone.Poor)
     NodeLatencyObservation.Unavailable ->
-        if (measuring) NodeLatencyPresentation("", NodeLatencyTone.Neutral, measuring = true)
+        if (measuring) NodeLatencyPresentation("---", NodeLatencyTone.Neutral, measuring = true)
         else if (tunnelActive) NodeLatencyPresentation(LatencySkippedLabel, NodeLatencyTone.Neutral)
         else NodeLatencyPresentation("不可测", NodeLatencyTone.Neutral)
     NodeLatencyObservation.NetworkChanged -> NodeLatencyPresentation("网络变化", NodeLatencyTone.Neutral)
-    null ->
-        if (measuring) NodeLatencyPresentation("", NodeLatencyTone.Neutral, measuring = true)
-        else NodeLatencyPresentation("---", NodeLatencyTone.Neutral)
+    null -> NodeLatencyPresentation("---", NodeLatencyTone.Neutral, measuring = measuring)
 }
 
 /** A quiet dash per cell; the toolbar note ([LatencySkippedNote]) and the spoken description carry the reason. */

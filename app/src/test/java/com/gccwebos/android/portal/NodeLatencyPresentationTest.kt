@@ -14,10 +14,11 @@ class NodeLatencyPresentationTest {
         assertFalse(p.measuring)
     }
 
-    @Test fun measuringEmptyCellShowsSpinnerState() {
+    @Test fun measuringEmptyCellKeepsStaticDashAndTestingDescription() {
         val p = nodeLatencyPresentation(null, measuring = true)
         assertTrue(p.measuring)
-        assertEquals("", p.label)
+        assertEquals("---", p.label)
+        assertEquals("节点延迟：测试中", nodeLatencyContentDescription(p))
     }
 
     @Test fun successTiersMatchThresholds() {
@@ -39,9 +40,13 @@ class NodeLatencyPresentationTest {
         val p = nodeLatencyPresentation(NodeLatencyObservation.Unavailable, tunnelActive = true)
         assertEquals("—", p.label)
         assertEquals("节点延迟：已连接时无法测速", nodeLatencyContentDescription(p))
-        // A real result is never rewritten, and a running batch still shows the spinner.
+        // A real result is never rewritten. A running batch keeps the spoken testing state and a static dash.
         assertEquals("超时", nodeLatencyPresentation(NodeLatencyObservation.NoReply, tunnelActive = true).label)
-        assertTrue(nodeLatencyPresentation(NodeLatencyObservation.Unavailable, measuring = true, tunnelActive = true).measuring)
+        val measuringUnavailable = nodeLatencyPresentation(
+            NodeLatencyObservation.Unavailable, measuring = true, tunnelActive = true)
+        assertTrue(measuringUnavailable.measuring)
+        assertEquals("---", measuringUnavailable.label)
+        assertEquals("节点延迟：测试中", nodeLatencyContentDescription(measuringUnavailable))
     }
 
     @Test fun timeoutIsPoorCapsuleLabel() {

@@ -4,11 +4,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,11 +52,6 @@ internal fun NodeLatencyBadge(
         contentAlignment = Alignment.CenterEnd,
     ) {
         when {
-            presentation.measuring -> CircularProgressIndicator(
-                modifier = Modifier.size(14.dp),
-                color = Brand.Cyan,
-                strokeWidth = 1.6.dp,
-            )
             presentation.label == "超时" -> Surface(
                 color = LatencyPoor.copy(alpha = .18f),
                 contentColor = LatencyPoor,

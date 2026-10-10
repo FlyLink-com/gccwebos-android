@@ -22,11 +22,26 @@ class NodeLatencyPresentationTest {
 
     @Test fun successTiersMatchThresholds() {
         assertEquals(NodeLatencyTone.Good, nodeLatencyPresentation(NodeLatencyObservation.Success(45, 1)).tone)
-        assertEquals(NodeLatencyTone.Good, nodeLatencyPresentation(NodeLatencyObservation.Success(99, 1)).tone)
-        assertEquals(NodeLatencyTone.Fair, nodeLatencyPresentation(NodeLatencyObservation.Success(100, 1)).tone)
-        assertEquals(NodeLatencyTone.Fair, nodeLatencyPresentation(NodeLatencyObservation.Success(200, 1)).tone)
-        assertEquals(NodeLatencyTone.Poor, nodeLatencyPresentation(NodeLatencyObservation.Success(201, 1)).tone)
+        assertEquals(NodeLatencyTone.Good, nodeLatencyPresentation(NodeLatencyObservation.Success(79, 1)).tone)
+        assertEquals(NodeLatencyTone.Fair, nodeLatencyPresentation(NodeLatencyObservation.Success(80, 1)).tone)
+        assertEquals(NodeLatencyTone.Fair, nodeLatencyPresentation(NodeLatencyObservation.Success(150, 1)).tone)
+        assertEquals(NodeLatencyTone.Poor, nodeLatencyPresentation(NodeLatencyObservation.Success(151, 1)).tone)
         assertEquals("150 ms", nodeLatencyPresentation(NodeLatencyObservation.Success(150, 1)).label)
+    }
+
+    @Test fun typicalHundredToTwoHundredMsNodesNoLongerAllShareOneTone() {
+        val tones = listOf(110L, 125L, 148L, 160L, 195L).map {
+            nodeLatencyPresentation(NodeLatencyObservation.Success(it, 1)).tone }.toSet()
+        assertEquals(setOf(NodeLatencyTone.Fair, NodeLatencyTone.Poor), tones)
+    }
+
+    @Test fun unavailableWhileTunnelUpIsSkippedNotBroken() {
+        val p = nodeLatencyPresentation(NodeLatencyObservation.Unavailable, tunnelActive = true)
+        assertEquals("—", p.label)
+        assertEquals("节点延迟：已连接时无法测速", nodeLatencyContentDescription(p))
+        // A real result is never rewritten, and a running batch still shows the spinner.
+        assertEquals("超时", nodeLatencyPresentation(NodeLatencyObservation.NoReply, tunnelActive = true).label)
+        assertTrue(nodeLatencyPresentation(NodeLatencyObservation.Unavailable, measuring = true, tunnelActive = true).measuring)
     }
 
     @Test fun timeoutIsPoorCapsuleLabel() {
@@ -61,9 +76,25 @@ class NodeLatencyPresentationTest {
         )
         assertEquals("244.26 GB", parts.traffic)
         assertEquals("2026-10-12", parts.expiry)
-        assertEquals("kitty.fo", parts.website)
-        assertEquals("流量：244.26 GB | 到期：2026-10-12 | 官网：kitty.fo", formatNodeInfoBarLine(parts))
+        // N7: a third-party provider's site is never shown; traffic and expiry stay.
+        assertNull(parts.website)
+        assertEquals("流量：244.26 GB | 到期：2026-10-12", formatNodeInfoBarLine(parts))
         assertNull(formatNodeInfoBarLine(extractNodeInfoBar(listOf("🇺🇸 United States 01"))))
+    }
+
+    @Test fun infoBarShowsOnlyGccwebosOfficialSite() {
+        fun line(vararg site: String) = formatNodeInfoBarLine(extractNodeInfoBar(
+            listOf("剩余流量：1 GB", "套餐到期：2026-10-12") + site))
+        assertEquals("流量：1 GB | 到期：2026-10-12 | 官网：gccwebos.com", line("官网：gccwebos.com"))
+        assertEquals("流量：1 GB | 到期：2026-10-12 | 官网：https://www.gccwebos.com/x", line("🌐 网址：https://www.gccwebos.com/x"))
+        assertEquals("流量：1 GB | 到期：2026-10-12 | 官网：GCCWEBOS.COM:443", line("官网: GCCWEBOS.COM:443"))
+        val hidden = "流量：1 GB | 到期：2026-10-12"
+        for (bad in listOf("官网：kitty.fo", "官网：gccwebos.com.evil.tld", "官网：evilgccwebos.com",
+            "官网：https://evil.tld/gccwebos.com", "官网：https://gccwebos.com@evil.tld", "官网：evil.tld?u=gccwebos.com",
+            "官网：gccwebos.com evil.tld", "官网：ftp://gccwebos.com", "官网：gccwebos.cоm", "官网：未知"))
+            assertEquals(bad, hidden, line(bad))
+        // A later official notice still shows when an earlier third-party one is dropped.
+        assertEquals("流量：1 GB | 到期：2026-10-12 | 官网：gccwebos.com", line("官网：kitty.fo", "网址：gccwebos.com"))
     }
 
     @Test fun infoBarAcceptsColonVariantsAndIgnoresUnknownNotices() {

@@ -64,16 +64,45 @@ class ConnectedNodePresentationTest {
         val p = requireNotNull(connectedNodePresentation(connected, TunnelThroughput.Unknown, null))
         assertEquals("–", p.downText); assertEquals("–", p.upText)
         assertEquals("– ms", p.latencyText); assertFalse(p.latencyKnown)
-        assertEquals("下载速度 未知，上传速度 未知", p.throughputDescription)
+        assertTrue(p.trafficIdle)
+        assertEquals("等待流量", p.throughputDescription)
         assertEquals("– ms", connectedNodePresentation(connected, TunnelThroughput.Unknown,
             NodeLatencyObservation.Unavailable)!!.latencyText)
         assertEquals("超时", connectedNodePresentation(connected, TunnelThroughput.Unknown,
             NodeLatencyObservation.NoReply)!!.latencyText)
     }
 
+    @Test fun idleTunnelReadsWaitingForTrafficNotZeroSpeeds() {
+        assertTrue(connectedNodePresentation(connected, TunnelThroughput(0, 0), null)!!.trafficIdle)
+        assertTrue(connectedNodePresentation(connected, TunnelThroughput(null, 0), null)!!.trafficIdle)
+        val flowing = connectedNodePresentation(connected, TunnelThroughput(0, 2048), null)!!
+        assertFalse(flowing.trafficIdle)
+        assertEquals("下载速度 0 B/s，上传速度 2.0 KB/s", flowing.throughputDescription)
+    }
+
     @Test fun notConnectedOrNoLabelKeepsExistingCard() {
         for (phase in ConnectionPhase.entries.filter { it != ConnectionPhase.Connected })
             assertNull(connectedNodePresentation(connected.copy(phase = phase), TunnelThroughput.Unknown, null))
         assertNull(connectedNodePresentation(connected.copy(activeNode = null), TunnelThroughput.Unknown, null))
+    }
+}
+
+/** C1 hint gate (display only). */
+class ConnectionNeedsNodeChoiceTest {
+    private fun needs(action: ConnectionPowerAction = ConnectionPowerAction.Connect, pending: Boolean = false,
+        hasNode: Boolean = false, busy: Boolean = false, sync: Boolean = true,
+        status: com.gccwebos.android.portal.LocalSubscriptionStatus = com.gccwebos.android.portal.LocalSubscriptionStatus.READY,
+        choices: Boolean = true) = connectionNeedsNodeChoice(action, pending, hasNode, busy, sync, status, choices)
+
+    @Test fun readyListWithoutASelectionShowsTheAutoSelectHint() = assertTrue(needs())
+    @Test fun aSelectedNodeShowsNoHint() = assertFalse(needs(hasNode = true))
+    @Test fun otherActionsAndPendingCommandsAreUntouched() {
+        for (action in ConnectionPowerAction.entries.filter { it != ConnectionPowerAction.Connect }) assertFalse(needs(action = action))
+        assertFalse(needs(pending = true))
+    }
+    @Test fun unloadedBusyOrEmptyListsKeepTheExistingOneClickPath() {
+        assertFalse(needs(busy = true)); assertFalse(needs(sync = false)); assertFalse(needs(choices = false))
+        assertFalse(needs(status = com.gccwebos.android.portal.LocalSubscriptionStatus.MISSING))
+        assertFalse(needs(status = com.gccwebos.android.portal.LocalSubscriptionStatus.EXPIRED))
     }
 }

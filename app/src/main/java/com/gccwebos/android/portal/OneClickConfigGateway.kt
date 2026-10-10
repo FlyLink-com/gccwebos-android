@@ -26,6 +26,11 @@ class OneClickConfigGateway(private val manager: LocalSubscriptionManager,
         // refreshes or cancellation must cancel this intent, not grant it a replacement epoch.
         if (current.epoch != before.epoch + 1) throw CancellationException("Subscription selection changed")
         if (current.snapshot.status != LocalSubscriptionStatus.READY || !sameChoices(current.snapshot.choices, fresh.choices)) return fresh
+        // The discovery itself re-matched the user's remembered node (same epoch, no user action in between):
+        // that is the user's own choice, so use it instead of a random suggestion.
+        current.snapshot.selected?.let {
+            return manager.prepareAtEpoch(SelectionIntent.Selected(it), files, addressPreparer, current.epoch)
+        }
         val epoch = manager.selectNodeIfUnchanged(choice.selection, current)
             ?: throw CancellationException("Subscription selection changed")
         // Selection is UI intent only. The second fresh read still owns admission and can reject it.

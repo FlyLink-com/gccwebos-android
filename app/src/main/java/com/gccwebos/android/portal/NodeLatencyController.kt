@@ -49,6 +49,8 @@ internal class NodeLatencyController(
 
     private val readings = mutableStateMapOf<ConnectionSelection, Reading>()
     private val attempts = mutableMapOf<ConnectionSelection, Attempt>()
+    /** Newest successful round trip per node, kept past the visible TTL so a connected card can still show it. */
+    private val lastGood = mutableMapOf<ConnectionSelection, Pair<NodeProbeTarget, Long>>()
     private var capturedTargets: List<NodeProbeTarget>? = null
     // Shared across cancelled/replacement batches, so a slow cancellation cannot multiply sockets.
     private val permits = Semaphore(4)
@@ -76,6 +78,18 @@ internal class NodeLatencyController(
     }
 
     /**
+     * The newest successful measurement for [selection] while that node is still in the current registry,
+     * even after its visible window has passed or the tunnel came up (probes cannot run through it).
+     * Display-only; a real, previously measured value, never an estimate.
+     */
+    fun lastKnownSuccess(selection: ConnectionSelection?): NodeLatencyObservation.Success? {
+        if (selection == null || probe == null) return null
+        val entry = lastGood[selection] ?: return null
+        if (entry.first.selection !== selection) return null
+        return NodeLatencyObservation.Success(entry.second, 0L).takeIf { manager.isNodeProbeTargetRegistryCurrent(entry.first) }
+    }
+
+    /**
      * Monotonic elapsed millis of the newest still-visible reading, or null when nothing is on
      * screen. Display-only; does not start measurement or touch disk.
      */
@@ -85,6 +99,21 @@ internal class NodeLatencyController(
         val network = networkKey()
         return readings.values.mapNotNull { entry ->
             entry.measuredAt.takeIf { visible(entry, now, network) }
+        }.maxOrNull()
+    }
+
+    /**
+     * Like [lastMeasuredAtElapsed], but only counts readings that actually measured something
+     * (a round trip or a timeout). A batch of "unavailable" cells is not a test result.
+     */
+    fun lastResultAtElapsed(): Long? {
+        if (probe == null || !canRun()) return null
+        val now = elapsedMillis()
+        val network = networkKey()
+        return readings.values.mapNotNull { entry ->
+            entry.measuredAt.takeIf {
+                entry.observation is NodeLatencyObservation.Success || entry.observation == NodeLatencyObservation.NoReply
+            }?.takeIf { visible(entry, now, network) }
         }.maxOrNull()
     }
 
@@ -213,6 +242,7 @@ internal class NodeLatencyController(
         val completedAt = elapsedMillis()
         if (observation !is NodeLatencyObservation.Success)
             attempts[target.selection] = Attempt(completedAt, network, FailedCooldownMillis)
+        if (observation is NodeLatencyObservation.Success) lastGood[target.selection] = target to observation.milliseconds
         readings[target.selection] = Reading(target, observation, completedAt, network, account)
     }
 
@@ -239,6 +269,7 @@ internal class NodeLatencyController(
         val current = targets.mapTo(mutableSetOf()) { it.selection }
         readings.keys.toList().filterNot { it in current }.forEach(readings::remove)
         attempts.keys.toList().filterNot { it in current }.forEach(attempts::remove)
+        lastGood.keys.toList().filterNot { it in current }.forEach(lastGood::remove)
     }
 
     private fun refreshAccountOwner() {
@@ -248,7 +279,7 @@ internal class NodeLatencyController(
         task?.cancel(); task = null
         syncTask?.cancel(); syncTask = null
         busy = false
-        readings.clear(); attempts.clear(); capturedTargets = null
+        readings.clear(); attempts.clear(); lastGood.clear(); capturedTargets = null
         accountGeneration = account
     }
 

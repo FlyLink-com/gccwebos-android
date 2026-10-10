@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -26,6 +27,7 @@ import com.gccwebos.android.portal.ImportStatus
 import com.gccwebos.android.portal.LocalSubscriptionSnapshot
 import com.gccwebos.android.portal.LocalSubscriptionStatus
 import com.gccwebos.android.portal.NodeLatencyBadge
+import com.gccwebos.android.portal.NodeLatencyObservation
 import java.time.Instant
 import java.time.Duration
 import kotlinx.coroutines.Dispatchers
@@ -148,6 +150,15 @@ internal fun connectionOverviewPresentation(
     return ConnectionOverviewPresentation(status, title, connectionText, tone, countdown,
         action = action, powerLabel = powerLabel)
 }
+
+/**
+ * C1: a node list is loaded and ready, offers real choices, and the user has none selected, so the card
+ * explains what 一键连接 will do. Pure presentation input: it never issues or blocks a connection command.
+ */
+internal fun connectionNeedsNodeChoice(action: ConnectionPowerAction, commandPending: Boolean, hasNode: Boolean,
+    selectionBusy: Boolean, synchronized: Boolean, status: LocalSubscriptionStatus, hasRealChoices: Boolean): Boolean =
+    action == ConnectionPowerAction.Connect && !commandPending && !hasNode && !selectionBusy && synchronized &&
+        status == LocalSubscriptionStatus.READY && hasRealChoices
 
 /** The idle owner may offer preparation before a local capability exists. That alone
  * must not hide account guidance; live/pending commands always retain their own UI. */
@@ -299,7 +310,11 @@ internal fun ConnectionOverview(
         }
     }
     val connectedNode = connectedNodePresentation(control, throughput,
-        latencySelection?.takeIf { activeNode != null }?.let(account.nodeLatency::reading))
+        latencySelection?.takeIf { activeNode != null }?.let { selection ->
+            // Probes cannot run through the tunnel; fall back to the last real measurement for this node.
+            account.nodeLatency.reading(selection).takeIf { it is NodeLatencyObservation.Success }
+                ?: account.nodeLatency.lastKnownSuccess(selection) ?: account.nodeLatency.reading(selection)
+        })
     // A retained name is display-only while the selection controller reads. Its old opaque
     // identity never reaches Ping or connection admission through this fallback.
     val displayedNode = selectedNode ?: nodeSnapshot.choices.firstOrNull { it.selection === nodeSnapshot.selected }?.takeIf {
@@ -384,15 +399,33 @@ internal fun ConnectionOverview(
                 })
     }
     val connected = control.phase == ConnectionPhase.Connected
+    // C1: a loaded list with nothing selected (first run, or the remembered node is gone). "一键连接" keeps its
+    // designed behaviour (use the remembered node, else pick one for the user); the card now says so instead of
+    // showing a bare "未选择". Display only: the connect command and its admission are untouched.
+    val needsNodeChoice = connectionNeedsNodeChoice(local.action, control.commandPending || acceptedCommand,
+        selectedNode != null || displayedNode != null, account.nodeSelection.busy,
+        synchronizedNodeGeneration == account.authSessionGeneration, nodeSnapshot.status,
+        nodeSnapshot.choices.any { !it.info })
+    val nodeChoiceHint = when {
+        nodeSnapshot.selectionLost && needsNodeChoice -> "请重新选择节点，或直接一键连接自动选择"
+        needsNodeChoice -> "未选节点，一键连接将自动选择"
+        else -> null
+    }
     // Zones: (1) the page's light brand header, (2) Hero: state + node + power, (3) plan/usage, (4) multi-platform link.
-    Column(Modifier.fillMaxWidth().padding(bottom = homeBottomSpacer()).testTag("connection-overview"),
-        verticalArrangement = Arrangement.spacedBy(HomeSpacing.CardGap)) {
+    // C11: with the usage card hidden the page is only the hero and the secondary banner, which hugged the top and left
+    // the lower half bare. Give the page a floor height and centre the pair in it (no new content, no new numbers).
+    val usageHidden = connectionUsageCardHidden(account.authenticated, manualSource, subscriptionUsage != null, snapshot.status)
+    val pageFloor = if (usageHidden) (LocalConfiguration.current.screenHeightDp * ConnectionBalancedPageFraction).dp else 0.dp
+    Column(Modifier.fillMaxWidth().heightIn(min = pageFloor).padding(bottom = homeBottomSpacer())
+        .testTag("connection-overview"),
+        verticalArrangement = if (usageHidden) Arrangement.spacedBy(HomeSpacing.CardGap, Alignment.CenterVertically)
+            else Arrangement.spacedBy(HomeSpacing.CardGap)) {
         HomeCard(Modifier.testTag("connection-hero"),
             // Static rim tint while connected; the only breathing glow stays on the usage bar (#36 rules).
             edge = if (connected) Brand.Green.copy(alpha = .38f) else HomeCardEdge) {
             ConnectionStatusRow(local)
             ConnectionNodeRow(account, connectedNode, displayedNode, selectedNode, snapshot.sourceKind,
-                connectionNodeEmphasized(control.phase), openNodes)
+                connectionNodeEmphasized(control.phase), nodeChoiceHint, openNodes)
             if (!controlMode || recoverBeforeConnect) ConnectionSetupButton(display, account.authenticated,
                 account::refreshAccountUsage, loading, usage.error, verifiedUsage && operable, setup.label,
                 setup.enabled || (localReadRecovery && operable), onSetupAction)
@@ -430,6 +463,10 @@ internal fun ConnectionOverview(
                     stateDescription = local.connectionText
                 })
         }
+        // C10: a local configuration that reports no verified usage (no Subscription-Userinfo) has nothing honest to put
+        // on this card; "暂未获取" next to the node page's info-row text read as a contradiction. Info-row text is
+        // third-party display text and is never promoted to a usage figure here.
+        if (!usageHidden) {
         HomeCard(Modifier.testTag("connection-account-surface")) {
             ConnectionUsageCard(display, authenticated = account.authenticated,
                 subscriptionUsage = subscriptionUsage,
@@ -448,6 +485,7 @@ internal fun ConnectionOverview(
                 activePlan = verifiedUsage && connectionPlanIsActive(display),
                 onRenew = openPlans.takeIf { subscriptionUsage == null &&
                     connectionRenewVisible(account.authenticated && verifiedUsage, manualSource, display.state) })
+        }
         }
         // Local configuration evidence has no account/resource binding and is never the account usage.
         if (snapshot.status != LocalSubscriptionStatus.MISSING) {
@@ -488,25 +526,27 @@ private fun ConnectedNodeSummary(node: ConnectedNodePresentation, kind: com.gccw
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         NodeRegionIcon(name = node.name, size = 39.dp, emphasized = true)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            // The protocol chip moved up next to the label so the node name gets the full width (two lines).
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("当前节点", color = Brand.Muted, fontSize = 10.sp, letterSpacing = .5.sp)
                 SourceKindLabel(kind)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(node.name, color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).testTag("connection-node-name"))
+                Spacer(Modifier.weight(1f))
                 if (node.protocol.isNotBlank()) Text(node.protocol, color = Brand.Cyan, fontSize = 9.sp, lineHeight = 12.sp,
                     maxLines = 1, modifier = Modifier.border(1.dp, Brand.Cyan.copy(alpha = .4f), RoundedCornerShape(6.dp))
                         .padding(horizontal = 5.dp, vertical = 1.dp).testTag("connection-node-protocol"))
             }
+            // The region badge already shows the flag; the duplicate flag emoji in the name is dropped here.
+            Text(nodeDisplayName(node.name), color = Brand.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("connection-node-name"))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("↓ ${node.downText}  ↑ ${node.upText}", color = Brand.Muted, fontSize = 11.sp, maxLines = 1,
-                    modifier = Modifier.testTag("connection-node-throughput")
+                // C9: the latency (with its "ms" unit) must never be the part that gets clipped: the speeds shrink first.
+                Text(if (node.trafficIdle) "等待流量" else "↓ ${node.downText}  ↑ ${node.upText}", color = Brand.Muted,
+                    fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false).testTag("connection-node-throughput")
                         .semantics { contentDescription = node.throughputDescription })
                 Text(" · ", color = Brand.Muted, fontSize = 11.sp)
                 Text(node.latencyText, color = if (node.latencyKnown) Brand.Green else Brand.Muted, fontSize = 11.sp,
-                    maxLines = 1, modifier = Modifier.testTag("connection-node-latency")
+                    maxLines = 1, softWrap = false, modifier = Modifier.testTag("connection-node-latency")
                         .semantics { contentDescription = node.latencyDescription })
             }
         }
@@ -569,6 +609,7 @@ private fun ConnectionNodeRow(
     selectedNode: com.gccwebos.android.core.ConnectionChoice?,
     sourceKind: com.gccwebos.android.portal.ManualSourceKind,
     emphasized: Boolean,
+    nodeChoiceHint: String?,
     openNodes: () -> Unit,
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -589,7 +630,7 @@ private fun ConnectionNodeRow(
                             SourceKindLabel(sourceKind)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(displayedNode?.name ?: "未选择",
+                            Text(displayedNode?.name?.let(::nodeDisplayName) ?: "未选择",
                                 color = if (emphasized) Brand.Text else Brand.Muted, fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false).testTag("connection-node-name"))
@@ -597,8 +638,18 @@ private fun ConnectionNodeRow(
                                 style = MaterialTheme.typography.bodySmall, maxLines = 1,
                                 modifier = Modifier.testTag("connection-node-protocol")) }
                         }
-                        NodeLatencyBadge(account.nodeLatency.reading(selectedNode?.selection),
-                            Modifier.testTag("connection-node-latency"))
+                        if (displayedNode != null) {
+                            val reading = account.nodeLatency.reading(selectedNode?.selection)
+                            // C12: an idle latency number needs a name; the badge keeps the threshold colour rule.
+                            Row(verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(connectionNodeLatencyLabel(reading), color = Brand.Muted, fontSize = 11.sp, maxLines = 1,
+                                    modifier = Modifier.testTag("connection-node-latency-label"))
+                                NodeLatencyBadge(reading, Modifier.testTag("connection-node-latency"))
+                            }
+                        }
+                        else nodeChoiceHint?.let { Text(it, color = Brand.Amber, fontSize = 11.sp, maxLines = 2,
+                            modifier = Modifier.testTag("connection-node-hint")) }
                     }
                 }
             }
@@ -612,3 +663,21 @@ private fun ConnectionNodeRow(
         }
     }
 }
+
+/**
+ * C10: hide the usage card when the page is driven by a local/imported configuration and that configuration reported
+ * no verified usage. A signed-in account source, the empty first-run page and any state with usage keep the card.
+ */
+internal fun connectionUsageCardHidden(
+    authenticated: Boolean,
+    manualSource: Boolean,
+    hasSubscriptionUsage: Boolean,
+    status: LocalSubscriptionStatus,
+): Boolean = (!authenticated || manualSource) && !hasSubscriptionUsage && status != LocalSubscriptionStatus.MISSING
+
+/** C11: share of the screen height the connect page is padded out to while its usage card is hidden. */
+internal const val ConnectionBalancedPageFraction = 0.66f
+
+/** C12: "上次测速" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
+internal fun connectionNodeLatencyLabel(observation: NodeLatencyObservation?): String =
+    if (observation is NodeLatencyObservation.Success) "上次测速" else "延迟"

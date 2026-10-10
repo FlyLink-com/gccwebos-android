@@ -63,7 +63,9 @@ data class NodeSelectionSnapshot(val status: LocalSubscriptionStatus,
     val choices: List<ConnectionChoice> = emptyList(), val selected: ConnectionSelection? = null,
     val validUntil: Instant? = null,
     val sourceKind: ManualSourceKind = ManualSourceKind.LegacyRemote,
-    val validity: LocalSourceValidity = LocalSourceValidity.RemoteExpiry(validUntil))
+    val validity: LocalSourceValidity = LocalSourceValidity.RemoteExpiry(validUntil),
+    /** A remembered choice for this configuration no longer matches any node: ask the user to choose again. */
+    val selectionLost: Boolean = false)
 /** One local observation for compare-and-set selection, never config or tunnel admission. */
 internal data class NodeSelectionAttempt(val snapshot: NodeSelectionSnapshot, val epoch: Long)
 /** Opaque UI operation fence; contains no configuration, URL or account material. */
@@ -92,6 +94,8 @@ class LocalSubscriptionAuthority {
     /** Memory-only node identities aligned with [choices]; digested, never logged or persisted. */
     internal var choiceKeys = emptyList<String>()
     internal var selected: ConnectionSelection? = null
+    /** Display-only: a remembered node choice was not found in the current registry. */
+    internal var selectionLost = false
     internal var selectionStatus: LocalSubscriptionStatus? = null
     internal var selectionUntil: Instant? = null
     internal var selectionRequiresRefresh = false
@@ -143,7 +147,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     private val authority: LocalSubscriptionAuthority = LocalSubscriptionAuthority.process,
     private val allowHostnamePreparation: Boolean = false,
     private val manualSources: ManualSourceStore? = null,
-    private val externalSource: SubscriptionSource? = null) {
+    private val externalSource: SubscriptionSource? = null,
+    /** Remembers the user's node choice across restarts. Null disables persistence. */
+    private val nodeChoices: NodeChoiceStore? = null) {
     private val mutex get() = authority.mutex
     private val lock get() = authority.lock
     private var revision: Long
@@ -290,6 +296,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     selectedEntryId = if (active) null else library.selectedEntryId, selectorRevision = nextRevision).use { next ->
                     if (active) { revision++; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR) }
                     writeLibrary(next)
+                    try { nodeChoices?.remove("entry:${handle.entryId}") } catch (_: Exception) { }
                     if (active) {
                         authority.selectionSourceKind = ManualSourceKind.None
                         authority.selectionSourceRevision = nextRevision
@@ -702,12 +709,13 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         val ready = status == LocalSubscriptionStatus.READY
         NodeSelectionSnapshot(status, if (ready) authority.choices.toList() else emptyList(),
             if (ready) authority.selected else null, until, authority.selectionSourceKind,
-            sourceValidity(authority.selectionSourceKind, until))
+            sourceValidity(authority.selectionSourceKind, until), ready && authority.selectionLost)
     }
     fun nodeSelectionSnapshot(): NodeSelectionSnapshot = synchronized(lock) {
         fun result(status: LocalSubscriptionStatus, choices: List<ConnectionChoice> = emptyList(),
             selected: ConnectionSelection? = null, until: Instant? = null) = NodeSelectionSnapshot(status, choices,
-            selected, until, authority.selectionSourceKind, sourceValidity(authority.selectionSourceKind, until))
+            selected, until, authority.selectionSourceKind, sourceValidity(authority.selectionSourceKind, until),
+            status == LocalSubscriptionStatus.READY && authority.selectionLost)
         val observed = authority.selectionStatus ?: state.status
         val until = if (authority.selectionStatus != null) authority.selectionUntil else state.validUntil
         val status = if (observed == LocalSubscriptionStatus.READY && until?.let { it <= now() } == true)
@@ -734,12 +742,51 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         }
         result(status, authority.choices.toList(), authority.selected, until)
     }
+    /** Where a remembered choice lives: the account source, or one library entry (stable id, not revision). */
+    private fun choiceScope(kind: ManualSourceKind, sourceRevision: String?): String? = try {
+        when (kind) {
+            ManualSourceKind.LegacyRemote -> "account"
+            ManualSourceKind.None -> null
+            else -> {
+                val store = manualSources as? LibraryManualSourceStore
+                if (store == null) "source:${kind.name}" else store.readLibrary()?.use { library ->
+                    library.entries.firstOrNull { it.sourceRevision == sourceRevision }?.id?.let { "entry:$it" }
+                }
+            }
+        }
+    } catch (_: Exception) { null }
+    private fun persistChoice(selection: ConnectionSelection) {
+        val store = nodeChoices ?: return
+        try {
+            val index = authority.choices.indexOfFirst { it.selection === selection && !it.info }
+            if (index < 0 || authority.choiceKeys.size != authority.choices.size) return
+            val scope = choiceScope(authority.selectionSourceKind, authority.selectionSourceRevision) ?: return
+            store.put(scope, NodeChoiceKey.persisted(authority.choiceKeys[index]))
+        } catch (_: Exception) { } // Remembering is best effort; the in-memory choice stands.
+    }
+    /** Re-match a remembered choice against the current registry. Never creates a handle for an unmatched node. */
+    private fun restoreChoice(kind: ManualSourceKind, sourceRevision: String?) {
+        authority.selectionLost = false
+        val store = nodeChoices ?: return
+        if (authority.selected != null) return
+        try {
+            val scope = choiceScope(kind, sourceRevision) ?: return
+            val wanted = store.read()[scope] ?: return
+            val keys = authority.choiceKeys
+            val matches = if (keys.size != authority.choices.size) emptyList() else
+                keys.indices.filter { !authority.choices[it].info && NodeChoiceKey.persisted(keys[it]) == wanted }
+            if (matches.size == 1) authority.selected = authority.choices[matches.single()].selection
+            else authority.selectionLost = true
+        } catch (_: Exception) { }
+    }
     /** Object identity from the current validated registry only. This does not perform HTTP or prepare. */
     fun selectNode(selection: ConnectionSelection): Boolean = synchronized(lock) {
         val current = nodeSelectionSnapshot()
         if (current.status != LocalSubscriptionStatus.READY || current.choices.none { it.selection === selection && !it.info }) return@synchronized false
         if (authority.selected !== selection) revision++
         authority.selected = selection
+        authority.selectionLost = false
+        persistChoice(selection)
         true
     }
     internal fun nodeSelectionAttempt(): NodeSelectionAttempt = synchronized(lock) {
@@ -752,6 +799,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         if (revision != expected.epoch || current.status != LocalSubscriptionStatus.READY || current.selected != null ||
             current.choices != expected.snapshot.choices || current.choices.none { it.selection === selection && !it.info }) return@synchronized null
         authority.selected = selection
+        authority.selectionLost = false
+        persistChoice(selection)
         ++revision
     }
     /** One cache read per batch; no refresh, selection, epoch change or connection admission. */
@@ -925,6 +974,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             authority.choiceKeys = keys ?: emptyList()
             val selected = authority.selected
             authority.selected = if (selected != null && authority.choices.any { it.selection === selected && !it.info }) selected else null
+            restoreChoice(kind, observedRevision)
         } else digest.fill(0)
         authority.selectionStatus = LocalSubscriptionStatus.READY
         authority.selectionSourceKind = kind
@@ -941,7 +991,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     private fun invalidateSelections(status: LocalSubscriptionStatus? = null, until: Instant? = null) {
         authority.selectionRevision?.fill(0); authority.selectionRevision = null
         authority.selectionBinding = null; authority.choices = emptyList(); authority.choiceKeys = emptyList()
-        authority.selected = null
+        authority.selected = null; authority.selectionLost = false
         authority.selectionStatus = status; authority.selectionUntil = until
         if (status != null) authority.selectionRequiresRefresh = true
     }
@@ -1055,6 +1105,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         var observer: (() -> Unit)? = null
         try { return synchronized(lock) {
             revision++; authority.clearVersion++; invalidateSelections()
+            try { nodeChoices?.clear() } catch (_: Exception) { } // A cleared app forgets the remembered node choice.
             observer = authority.clearObserver
             state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
                 sourceKind = if (manualSources == null) ManualSourceKind.LegacyRemote else ManualSourceKind.None)

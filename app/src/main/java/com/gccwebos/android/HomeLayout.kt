@@ -35,7 +35,7 @@ internal fun homeBottomSpacer(pageBottomPadding: Dp = HomeSpacing.PageBottomPadd
     if (pageBottomPadding >= required) 0.dp else required - pageBottomPadding
 
 /** Deep slate wash (~75%) over the shared glass material, so the backdrop keeps only its colour, not its detail. */
-internal val HomeCardFill = Color(0xFF0B1426).copy(alpha = .75f)
+internal val HomeCardFill = Color(0xFF0B1426).copy(alpha = .88f)
 internal val HomeCardEdge = Color.White.copy(alpha = .12f)
 
 /** One home zone: opaque-ish dark card, subtle 1 dp rim, consistent padding and gaps. Static (no blur, no motion). */

@@ -80,6 +80,14 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     showTools: Boolean = true,
     showAccountAction: Boolean = true,
     headerActions: @Composable RowScope.() -> Unit = {},
+    /** Unified list: where this source's nodes come from, shown on every row. */
+    sourceLabel: String? = null,
+    /** Unified list: per-node actions of this source (the rename/delete menu); null for a read-only source. */
+    rowTrailing: (@Composable (Int) -> Unit)? = null,
+    /** Unified list: nodes of the other saved sources, rendered in this same list below this source's rows. */
+    extraCount: Int = 0,
+    showSourceRows: Boolean = true,
+    extraRows: (@Composable ColumnScope.() -> Unit)? = null,
     openAccount: () -> Unit) {
     LaunchedEffect(nodes, hasCapability, accountBusy) { state.expireIfNeeded() }
     val latestAccountBusy by rememberUpdatedState(accountBusy)
@@ -174,7 +182,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("nodes-group-title"))
                             // Count stays "N 条" for existing UI contracts; it excludes info notices.
-                            Text("$proxyCount 条", fontSize = 10.sp, color = Brand.Muted,
+                            Text("${proxyCount + extraCount} 条", fontSize = 10.sp, color = Brand.Muted,
                                 modifier = Modifier.testTag("nodes-count"))
                         }
                     }
@@ -234,7 +242,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                     if (needle != null && shownProxy.isEmpty()) Text("没有匹配的节点", color = Brand.Muted, fontSize = 12.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp)
                             .testTag("nodes-search-empty"))
-                    shownProxy.forEachIndexed { visibleIndex, indexed ->
+                    if (showSourceRows) shownProxy.forEachIndexed { visibleIndex, indexed ->
                         val choice = indexed.value
                         if (visibleIndex > 0) HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
                         MeasuredProxyRow(
@@ -245,12 +253,14 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             canRetest = canMeasure,
                             tunnelActive = tunnelActive,
                             enabled = !state.busy && !accountBusy,
+                            sourceLabel = sourceLabel,
+                            trailing = rowTrailing?.let { menu -> { menu(indexed.index) } },
                             onClick = { if (state.select(choice.selection)) onSelected() },
                         )
                     }
                     val connectionActive = connectionControl.phase in setOf(
                         ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
-                    if (readOnlyNodes.isNotEmpty() && connectionActive && displayProxy.isEmpty()) {
+                    if (showSourceRows && readOnlyNodes.isNotEmpty() && connectionActive && displayProxy.isEmpty()) {
                         // Auth/foreground revoked opaque handles while the tunnel stayed up. Avoid the
                         // misleading "只读" rows; MainActivity rebuilds from local cache in this state.
                         Text(
@@ -263,7 +273,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 .padding(horizontal = 14.dp, vertical = 16.dp)
                                 .testTag("nodes-connected-registry-empty"),
                         )
-                    } else {
+                    } else if (showSourceRows) {
                         readOnlyNodes.filterNot { it.info }.forEachIndexed { visibleIndex, node ->
                             if (visibleIndex > 0 || displayProxy.isNotEmpty()) {
                                 HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
@@ -274,6 +284,7 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 modifier = Modifier.testTag("subscription-node-${node.index}"), inspectionIndex = node.index)
                         }
                     }
+                    extraRows?.invoke(this)
                 }
             }
         }
@@ -427,7 +438,7 @@ private fun rememberNodeListMotionEnabled(): Boolean {
 }
 
 @Composable
-private fun MeasuredProxyRow(
+internal fun MeasuredProxyRow(
     choice: ConnectionChoice,
     index: Int,
     chosen: Boolean,
@@ -435,6 +446,8 @@ private fun MeasuredProxyRow(
     canRetest: Boolean,
     tunnelActive: Boolean,
     enabled: Boolean,
+    sourceLabel: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val observation = latency?.reading(choice.selection)
@@ -448,6 +461,7 @@ private fun MeasuredProxyRow(
         regionTag = "node-region-$index",
         latencyTag = "node-latency-$index",
         tunnelActive = tunnelActive,
+        sourceLabel = sourceLabel, trailing = trailing,
         modifier = Modifier.testTag("node-choice-$index").semantics { selected = chosen }
             .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick),
     )
@@ -464,7 +478,11 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
     onRetestLatency: (() -> Unit)? = null,
     regionTag: String, latencyTag: String,
     modifier: Modifier = Modifier, inspectionIndex: Int? = null, readOnlyLabel: String = "只读",
-    tunnelActive: Boolean = false) {
+    tunnelActive: Boolean = false,
+    /** Unified list: the source this node comes from, as a small caption under the name. */
+    sourceLabel: String? = null,
+    /** Unified list: per-node actions (rename / delete), placed after the selection mark. */
+    trailing: (@Composable () -> Unit)? = null) {
     val selected = chosen == true
     Row(
         modifier.fillMaxWidth().heightIn(min = 56.dp)
@@ -491,19 +509,23 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
             Text(nodeDisplayName(name), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-name-$it") } ?: Modifier)
-            // Protocol chip only; multiplier is omitted when the payload has no such field.
-            Box(
-                Modifier.clip(ProtocolChipShape)
-                    .background(Brand.Cyan.copy(alpha = .10f))
-                    .padding(horizontal = 6.dp, vertical = 1.dp),
-            ) {
-                Text(
-                    nodeProtocolLabel(protocol),
-                    fontSize = 10.sp,
-                    color = Brand.Cyan.copy(alpha = .9f),
-                    maxLines = 1,
-                    modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-details-$it") } ?: Modifier,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Protocol chip only; multiplier is omitted when the payload has no such field.
+                Box(
+                    Modifier.clip(ProtocolChipShape)
+                        .background(Brand.Cyan.copy(alpha = .10f))
+                        .padding(horizontal = 6.dp, vertical = 1.dp),
+                ) {
+                    Text(
+                        nodeProtocolLabel(protocol),
+                        fontSize = 10.sp,
+                        color = Brand.Cyan.copy(alpha = .9f),
+                        maxLines = 1,
+                        modifier = inspectionIndex?.let { Modifier.testTag("subscription-node-details-$it") } ?: Modifier,
+                    )
+                }
+                if (sourceLabel != null) Text(sourceLabel, fontSize = 10.sp, color = Brand.Muted, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).testTag("node-source-label"))
             }
         }
         NodeLatencyBadge(
@@ -527,5 +549,6 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
                     Offset(size.width * .85f, size.height * .25f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
             }
         }
+        trailing?.invoke()
     }
 }

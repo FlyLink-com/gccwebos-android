@@ -83,7 +83,7 @@ internal fun productionRepository(context: Context): PortalRepository {
         sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context),
         allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME,
         manualSources = EncryptedManualSourceStore(context),
-        nodeChoices = EncryptedNodeChoiceStore(context))
+        nodeChoices = EncryptedNodeChoiceStore(context), nodeOverrides = EncryptedNodeOverrideStore(context))
 }
 
 /** Process-local ownership only; identity contains no account label or bearer data. */
@@ -169,7 +169,14 @@ internal class AccountController(private val repository: PortalRepository, priva
     val configurationLibrary: ConfigurationLibraryController = ConfigurationLibraryController(repository.localSubscriptions, scope,
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !nodeSelection.busy },
         commitFence = sourceCommitFence,
-        onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() })
+        onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() },
+        accountSignedIn = { authenticated },
+        nodesChanged = { nodeLatency.cancel(); nodeSelection.expireIfNeeded() },
+        chooseNode = { target ->
+            nodeSelection.expireIfNeeded()
+            val match = matchNodeTarget(nodeSelection.snapshot.choices, target)
+            match != null && nodeSelection.select(match)
+        })
     val manualImport: ManualImportController = ManualImportController(repository.localSubscriptions, scope,
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !nodeSelection.busy &&
             !accountUsage.state.value.busy && !accountUsage.state.value.verifying && !configurationLibrary.busy },

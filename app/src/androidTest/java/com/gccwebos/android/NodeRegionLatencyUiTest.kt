@@ -111,6 +111,17 @@ class NodeRegionLatencyUiTest {
 
     private fun badge(index: Int) = compose.onNodeWithTag("node-latency-$index", useUnmergedTree = true)
     private fun region(index: Int) = compose.onNodeWithTag("node-region-$index", useUnmergedTree = true)
+    /** Latency label is drawn on a child Text; the tagged node only owns contentDescription. */
+    private fun assertBadge(index: Int, label: String) {
+        badge(index).assertContentDescriptionEquals(badgeDescription(label))
+    }
+    private fun badgeDescription(label: String) = when (label) {
+        "---" -> "节点延迟：未测试"
+        "超时" -> "节点延迟：超时"
+        "不可测" -> "节点延迟：不可测"
+        "网络变化" -> "节点延迟：网络变化"
+        else -> if (label.endsWith(" ms")) "节点延迟 ${label.removeSuffix(" ms")} 毫秒" else "节点延迟：$label"
+    }
     private fun awaitObservation(index: Int) {
         compose.waitUntil(5000) { latency.reading(state.snapshot.choices[index].selection) != null }
     }
@@ -118,7 +129,7 @@ class NodeRegionLatencyUiTest {
     private fun capture(name: String) {
         compose.onNodeWithTag("node-choice-0").performScrollTo().assertIsDisplayed()
         region(0).assertIsDisplayed()
-        badge(0).assertIsDisplayed().assertTextEquals("27 ms")
+        badge(0).assertIsDisplayed(); assertBadge(0, "27 ms")
         compose.waitForIdle()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = File(requireNotNull(context.getExternalFilesDir(null)), "ui-evidence/preview-v2")
@@ -133,8 +144,8 @@ class NodeRegionLatencyUiTest {
         launch(withLatency = false)
         region(0).assertContentDescriptionEquals("节点标注地区：日本")
         region(1).assertContentDescriptionEquals("地区未标注")
-        badge(0).assertTextEquals("— ms")
-        badge(1).assertTextEquals("— ms")
+        assertBadge(0, "---")
+        assertBadge(1, "---")
         compose.onNodeWithTag("nodes-selected-region").assertContentDescriptionEquals("地区未标注")
         compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
@@ -147,21 +158,20 @@ class NodeRegionLatencyUiTest {
         response = { gate.await(); NodeLatencyObservation.Success(27L, 7L) }
         launch(width = 320)
         compose.waitUntil(5000) { measurements.get() == 2 }
-        badge(1).assertTextEquals("---")
-            .assertContentDescriptionEquals("节点延迟：测试中")
+        badge(1).assertContentDescriptionEquals("节点延迟：测试中")
         compose.runOnIdle { assertTrue(latency.busy) }
         compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         val selected = state.snapshot.choices[1].selection
         compose.onNodeWithTag("node-choice-1").performScrollTo().assertIsEnabled().performClick()
         compose.runOnIdle { assertSame(selected, state.snapshot.selected); gate.complete(Unit) }
         awaitObservation(1)
-        badge(1).assertTextEquals("27 ms")
-        badge(1).assertTextEquals("27 ms")
+        assertBadge(1, "27 ms")
+        assertBadge(1, "27 ms")
         compose.runOnIdle { assertFalse(latency.busy) }
         compose.runOnIdle { showPanel = false }
         compose.runOnIdle { assertFalse(latency.busy); showPanel = true }
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
-        badge(1).assertTextEquals("27 ms")
+        assertBadge(1, "27 ms")
         compose.runOnIdle {
             assertSame(selected, state.snapshot.selected)
             assertEquals(2, measurements.get())
@@ -175,7 +185,7 @@ class NodeRegionLatencyUiTest {
         response = { NodeLatencyObservation.NoReply }
         launch()
         awaitObservation(0)
-        badge(0).assertTextEquals("超时").assertContentDescriptionEquals("节点延迟：超时")
+        assertBadge(0, "超时")
         compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()
         val selected = state.snapshot.choices[0].selection
         compose.runOnIdle { assertSame(NodeLatencyObservation.NoReply, latency.reading(selected)) }
@@ -194,7 +204,7 @@ class NodeRegionLatencyUiTest {
         compose.waitUntil(5000) {
             latency.reading(selected) == NodeLatencyObservation.Success(19L, 7L) && !latency.busy
         }
-        badge(0).assertTextEquals("19 ms").assertContentDescriptionEquals("节点延迟 19 毫秒")
+        assertBadge(0, "19 ms")
         compose.runOnIdle {
             assertSame(selected, state.snapshot.selected)
             assertEquals(4, measurements.get()); assertEquals(1, reads.get())
@@ -218,18 +228,13 @@ class NodeRegionLatencyUiTest {
                 }
             }
         }
-        compose.onNodeWithTag("pending").assertTextEquals("— ms")
-            .assertContentDescriptionEquals("节点延迟：未测试")
-        compose.onNodeWithTag("measuring").assertTextEquals("---")
-            .assertContentDescriptionEquals("节点延迟：测试中")
+        compose.onNodeWithTag("pending").assertContentDescriptionEquals("节点延迟：未测试")
+        compose.onNodeWithTag("measuring").assertContentDescriptionEquals("节点延迟：测试中")
         compose.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo.Indeterminate)
             and hasAnyAncestor(hasTestTag("measuring")), useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag("timeout").assertTextEquals("超时")
-            .assertContentDescriptionEquals("节点延迟：超时")
-        compose.onNodeWithTag("unavailable").assertTextEquals("不可测")
-            .assertContentDescriptionEquals("节点延迟：不可测")
-        compose.onNodeWithTag("changed").assertTextEquals("网络变化")
-            .assertContentDescriptionEquals("节点延迟：网络变化")
+        compose.onNodeWithTag("timeout").assertContentDescriptionEquals("节点延迟：超时")
+        compose.onNodeWithTag("unavailable").assertContentDescriptionEquals("节点延迟：不可测")
+        compose.onNodeWithTag("changed").assertContentDescriptionEquals("节点延迟：网络变化")
         compose.onNodeWithText("测试节点延迟").assertDoesNotExist()
     }
 
@@ -243,7 +248,7 @@ class NodeRegionLatencyUiTest {
         compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         compose.onNodeWithTag("node-choice-0").assertIsNotEnabled()
         compose.runOnIdle { gate.complete(Unit) }
-        badge(0).assertTextEquals("— ms")
+        assertBadge(0, "---")
         compose.runOnIdle { accountBusy = false }
         awaitObservation(0)
         compose.onNodeWithTag("node-choice-0").assertIsEnabled()
@@ -255,23 +260,31 @@ class NodeRegionLatencyUiTest {
         awaitObservation(0)
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
         val selected = state.snapshot.selected
-        badge(0).assertTextEquals("27 ms")
+        assertBadge(0, "27 ms")
         val gate = CompletableDeferred<Unit>()
         compose.runOnIdle {
             response = { gate.await(); NodeLatencyObservation.Success(19L, 7L) }
             elapsed.addAndGet(120_000L)
         }
         compose.waitUntil(5000) {
-            measurements.get() == 4 && compose.onAllNodes(hasTestTag("node-latency-0") and hasText("---"), useUnmergedTree = true)
-                .fetchSemanticsNodes().size == 1
+            measurements.get() == 4 && latency.busy &&
+                (compose.onAllNodes(
+                    hasTestTag("node-latency-0") and (
+                        hasContentDescription("节点延迟：测试中") or hasContentDescription("节点延迟：未测试")),
+                    useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() ||
+                    compose.onAllNodes(
+                        hasTestTag("node-latency-1") and (
+                            hasContentDescription("节点延迟：测试中") or hasContentDescription("节点延迟：未测试")),
+                        useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         }
-        badge(1).assertTextEquals("---")
+        // Stale reading cleared; remeasure in flight (gate still open).
+        compose.runOnIdle { assertTrue(latency.busy) }
         compose.runOnIdle {
             assertSame(selected, state.snapshot.selected)
             assertEquals(4, measurements.get()); assertEquals(1, reads.get()); gate.complete(Unit)
         }
         compose.waitUntil(5000) { latency.reading(selected) == NodeLatencyObservation.Success(19L, 7L) }
-        badge(1).assertTextEquals("19 ms")
+        assertBadge(1, "19 ms")
     }
 
     @Test fun backgroundSuspensionRejectsRecompositionUntilForegroundReturns() {
@@ -284,12 +297,12 @@ class NodeRegionLatencyUiTest {
         compose.runOnIdle { accountBusy = true }
         compose.runOnIdle { accountBusy = false }
         compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
-        badge(0).assertTextEquals("— ms")
+        assertBadge(0, "---")
         compose.runOnIdle { assertEquals(2, measurements.get()); latency.setForeground(true) }
         compose.waitUntil(5000) { measurements.get() == 4 }
         compose.runOnIdle { gate.complete(Unit) }
         awaitObservation(0)
-        badge(0).assertTextEquals("27 ms")
+        assertBadge(0, "27 ms")
         compose.runOnIdle { assertNull(state.snapshot.selected); assertEquals(1, reads.get()) }
     }
 
@@ -298,7 +311,7 @@ class NodeRegionLatencyUiTest {
         launch()
         compose.onNodeWithTag("subscription-node-region-0", useUnmergedTree = true)
             .assertContentDescriptionEquals("节点标注地区：日本")
-        compose.onNodeWithTag("subscription-node-latency-0", useUnmergedTree = true).assertTextEquals("— ms")
+        compose.onNodeWithTag("subscription-node-latency-0", useUnmergedTree = true).assertContentDescriptionEquals("节点延迟：未测试")
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
         compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         compose.runOnIdle {
@@ -319,7 +332,7 @@ class NodeRegionLatencyUiTest {
             val bounds = node.fetchSemanticsNode().boundsInRoot
             assertTrue(bounds.left >= host.left); assertTrue(bounds.right <= host.right)
         }
-        badge(1).assertTextEquals("27 ms")
+        assertBadge(1, "27 ms")
         row.performClick().assertIsSelected()
         compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
         compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()

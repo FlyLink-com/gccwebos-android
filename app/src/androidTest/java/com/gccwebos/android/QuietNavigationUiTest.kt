@@ -86,7 +86,7 @@ class QuietNavigationUiTest {
         launch(refreshPages = false)
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.waitUntil(5000) { probes.get() == 1 }
-        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertTextEquals("27 ms")
+        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertContentDescriptionEquals("节点延迟 27 毫秒")
         compose.onNodeWithTag("node-region-0", useUnmergedTree = true)
             .assertContentDescriptionEquals("节点标注地区：日本")
         compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
@@ -157,10 +157,15 @@ class QuietNavigationUiTest {
         compose.runOnIdle { control = ConnectionControlState(phase = ConnectionPhase.Connecting, commandPending = true) }
         compose.runOnIdle { account.busy = false }
         compose.waitForIdle()
+        // While connecting, revoked handles rebuild from local cache — no subscription HTTP, no power action.
         compose.runOnIdle { assertEquals(0, reads.get()); assertEquals(0, commands.get()) }
+        compose.waitUntil(5000) {
+            !account.nodeSelection.busy && account.nodeSelection.snapshot.choices.isNotEmpty()
+        }
         compose.runOnIdle { control = ConnectionControlState() }
         compose.onNodeWithTag("nav-Lines").performClick()
-        compose.waitUntil(5000) { reads.get() == 1 }
+        awaitNodeChoice()
+        compose.runOnIdle { assertEquals(0, reads.get()); assertEquals(0, commands.get()) }
     }
 
     @Test fun healthyRepeatedNavigationKeepsTheLocalSelectionWithoutSubscriptionHttp() {

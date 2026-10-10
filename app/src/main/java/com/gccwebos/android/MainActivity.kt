@@ -215,6 +215,13 @@ internal fun showsSignedOutMine(account: AccountController, loginRequested: Bool
     showsSignedOutMine(account.authenticated, account.retainingCommerceSession, loginRequested, account.restoring,
         account.foregroundCheckPending, account.restorationPending, account.factorReference != null, account.busy)
 
+/**
+ * 「使用账户订阅」 is offered whenever an account is signed in and the account is not already the active source.
+ * It used to require sourceKind == None, which hid it for anyone who had imported a configuration first.
+ */
+internal fun canUseAccountSource(authenticated: Boolean, sourceKind: ManualSourceKind): Boolean =
+    authenticated && sourceKind != ManualSourceKind.LegacyRemote
+
 @Composable
 internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommerce: Boolean = true,
     commerceOverride: com.gccwebos.android.commerce.CommerceController? = null,
@@ -492,7 +499,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
                             account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
                         error = importer.error,
-                        canUseAccount = account.authenticated && account.localSubscription.sourceKind == ManualSourceKind.None,
+                        canUseAccount = canUseAccountSource(account.authenticated, account.localSubscription.sourceKind),
                         canRemove = false,
                         onDismiss = importer::cancel, onBegin = importer::beginAsync, onSubmit = importer::submit,
                         onCancel = importer::cancel, onFailure = importer::failure,

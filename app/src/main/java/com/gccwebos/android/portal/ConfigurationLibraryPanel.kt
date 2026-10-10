@@ -45,6 +45,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     ConfigurationLibraryContent(library.snapshot, busy, library.error, canMeasure,
         measuring = latency?.busy == true,
         onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
+        onChooseNode = library::activateAndChoose,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
         namingEntryId = namingEntryId, onNamingDone = onNamingDone,
         activeContent = { item, menu ->
@@ -64,6 +65,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     canMeasure: Boolean, measuring: Boolean = false, onMeasure: () -> Unit, onImport: () -> Unit,
     onActivate: (ConfigurationHandle) -> Unit, onRename: (ConfigurationHandle, String) -> Unit,
     onRemove: (ConfigurationHandle) -> Unit, onReplace: (ConfigurationHandle) -> Unit,
+    onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit = { _, _ -> },
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     activeContent: @Composable (ConfigurationItem, @Composable () -> Unit) -> Unit) {
     val actionsBlocked = busy || snapshot.storageError
@@ -144,7 +146,8 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
         // refresh cannot collapse a group the user expanded.
         snapshot.items.forEachIndexed { index, item ->
             if (index != activeIndex) key(item.displayKey) {
-                InactiveConfigurationGroup(item, index, actionsBlocked, { onActivate(item.handle) }) { itemMenu(item, index) }
+                InactiveConfigurationGroup(item, index, actionsBlocked, { onActivate(item.handle) },
+                    onChooseNode = { target -> onChooseNode(item.handle, target) }) { itemMenu(item, index) }
             }
         }
     }
@@ -230,7 +233,7 @@ private fun ConfigurationItemMenu(item: ConfigurationItem, index: Int, busy: Boo
 
 @Composable
 private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy: Boolean,
-    onActivate: () -> Unit, menu: @Composable () -> Unit) {
+    onActivate: () -> Unit, onChooseNode: (NodeTarget) -> Unit, menu: @Composable () -> Unit) {
     var expanded by remember(item.displayKey) { mutableStateOf(false) }
     GlassSurface(Modifier.fillMaxWidth().testTag("configuration-group-$index"), shape = RoundedCornerShape(20.dp)) {
         Column {
@@ -249,7 +252,7 @@ private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy
                     Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
                         Text(item.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                             overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("configuration-name-$index"))
-                        Text("${item.nodes.count { !it.info }} 条 · ${configurationStatusLabel(item)}", fontSize = 10.sp,
+                        Text(groupCaption(item), fontSize = 10.sp,
                             color = Brand.Muted, modifier = Modifier.testTag("configuration-status-$index"))
                     }
                 }
@@ -267,9 +270,15 @@ private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy
                     val node = indexed.value
                     val nodeIndex = indexed.index
                     HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+                    // One tap chooses this node as the egress: its source becomes active first (same fenced
+                    // activation as 选择配置) and the node is then selected if it is still present.
+                    val choosable = node.supported && !busy
                     NodeChoiceRow(node.name, node.protocol, node.supported, chosen = null,
                         regionTag = "configuration-region-$index-$nodeIndex", latencyTag = "configuration-latency-$index-$nodeIndex",
-                        modifier = Modifier.testTag("configuration-node-$index-$nodeIndex"))
+                        modifier = Modifier.testTag("configuration-node-$index-$nodeIndex")
+                            .clickable(enabled = choosable, role = Role.Button, onClickLabel = "选择此节点") {
+                                onChooseNode(NodeTarget(nodeIndex, node.name, node.protocol))
+                            })
                 }
                 TextButton(onClick = { if (!busy) onActivate() }, enabled = !busy,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("configuration-activate-$index")) { Text("选择配置") }
@@ -282,7 +291,11 @@ private fun InactiveConfigurationGroup(item: ConfigurationItem, index: Int, busy
 private object AccountConfigurationKey
 private val ConfigurationItem.displayKey: Any get() = handle.entryId ?: AccountConfigurationKey
 
-private fun configurationKindLabel(kind: ManualSourceKind): String = when (kind) {
+/** Source label shown next to the node count, so every group says where its nodes come from. */
+internal fun groupCaption(item: ConfigurationItem): String =
+    "${item.nodes.count { !it.info }} 条 · ${configurationKindLabel(item.kind)} · ${configurationStatusLabel(item)}"
+
+internal fun configurationKindLabel(kind: ManualSourceKind): String = when (kind) {
     ManualSourceKind.LegacyRemote -> "账户订阅"
     ManualSourceKind.ImportedRemote -> "订阅配置"
     ManualSourceKind.ImportedLocal -> "本地文件"
@@ -290,10 +303,11 @@ private fun configurationKindLabel(kind: ManualSourceKind): String = when (kind)
     ManualSourceKind.None -> "未选择"
 }
 
-private fun configurationStatusLabel(item: ConfigurationItem): String = when (item.status) {
+internal fun configurationStatusLabel(item: ConfigurationItem): String = when (item.status) {
     LocalSubscriptionStatus.READY -> if (item.active) "使用中" else "可用"
     LocalSubscriptionStatus.EXPIRED -> "已到期"
-    LocalSubscriptionStatus.MISSING -> "未导入"
+    // The signed-in account row exists before its first download: selecting it loads the nodes.
+    LocalSubscriptionStatus.MISSING -> if (item.kind == ManualSourceKind.LegacyRemote) "待加载" else "未导入"
     LocalSubscriptionStatus.RETRY_REQUIRED -> "待更新"
     LocalSubscriptionStatus.INVALID_LINK -> "链接不可用"
     LocalSubscriptionStatus.UNSUPPORTED -> "格式不支持"

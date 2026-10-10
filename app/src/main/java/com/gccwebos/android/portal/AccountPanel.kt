@@ -163,7 +163,13 @@ internal class AccountController(private val repository: PortalRepository, priva
     val configurationLibrary: ConfigurationLibraryController = ConfigurationLibraryController(repository.localSubscriptions, scope,
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !nodeSelection.busy },
         commitFence = sourceCommitFence,
-        onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() })
+        onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() },
+        accountSignedIn = { authenticated },
+        chooseNode = { target ->
+            nodeSelection.expireIfNeeded()
+            val match = matchNodeTarget(nodeSelection.snapshot.choices, target)
+            match != null && nodeSelection.select(match)
+        })
     val manualImport: ManualImportController = ManualImportController(repository.localSubscriptions, scope,
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !nodeSelection.busy &&
             !accountUsage.state.value.busy && !accountUsage.state.value.verifying && !configurationLibrary.busy },

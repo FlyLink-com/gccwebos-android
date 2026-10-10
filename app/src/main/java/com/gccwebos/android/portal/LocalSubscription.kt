@@ -191,7 +191,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
 
     /** Summary reads never register choices or activate an inactive entry. */
-    internal fun configurationLibrarySnapshot(): ConfigurationLibrarySnapshot = synchronized(lock) {
+    internal fun configurationLibrarySnapshot(accountSignedIn: Boolean = false): ConfigurationLibrarySnapshot = synchronized(lock) {
         try {
             readLibrary().use { library ->
                 val items = mutableListOf<ConfigurationItem>()
@@ -206,7 +206,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                             items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
                                 parsed.nodes, parsed.status, accountActive)
                         } finally { raw.fill(0) }
-                    } else if (accountActive || delivery.read()?.let { !it.pendingAck } == true) {
+                    } else if (accountActive || accountSignedIn || delivery.read()?.let { !it.pendingAck } == true) {
+                        // A signed-in account always has a selectable (possibly not yet loaded) subscription row,
+                        // so a previously imported configuration can never hide it. Activating it downloads.
                         items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
                             if (accountActive) state.nodes else emptyList(),
                             if (accountActive) state.status else LocalSubscriptionStatus.MISSING, accountActive)

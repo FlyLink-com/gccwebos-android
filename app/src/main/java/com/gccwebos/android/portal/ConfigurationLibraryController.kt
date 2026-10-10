@@ -3,6 +3,8 @@ package com.gccwebos.android.portal
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.gccwebos.android.core.ConnectionChoice
+import com.gccwebos.android.core.ConnectionSelection
 import com.gccwebos.android.vpn.SafeProxyConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -31,16 +33,31 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
     private val scope: CoroutineScope, private val allowed: () -> Boolean,
     private val commitFence: ((() -> Unit) -> Unit),
     private val onSnapshot: (LocalSubscriptionSnapshot) -> Unit,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO) {
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** True while an account is signed in: the account subscription row is then always listed and selectable. */
+    private val accountSignedIn: () -> Boolean = { false },
+    /** Called after a node-targeted activation settled; it may select the matching node (never a different one). */
+    private val chooseNode: (NodeTarget) -> Boolean = { false }) {
     var snapshot by mutableStateOf(ConfigurationLibrarySnapshot()); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
     private var generation = 0L
     private var task: Job? = null
 
-    fun refresh() = run { null to manager.configurationLibrarySnapshot() }
+    fun refresh() = run { null to manager.configurationLibrarySnapshot(accountSignedIn()) }
     fun activate(handle: ConfigurationHandle) = mutate {
         manager.activateConfiguration(handle, guardedFence())
+    }
+    /**
+     * Choosing a node in any saved source is one step for the user: the source becomes the active egress
+     * source through the same fenced activation, then the tapped node is selected if it is still there.
+     * A node that changed or disappeared is never replaced by a different one.
+     */
+    fun activateAndChoose(handle: ConfigurationHandle, target: NodeTarget) = run(afterSuccess = {
+        if (!chooseNode(target)) error = "节点已变化，请重新选择节点"
+    }) {
+        val value = manager.activateConfiguration(handle, guardedFence())
+        value to manager.configurationLibrarySnapshot(accountSignedIn())
     }
     fun rename(handle: ConfigurationHandle, name: String) = mutate {
         manager.renameConfiguration(handle, name)
@@ -59,14 +76,16 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
     } }
     private fun mutate(action: suspend () -> LocalSubscriptionSnapshot) = run {
         val value = action()
-        value to manager.configurationLibrarySnapshot()
+        value to manager.configurationLibrarySnapshot(accountSignedIn())
     }
-    private fun run(action: suspend () -> Pair<LocalSubscriptionSnapshot?, ConfigurationLibrarySnapshot>) {
+    private fun run(afterSuccess: (() -> Unit)? = null,
+        action: suspend () -> Pair<LocalSubscriptionSnapshot?, ConfigurationLibrarySnapshot>) {
         if (busy || !allowed()) return
         val request = ++generation
         val clearVersion = manager.captureClearVersion()
         busy = true; error = null
         task = scope.launch {
+            var settled = false
             try {
                 val result = withContext(ioDispatcher) { action() }
                 coroutineContext.ensureActive()
@@ -74,6 +93,7 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
                 val (local, library) = result
                 local?.let(onSnapshot)
                 snapshot = library
+                settled = true
             } catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) {
                 if (request == generation) {
@@ -85,6 +105,24 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
                     }
                 }
             } finally { if (request == generation) { busy = false; task = null } }
+            // After busy is released, so the node-selection controller accepts the choice.
+            if (settled && request == generation) afterSuccess?.invoke()
         }
     }
+}
+
+/** A node the user tapped in a saved source: its position in that source's list plus name and protocol. */
+internal data class NodeTarget(val position: Int, val name: String, val protocol: String)
+
+/**
+ * Finds the freshly registered choice for [target]: the same position when name and protocol still agree,
+ * otherwise the single non-notice choice with the same name and protocol. Anything ambiguous or missing
+ * returns null, so the UI asks the user to choose again instead of connecting through another node.
+ */
+internal fun matchNodeTarget(choices: List<ConnectionChoice>, target: NodeTarget): ConnectionSelection? {
+    val atPosition = choices.getOrNull(target.position)
+    if (atPosition != null && !atPosition.info && atPosition.name == target.name && atPosition.protocol == target.protocol)
+        return atPosition.selection
+    val same = choices.filter { !it.info && it.name == target.name && it.protocol == target.protocol }
+    return same.singleOrNull()?.selection
 }

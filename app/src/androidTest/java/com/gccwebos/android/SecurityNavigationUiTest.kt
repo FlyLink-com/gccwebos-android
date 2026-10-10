@@ -80,7 +80,7 @@ class SecurityNavigationUiTest {
         compose.onNodeWithTag("security-refresh").assertDoesNotExist()
         releaseOverview.complete(Unit)
         compose.waitUntil(5_000) { securityReads == 1 && !account.busy }
-        compose.onNodeWithText("身份验证器：未绑定").assertExists()
+        compose.onNodeWithTag("security-authenticator-status").assertTextEquals("未绑定")
 
         val original = account
         val releaseSecurity = CompletableDeferred<Unit>()
@@ -98,7 +98,7 @@ class SecurityNavigationUiTest {
 
         compose.runOnIdle { failSecurity = false; securityGate = null; refreshRequest++ }
         compose.waitUntil(5_000) { securityReads == 3 && !account.busy }
-        compose.onNodeWithText("身份验证器：未绑定").assertExists()
+        compose.onNodeWithTag("security-authenticator-status").assertTextEquals("未绑定")
         compose.runOnIdle {
             assertNull(account.error); assertTrue(account.authenticated); assertNotNull(saved.read())
             assertEquals(2, overviewReads)

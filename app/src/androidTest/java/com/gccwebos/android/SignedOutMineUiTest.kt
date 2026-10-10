@@ -52,13 +52,13 @@ class SignedOutMineUiTest {
         compose.onNodeWithTag("mine-current-plan").assertDoesNotExist()
         compose.onNodeWithTag("mine-go-login").assertTextEquals("去登录").assertIsEnabled()
         compose.onNodeWithTag("wallet-balance-signed-out").assertTextEquals("登录后查看余额")
-        compose.onNodeWithTag("wallet-signed-out-hint").assertTextEquals("充值与账单明细登录后使用")
+        compose.onNodeWithTag("wallet-signed-out-hint").assertTextEquals("充值与订单明细登录后使用")
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
         // 去登录 is the only action in the wallet area: no inert recharge / ledger buttons.
         for (tag in listOf("mine-recharge", "mine-ledger")) compose.onNodeWithTag(tag).assertDoesNotExist()
         compose.onNodeWithTag("mine-signed-out").assertExists()
         compose.onNodeWithTag("mine-back").assertDoesNotExist()
-        compose.onNodeWithTag("mine-history").assertTextContains("登录后查看订单与充值记录", substring = true)
+        compose.onNodeWithTag("mine-history").assertTextContains("登录后查看余额变动流水", substring = true)
         compose.onNodeWithTag("mine-signout").assertDoesNotExist()
         // The invite banner is a signed-in surface; signed out it is not shown at all.
         compose.onNodeWithTag("mine-referral-banner").assertDoesNotExist()
@@ -70,7 +70,7 @@ class SignedOutMineUiTest {
         compose.onNodeWithTag("mine-renew").assertDoesNotExist()
         compose.onNodeWithTag("mine-avatar").assertExists()
         compose.onNodeWithTag("mine-avatar-initial", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag("mine-topbar-title").assertTextEquals("我的")
+        compose.onNodeWithTag("mine-topbar").assertDoesNotExist() // the redundant 我的 title card was removed
         compose.onNodeWithTag("brand-name").assertDoesNotExist()
         compose.waitForIdle()
         // Only the anonymous startup paths may run: no wallet, ledger, order, referral or overview read.

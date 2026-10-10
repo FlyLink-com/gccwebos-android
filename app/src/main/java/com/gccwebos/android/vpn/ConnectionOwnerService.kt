@@ -61,7 +61,7 @@ internal class ConnectionOwnerService : Service() {
         val permission: ActivityVpnPermission get() = this@ConnectionOwnerService.permission
         val control: StateFlow<ConnectionControlState> get() = controls
         fun power(action: ConnectionPowerAction) = submit(action)
-        suspend fun clearLocalData() = repository.clearLocalData(cleanup = {
+        suspend fun logoutClearingAccountSubscription() = repository.logoutClearingAccountSubscription(ownerCleanup = {
             val coordinator = synchronized(publication) {
                 check(!destroyed) { "Connection owner is unavailable" }
                 (handoff.state.value as? ConnectionOwnerAvailability.Ready)?.owner

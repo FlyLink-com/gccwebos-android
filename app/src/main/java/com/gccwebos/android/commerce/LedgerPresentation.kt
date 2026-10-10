@@ -108,6 +108,13 @@ internal object LedgerPresentation {
     fun clock(value: Instant, zone: ZoneId = ZoneId.systemDefault()): String =
         DateTimeFormatter.ofPattern("HH:mm").withZone(zone).format(value)
 
+    /** Row time in the flat 流水: "10-10 14:32" for this year, "2025-12-31 14:32" for an earlier one. */
+    fun rowTime(value: Instant, today: LocalDate = LocalDate.now(ZoneId.systemDefault()),
+                zone: ZoneId = ZoneId.systemDefault()): String {
+        val pattern = if (value.atZone(zone).year == today.year) "MM-dd HH:mm" else "yyyy-MM-dd HH:mm"
+        return DateTimeFormatter.ofPattern(pattern).withZone(zone).format(value)
+    }
+
     fun detailTime(value: Instant, zone: ZoneId = ZoneId.systemDefault()): String =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(zone).format(value)
 }

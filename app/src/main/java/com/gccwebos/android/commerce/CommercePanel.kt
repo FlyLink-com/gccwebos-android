@@ -19,6 +19,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.Lifecycle
@@ -153,7 +155,8 @@ internal class CommerceController(private val account: AccountController, privat
     }
     fun loadLedger(more: Boolean = false) = run {
         val old = if (more) ledgerPage else null
-        if (!more) ledgerPage = null
+        // A refresh keeps the previous page of this same session on screen until the new one arrives
+        // (the controller is session-scoped), so re-opening 订单明细 is not a blank wait.
         val next = repository().ledger(old?.nextCursor)
         ensureCurrentSession()
         require(old == null || old.entries.none { entry -> next.entries.any { it.entryRef == entry.entryRef } })
@@ -709,7 +712,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     val state = stateOverride ?: remember(sessionOwner, recoveryOverride) { CommerceController(account, scope,
         recoveryOverride ?: FileCommerceRecovery(context.applicationContext), includeHistory = true) }
     var view by remember(sessionOwner) { mutableStateOf("mine") }
-    var historyTab by remember(sessionOwner) { mutableStateOf("orders") }
+    var confirmLogout by remember(sessionOwner) { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
@@ -717,63 +720,52 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     val historyTopBar = view == "history" && account.authenticated && !account.restoring && !account.foregroundCheckPending
     val walletTopBar = (view == "wallet" || view == "recharge") && account.authenticated && !account.restoring && !account.foregroundCheckPending
     if (view != "mine" && !walletTopBar && !historyTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
-    if (historyTopBar) WalletTopBar(if (historyTab == "ledger") "账单明细" else "我的订单", onBack = { view = "mine" }, onRecords = null)
+    if (historyTopBar) WalletTopBar("订单明细", onBack = { view = "mine" }, onRecords = null)
     if (view == "about") {
         SectionCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             com.gccwebos.android.update.UpdatePanel(autoCheck = autoLoad, refreshRequest = refreshRequest)
         }
     } else if (view == "security") {
-        com.gccwebos.android.portal.AccountPanel(account, compactLogin = true)
-        com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad, refreshRequest)
+        // Signed in: only 通行密钥 and 绑定身份验证器 (no account-resource detail). Otherwise the login form.
+        if (!account.authenticated) com.gccwebos.android.portal.AccountPanel(account, compactLogin = true)
+        else {
+            MineGroupLabel("账户与安全", "security-title")
+            com.gccwebos.android.portal.SecurityStatusPanel(account, autoLoad, refreshRequest)
+        }
     } else if (view == "referral") {
         ReferralPanel(account, autoLoad, referralOverride, copyOverride, refreshRequest)
     } else if (view != "mine") {
-        if (view == "history") {
-            Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(GccSpacing.Small)) {
-                FilterChip(selected = historyTab == "orders", onClick = { historyTab = "orders" },
-                    enabled = !state.busy && state.canOperate(), label = { Text("消费订单") },
-                    modifier = Modifier.testTag("mine-history-orders"))
-                FilterChip(selected = historyTab == "ledger", onClick = {
-                    historyTab = "ledger"
-                }, enabled = !state.busy && state.canOperate(), label = { Text("代币账单") },
-                    modifier = Modifier.testTag("mine-history-ledger"))
-            }
-        }
         val mode = when(view) {
-            "history" -> if (historyTab == "ledger") CommerceMode.Ledger else CommerceMode.Orders
+            "history" -> CommerceMode.Ledger // one flat 流水 list; orders and ledger are no longer split
             "ledger" -> CommerceMode.Ledger
             "wallet", "recharge" -> CommerceMode.Wallet
             else -> CommerceMode.Mine
         }
         CommercePanel(account, mode, state, autoLoad, paymentOpener = paymentOpener, refreshRequest = refreshRequest,
-            onWalletBack = { view = "mine" }, onRechargeRecords = { view = "history"; historyTab = "orders" },
+            onWalletBack = { view = "mine" }, onRechargeRecords = { view = "history" },
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
-            onLedger = { if (account.authenticated) {
-                view = "history"; historyTab = "ledger"
-            } else view = "security" })
+            onLedger = { if (account.authenticated) view = "history" else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
+    if (confirmLogout) com.gccwebos.android.portal.LogoutDialog(
+        onConfirm = { confirmLogout = false; account.logout() }, onDismiss = { confirmLogout = false })
     if (view == "mine") Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
-        MineTopBar()
         MineWelcomeCard(account, onRenew = onReturnToPlans?.takeIf { account.authenticated }, copyOverride = copyOverride)
         CommercePanel(account, CommerceMode.Mine, state, autoLoad, paymentOpener = paymentOpener, embeddedWallet = true, refreshRequest = refreshRequest,
             onRecharge = { view = if (account.authenticated) "recharge" else "security" },
-            onLedger = { if (account.authenticated) {
-                view = "history"; historyTab = "ledger"
-            } else view = "security" })
+            onLedger = { if (account.authenticated) view = "history" else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
         // ① Invite banner. Neutral copy: any reward rate belongs to the server policy on the referral screen.
         MineInviteBanner("mine-referral", !account.busy) {
             view = if (account.authenticated) "referral" else "security"
         }
-        // ② 服务与记录. The wallet has no separate row: the balance card's 钱包充值 / 账单明细 cover it.
+        // ② 服务与记录. The wallet has no separate row: the balance card's 钱包充值 / 订单明细 cover it.
         MineGroupLabel("服务与记录", "mine-group-service")
         SectionCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall), verticalSpacing = 0.dp) {
-            MineMenuRow("我的订单", "mine-history", !state.busy && idle, subtitle = "商品订单与充值记录") {
+            MineMenuRow("订单明细", "mine-history", !state.busy && idle, subtitle = "充值、购买等余额变动流水") {
                 view = if (account.authenticated) "history" else "security"
-                historyTab = "orders"
             }
             MineRowDivider()
             MineOfficialChannelRow(MINE_OFFICIAL_CHANNEL_URL, telegramOpener) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
@@ -786,7 +778,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { view = "about" }
             if (account.authenticated) {
                 MineRowDivider()
-                MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, onClick = account::logout)
+                MineMenuRow(com.gccwebos.android.portal.LOGOUT_LABEL, "mine-signout", !account.busy) { confirmLogout = true }
             }
         }
     }
@@ -809,7 +801,6 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
     }
     val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
     Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
-        MineTopBar()
         Column(Modifier.fillMaxWidth().testTag("mine-signed-out"), verticalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         MineWelcomeCard(account, onLogin = onLogin)
         MineWalletCard(Modifier.testTag("wallet-card")) {
@@ -819,7 +810,7 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(GccSpacing.ExtraSmall)) {
                     Text("登录后查看余额", style = MaterialTheme.typography.titleMedium, color = Brand.Muted,
                         modifier = Modifier.testTag("wallet-balance-signed-out"))
-                    Text("充值与账单明细登录后使用", style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
+                    Text("充值与订单明细登录后使用", style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
                         modifier = Modifier.testTag("wallet-signed-out-hint"))
                 }
             }
@@ -828,7 +819,7 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
         // The invite banner and its 立即邀请 action appear after login (referral needs an account).
         MineGroupLabel("服务与记录", "mine-group-service")
         SectionCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall), verticalSpacing = 0.dp) {
-            MineMenuRow("我的订单", "mine-history", idle, subtitle = "登录后查看订单与充值记录", onClick = onLogin)
+            MineMenuRow("订单明细", "mine-history", idle, subtitle = "登录后查看余额变动流水", onClick = onLogin)
             MineRowDivider()
             MineOfficialChannelRow(MINE_OFFICIAL_CHANNEL_URL, telegramOpener) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         }

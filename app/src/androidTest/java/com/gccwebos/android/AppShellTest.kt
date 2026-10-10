@@ -500,13 +500,10 @@ class AppShellTest {
         }
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-history").performScrollTo().performClick()
-        compose.onNodeWithTag("orders-orders").assertExists()
-        compose.onNodeWithTag("orders-state-separation").assertExists()
-        compose.onNodeWithTag("history-read-title").assertTextEquals("暂无这类订单")
-        compose.onNodeWithTag("orders-loading").assertDoesNotExist()
-        compose.onNodeWithTag("history-error").assertDoesNotExist()
+        // One flat 流水: no order/ledger tabs, the ledger is the only list.
+        compose.onNodeWithTag("mine-history-tabs").assertDoesNotExist()
+        compose.onNodeWithTag("orders-orders").assertDoesNotExist()
         compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
-        compose.onNodeWithTag("mine-history-ledger").performScrollTo().performClick()
         compose.onNodeWithTag("ledger-empty").assertTextEquals("暂无账单")
         compose.onNodeWithTag("ledger-unread").assertDoesNotExist()
         compose.onNodeWithTag("ledger-loading").assertDoesNotExist()

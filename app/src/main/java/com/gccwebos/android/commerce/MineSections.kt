@@ -106,7 +106,7 @@ internal fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, su
 
 /**
  * The share entry as a banner. The whole banner is the single click target (tag [tag]); the
- * 立即邀请 pill is a visual affordance inside it, not a second button. Copy is unchanged from the
+ * 去分享 pill is a visual affordance inside it, not a second button. Copy is unchanged from the
  * list row because the referral reward is a server-set, eligibility-gated percentage.
  */
 @Composable
@@ -121,9 +121,10 @@ internal fun MineInviteBanner(tag: String, enabled: Boolean, onClick: () -> Unit
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
             GiftIcon(40.dp, enabled)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(GccSpacing.ExtraSmall)) {
-                Text("分享一份好连接", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-                    color = if (enabled) Brand.Text else Brand.Muted)
-                Text("邀请好友 · 查看推荐与奖励", style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
+                Text("邀请好友一起用", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                    color = if (enabled) Brand.Text else Brand.Muted, modifier = Modifier.testTag("mine-referral-title"))
+                Text("分享你的专属链接，查看邀请记录和奖励", style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
+                    modifier = Modifier.testTag("mine-referral-subtitle"))
             }
             Surface(shape = GccShapes.pill, color = Color.Transparent,
                 modifier = Modifier.drawBehind {
@@ -131,7 +132,7 @@ internal fun MineInviteBanner(tag: String, enabled: Boolean, onClick: () -> Unit
                         else Brush.horizontalGradient(listOf(Brand.Disabled, Brand.Disabled)),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
                 }) {
-                Text("立即邀请", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                Text("去分享", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
                     color = if (enabled) Brand.Text else Brand.DisabledText, maxLines = 1,
                     modifier = Modifier.padding(horizontal = GccSpacing.Medium, vertical = GccSpacing.Small).testTag("mine-referral-cta"))
             }
@@ -207,7 +208,7 @@ internal fun MineBalanceHeading() {
 }
 
 /**
- * Primary gradient 钱包充值 and secondary translucent-outline 账单明细. Tags and labels are the
+ * Primary gradient 钱包充值 and secondary translucent-outline 订单明细. Tags and labels are the
  * contract used by tests; [enabled] = false keeps both inert with disabled semantics.
  */
 @Composable
@@ -225,7 +226,7 @@ internal fun MineWalletActions(enabled: Boolean, onRecharge: () -> Unit, onLedge
                 colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                     containerColor = Color.White.copy(alpha = .05f), contentColor = Brand.Text,
                     disabledContainerColor = Color.White.copy(alpha = .02f), disabledContentColor = Brand.DisabledText),
-                modifier = modifier.pressFeedback(press).heightIn(min = 48.dp).testTag("mine-ledger")) { Text("账单明细", fontWeight = FontWeight.Medium) }
+                modifier = modifier.pressFeedback(press).heightIn(min = 48.dp).testTag("mine-ledger")) { Text("订单明细", fontWeight = FontWeight.Medium) }
         }
         if (maxWidth < 260.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
             Column(verticalArrangement = Arrangement.spacedBy(GccSpacing.Small)) {

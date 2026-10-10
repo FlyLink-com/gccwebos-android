@@ -26,6 +26,7 @@ class UnifiedNodesTest {
         val store = MemoryManualSourceStore()
         val profiles = MemoryLocalProfileStore()
         val choices = MemoryNodeChoiceStore()
+        val overrides = MemoryNodeOverrideStore()
         var response = yaml("Remote Alpha", "Remote Beta")
         var failDownload = false
         private val external = object : SubscriptionSource {
@@ -41,7 +42,7 @@ class UnifiedNodesTest {
             override fun clear() = Unit
         }, profiles, SubscriptionSource { error("No official HTTP expected") },
             OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { now },
-            LocalSubscriptionAuthority(), manualSources = store, externalSource = external, nodeChoices = choices)
+            LocalSubscriptionAuthority(), manualSources = store, externalSource = external, nodeChoices = choices, nodeOverrides = overrides)
         suspend fun local(vararg names: String) { val b = yaml(*names); try { manager.importManual(b) { it() } } finally { b.fill(0) } }
         suspend fun remote() {
             val b = "https://subscription.example/unified?token=synthetic-only".toByteArray()
@@ -181,5 +182,74 @@ class UnifiedNodesTest {
         val f = Fixture(); f.local("Local Alpha")
         val c = controller(f); c.refresh(); advanceUntilIdle()
         assertEquals(1, c.snapshot.items.count { it.kind == ManualSourceKind.LegacyRemote })
+    }
+
+    // ---- automatic account load ----
+
+    @Test fun accountLoadsItselfOnlyWhenItCannotDisplaceAChosenNode() = runTest {
+        val f = Fixture(); f.local("Local Alpha")
+        val items = f.items(true)
+        assertNotNull("Nothing chosen: the signed-in account loads by itself", accountToAutoLoad(true, items, nodeChosen = false))
+        assertNull("A node the user already chose is never displaced", accountToAutoLoad(true, items, nodeChosen = true))
+        assertNull("Not while busy or connected", accountToAutoLoad(false, items, nodeChosen = false))
+        assertNull("Signed out: no account row at all", accountToAutoLoad(true, f.items(false), nodeChosen = false))
+    }
+
+    @Test fun anAlreadyLoadedOrActiveAccountIsNotLoadedAgain() = runTest {
+        val f = Fixture(); f.seedAccount(); f.local("Local Alpha")
+        assertNull(accountToAutoLoad(true, f.items(true), nodeChosen = false))
+        f.manager.useAccountSource { it() }
+        assertNull(accountToAutoLoad(true, f.items(true), nodeChosen = false))
+    }
+
+    // ---- one list: labels, per-node edits through the controller ----
+
+    @Test fun everySourceHasAReadableLabelAndTheAccountIsMarkedReadOnly() = runTest {
+        val f = Fixture(); f.seedAccount(); f.remote(); f.local("Local Beta")
+        val labels = f.items(true).associate { it.kind to nodeSourceLabel(it) }
+        assertEquals("账户订阅 · 只读", labels[ManualSourceKind.LegacyRemote])
+        assertTrue(labels.getValue(ManualSourceKind.ExternalRemote).endsWith("第三方订阅"))
+        assertTrue(labels.getValue(ManualSourceKind.ImportedLocal).endsWith("本地文件"))
+    }
+
+    @Test fun renamingAndDeletingThroughTheControllerRefreshesTheListAndTheNodeSelection() = runTest {
+        val f = Fixture(); f.remote(); f.local("Local Alpha", "Local Beta")
+        var changed = 0
+        val c = ConfigurationLibraryController(f.manager, this, { true }, { it() }, {},
+            ioDispatcher = coroutineContext[kotlin.coroutines.ContinuationInterceptor] as kotlinx.coroutines.CoroutineDispatcher,
+            accountSignedIn = { false }, nodesChanged = { changed++ },
+            chooseNode = { target ->
+                val match = matchNodeTarget(f.manager.nodeSelectionSnapshot().choices, target)
+                match != null && f.manager.selectNode(match)
+            })
+        c.refresh(); advanceUntilIdle()
+        val remote = c.snapshot.items.single { it.kind == ManualSourceKind.ExternalRemote }
+        c.renameNode(remote, remote.nodes.indexOfFirst { it.name == "Remote Alpha" }, "我的东京"); advanceUntilIdle()
+        assertNull(c.error); assertEquals(1, changed)
+        val renamed = c.snapshot.items.single { it.kind == ManualSourceKind.ExternalRemote }
+        assertEquals(setOf("我的东京", "Remote Beta"), renamed.nodes.map { it.name }.toSet())
+        c.deleteNode(renamed, renamed.nodes.indexOfFirst { it.name == "Remote Beta" }); advanceUntilIdle()
+        assertEquals(2, changed)
+        val afterDelete = c.snapshot.items.single { it.kind == ManualSourceKind.ExternalRemote }
+        assertEquals(listOf("我的东京"), afterDelete.nodes.filterNot { it.info }.map { it.name })
+        // Tapping the renamed node still selects exactly it, by its displayed name.
+        val position = afterDelete.nodes.indexOfFirst { it.name == "我的东京" }
+        c.activateAndChoose(afterDelete.handle, NodeTarget(position, "我的东京", "ss")); advanceUntilIdle()
+        assertNull(c.error)
+        val snapshot = f.manager.nodeSelectionSnapshot()
+        assertEquals("我的东京", snapshot.choices.single { it.selection === snapshot.selected }.name)
+    }
+
+    @Test fun theAccountSubscriptionRefusesNodeEditsThroughTheController() = runTest {
+        val f = Fixture(); f.seedAccount(); f.local("Local Alpha")
+        var changed = 0
+        val c = ConfigurationLibraryController(f.manager, this, { true }, { it() }, {},
+            ioDispatcher = coroutineContext[kotlin.coroutines.ContinuationInterceptor] as kotlinx.coroutines.CoroutineDispatcher,
+            accountSignedIn = { true }, nodesChanged = { changed++ })
+        c.refresh(); advanceUntilIdle()
+        val account = c.snapshot.items.single { it.kind == ManualSourceKind.LegacyRemote }
+        c.renameNode(account, 0, "x"); c.deleteNode(account, 0); advanceUntilIdle()
+        assertEquals(0, changed); assertNull(c.error)
+        assertEquals(listOf("Account fixture"), c.snapshot.items.single { it.kind == ManualSourceKind.LegacyRemote }.nodes.map { it.name })
     }
 }

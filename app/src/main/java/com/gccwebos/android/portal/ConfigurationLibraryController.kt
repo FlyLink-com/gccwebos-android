@@ -23,7 +23,15 @@ internal class ConfigurationHandle internal constructor(internal val owner: Any,
 
 internal data class ConfigurationItem(val handle: ConfigurationHandle, val name: String,
     val kind: ManualSourceKind, val nodes: List<SafeProxyConfig.NodeSummary>,
-    val status: LocalSubscriptionStatus, val active: Boolean)
+    val status: LocalSubscriptionStatus, val active: Boolean,
+    /** One-way node keys aligned with [nodes] (null where a node cannot be addressed). Empty for the read-only account subscription. */
+    val nodeKeys: List<String?> = emptyList(),
+    /** Positions whose name is a local alias. */
+    val nodeAliased: Set<Int> = emptySet()) {
+    /** Only imported nodes can be renamed or deleted; the account subscription is read-only. */
+    fun canEditNode(position: Int): Boolean = kind != ManualSourceKind.LegacyRemote && handle.entryId != null &&
+        nodeKeys.getOrNull(position) != null && nodes.getOrNull(position)?.info == false
+}
 
 internal data class ConfigurationLibrarySnapshot(val items: List<ConfigurationItem> = emptyList(),
     val storageError: Boolean = false)
@@ -37,7 +45,9 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
     /** True while an account is signed in: the account subscription row is then always listed and selectable. */
     private val accountSignedIn: () -> Boolean = { false },
     /** Called after a node-targeted activation settled; it may select the matching node (never a different one). */
-    private val chooseNode: (NodeTarget) -> Boolean = { false }) {
+    private val chooseNode: (NodeTarget) -> Boolean = { false },
+    /** Called after a local alias / deletion changed the active registry, so the node list re-reads it. */
+    private val nodesChanged: () -> Unit = {}) {
     var snapshot by mutableStateOf(ConfigurationLibrarySnapshot()); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
@@ -66,6 +76,18 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
     fun remove(handle: ConfigurationHandle) = mutate {
         manager.removeConfiguration(handle, guardedFence())
     }
+    /** Local alias of one imported node; a blank alias restores the delivered name. */
+    fun renameNode(item: ConfigurationItem, position: Int, alias: String) {
+        val key = item.nodeKeys.getOrNull(position)
+        if (key == null || !item.canEditNode(position)) return
+        mutate(afterSuccess = nodesChanged) { manager.setNodeOverride(item.handle, key, NodeOverride(alias = alias.trim())); manager.snapshot() }
+    }
+    /** Local deletion of one imported node: hidden here, kept in the saved file, and it stays gone after a refresh. */
+    fun deleteNode(item: ConfigurationItem, position: Int) {
+        val key = item.nodeKeys.getOrNull(position)
+        if (key == null || !item.canEditNode(position)) return
+        mutate(afterSuccess = nodesChanged) { manager.setNodeOverride(item.handle, key, NodeOverride(hidden = true)); manager.snapshot() }
+    }
     fun cancel() {
         generation++; task?.cancel(); task = null; busy = false; error = null
     }
@@ -74,7 +96,7 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
         if (!allowed()) throw CancellationException("Configuration operation unavailable")
         action()
     } }
-    private fun mutate(action: suspend () -> LocalSubscriptionSnapshot) = run {
+    private fun mutate(afterSuccess: (() -> Unit)? = null, action: suspend () -> LocalSubscriptionSnapshot) = run(afterSuccess) {
         val value = action()
         value to manager.configurationLibrarySnapshot(accountSignedIn())
     }

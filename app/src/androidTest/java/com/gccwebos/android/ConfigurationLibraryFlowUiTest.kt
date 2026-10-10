@@ -133,11 +133,11 @@ class ConfigurationLibraryFlowUiTest {
             assertFalse(items[0].active); assertTrue(items[1].active)
             assertEquals(2, commits.get())
         }
-        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("配置 2")
+        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("节点列表")
         compose.onNodeWithTag("configuration-name-0", useUnmergedTree = true).assertTextEquals("配置 1")
-        compose.onNodeWithTag("configuration-toggle-0").performScrollTo().performClick()
+        // Both saved configurations are rows of the one list; the inactive one is chosen with a single tap.
         compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasClickAction()
-        // A background library refresh replaces every opaque handle; an expanded group must stay open.
+        // A background library refresh replaces every opaque handle; the rows must stay.
         val before = compose.runOnIdle { account.configurationLibrary.snapshot.items[0].handle }
         compose.runOnIdle { account.configurationLibrary.refresh() }
         compose.waitUntil(10_000) { idle() && account.configurationLibrary.snapshot.items[0].handle !== before }

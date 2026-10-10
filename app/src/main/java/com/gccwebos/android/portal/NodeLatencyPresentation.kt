@@ -5,7 +5,7 @@ package com.gccwebos.android.portal
  * connection, change selection, or invent traffic / expiry / website figures.
  */
 
-internal enum class NodeLatencyTone { Neutral, Good, Fair, Poor }
+internal enum class NodeLatencyTone { Neutral, Good, Moderate, Slow, Poor }
 
 /**
  * Label + severity for a single node latency cell. [measuring] keeps the spoken "测试中" state.
@@ -17,16 +17,19 @@ internal data class NodeLatencyPresentation(
     val measuring: Boolean = false,
 )
 
-/** Latency tone thresholds (ms). Calibrated so typical 100–200 ms nodes no longer all read as one colour. */
-internal const val LatencyGoodBelowMs = 80L
-internal const val LatencyFairUpToMs = 150L
+/** Inclusive green bound. 150 ms is still green. */
+internal const val LatencyGoodUpToMs = 150L
+/** Blue is strictly below this. 200 ms is orange. */
+internal const val LatencyModerateBelowMs = 200L
+/** Orange is strictly below this. 300 ms is red. */
+internal const val LatencySlowBelowMs = 300L
 
 /**
  * Maps an observation (and whether a batch is currently running for an empty cell) to UI copy.
- * Thresholds: &lt;80 ms good (green), 80–150 ms fair (amber), &gt;150 ms or timeout poor (red).
- * Untested is "---". While the tunnel is up the node probes cannot run, so a failed read is shown
- * as a dash (skipped), not as a broken measurement. [measuring] keeps the same static dash and
- * only changes the spoken description; it does not draw a per-row spinner.
+ * Successful readings: &lt;=150 ms green, 151–199 ms blue, 200–299 ms orange, &gt;=300 ms red.
+ * Timeout stays the error tone. Untested is "---". While the tunnel is up the node probes cannot
+ * run, so a failed read is shown as a dash (skipped), not as a broken measurement. [measuring]
+ * keeps the same static dash and only changes the spoken description; it does not draw a per-row spinner.
  */
 internal fun nodeLatencyPresentation(
     observation: NodeLatencyObservation?,
@@ -35,11 +38,13 @@ internal fun nodeLatencyPresentation(
 ): NodeLatencyPresentation = when (observation) {
     is NodeLatencyObservation.Success -> {
         val ms = observation.milliseconds
-        when {
-            ms < LatencyGoodBelowMs -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Good)
-            ms <= LatencyFairUpToMs -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Fair)
-            else -> NodeLatencyPresentation("$ms ms", NodeLatencyTone.Poor)
+        val tone = when {
+            ms <= LatencyGoodUpToMs -> NodeLatencyTone.Good
+            ms < LatencyModerateBelowMs -> NodeLatencyTone.Moderate
+            ms < LatencySlowBelowMs -> NodeLatencyTone.Slow
+            else -> NodeLatencyTone.Poor
         }
+        NodeLatencyPresentation("$ms ms", tone)
     }
     NodeLatencyObservation.NoReply -> NodeLatencyPresentation("超时", NodeLatencyTone.Poor)
     NodeLatencyObservation.Unavailable ->

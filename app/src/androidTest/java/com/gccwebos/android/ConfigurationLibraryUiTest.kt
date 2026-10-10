@@ -40,6 +40,7 @@ class ConfigurationLibraryUiTest {
     private val chosen = mutableListOf<Pair<ConfigurationHandle, NodeTarget>>()
     private val nodeRenames = mutableListOf<Triple<ConfigurationItem, Int, String>>()
     private val nodeDeletes = mutableListOf<Pair<ConfigurationItem, Int>>()
+    private val nodeRestores = mutableListOf<Pair<ConfigurationItem, Int>>()
     private val activations = mutableListOf<ConfigurationHandle>()
     private val renames = mutableListOf<Pair<ConfigurationHandle, String>>()
     private val replacements = mutableListOf<ConfigurationHandle>()
@@ -64,6 +65,7 @@ class ConfigurationLibraryUiTest {
                             onChooseNode = { handle, target -> chosen += handle to target },
                             onRenameNode = { item, position, alias -> nodeRenames += Triple(item, position, alias) },
                             onDeleteNode = { item, position -> nodeDeletes += item to position },
+                            onRestoreNode = { item, position -> nodeRestores += item to position },
                             tunnelActive = tunnelActive,
                             namingEntryId = namingEntryId, onNamingDone = { namingDone++; namingEntryId = null },
                             activeContent = { item, list ->
@@ -90,7 +92,7 @@ class ConfigurationLibraryUiTest {
     private fun assertNoSourceMutation() = compose.runOnIdle {
         assertTrue(activations.isEmpty()); assertTrue(renames.isEmpty())
         assertTrue(replacements.isEmpty()); assertTrue(removals.isEmpty())
-        assertTrue(nodeRenames.isEmpty()); assertTrue(nodeDeletes.isEmpty())
+        assertTrue(nodeRenames.isEmpty()); assertTrue(nodeDeletes.isEmpty()); assertTrue(nodeRestores.isEmpty())
     }
 
     @Test fun allConfigurationsRemainVisibleAndEveryNodeOfEverySourceIsChosenInOneTap() {
@@ -161,6 +163,51 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("node-delete-active-0").assertIsNotEnabled()
         compose.onNodeWithTag("node-rename-active-0").assertIsEnabled()
         compose.runOnIdle { assertTrue(chosen.isEmpty()) }
+    }
+
+    private fun withDeletedNode() {
+        snapshot = snapshot.copy(items = snapshot.items.map { item ->
+            if (item.handle === second) item.copy(
+                nodes = nodes + SafeProxyConfig.NodeSummary(1, "Synthetic Deleted", "vless", true, info = true),
+                nodeKeys = listOf("k2", "k3"), nodeDeleted = setOf(1))
+            else item
+        })
+    }
+
+    @Test fun deletedNodesSectionIsHiddenWhenNothingIsDeleted() {
+        launch()
+        compose.onNodeWithTag("unified-deleted").assertDoesNotExist()
+    }
+
+    @Test fun deletedNodesAreCollapsedAtTheBottomNotListedAsNodesAndOnlyRestorable() {
+        withDeletedNode()
+        launch()
+        compose.onNodeWithTag("unified-deleted").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("unified-deleted-count").assertTextEquals("1 条")
+        compose.onNodeWithTag("deleted-node-2-1").assertDoesNotExist() // collapsed by default
+        compose.onNodeWithTag("configuration-node-2-1").assertDoesNotExist() // never a main-list row
+        compose.onNodeWithTag("unified-deleted-toggle").performClick()
+        compose.onNodeWithTag("deleted-node-2-1").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("deleted-node-2-1").assertHasNoClickAction() // not selectable
+        compose.onNodeWithTag("deleted-menu-2-1").performClick()
+        compose.onNodeWithTag("deleted-restore-2-1").assertExists()
+        compose.onAllNodesWithText("重命名").assertCountEquals(0)
+        compose.onAllNodesWithText("删除").assertCountEquals(0)
+        compose.onNodeWithTag("deleted-restore-2-1").performClick()
+        compose.runOnIdle {
+            assertEquals(1, nodeRestores.size); assertSame(second, nodeRestores.single().first.handle)
+            assertEquals(1, nodeRestores.single().second)
+            assertTrue(chosen.isEmpty()); assertTrue(nodeRenames.isEmpty()); assertTrue(nodeDeletes.isEmpty())
+        }
+    }
+
+    @Test fun deletedSectionFollowsTheSourceFilter() {
+        withDeletedNode()
+        launch()
+        compose.onNodeWithTag("unified-filter-1").performClick()
+        compose.onNodeWithTag("unified-deleted").assertDoesNotExist()
+        compose.onNodeWithTag("unified-filter-2").performClick()
+        compose.onNodeWithTag("unified-deleted").performScrollTo().assertExists()
     }
 
     @Test fun filterChipsNarrowTheListToOneSource() {

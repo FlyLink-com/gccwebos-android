@@ -175,6 +175,24 @@ class ConfigurationLibraryEvidenceTest {
         compose.waitUntil(10_000) { account.configurationLibrary.snapshot.items.last().nodes.none { !it.info && it.name == "香港 A" } }
         compose.onNodeWithTag("configuration-library").performScrollTo()
         capture("11-after-deleting-node-of-another-source")
-        compose.runOnIdle { assertEquals(0, httpCalls.get()) }
+        // 已删除节点: collapsed at the bottom, restore only.
+        compose.onNodeWithTag("unified-deleted").performScrollTo().assertIsDisplayed()
+        capture("12-deleted-section-collapsed-at-bottom")
+        compose.onNodeWithTag("unified-deleted-toggle").performClick()
+        compose.onNodeWithTag("deleted-node-1-1").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("deleted-node-2-0").performScrollTo().assertIsDisplayed()
+        capture("13-deleted-section-expanded")
+        compose.onNodeWithTag("deleted-menu-1-1").performScrollTo().performClick()
+        compose.onNodeWithTag("deleted-restore-1-1").assertExists()
+        captureScreen("14-deleted-node-menu-restore-only")
+        compose.onNodeWithTag("deleted-restore-1-1").performClick()
+        awaitIdle()
+        compose.waitUntil(10_000) { account.nodeSelection.snapshot.choices.any { !it.info && it.name == "东京 02" } }
+        compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).performScrollTo()
+        capture("15-after-restore-node-back-in-list-unselected")
+        compose.runOnIdle {
+            assertNull("restore never re-selects", account.nodeSelection.snapshot.selected)
+            assertEquals(0, httpCalls.get())
+        }
     }
 }

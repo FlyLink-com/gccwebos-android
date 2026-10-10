@@ -1,11 +1,14 @@
 package com.gccwebos.android.portal
 
 import java.time.Instant
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
 /** Per-node local alias / deletion of imported nodes, read-only account nodes, persistence. Synthetic data only. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class NodeOverridesTest {
     private val now = Instant.parse("2026-10-10T00:00:00Z")
     private fun yaml(vararg names: String): ByteArray = buildString {
@@ -167,5 +170,107 @@ class NodeOverridesTest {
         val after = f.manager.configurationLibrarySnapshot(false).items
         assertEquals(listOf("只改这一份", "Other"), after.first { it.handle.entryId == first.handle.entryId }.nodes.map { it.name })
         assertEquals(listOf("Same", "Third"), after.first { it.handle.entryId != first.handle.entryId }.nodes.map { it.name })
+    }
+
+    // ---- 已删除节点: list, restore, alias kept ----
+
+    @Test fun aDeletedNodeIsListedAsDeletedAndOnlyRestorable() = runTest {
+        val f = Fixture(); f.local("Local Alpha", "Local Beta")
+        val item = f.active()
+        f.manager.setNodeHidden(item.handle, item.keyOf("Local Beta"), true)
+        val after = f.active()
+        val position = after.nodes.indexOfFirst { it.name == "Local Beta" }
+        assertEquals(setOf(position), after.nodeDeleted)
+        assertTrue(after.canRestoreNode(position)); assertFalse(after.canEditNode(position))
+        assertFalse("A visible node is not restorable", after.canRestoreNode(after.nodes.indexOfFirst { it.name == "Local Alpha" }))
+        assertEquals(listOf("Local Alpha"), f.names())
+    }
+
+    @Test fun restoreBringsTheNodeBackSelectableAndClearsTheStoredFlag() = runTest {
+        val f = Fixture(); f.local("Local Alpha", "Local Beta")
+        val key = f.active().keyOf("Local Beta")
+        f.manager.setNodeHidden(f.active().handle, key, true)
+        f.manager.setNodeHidden(f.active().handle, key, false)
+        assertTrue(f.active().nodeDeleted.isEmpty())
+        assertEquals(listOf("Local Alpha", "Local Beta"), f.names())
+        val back = f.manager.nodeSelectionSnapshot().choices.single { it.name == "Local Beta" }
+        assertFalse(back.info)
+        assertTrue(f.manager.selectNode(back.selection))
+        assertTrue("Nothing is left over in the store", f.overrides.read().isEmpty())
+    }
+
+    @Test fun aLocalAliasSurvivesDeleteAndRestore() = runTest {
+        val f = Fixture(); f.local("Local Alpha", "Local Beta")
+        val key = f.active().keyOf("Local Beta")
+        f.manager.setNodeOverride(f.active().handle, key, NodeOverride(alias = "常用线路"))
+        f.manager.setNodeHidden(f.active().handle, key, true)
+        // The deleted entry is shown under its alias, still unselectable.
+        val deleted = f.active()
+        assertEquals("常用线路", deleted.nodes[deleted.nodeDeleted.single()].name)
+        assertEquals(listOf("Local Alpha"), f.names())
+        f.manager.setNodeHidden(f.active().handle, key, false)
+        assertEquals(listOf("Local Alpha", "常用线路"), f.names())
+        assertEquals(1, f.active().nodeAliased.size)
+    }
+
+    @Test fun restoreDoesNotReselectTheNodeThatWasSelectedBeforeDeleting() = runTest {
+        val f = Fixture(); f.local("Local Alpha", "Local Beta")
+        val choice = f.manager.nodeSelectionSnapshot().choices.first { it.name == "Local Beta" }
+        assertTrue(f.manager.selectNode(choice.selection))
+        val key = f.active().keyOf("Local Beta")
+        f.manager.setNodeHidden(f.active().handle, key, true)
+        f.manager.setNodeHidden(f.active().handle, key, false)
+        assertNull("The user picks again; restore never chooses for them", f.manager.nodeSelectionSnapshot().selected)
+    }
+
+    @Test fun deletedAndRestoredStateSurvivesRefreshAndRestart() = runTest {
+        val f = Fixture(); f.remote()
+        val gamma = f.active().keyOf("Remote Gamma")
+        f.manager.setNodeHidden(f.active().handle, gamma, true)
+        f.restart(); f.manager.refresh()
+        assertFalse(f.names().contains("Remote Gamma"))
+        assertEquals(1, f.active().nodeDeleted.size)
+        f.manager.setNodeHidden(f.active().handle, gamma, false)
+        f.restart(); f.manager.refresh()
+        assertTrue(f.names().contains("Remote Gamma"))
+        assertTrue(f.active().nodeDeleted.isEmpty())
+    }
+
+    @Test fun anInactiveSourceKeepsItsDeletedListAndCanRestoreFromIt() = runTest {
+        val f = Fixture(); f.local("Local Alpha", "Local Beta"); f.local("Other One")
+        val first = f.manager.configurationLibrarySnapshot(false).items.first { it.nodes.any { n -> n.name == "Local Beta" } }
+        assertFalse(first.active)
+        f.manager.setNodeHidden(first.handle, first.keyOf("Local Beta"), true)
+        val deleted = f.manager.configurationLibrarySnapshot(false).items.first { it.handle.entryId == first.handle.entryId }
+        assertEquals(1, deleted.nodeDeleted.size)
+        f.manager.setNodeHidden(deleted.handle, deleted.keyOf("Local Beta"), false)
+        assertTrue(f.manager.configurationLibrarySnapshot(false).items.all { it.nodeDeleted.isEmpty() })
+    }
+
+    @Test fun accountNodesNeverAppearAsDeletedAndCannotBeRestored() = runTest {
+        val f = Fixture(); f.seedAccount(); f.local("Local Alpha")
+        val account = f.manager.configurationLibrarySnapshot(true).items.single { it.kind == ManualSourceKind.LegacyRemote }
+        assertTrue(account.nodeDeleted.isEmpty()); assertFalse(account.canRestoreNode(0))
+        try { f.manager.setNodeHidden(account.handle, "any", false); fail() } catch (_: IllegalArgumentException) { }
+    }
+
+    @Test fun controllerRestoreRefreshesTheListAndIgnoresNodesThatAreNotDeleted() = runTest {
+        val f = Fixture(); f.local("Local Alpha", "Local Beta")
+        var changed = 0
+        val c = ConfigurationLibraryController(f.manager, this, { true }, { it() }, {},
+            ioDispatcher = coroutineContext[kotlin.coroutines.ContinuationInterceptor] as kotlinx.coroutines.CoroutineDispatcher,
+            accountSignedIn = { false }, nodesChanged = { changed++ })
+        c.refresh(); advanceUntilIdle()
+        val item = c.snapshot.items.single()
+        val beta = item.nodes.indexOfFirst { it.name == "Local Beta" }
+        c.restoreNode(item, beta); advanceUntilIdle()
+        assertEquals("Restoring a visible node does nothing", 0, changed)
+        c.deleteNode(item, beta); advanceUntilIdle()
+        val deleted = c.snapshot.items.single()
+        assertEquals(setOf(beta), deleted.nodeDeleted)
+        c.restoreNode(deleted, beta); advanceUntilIdle()
+        assertEquals(2, changed)
+        assertTrue(c.snapshot.items.single().nodeDeleted.isEmpty())
+        assertEquals(listOf("Local Alpha", "Local Beta"), c.snapshot.items.single().nodes.filterNot { it.info }.map { it.name })
     }
 }

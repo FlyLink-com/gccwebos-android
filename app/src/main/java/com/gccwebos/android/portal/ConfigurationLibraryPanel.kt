@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -29,6 +30,8 @@ import com.gccwebos.android.ConnectionControlState
 import com.gccwebos.android.ConnectionPhase
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
+import com.gccwebos.android.design.NodeRegionIcon
+import com.gccwebos.android.design.nodeDisplayName
 import com.gccwebos.android.vpn.SafeProxyConfig
 
 /** All saved sources are visible; only the active source receives opaque node choices. */
@@ -61,7 +64,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
         onChooseNode = library::activateAndChoose,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
-        onRenameNode = library::renameNode, onDeleteNode = library::deleteNode,
+        onRenameNode = library::renameNode, onDeleteNode = library::deleteNode, onRestoreNode = library::restoreNode,
         tunnelActive = tunnelActive,
         namingEntryId = namingEntryId, onNamingDone = onNamingDone,
         activeContent = { item, list ->
@@ -98,6 +101,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit = { _, _ -> },
     onRenameNode: (ConfigurationItem, Int, String) -> Unit = { _, _, _ -> },
     onDeleteNode: (ConfigurationItem, Int) -> Unit = { _, _ -> },
+    onRestoreNode: (ConfigurationItem, Int) -> Unit = { _, _ -> },
     /** While a tunnel is up or changing, nodes of another source cannot be chosen (that would switch the source). */
     tunnelActive: Boolean = false,
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
@@ -200,6 +204,10 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                 Column { unified.extraRows(this) }
             }
         }
+        // Locally deleted nodes: collapsed at the bottom of the list, only when there are any. They can only be restored.
+        val deleted = snapshot.items.withIndex().filter { (_, item) -> filterKey == null || item.displayKey == filterKey }
+            .flatMap { (index, item) -> item.nodeDeleted.sorted().map { position -> Triple(index, item, position) } }
+        if (deleted.isNotEmpty()) DeletedNodesSection(deleted, actionsBlocked, onRestoreNode)
         // Where every node comes from; also the place for source-level actions (rename / replace / delete).
         if (snapshot.items.isNotEmpty()) SourceList(snapshot.items) { item, index ->
             ConfigurationItemMenu(item, index, actionsBlocked, onDetails = {
@@ -224,7 +232,8 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                 text = {
                     if (edit.delete) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(node.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("node-dialog-name"))
-                        Text("只在本机删除，不会改动订阅本身；订阅更新后仍保持删除。", color = Brand.Muted, fontSize = 12.sp)
+                        Text("只在本机删除，不会改动订阅本身；订阅更新后仍保持删除。可在列表底部的「已删除节点」里恢复。",
+                            color = Brand.Muted, fontSize = 12.sp)
                     } else Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedTextField(nodeName, { if (it.codePointCount(0, it.length) <= ConfigurationName.MAX_CODE_POINTS) nodeName = it },
                             label = { Text("节点名称") }, singleLine = true, enabled = !actionsBlocked,
@@ -396,6 +405,60 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
                     .clickable(enabled = choosable, role = Role.Button, onClickLabel = "选择此节点") {
                         onChooseNode(item.handle, NodeTarget(position, node.name, node.protocol))
                     })
+        }
+    }
+}
+
+@Composable
+private fun DeletedNodesSection(deleted: List<Triple<Int, ConfigurationItem, Int>>, busy: Boolean,
+    onRestore: (ConfigurationItem, Int) -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    GlassSurface(Modifier.fillMaxWidth().testTag("unified-deleted"), shape = RoundedCornerShape(20.dp)) {
+        Column {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("unified-deleted-toggle")
+                .semantics { contentDescription = if (expanded) "收起已删除节点" else "展开已删除节点" }
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Canvas(Modifier.size(14.dp)) {
+                    val first = if (expanded) Offset(size.width * .15f, size.height * .35f) else Offset(size.width * .35f, size.height * .15f)
+                    val middle = if (expanded) Offset(size.width * .5f, size.height * .7f) else Offset(size.width * .7f, size.height * .5f)
+                    val last = if (expanded) Offset(size.width * .85f, size.height * .35f) else Offset(size.width * .35f, size.height * .85f)
+                    drawLine(Brand.Muted, first, middle, 1.7.dp.toPx(), StrokeCap.Round)
+                    drawLine(Brand.Muted, middle, last, 1.7.dp.toPx(), StrokeCap.Round)
+                }
+                Text("已删除节点", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Brand.Muted, modifier = Modifier.weight(1f))
+                Text("${deleted.size} 条", fontSize = 10.sp, color = Brand.Muted, modifier = Modifier.testTag("unified-deleted-count"))
+            }
+            if (expanded) deleted.forEach { (index, item, position) ->
+                HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("deleted-node-$index-$position")
+                    .padding(start = 15.dp, end = 12.dp, top = 7.dp, bottom = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NodeRegionIcon(item.nodes[position].name, Modifier, size = 26.dp)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(nodeDisplayName(item.nodes[position].name), fontSize = 13.sp, color = Brand.Muted,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(nodeSourceLabel(item), fontSize = 10.sp, color = Brand.Muted, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                    var open by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { open = true }, enabled = !busy,
+                            modifier = Modifier.size(40.dp).testTag("deleted-menu-$index-$position")
+                                .semantics { contentDescription = "已删除节点操作" }) {
+                            Canvas(Modifier.size(18.dp)) {
+                                listOf(.2f, .5f, .8f).forEach { drawCircle(Brand.Muted, radius = 1.5.dp.toPx(), center = Offset(size.width * .5f, size.height * it)) }
+                            }
+                        }
+                        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                            DropdownMenuItem(text = { Text("恢复") }, enabled = !busy,
+                                onClick = { open = false; onRestore(item, position) },
+                                modifier = Modifier.testTag("deleted-restore-$index-$position"))
+                        }
+                    }
+                }
+            }
         }
     }
 }

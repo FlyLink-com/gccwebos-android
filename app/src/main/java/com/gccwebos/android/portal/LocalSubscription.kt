@@ -228,7 +228,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                         items += ConfigurationItem(handle(entry.id), entry.name, source.kind,
                             displayNodes(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()),
                             parsed.status, library.selector == ConfigurationSelector.Entry && library.selectedEntryId == entry.id,
-                            nodeKeys = keys.orEmpty(), nodeAliased = aliasedPositions(keys, overrides["entry:${entry.id}"].orEmpty()))
+                            nodeKeys = keys.orEmpty(), nodeAliased = aliasedPositions(keys, overrides["entry:${entry.id}"].orEmpty()),
+                            nodeDeleted = hiddenPositions(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()))
                     } finally { raw.fill(0) }
                 }
                 ConfigurationLibrarySnapshot(items)
@@ -252,7 +253,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             val override = keys[index]?.let(overrides::get)
             when {
                 override == null || node.info -> node
-                override.hidden -> node.copy(info = true)
+                override.hidden -> node.copy(info = true, name = override.alias ?: node.name)
                 override.alias != null -> node.copy(name = override.alias)
                 else -> node
             }
@@ -260,6 +261,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     private fun aliasedPositions(keys: List<String?>?, overrides: Map<String, NodeOverride>): Set<Int> =
         if (keys == null) emptySet() else keys.indices.filter { index -> keys[index]?.let { overrides[it]?.alias } != null }.toSet()
+    private fun hiddenPositions(nodes: List<SafeProxyConfig.NodeSummary>, keys: List<String?>?, overrides: Map<String, NodeOverride>): Set<Int> =
+        if (keys == null || keys.size != nodes.size) emptySet()
+        else keys.indices.filter { index -> !nodes[index].info && keys[index]?.let { overrides[it]?.hidden } == true }.toSet()
     private fun overridesOf(scope: String?): Map<String, NodeOverride> =
         if (scope == null) emptyMap() else try { nodeOverrides?.read()?.get(scope).orEmpty() } catch (_: Exception) { emptyMap() }
     /** Re-derives the active registry's display names / deleted flags from the stored overrides, keeping every selection object. */
@@ -342,9 +346,16 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
      * that is not (uniquely) present in the stored configuration changes nothing. Display only: the
      * subscription, the generated connection config and connection admission are untouched.
      */
-    internal suspend fun setNodeOverride(handle: ConfigurationHandle, key: String, value: NodeOverride) = mutex.withLock {
-        val store = nodeOverrides ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+    internal suspend fun setNodeOverride(handle: ConfigurationHandle, key: String, value: NodeOverride) {
         val normalized = value.alias?.takeIf { it.isNotBlank() }?.let { ConfigurationName.normalize(it) }
+        changeNodeOverride(handle, key) { NodeOverride(normalized, value.hidden) }
+    }
+    /** Deleting keeps a local alias, so a restored node comes back under the name the user gave it. */
+    internal suspend fun setNodeHidden(handle: ConfigurationHandle, key: String, hidden: Boolean) =
+        changeNodeOverride(handle, key) { it.copy(hidden = hidden) }
+
+    private suspend fun changeNodeOverride(handle: ConfigurationHandle, key: String, change: (NodeOverride) -> NodeOverride) = mutex.withLock {
+        val store = nodeOverrides ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
         val context = currentCoroutineContext()
         context.ensureActive()
         synchronized(lock) {
@@ -359,7 +370,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 }
                 if (!present) throw IllegalArgumentException()
                 val scope = "entry:$id"
-                try { store.put(scope, key, NodeOverride(normalized, value.hidden)) }
+                try { store.put(scope, key, change(store.read()[scope]?.get(key) ?: NodeOverride())) }
                 catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
                 val active = library.selector == ConfigurationSelector.Entry && library.selectedEntryId == id
                 if (active) reapplyNodeOverrides()

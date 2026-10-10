@@ -27,7 +27,12 @@ internal data class ConfigurationItem(val handle: ConfigurationHandle, val name:
     /** One-way node keys aligned with [nodes] (null where a node cannot be addressed). Empty for the read-only account subscription. */
     val nodeKeys: List<String?> = emptyList(),
     /** Positions whose name is a local alias. */
-    val nodeAliased: Set<Int> = emptySet()) {
+    val nodeAliased: Set<Int> = emptySet(),
+    /** Positions the user deleted locally. They are not listed as nodes; they can only be restored. */
+    val nodeDeleted: Set<Int> = emptySet()) {
+    /** Only a locally deleted imported node can be restored. */
+    fun canRestoreNode(position: Int): Boolean = kind != ManualSourceKind.LegacyRemote && handle.entryId != null &&
+        nodeKeys.getOrNull(position) != null && position in nodeDeleted
     /** Only imported nodes can be renamed or deleted; the account subscription is read-only. */
     fun canEditNode(position: Int): Boolean = kind != ManualSourceKind.LegacyRemote && handle.entryId != null &&
         nodeKeys.getOrNull(position) != null && nodes.getOrNull(position)?.info == false
@@ -86,7 +91,13 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
     fun deleteNode(item: ConfigurationItem, position: Int) {
         val key = item.nodeKeys.getOrNull(position)
         if (key == null || !item.canEditNode(position)) return
-        mutate(afterSuccess = nodesChanged) { manager.setNodeOverride(item.handle, key, NodeOverride(hidden = true)); manager.snapshot() }
+        mutate(afterSuccess = nodesChanged) { manager.setNodeHidden(item.handle, key, true); manager.snapshot() }
+    }
+    /** Brings a locally deleted node back into the list, under its previous local alias if it had one. */
+    fun restoreNode(item: ConfigurationItem, position: Int) {
+        val key = item.nodeKeys.getOrNull(position)
+        if (key == null || !item.canRestoreNode(position)) return
+        mutate(afterSuccess = nodesChanged) { manager.setNodeHidden(item.handle, key, false); manager.snapshot() }
     }
     fun cancel() {
         generation++; task?.cancel(); task = null; busy = false; error = null

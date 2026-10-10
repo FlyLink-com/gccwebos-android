@@ -2,7 +2,6 @@ package com.gccwebos.android.commerce
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,9 +23,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
+import com.gccwebos.android.design.GccShapes
+import com.gccwebos.android.design.GccSpacing
+import com.gccwebos.android.design.GccType
 import com.gccwebos.android.design.GlassSurface
 
 /** The one configured official channel. The Mine rows derive their icon and handle from it. */
@@ -89,7 +90,7 @@ internal fun mineVersionLabel(versionName: String?): String? =
  */
 @Composable
 internal fun MineTopBar(title: String = "我的") {
-    GlassSurface(Modifier.fillMaxWidth().testTag("mine-topbar"), shape = RoundedCornerShape(16.dp),
+    GlassSurface(Modifier.fillMaxWidth().testTag("mine-topbar"), shape = GccShapes.card,
         edge = MineStyle.Edge, tint = Brush.verticalGradient(listOf(Brand.Background.copy(alpha = .55f), Brand.Background.copy(alpha = .35f)))) {
         Box(Modifier.fillMaxWidth().heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Brand.Text,
@@ -111,7 +112,7 @@ internal fun MineAvatar(initial: String?, enabled: Boolean, size: Dp = 64.dp) {
         drawCircle(Brush.sweepGradient(ring + ring.first(), center), r * .80f, style = Stroke(width = 2.dp.toPx()))
     }, contentAlignment = Alignment.Center) {
         val tint = if (enabled) Brand.Cyan else Brand.Muted
-        if (initial != null) Text(initial, color = tint, fontSize = (size.value * .36f).sp, fontWeight = FontWeight.Bold,
+        if (initial != null) Text(initial, color = tint, style = GccType.avatarGlyph(size),
             modifier = Modifier.testTag("mine-avatar-initial"))
         else Icon(painterResource(R.drawable.brand_user), null, tint = tint, modifier = Modifier.size(size * .42f))
     }
@@ -130,7 +131,7 @@ internal fun MineCopyIdButton(accountId: String, copyOverride: ((String) -> Unit
             })(accountId)
             true
         } catch (_: Exception) { false }
-    }, shape = RoundedCornerShape(50), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+    }, shape = GccShapes.pill, contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = 0.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, Brand.Cyan.copy(alpha = .45f)),
         modifier = Modifier.heightIn(min = 48.dp).testTag("mine-copy-id").semantics { contentDescription = if (copied) "账户 ID 已复制" else "复制账户 ID" }) {
         Text(if (copied) "已复制" else "复制 ID", style = MaterialTheme.typography.labelMedium, color = Brand.Cyan)
@@ -140,7 +141,7 @@ internal fun MineCopyIdButton(accountId: String, copyOverride: ((String) -> Unit
 /** Light "续费 ›" link that opens the existing 套餐 tab; it never starts a purchase. */
 @Composable
 internal fun MineRenewLink(enabled: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = GccSpacing.Small, vertical = 0.dp),
         modifier = Modifier.heightIn(min = 48.dp).testTag("mine-renew")) {
         Text("续费 ›", style = MaterialTheme.typography.labelLarge, color = if (enabled) Brand.Cyan else Brand.Muted)
     }
@@ -151,9 +152,9 @@ internal fun MineRenewLink(enabled: Boolean, onClick: () -> Unit) {
 internal fun MineGroupLabel(title: String, tag: String) {
     // A small dark glass plate keeps the label readable over the busy backdrop artwork (review M4).
     Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = Brand.Text,
-        modifier = Modifier.padding(start = 2.dp, top = 2.dp).semantics { heading() }.testTag(tag)
-            .background(Brand.Background.copy(alpha = .78f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 4.dp))
+        modifier = Modifier.padding(start = GccSpacing.ExtraSmall, top = GccSpacing.ExtraSmall).semantics { heading() }.testTag(tag)
+            .background(Brand.Background.copy(alpha = .78f), GccShapes.medium)
+            .padding(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall))
 }
 
 /** 官方频道 row: Telegram paper plane + @handle for a Telegram URL, otherwise a neutral link row. */

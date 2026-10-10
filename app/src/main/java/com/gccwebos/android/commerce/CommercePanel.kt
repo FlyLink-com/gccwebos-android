@@ -20,7 +20,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
@@ -720,7 +719,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     if (view != "mine" && !walletTopBar && !historyTopBar) TextButton(onClick = { view = "mine" }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
     if (historyTopBar) WalletTopBar(if (historyTab == "ledger") "账单明细" else "我的订单", onBack = { view = "mine" }, onRecords = null)
     if (view == "about") {
-        BrandCard(Modifier.testTag("mine-about")) {
+        SectionCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             com.gccwebos.android.update.UpdatePanel(autoCheck = autoLoad, refreshRequest = refreshRequest)
         }
@@ -731,7 +730,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         ReferralPanel(account, autoLoad, referralOverride, copyOverride, refreshRequest)
     } else if (view != "mine") {
         if (view == "history") {
-            Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().testTag("mine-history-tabs"), horizontalArrangement = Arrangement.spacedBy(GccSpacing.Small)) {
                 FilterChip(selected = historyTab == "orders", onClick = { historyTab = "orders" },
                     enabled = !state.busy && state.canOperate(), label = { Text("消费订单") },
                     modifier = Modifier.testTag("mine-history-orders"))
@@ -755,7 +754,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             } else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
-    if (view == "mine") Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    if (view == "mine") Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
         MineTopBar()
         MineWelcomeCard(account, onRenew = onReturnToPlans?.takeIf { account.authenticated }, copyOverride = copyOverride)
@@ -771,7 +770,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         }
         // ② 服务与记录. The wallet has no separate row: the balance card's 钱包充值 / 账单明细 cover it.
         MineGroupLabel("服务与记录", "mine-group-service")
-        MineCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
+        SectionCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall), verticalSpacing = 0.dp) {
             MineMenuRow("我的订单", "mine-history", !state.busy && idle, subtitle = "商品订单与充值记录") {
                 view = if (account.authenticated) "history" else "security"
                 historyTab = "orders"
@@ -781,7 +780,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
         }
         // ③ 系统与设置.
         MineGroupLabel("系统与设置", "mine-group-system")
-        MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
+        SectionCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall), verticalSpacing = 0.dp) {
             MineMenuRow("账户与安全", "mine-security", !account.busy) { view = "security" }
             MineRowDivider()
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { view = "about" }
@@ -802,22 +801,22 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
     androidx.activity.compose.BackHandler(enabled = about) { about = false }
     if (about) {
         TextButton(onClick = { about = false }, modifier = Modifier.heightIn(min = 48.dp).testTag("mine-back")) { Text("‹ 返回我的") }
-        BrandCard(Modifier.testTag("mine-about")) {
+        SectionCard(Modifier.testTag("mine-about")) {
             Text("关于与更新", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             com.gccwebos.android.update.UpdatePanel(autoCheck = autoLoad, refreshRequest = refreshRequest)
         }
         return
     }
     val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
-    Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         MineTopBar()
-        Column(Modifier.fillMaxWidth().testTag("mine-signed-out"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().testTag("mine-signed-out"), verticalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         MineWelcomeCard(account, onLogin = onLogin)
         MineWalletCard(Modifier.testTag("wallet-card")) {
             MineBalanceHeading()
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
                 CoinIcon(30.dp, enabled = false)
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(GccSpacing.ExtraSmall)) {
                     Text("登录后查看余额", style = MaterialTheme.typography.titleMedium, color = Brand.Muted,
                         modifier = Modifier.testTag("wallet-balance-signed-out"))
                     Text("充值与账单明细登录后使用", style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
@@ -828,13 +827,13 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
         }
         // The invite banner and its 立即邀请 action appear after login (referral needs an account).
         MineGroupLabel("服务与记录", "mine-group-service")
-        MineCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
+        SectionCard(Modifier.testTag("mine-menu"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall), verticalSpacing = 0.dp) {
             MineMenuRow("我的订单", "mine-history", idle, subtitle = "登录后查看订单与充值记录", onClick = onLogin)
             MineRowDivider()
             MineOfficialChannelRow(MINE_OFFICIAL_CHANNEL_URL, telegramOpener) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         }
         MineGroupLabel("系统与设置", "mine-group-system")
-        MineCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp), verticalSpacing = 0.dp) {
+        SectionCard(Modifier.testTag("mine-functions"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall), verticalSpacing = 0.dp) {
             MineMenuRow("账户与安全", "mine-security", idle, subtitle = "登录后管理账户与安全", onClick = onLogin)
             MineRowDivider()
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { about = true }

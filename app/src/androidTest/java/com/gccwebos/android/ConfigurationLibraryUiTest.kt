@@ -183,7 +183,7 @@ class ConfigurationLibraryUiTest {
         withDeletedNode()
         launch()
         compose.onNodeWithTag("unified-deleted").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("unified-deleted-count").assertTextEquals("1 条")
+        compose.onNodeWithTag("unified-deleted-count", useUnmergedTree = true).assertTextEquals("1 条")
         compose.onNodeWithTag("deleted-node-2-1").assertDoesNotExist() // collapsed by default
         compose.onNodeWithTag("configuration-node-2-1").assertDoesNotExist() // never a main-list row
         compose.onNodeWithTag("unified-deleted-toggle").performClick()

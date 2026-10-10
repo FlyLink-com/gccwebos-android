@@ -712,6 +712,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
     val state = stateOverride ?: remember(sessionOwner, recoveryOverride) { CommerceController(account, scope,
         recoveryOverride ?: FileCommerceRecovery(context.applicationContext), includeHistory = true) }
     var view by remember(sessionOwner) { mutableStateOf("mine") }
+    var confirmLogout by remember(sessionOwner) { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = view != "mine") {
         if (shouldCancelLoginOnBack(account)) account.cancelAuthentication() else view = "mine"
     }
@@ -747,6 +748,8 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             onLedger = { if (account.authenticated) view = "history" else view = "security" })
         if (!account.authenticated && !account.retainingCommerceSession) BrandButton("登录账户管理钱包", { view = "security" }, modifier = Modifier.testTag("mine-login"))
     }
+    if (confirmLogout) com.gccwebos.android.portal.LogoutDialog(
+        onConfirm = { confirmLogout = false; account.logout() }, onDismiss = { confirmLogout = false })
     if (view == "mine") Column(Modifier.fillMaxWidth().testTag("mine-surface"), verticalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         val idle = !account.busy && !account.restoring && !account.foregroundCheckPending
         MineWelcomeCard(account, onRenew = onReturnToPlans?.takeIf { account.authenticated }, copyOverride = copyOverride)
@@ -775,7 +778,7 @@ internal fun MinePanel(account: AccountController, autoLoad: Boolean = true, sta
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { view = "about" }
             if (account.authenticated) {
                 MineRowDivider()
-                MineMenuRow("退出登录（保留本地订阅）", "mine-signout", !account.busy, onClick = account::logout)
+                MineMenuRow(com.gccwebos.android.portal.LOGOUT_LABEL, "mine-signout", !account.busy) { confirmLogout = true }
             }
         }
     }

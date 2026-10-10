@@ -205,7 +205,7 @@ class AccountStartupRestoreTest {
         fixture.assertVerifiedAccount(state)
     }
 
-    @Test fun logoutDuringStartupRejectsALateSuccessfulValidationAndKeepsLocalConfiguration() = runTest {
+    @Test fun logoutDuringStartupRejectsALateSuccessfulValidationAndClearsTheAccountSubscription() = runTest {
         val fixture = Fixture()
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -233,7 +233,9 @@ class AccountStartupRestoreTest {
             assertFalse(state.clearing)
             assertFalse(state.restoring)
             assertNull(fixture.sessions.read())
-            fixture.assertLocalPreserved(state)
+            // 退出登录 also forgets this device's account subscription.
+            assertFalse(state.localSubscription.hasProfile)
+            assertNull(fixture.profiles.read())
         } finally { release.complete(Unit); runCurrent() }
     }
 }

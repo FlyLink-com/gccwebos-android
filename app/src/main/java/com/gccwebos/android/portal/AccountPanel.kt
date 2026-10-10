@@ -92,7 +92,8 @@ internal class CommerceSessionIdentity
 internal class AccountController(private val repository: PortalRepository, private val scope: CoroutineScope,
     nodeLatencyProbe: NodeLatencyProbe? = null,
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
-    private val clearLocalData: suspend () -> Unit = { repository.clearLocalData() }) {
+    /** 退出登录: revokes the session and forgets this device's account subscription; imported configurations stay. */
+    private val logoutClearingAccount: suspend () -> Unit = { repository.logoutClearingAccountSubscription() }) {
     var account by mutableStateOf("")
     var password by mutableStateOf("")
     var answer by mutableStateOf("")
@@ -505,10 +506,11 @@ internal class AccountController(private val repository: PortalRepository, priva
         }
     }
 
-    fun logout() = reset(clearLocal = false)
-    fun clearLocal() = reset(clearLocal = true)
-    fun cancelAuthentication() = reset(clearLocal = false)
-    private fun reset(clearLocal: Boolean) {
+    /** 退出登录: log out and clear this device's account subscription (not manually imported configurations, not the server account). */
+    fun logout() = reset(clearAccountSubscription = true)
+    /** Abandon an in-progress sign-in; keeps whatever local subscription exists. */
+    fun cancelAuthentication() = reset(clearAccountSubscription = false)
+    private fun reset(clearAccountSubscription: Boolean) {
         manualImport.cancel()
         configurationLibrary.clearDisplay()
         nodeLatency.cancel()
@@ -521,7 +523,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         task?.cancel(); expiryTask?.cancel()
         authenticationSubmitting = false
         restoring = false; restorationPending = false; foregroundCheckPending = false
-        if (clearLocal) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
+        if (clearAccountSubscription) localSubscription = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
             sourceKind = ManualSourceKind.None)
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
         referralGenerationGuard = ReferralGenerationGuard()
@@ -531,7 +533,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
             try {
-                if (clearLocal) { clearLocalData(); localSubscription = repository.localSubscriptions.snapshot() } else repository.signOutAccount()
+                if (clearAccountSubscription) { logoutClearingAccount(); localSubscription = repository.localSubscriptions.snapshot() } else repository.signOutAccount()
                 nodes = localSubscription.nodes
                 error = null
             }
@@ -596,7 +598,7 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                           loginStartupReady: Boolean = true,
                           registrationOverride: RegistrationController? = null,
                           startRegistration: Boolean = false) {
-    var confirmReset by remember { mutableStateOf(false) }
+    var confirmLogout by remember { mutableStateOf(false) }
     var registering by remember(state, startRegistration) { mutableStateOf(startRegistration) }
     val registrationScope = rememberCoroutineScope()
     val registration = remember(state, registrationOverride) {
@@ -638,9 +640,8 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                 ImportStatus.WAITING_DELIVERY -> "订阅暂未交付"
                 else -> null
             }, Modifier.testTag("account-read-error"))
-            TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅与登录") }
-            TextButton(onClick = state::logout, enabled = !state.clearing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-signout")) { Text("退出账户（保留本地订阅）") }
+            TextButton(onClick = { confirmLogout = true }, enabled = !state.clearing,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-logout")) { Text(LOGOUT_LABEL) }
         } else if (state.factorReference != null) {
             SupportingText("请输入身份验证器中的 TOTP 验证码")
             OutlinedTextField(state.code, { state.code = it }, enabled = !state.busy,
@@ -664,30 +665,26 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
             BrandButton("登录", state::login, enabled = !state.busy && state.challenge != null && state.account.isNotBlank() && normalizedLoginPassword(state.password).isNotEmpty() && state.answer.isNotBlank(),
                 modifier = Modifier.testTag("login-submit"))
         }
-        if (!state.authenticated) {
-            TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅并重置登录") }
-        }
     }
-    if (confirmReset) ClearLocalDialog(onConfirm = { confirmReset = false; state.clearLocal() }, onDismiss = { confirmReset = false })
+    if (confirmLogout) LogoutDialog(onConfirm = { confirmLogout = false; state.logout() }, onDismiss = { confirmLogout = false })
 }
 
-/** 账户与安全 bottom action and its confirmation: plain words, local device only, server account untouched. */
-internal const val CLEAR_LOCAL_LABEL = "退出登录"
-internal const val CLEAR_LOCAL_TITLE = "是否退出登录并清除当前设备订阅配置？"
-internal const val CLEAR_LOCAL_BODY = "只影响当前设备：退出登录，并清除保存在这台设备上的订阅配置。不会删除或更改服务器上的账户。" +
-    "已领取的订阅清除后，可能需要重新登录获取，或联系客服恢复。"
-internal const val CLEAR_LOCAL_CONFIRM = "退出登录"
+/** The one logout action: plain words, this device only, server account untouched. */
+internal const val LOGOUT_LABEL = "退出登录"
+internal const val LOGOUT_TITLE = "是否退出登录并清除当前设备订阅配置？"
+internal const val LOGOUT_BODY = "将退出登录，并清除这台设备上保存的账户订阅配置。只影响当前设备，不会删除或更改服务器上的账户；" +
+    "你自己导入的配置会保留。账户订阅清除后，重新登录即可再次获取。"
+internal const val LOGOUT_CONFIRM = "退出登录"
 
 @Composable
-private fun ClearLocalDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+internal fun LogoutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(onDismissRequest = onDismiss,
-        title = { Text(CLEAR_LOCAL_TITLE, modifier = Modifier.testTag("reset-title")) },
+        title = { Text(LOGOUT_TITLE, modifier = Modifier.testTag("logout-title")) },
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            Text(CLEAR_LOCAL_BODY, modifier = Modifier.testTag("reset-body"))
+            Text(LOGOUT_BODY, modifier = Modifier.testTag("logout-body"))
         } },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("reset-confirm")) { Text(CLEAR_LOCAL_CONFIRM) } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("reset-cancel")) { Text("取消") } })
+        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("logout-confirm")) { Text(LOGOUT_CONFIRM) } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("logout-cancel")) { Text("取消") } })
 }
 
 internal const val OFFICIAL_REGISTRATION_URL = "https://portal.gccwebos.com/portal/register/"
@@ -876,7 +873,7 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
     if (!state.authenticated || state.restoring || state.foregroundCheckPending) return
     // 账户与安全 has exactly two functions: 通行密钥 and 绑定身份验证器. No account-resource detail here.
     val status = state.security
-    var confirmReset by remember { mutableStateOf(false) }
+    var confirmLogout by remember { mutableStateOf(false) }
     SectionCard(Modifier.testTag("account-security-state"), contentPadding = PaddingValues(horizontal = GccSpacing.Medium, vertical = GccSpacing.ExtraSmall),
         verticalSpacing = 0.dp) {
         if (status == null && state.busy) {
@@ -890,18 +887,18 @@ internal fun SecurityStatusPanel(state: AccountController, autoLoad: Boolean, re
             SecurityRow(R.drawable.brand_shield, "绑定身份验证器", status?.let { if (it.authenticatorBound) "已绑定" else "未绑定" },
                 on = status?.authenticatorBound == true, tag = "security-authenticator")
         }
-        // Kept (not a third feature): the only place a signed-in user can wipe the local login and subscription.
+        // Kept (not a third feature): 退出登录 = log out and forget this device's account subscription.
         HorizontalDivider(color = Brand.Border.copy(alpha = .35f))
-        TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) {
-            Text(CLEAR_LOCAL_LABEL, style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
+        TextButton(onClick = { confirmLogout = true }, enabled = !state.clearing,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-logout")) {
+            Text(LOGOUT_LABEL, style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
         }
     }
     if (status == null && !state.busy) {
         SupportingText("暂时无法读取安全状态。", Modifier.testTag("security-unavailable"))
         TextButton(onClick = state::readSecurity, modifier = Modifier.heightIn(min = 48.dp).testTag("security-retry")) { Text("重新读取") }
     }
-    if (confirmReset) ClearLocalDialog(onConfirm = { confirmReset = false; state.clearLocal() }, onDismiss = { confirmReset = false })
+    if (confirmLogout) LogoutDialog(onConfirm = { confirmLogout = false; state.logout() }, onDismiss = { confirmLogout = false })
 }
 
 /** One status line; [value] null means "not read yet" and shows a dash rather than a guess. */

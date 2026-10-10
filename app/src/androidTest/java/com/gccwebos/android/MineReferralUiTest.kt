@@ -118,6 +118,7 @@ class MineReferralUiTest {
         compose.onNodeWithTag("mine-security").assert(hasAnyAncestor(hasTestTag("mine-functions")))
         compose.onNodeWithTag("mine-more").assert(hasAnyAncestor(hasTestTag("mine-functions")))
         compose.onNodeWithTag("mine-signout").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.onNodeWithTag("mine-signout", useUnmergedTree = true).assertTextContains("退出登录")
         compose.onNodeWithTag("mine-group-service").assertTextEquals("服务与记录")
         compose.onNodeWithTag("mine-group-system").assertTextEquals("系统与设置")
         compose.onNodeWithText("15%", substring = true).assertDoesNotExist()

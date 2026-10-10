@@ -147,7 +147,8 @@ class NodeRegionLatencyUiTest {
         response = { gate.await(); NodeLatencyObservation.Success(27L, 7L) }
         launch(width = 320)
         compose.waitUntil(5000) { measurements.get() == 2 }
-        badge(1).assertTextEquals("— ms")
+        badge(1).assertTextEquals("---")
+            .assertContentDescriptionEquals("节点延迟：测试中")
         compose.runOnIdle { assertTrue(latency.busy) }
         compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
         val selected = state.snapshot.choices[1].selection
@@ -210,6 +211,7 @@ class NodeRegionLatencyUiTest {
             GccTheme {
                 Column {
                     NodeLatencyBadge(null, Modifier.testTag("pending"))
+                    NodeLatencyBadge(null, Modifier.testTag("measuring"), measuring = true)
                     NodeLatencyBadge(NodeLatencyObservation.NoReply, Modifier.testTag("timeout"))
                     NodeLatencyBadge(NodeLatencyObservation.Unavailable, Modifier.testTag("unavailable"))
                     NodeLatencyBadge(NodeLatencyObservation.NetworkChanged, Modifier.testTag("changed"))
@@ -218,6 +220,10 @@ class NodeRegionLatencyUiTest {
         }
         compose.onNodeWithTag("pending").assertTextEquals("— ms")
             .assertContentDescriptionEquals("节点延迟：未测试")
+        compose.onNodeWithTag("measuring").assertTextEquals("---")
+            .assertContentDescriptionEquals("节点延迟：测试中")
+        compose.onNode(hasProgressBarRangeInfo(androidx.compose.ui.semantics.ProgressBarRangeInfo.Indeterminate)
+            and hasAnyAncestor(hasTestTag("measuring")), useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("timeout").assertTextEquals("超时")
             .assertContentDescriptionEquals("节点延迟：超时")
         compose.onNodeWithTag("unavailable").assertTextEquals("不可测")
@@ -256,10 +262,10 @@ class NodeRegionLatencyUiTest {
             elapsed.addAndGet(120_000L)
         }
         compose.waitUntil(5000) {
-            measurements.get() == 4 && compose.onAllNodes(hasTestTag("node-latency-0") and hasText("— ms"), useUnmergedTree = true)
+            measurements.get() == 4 && compose.onAllNodes(hasTestTag("node-latency-0") and hasText("---"), useUnmergedTree = true)
                 .fetchSemanticsNodes().size == 1
         }
-        badge(1).assertTextEquals("— ms")
+        badge(1).assertTextEquals("---")
         compose.runOnIdle {
             assertSame(selected, state.snapshot.selected)
             assertEquals(4, measurements.get()); assertEquals(1, reads.get()); gate.complete(Unit)

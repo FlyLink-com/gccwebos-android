@@ -13,12 +13,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.*
 import com.gccwebos.android.portal.AccountController
 import java.time.Instant
@@ -199,17 +197,14 @@ private fun BalanceCard(modifier: Modifier, embedded: Boolean, content: @Composa
 private fun MineSpendableBalance(wallet: Wallet?) {
     val formatted = wallet?.spendableUnits?.let(::formatCoins) ?: "— Coins"
     val amount = formatted.removeSuffix(" Coins")
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    val amountStyle = if (amount.length > 9) MaterialTheme.typography.displayMedium else MaterialTheme.typography.displayLarge
+    val unitStyle = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold, color = MineStyle.Gold)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
         CoinIcon(30.dp)
         Text(buildAnnotatedString {
-            withStyle(SpanStyle(fontSize = if (amount.length > 9) 30.sp else 38.sp, fontWeight = FontWeight.ExtraBold)) {
-                append(amount)
-            }
-            withStyle(SpanStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MineStyle.Gold)) {
-                append(" Coins")
-            }
-        }, style = MaterialTheme.typography.headlineLarge.copy(lineHeight = 46.sp),
-            color = Brand.Text, modifier = Modifier.weight(1f).testTag("wallet-balance"))
+            withStyle(amountStyle.toSpanStyle()) { append(amount) }
+            withStyle(unitStyle.toSpanStyle()) { append(" Coins") }
+        }, style = amountStyle, color = Brand.Text, modifier = Modifier.weight(1f).testTag("wallet-balance"))
     }
 }
 
@@ -238,7 +233,6 @@ private fun WalletBalanceMetrics(wallet: Wallet?) {
                             Text(metric.first, style = MaterialTheme.typography.labelMedium, color = Brand.Muted)
                             Text(metric.second?.let(::formatCoins) ?: "— Coins",
                                 style = if (metric.third == "wallet-detail-total") MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
-                                fontSize = if (metric.third == "wallet-detail-total") 20.sp else 16.sp,
                                 color = if (metric.third == "wallet-detail-total") Brand.Cyan else Brand.Text,
                                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag(metric.third))
                         }

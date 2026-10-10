@@ -170,11 +170,10 @@ class BrandUiTest {
         if (enabled) button.assertIsEnabled() else button.assertIsNotEnabled()
     }
     private fun assertCompactLoginHasNoMoreOrReset() {
-        listOf("login-more", "account-reset", "reset-confirm", "reset-cancel").forEach { tag ->
+        listOf("login-more", "account-reset", "account-logout", "logout-confirm", "logout-cancel").forEach { tag ->
             compose.onNodeWithTag(tag).assertDoesNotExist()
         }
-        listOf("⋯", "清除本地订阅并重置登录",
-            "不保存密码。退出账户保留本地订阅；清除仅影响本机，不撤销服务器凭据。").forEach { text ->
+        listOf("⋯", "清除本地订阅并重置登录", "清除本地订阅与登录", "退出登录").forEach { text ->
             compose.onAllNodesWithText(text, useUnmergedTree = true).assertCountEquals(0)
         }
     }
@@ -204,7 +203,7 @@ class BrandUiTest {
             capture(page.lowercase())
         }
         compose.onNodeWithTag("mine-security").performScrollTo().performClick()
-        compose.onNodeWithTag("account-reset").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("account-logout").performScrollTo().assertIsDisplayed()
     }
     @Test fun signedOutGateOmitsMoreAndResetAndRetainsTypedAccount() {
         val fixture = OfflineLoginChallengeFixture()
@@ -444,10 +443,10 @@ class BrandUiTest {
         capture("connect-font-200")
         compose.onNodeWithTag("nav-Profile").performClick()
         compose.onNodeWithTag("mine-security").performScrollTo().performClick()
-        compose.onNodeWithTag("account-panel").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("account-security-state").performScrollTo().assertIsDisplayed()
         capture("profile-font-200")
-        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
-        compose.onNodeWithTag("reset-cancel").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("account-logout").performScrollTo().performClick()
+        compose.onNodeWithTag("logout-cancel").assertIsDisplayed().performClick()
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("page-Connect").assertIsDisplayed()
     }
@@ -588,13 +587,10 @@ class BrandUiTest {
         compose.onNodeWithTag("totp-cancel").performScrollTo().performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertNull(state.factorReference); assertNotNull(store.value) }
-        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
-        compose.onNodeWithTag("reset-cancel").performClick()
+        // The separate clear-local feature is gone; a signed-out login form has no logout/reset action.
+        compose.onNodeWithTag("account-logout").assertDoesNotExist()
+        compose.onNodeWithTag("account-reset").assertDoesNotExist()
         compose.runOnIdle { assertNotNull(store.value) }
-        compose.onNodeWithTag("account-reset").performScrollTo().performClick()
-        compose.onNodeWithTag("reset-confirm").performClick()
-        compose.waitForIdle()
-        compose.runOnIdle { assertNull(store.value) }
     }
 
 }

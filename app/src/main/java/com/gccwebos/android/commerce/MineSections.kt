@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -27,10 +26,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.gccwebos.android.R
 import com.gccwebos.android.design.Brand
+import com.gccwebos.android.design.GccCard
+import com.gccwebos.android.design.GccSemantic
+import com.gccwebos.android.design.GccShapes
+import com.gccwebos.android.design.GccSpacing
 import com.gccwebos.android.design.GlassSurface
+import com.gccwebos.android.design.SectionCard
 import com.gccwebos.android.design.UiHaptic
 import com.gccwebos.android.design.pressFeedback
 import com.gccwebos.android.design.rememberPressFeedback
@@ -40,15 +43,15 @@ import com.gccwebos.android.design.rememberPressFeedback
  * no account data. Callers own every enabled state and click target.
  */
 internal object MineStyle {
-    val CardShape = RoundedCornerShape(20.dp)
+    val CardShape = GccShapes.card
     /** ~12% white→cyan rim, the "glass edge" of every Mine card. */
-    val Edge = BorderStroke(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .12f), Brand.Cyan.copy(alpha = .12f))))
+    val Edge = GccCard.Edge
     val Chevron = Color(0xFFA9B9CE)
-    val Gold = Color(0xFFFFCB73)
-    val GoldDeep = Color(0xFFE59A2F)
+    val Gold = GccSemantic.Gold
+    val GoldDeep = GccSemantic.GoldDeep
     /** Electric blue into a faint gold corner for the standalone wallet card. */
     val WalletTint = Brush.linearGradient(listOf(Color(0xFF2658FF).copy(alpha = .30f),
-        Color(0xFF39D7FF).copy(alpha = .08f), Color(0xFFFFCB73).copy(alpha = .16f)))
+        Color(0xFF39D7FF).copy(alpha = .08f), GccSemantic.Gold.copy(alpha = .16f)))
     /** Deep violet/navy wash for the invite banner. */
     val InviteTint = Brush.linearGradient(listOf(Color(0xFF4A2A8C).copy(alpha = .42f),
         Color(0xFF0E2C55).copy(alpha = .30f), Color(0xFF39D7FF).copy(alpha = .10f)))
@@ -56,12 +59,9 @@ internal object MineStyle {
 
 @Composable
 internal fun MineCard(modifier: Modifier = Modifier, tint: Brush? = null,
-                      contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                      verticalSpacing: Dp = 8.dp, content: @Composable ColumnScope.() -> Unit) {
-    GlassSurface(modifier.fillMaxWidth(), shape = MineStyle.CardShape, edge = MineStyle.Edge, tint = tint) {
-        Column(Modifier.fillMaxWidth().padding(contentPadding), verticalArrangement = Arrangement.spacedBy(verticalSpacing),
-            content = content)
-    }
+                      contentPadding: PaddingValues = PaddingValues(horizontal = GccSpacing.Large, vertical = GccSpacing.Medium),
+                      verticalSpacing: Dp = GccSpacing.Small, content: @Composable ColumnScope.() -> Unit) {
+    SectionCard(modifier, tint = tint, contentPadding = contentPadding, verticalSpacing = verticalSpacing, content = content)
 }
 
 @Composable
@@ -81,7 +81,7 @@ internal fun MineGlowIcon(icon: Int, enabled: Boolean, size: Dp = 20.dp) {
 @Composable
 internal fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, subtitle: String? = null, onClick: () -> Unit) {
     val press = rememberPressFeedback(enabled)
-    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
+    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = GccSpacing.ExtraSmall, vertical = GccSpacing.ExtraSmall),
         interactionSource = press.interactionSource,
         modifier = Modifier.pressFeedback(press).fillMaxWidth().heightIn(min = 52.dp).testTag(tag)) {
         val icon = when (tag) {
@@ -94,46 +94,47 @@ internal fun MineMenuRow(title: String, tag: String, enabled: Boolean = true, su
             else -> R.drawable.brand_arrow
         }
         MineGlowIcon(icon, enabled)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Spacer(Modifier.width(GccSpacing.Medium))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(GccSpacing.ExtraSmall)) {
             Text(title, style = MaterialTheme.typography.bodyMedium, color = if (enabled) Brand.Text else Brand.Muted)
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Brand.Muted) }
         }
-        Spacer(Modifier.width(8.dp))
-        Text("›", fontSize = 20.sp, color = MineStyle.Chevron.copy(alpha = if (enabled) 1f else .5f))
+        Spacer(Modifier.width(GccSpacing.Small))
+        Text("›", style = MaterialTheme.typography.titleLarge, color = MineStyle.Chevron.copy(alpha = if (enabled) 1f else .5f))
     }
 }
 
 /**
  * The share entry as a banner. The whole banner is the single click target (tag [tag]); the
- * 立即邀请 pill is a visual affordance inside it, not a second button. Copy is unchanged from the
+ * 去分享 pill is a visual affordance inside it, not a second button. Copy is unchanged from the
  * list row because the referral reward is a server-set, eligibility-gated percentage.
  */
 @Composable
 internal fun MineInviteBanner(tag: String, enabled: Boolean, onClick: () -> Unit) {
     val press = rememberPressFeedback(enabled)
-    GlassSurface(Modifier.pressFeedback(press).fillMaxWidth().testTag("mine-referral-banner"), shape = MineStyle.CardShape,
-        edge = MineStyle.Edge, tint = MineStyle.InviteTint) {
+    GlassSurface(Modifier.pressFeedback(press).fillMaxWidth().testTag("mine-referral-banner"), shape = GccShapes.card,
+        edge = GccCard.Edge, tint = MineStyle.InviteTint) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp)
             .clickable(interactionSource = press.interactionSource, indication = androidx.compose.material3.ripple(),
                 enabled = enabled, role = Role.Button, onClick = onClick).testTag(tag)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            .padding(horizontal = GccSpacing.Large, vertical = GccSpacing.Medium),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GccSpacing.Medium)) {
             GiftIcon(40.dp, enabled)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("分享一份好连接", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-                    color = if (enabled) Brand.Text else Brand.Muted)
-                Text("邀请好友 · 查看推荐与奖励", style = MaterialTheme.typography.bodySmall, color = Brand.Muted)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(GccSpacing.ExtraSmall)) {
+                Text("邀请好友一起用", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                    color = if (enabled) Brand.Text else Brand.Muted, modifier = Modifier.testTag("mine-referral-title"))
+                Text("分享你的专属链接，查看邀请记录和奖励", style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
+                    modifier = Modifier.testTag("mine-referral-subtitle"))
             }
-            Surface(shape = RoundedCornerShape(50), color = Color.Transparent,
+            Surface(shape = GccShapes.pill, color = Color.Transparent,
                 modifier = Modifier.drawBehind {
                     drawRoundRect(if (enabled) Brush.horizontalGradient(listOf(Brand.ActionStart, Brand.ActionEnd))
                         else Brush.horizontalGradient(listOf(Brand.Disabled, Brand.Disabled)),
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
                 }) {
-                Text("立即邀请", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                Text("去分享", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
                     color = if (enabled) Brand.Text else Brand.DisabledText, maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).testTag("mine-referral-cta"))
+                    modifier = Modifier.padding(horizontal = GccSpacing.Medium, vertical = GccSpacing.Small).testTag("mine-referral-cta"))
             }
         }
     }
@@ -197,8 +198,8 @@ internal fun maskAccountEmail(email: String): String {
 
 @Composable
 internal fun MineWalletCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
-    MineCard(modifier, tint = MineStyle.WalletTint, contentPadding = PaddingValues(16.dp), verticalSpacing = 10.dp,
-        content = content)
+    MineCard(modifier, tint = MineStyle.WalletTint, contentPadding = PaddingValues(GccSpacing.Large),
+        verticalSpacing = GccSpacing.Medium, content = content)
 }
 
 @Composable
@@ -207,7 +208,7 @@ internal fun MineBalanceHeading() {
 }
 
 /**
- * Primary gradient 钱包充值 and secondary translucent-outline 账单明细. Tags and labels are the
+ * Primary gradient 钱包充值 and secondary translucent-outline 订单明细. Tags and labels are the
  * contract used by tests; [enabled] = false keeps both inert with disabled semantics.
  */
 @Composable
@@ -219,19 +220,19 @@ internal fun MineWalletActions(enabled: Boolean, onRecharge: () -> Unit, onLedge
         }
         val ledger: @Composable (Modifier) -> Unit = { modifier ->
             val press = rememberPressFeedback(enabled)
-            androidx.compose.material3.OutlinedButton(onClick = onLedger, enabled = enabled, shape = RoundedCornerShape(14.dp),
+            androidx.compose.material3.OutlinedButton(onClick = onLedger, enabled = enabled, shape = GccShapes.medium,
                 interactionSource = press.interactionSource,
                 border = BorderStroke(1.dp, if (enabled) Brand.GlassBorder.copy(alpha = .45f) else Brand.Border.copy(alpha = .35f)),
                 colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
                     containerColor = Color.White.copy(alpha = .05f), contentColor = Brand.Text,
                     disabledContainerColor = Color.White.copy(alpha = .02f), disabledContentColor = Brand.DisabledText),
-                modifier = modifier.pressFeedback(press).heightIn(min = 48.dp).testTag("mine-ledger")) { Text("账单明细", fontWeight = FontWeight.Medium) }
+                modifier = modifier.pressFeedback(press).heightIn(min = 48.dp).testTag("mine-ledger")) { Text("订单明细", fontWeight = FontWeight.Medium) }
         }
         if (maxWidth < 260.dp || androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(GccSpacing.Small)) {
                 recharge(Modifier.fillMaxWidth()); ledger(Modifier.fillMaxWidth())
             }
-        } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        } else Row(horizontalArrangement = Arrangement.spacedBy(GccSpacing.Small)) {
             recharge(Modifier.weight(1f)); ledger(Modifier.weight(1f))
         }
     }

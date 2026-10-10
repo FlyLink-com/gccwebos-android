@@ -359,7 +359,7 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("mine-more").assertDoesNotExist()
         reachable("mine-back").performClick()
         reachable("mine-ledger").performClick()
-        compose.onNodeWithTag("mine-history-tabs").assertExists()
+        compose.onNodeWithTag("mine-history-tabs").assertDoesNotExist() // one flat 流水, no tabs
         compose.onNodeWithTag("mine-more").assertDoesNotExist()
         assertNoActions()
     }

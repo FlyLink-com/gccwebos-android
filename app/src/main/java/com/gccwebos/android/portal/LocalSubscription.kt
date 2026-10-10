@@ -93,6 +93,8 @@ class LocalSubscriptionAuthority {
     internal var choices = emptyList<ConnectionChoice>()
     /** Memory-only node identities aligned with [choices]; digested, never logged or persisted. */
     internal var choiceKeys = emptyList<String>()
+    /** The registry's nodes exactly as the source delivered them; local aliases/deletions are applied on top. */
+    internal var choiceBase = emptyList<SafeProxyConfig.NodeSummary>()
     internal var selected: ConnectionSelection? = null
     /** Display-only: a remembered node choice was not found in the current registry. */
     internal var selectionLost = false
@@ -149,7 +151,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     private val manualSources: ManualSourceStore? = null,
     private val externalSource: SubscriptionSource? = null,
     /** Remembers the user's node choice across restarts. Null disables persistence. */
-    private val nodeChoices: NodeChoiceStore? = null) {
+    private val nodeChoices: NodeChoiceStore? = null,
+    /** Local per-node alias / deletion of imported nodes. Display only; null disables it. */
+    private val nodeOverrides: NodeOverrideStore? = null) {
     private val mutex get() = authority.mutex
     private val lock get() = authority.lock
     private var revision: Long
@@ -191,7 +195,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
 
     /** Summary reads never register choices or activate an inactive entry. */
-    internal fun configurationLibrarySnapshot(): ConfigurationLibrarySnapshot = synchronized(lock) {
+    internal fun configurationLibrarySnapshot(accountSignedIn: Boolean = false): ConfigurationLibrarySnapshot = synchronized(lock) {
         try {
             readLibrary().use { library ->
                 val items = mutableListOf<ConfigurationItem>()
@@ -203,26 +207,86 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                         val raw = cached.copyBytes()
                         try {
                             val parsed = describeForLibrary(raw, cached.validUntil, cached.observedStatus)
+                            // The account subscription is read-only: no alias, no deletion, so no node keys.
                             items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
                                 parsed.nodes, parsed.status, accountActive)
                         } finally { raw.fill(0) }
-                    } else if (accountActive || delivery.read()?.let { !it.pendingAck } == true) {
+                    } else if (accountActive || accountSignedIn || delivery.read()?.let { !it.pendingAck } == true) {
+                        // A signed-in account always has a selectable (possibly not yet loaded) subscription row,
+                        // so a previously imported configuration can never hide it. Activating it downloads.
                         items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
                             if (accountActive) state.nodes else emptyList(),
                             if (accountActive) state.status else LocalSubscriptionStatus.MISSING, accountActive)
                     }
                 } finally { cached?.close() }
+                val overrides = try { nodeOverrides?.read() ?: emptyMap() } catch (_: Exception) { emptyMap() }
                 for (entry in library.entries) entry.copySource().use { source ->
                     val raw = source.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
                     try {
                         val parsed = describeForLibrary(raw, source.validUntil, source.observedStatus)
-                        items += ConfigurationItem(handle(entry.id), entry.name, source.kind, parsed.nodes,
-                            parsed.status, library.selector == ConfigurationSelector.Entry && library.selectedEntryId == entry.id)
+                        val keys = persistedNodeKeys(raw, parsed.nodes.size)
+                        items += ConfigurationItem(handle(entry.id), entry.name, source.kind,
+                            displayNodes(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()),
+                            parsed.status, library.selector == ConfigurationSelector.Entry && library.selectedEntryId == entry.id,
+                            nodeKeys = keys.orEmpty(), nodeAliased = aliasedPositions(keys, overrides["entry:${entry.id}"].orEmpty()),
+                            nodeDeleted = hiddenPositions(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()))
                     } finally { raw.fill(0) }
                 }
                 ConfigurationLibrarySnapshot(items)
             }
         } catch (_: Exception) { ConfigurationLibrarySnapshot(storageError = true) }
+    }
+
+    /** One-way node keys (the same ones the remembered choice uses); a key shared by two nodes cannot address either. */
+    private fun persistedNodeKeys(raw: ByteArray, expected: Int): List<String?>? = try {
+        val keys = SafeProxyConfig.selectionKeys(raw).map(NodeChoiceKey::persisted)
+        if (expected >= 0 && keys.size != expected) null else {
+            val counts = keys.groupingBy { it }.eachCount()
+            keys.map { key -> key.takeIf { counts[it] == 1 } }
+        }
+    } catch (_: Exception) { null }
+    /** Local alias / deletion on top of the delivered nodes. A deleted node becomes a non-selectable, non-listed entry. */
+    private fun displayNodes(nodes: List<SafeProxyConfig.NodeSummary>, keys: List<String?>?,
+        overrides: Map<String, NodeOverride>): List<SafeProxyConfig.NodeSummary> {
+        if (keys == null || keys.size != nodes.size || overrides.isEmpty()) return nodes
+        return nodes.mapIndexed { index, node ->
+            val override = keys[index]?.let(overrides::get)
+            when {
+                override == null || node.info -> node
+                override.hidden -> node.copy(info = true, name = override.alias ?: node.name)
+                override.alias != null -> node.copy(name = override.alias)
+                else -> node
+            }
+        }
+    }
+    private fun aliasedPositions(keys: List<String?>?, overrides: Map<String, NodeOverride>): Set<Int> =
+        if (keys == null) emptySet() else keys.indices.filter { index -> keys[index]?.let { overrides[it]?.alias } != null }.toSet()
+    private fun hiddenPositions(nodes: List<SafeProxyConfig.NodeSummary>, keys: List<String?>?, overrides: Map<String, NodeOverride>): Set<Int> =
+        if (keys == null || keys.size != nodes.size) emptySet()
+        else keys.indices.filter { index -> !nodes[index].info && keys[index]?.let { overrides[it]?.hidden } == true }.toSet()
+    private fun overridesOf(scope: String?): Map<String, NodeOverride> =
+        if (scope == null) emptyMap() else try { nodeOverrides?.read()?.get(scope).orEmpty() } catch (_: Exception) { emptyMap() }
+    /** Re-derives the active registry's display names / deleted flags from the stored overrides, keeping every selection object. */
+    private fun reapplyNodeOverrides() {
+        val base = authority.choiceBase
+        val keys = authority.choiceKeys
+        if (base.isEmpty() || base.size != authority.choices.size || keys.size != base.size) return
+        val scope = choiceScope(authority.selectionSourceKind, authority.selectionSourceRevision)
+        val persisted = keys.map(NodeChoiceKey::persisted)
+        val counts = persisted.groupingBy { it }.eachCount()
+        val unique = persisted.map { key -> key.takeIf { counts[it] == 1 } }
+        val view = displayNodes(base, unique, overridesOf(scope))
+        authority.choices = authority.choices.mapIndexed { index, choice ->
+            if (choice.name == view[index].name && choice.info == view[index].info) choice
+            else choice.copy(name = view[index].name, info = view[index].info)
+        }
+        val selected = authority.selected
+        if (selected != null && authority.choices.none { it.selection === selected && !it.info }) {
+            authority.selected = null
+            authority.selectionLost = false
+            try { if (scope != null) nodeChoices?.remove(scope) } catch (_: Exception) { }
+        }
+        revision++
     }
 
     private fun describeForLibrary(raw: ByteArray, until: Instant?, status: LocalSubscriptionStatus?): LocalSubscriptionSnapshot {
@@ -276,6 +340,44 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         }
     }
 
+    /**
+     * Local alias / deletion of one node of an imported configuration. [key] comes from the item's own
+     * [ConfigurationItem.nodeKeys]; the account subscription has no handle entry and is refused, and a key
+     * that is not (uniquely) present in the stored configuration changes nothing. Display only: the
+     * subscription, the generated connection config and connection admission are untouched.
+     */
+    internal suspend fun setNodeOverride(handle: ConfigurationHandle, key: String, value: NodeOverride) {
+        val normalized = value.alias?.takeIf { it.isNotBlank() }?.let { ConfigurationName.normalize(it) }
+        changeNodeOverride(handle, key) { NodeOverride(normalized, value.hidden) }
+    }
+    /** Deleting keeps a local alias, so a restored node comes back under the name the user gave it. */
+    internal suspend fun setNodeHidden(handle: ConfigurationHandle, key: String, hidden: Boolean) =
+        changeNodeOverride(handle, key) { it.copy(hidden = hidden) }
+
+    private suspend fun changeNodeOverride(handle: ConfigurationHandle, key: String, change: (NodeOverride) -> NodeOverride) = mutex.withLock {
+        val store = nodeOverrides ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+        val context = currentCoroutineContext()
+        context.ensureActive()
+        synchronized(lock) {
+            context.ensureActive()
+            readLibrary().use { library ->
+                requireLibraryHandle(handle, library)
+                val id = handle.entryId ?: throw IllegalArgumentException()
+                val entry = library.entries.firstOrNull { it.id == id } ?: throw IllegalArgumentException()
+                val present = entry.copySource().use { source ->
+                    val raw = source.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+                    try { persistedNodeKeys(raw, -1).orEmpty().contains(key) } finally { raw.fill(0) }
+                }
+                if (!present) throw IllegalArgumentException()
+                val scope = "entry:$id"
+                try { store.put(scope, key, change(store.read()[scope]?.get(key) ?: NodeOverride())) }
+                catch (_: Exception) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
+                val active = library.selector == ConfigurationSelector.Entry && library.selectedEntryId == id
+                if (active) reapplyNodeOverrides()
+            }
+        }
+    }
+
     internal suspend fun removeConfiguration(handle: ConfigurationHandle,
         commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot = mutex.withLock {
         val context = currentCoroutineContext()
@@ -297,6 +399,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     if (active) { revision++; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR) }
                     writeLibrary(next)
                     try { nodeChoices?.remove("entry:${handle.entryId}") } catch (_: Exception) { }
+                    try { nodeOverrides?.removeScope("entry:${handle.entryId}") } catch (_: Exception) { }
                     if (active) {
                         authority.selectionSourceKind = ManualSourceKind.None
                         authority.selectionSourceRevision = nextRevision
@@ -966,7 +1069,12 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             authority.selectionBinding = binding
             authority.selectionSchema = SafeProxyConfig.SCHEMA_VERSION
             authority.selectionClearVersion = authority.clearVersion
-            authority.choices = nodes.mapIndexed { index, node ->
+            val persistedKeys = keys?.map(NodeChoiceKey::persisted)
+            val persistedCounts = persistedKeys?.groupingBy { it }?.eachCount()
+            val shown = displayNodes(nodes, persistedKeys?.map { key -> key.takeIf { persistedCounts?.get(it) == 1 } },
+                overridesOf(choiceScope(kind, observedRevision)))
+            authority.choiceBase = nodes
+            authority.choices = shown.mapIndexed { index, node ->
                 val key = keys?.get(index)?.takeIf { reusable?.get(it) == 1 }
                 val old = key?.let(previous::get)?.takeIf { it.protocol == node.protocol && !node.info }
                 ConnectionChoice(old?.selection ?: ConnectionSelection(), node.name, node.protocol, node.info)
@@ -990,7 +1098,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     private fun invalidateSelections(status: LocalSubscriptionStatus? = null, until: Instant? = null) {
         authority.selectionRevision?.fill(0); authority.selectionRevision = null
-        authority.selectionBinding = null; authority.choices = emptyList(); authority.choiceKeys = emptyList()
+        authority.selectionBinding = null; authority.choices = emptyList(); authority.choiceKeys = emptyList(); authority.choiceBase = emptyList()
         authority.selected = null; authority.selectionLost = false
         authority.selectionStatus = status; authority.selectionUntil = until
         if (status != null) authority.selectionRequiresRefresh = true
@@ -1106,6 +1214,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         try { return synchronized(lock) {
             revision++; authority.clearVersion++; invalidateSelections()
             try { nodeChoices?.clear() } catch (_: Exception) { } // A cleared app forgets the remembered node choice.
+            try { nodeOverrides?.clear() } catch (_: Exception) { } // ... and every local node alias / deletion.
             observer = authority.clearObserver
             state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR,
                 sourceKind = if (manualSources == null) ManualSourceKind.LegacyRemote else ManualSourceKind.None)
@@ -1169,6 +1278,57 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         cleanup() // No authority lock/mutex is held while the actual owner stops and removes prepared material.
         currentCoroutineContext().ensureActive()
         if (ticket != null) finishUnlink(ticket, commitFence)
+    }
+    /**
+     * Logout: forget only the account subscription on this device (its cached configuration, delivery record and
+     * remembered node). Imported / local library entries and their node edits are untouched. When the account is the
+     * active source the selector moves to "none" (entries kept) after [ownerCleanup] has stopped the owner.
+     * Without the library store (legacy single-source layout) there is nothing else to keep, so it falls back to the full unlink.
+     */
+    suspend fun clearAccountSubscription(ownerCleanup: suspend () -> Unit, commitFence: ((() -> Unit) -> Unit)) {
+        if (manualSources !is LibraryManualSourceStore) return unlinkAndAwait(ownerCleanup, commitFence)
+        var observer: (() -> Unit)? = null
+        val clearVersion: Long
+        val accountActive: Boolean
+        try {
+            synchronized(lock) {
+                accountActive = readLibrary().use { it.selector == ConfigurationSelector.Account }
+                val before = state // Read before the version moves: the getter shows MISSING for a stale stamp.
+                revision++; authority.clearVersion++; invalidateSelections()
+                clearVersion = authority.clearVersion
+                try { nodeChoices?.remove("account") } catch (_: Exception) { }
+                if (accountActive) {
+                    observer = authority.clearObserver
+                    state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR, sourceKind = ManualSourceKind.LegacyRemote)
+                } else state = before // Keep the selected imported source readable; only the version stamp moves.
+                try { profiles.clear() } finally { delivery.clear() }
+                verifyLegacyAbsent()
+            }
+        } catch (_: Exception) {
+            synchronized(lock) { authority.manualStorageBlocked = true; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR) }
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        } finally { observer?.invoke() } // Never call the owner while holding the capability lock.
+        if (!accountActive) return
+        ownerCleanup() // Stops the tunnel / removes prepared material of the account source.
+        currentCoroutineContext().ensureActive()
+        var completed = false
+        commitFence { synchronized(lock) {
+            if (completed || authority.clearVersion != clearVersion) throw CancellationException("Account clear superseded")
+            readLibrary().use { library ->
+                if (library.selector != ConfigurationSelector.Account) { completed = true; return@use }
+                val nextRevision = UUID.randomUUID().toString()
+                ConfigurationLibrary(entries = library.entries, selector = ConfigurationSelector.None,
+                    selectorRevision = nextRevision).use { next ->
+                    writeLibrary(next)
+                    authority.selectionSourceKind = ManualSourceKind.None
+                    authority.selectionSourceRevision = nextRevision
+                    invalidateSelections(LocalSubscriptionStatus.MISSING)
+                    state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = ManualSourceKind.None)
+                    completed = true
+                }
+            }
+        } }
+        if (!completed) throw PortalFailure(PortalFailure.Reason.STORAGE)
     }
     private fun rememberObservation(kind: LocalSubscriptionStatus) {
         if (kind !in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.INVALID_LINK)) return

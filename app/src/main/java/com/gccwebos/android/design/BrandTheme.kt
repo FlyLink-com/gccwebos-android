@@ -10,6 +10,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.TextStyle
@@ -25,7 +26,7 @@ internal object Brand {
     val Cyan = Color(0xFF39D7FF)
     val Blue = Color(0xFF2658FF)
     val Green = Color(0xFF45E3C0)
-    val Amber = Color(0xFFFFCB73)
+    val Amber = GccSemantic.Gold
     // Cyan is decorative; the actionable button remains dark enough for white text.
     val ActionStart = Color(0xFF176CAE)
     val ActionMiddle = Color(0xFF3157E0)
@@ -55,6 +56,9 @@ internal fun GccTheme(materialMode: GlassMode? = null, content: @Composable () -
                 outline = Brand.Border, error = Color(0xFFFFB4AB),
             ),
             typography = Typography(
+                displayLarge = GccType.Display,
+                displayMedium = GccType.DisplayCompact,
+                displaySmall = GccType.Identity,
                 titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Medium),
                 titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
                 titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
@@ -77,6 +81,21 @@ internal fun BrandCard(modifier: Modifier = Modifier, selected: Boolean = false,
                       contentPadding: PaddingValues = PaddingValues(14.dp), content: @Composable ColumnScope.() -> Unit) {
     GlassSurface(modifier.fillMaxWidth(), selected = selected) {
         Column(Modifier.padding(contentPadding), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+/**
+ * Shared section surface used by 我的. Same GlassSurface fill and material as [BrandCard] / MineCard;
+ * card radius 20 and the 12% white→cyan rim. Does not change [GlassMaterialPolicy] alphas.
+ */
+@Composable
+internal fun SectionCard(modifier: Modifier = Modifier, tint: Brush? = null, selected: Boolean = false,
+                         contentPadding: PaddingValues = PaddingValues(horizontal = GccSpacing.Large, vertical = GccSpacing.Medium),
+                         verticalSpacing: Dp = GccSpacing.Small,
+                         content: @Composable ColumnScope.() -> Unit) {
+    GlassSurface(modifier.fillMaxWidth(), shape = GccShapes.card, selected = selected, edge = GccCard.Edge, tint = tint) {
+        Column(Modifier.fillMaxWidth().padding(contentPadding), verticalArrangement = Arrangement.spacedBy(verticalSpacing),
+            content = content)
     }
 }
 

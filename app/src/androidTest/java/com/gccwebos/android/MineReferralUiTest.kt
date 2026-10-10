@@ -108,7 +108,7 @@ class MineReferralUiTest {
         for (outer in sections) for (inner in sections) if (outer != inner)
             compose.onNodeWithTag(inner).assert(hasAnyAncestor(hasTestTag(outer)).not())
         compose.onNodeWithTag("mine-referral").assert(hasAnyAncestor(hasTestTag("mine-referral-banner")))
-        compose.onNodeWithTag("mine-referral-cta", useUnmergedTree = true).assertTextEquals("立即邀请")
+        compose.onNodeWithTag("mine-referral-cta", useUnmergedTree = true).assertTextEquals("去分享")
         // ① invite banner, ② 服务与记录, ③ 系统与设置, top to bottom; no duplicate wallet row.
         val tops = sections.map { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot.top }
         assertEquals(tops.sorted(), tops)
@@ -118,13 +118,14 @@ class MineReferralUiTest {
         compose.onNodeWithTag("mine-security").assert(hasAnyAncestor(hasTestTag("mine-functions")))
         compose.onNodeWithTag("mine-more").assert(hasAnyAncestor(hasTestTag("mine-functions")))
         compose.onNodeWithTag("mine-signout").assert(hasAnyAncestor(hasTestTag("mine-functions")))
+        compose.onNodeWithTag("mine-signout", useUnmergedTree = true).assertTextContains("退出登录")
         compose.onNodeWithTag("mine-group-service").assertTextEquals("服务与记录")
         compose.onNodeWithTag("mine-group-system").assertTextEquals("系统与设置")
         compose.onNodeWithText("15%", substring = true).assertDoesNotExist()
         compose.onNodeWithText("在线客服", substring = true).assertDoesNotExist()
         compose.onNodeWithText("应用设置", substring = true).assertDoesNotExist()
         compose.onNodeWithTag("mine-avatar").assertExists()
-        compose.onNodeWithTag("mine-topbar-title").assertTextEquals("我的")
+        compose.onNodeWithTag("mine-topbar").assertDoesNotExist() // the redundant 我的 title card was removed
         compose.onNodeWithTag("mine-more").assertTextContains("当前版本 v", substring = true)
         compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(copied.isEmpty()) }
     }
@@ -192,7 +193,7 @@ class MineReferralUiTest {
         compose.onNodeWithTag("referral-stat-reversed").assertDoesNotExist()
         compose.onNodeWithTag("referral-step-3").performScrollTo().assertTextEquals("自动到账", "9 天确认期后奖励自动到账")
         compose.onNodeWithTag("referral-hero-title").assertTextEquals("邀请好友 · 赚 Coins 奖励")
-        compose.onNodeWithTag("referral-rule-attribution").performScrollTo().assertTextContains("47 天有效追踪")
+        compose.onNodeWithTag("referral-rule-attribution").performScrollTo().assertTextContains("47 天内注册有效")
         compose.onNodeWithTag("referral-rule-confirmation").performScrollTo().assertTextContains("9 天确认期")
         compose.onNodeWithTag("referral-link-masked").performScrollTo().assertTextEquals("portal.gccwebos.com/r/" + path.removePrefix("/r/").take(4) + "…" + path.takeLast(4))
         compose.runOnIdle { assertTrue(copied.isEmpty()); assertEquals(listOf(ReferralJson.PROFILE, ReferralJson.PERFORMANCE), requests.map { it.first }) }
@@ -294,13 +295,13 @@ class MineReferralUiTest {
             if (unavailable) throw PortalFailure(PortalFailure.Reason.NETWORK)
             """{"profile":{"eligible":false,"linkPath":null,"policy":null}}"""
         }, expectProfile = false)
-        compose.onNodeWithText("推荐信息暂不可用").assertExists()
+        compose.onNodeWithText("邀请信息暂时无法获取，请稍后再试").assertExists()
         compose.onNodeWithTag("referral-refresh").assertDoesNotExist()
         compose.onNodeWithTag("referral-profile-status").assertDoesNotExist()
         val first = referral
         compose.runOnIdle { unavailable = false; referralVisit++ }
         compose.waitUntil(5_000) { referral !== first && !referral.busy && referral.profile != null }
-        compose.onNodeWithTag("referral-profile-status").assertTextEquals("当前账户暂不具备推荐资格")
+        compose.onNodeWithTag("referral-profile-status").assertTextEquals("当前账户暂时不能邀请好友")
         compose.runOnIdle {
             assertEquals(4, requests.size)
             assertTrue(requests.all { it.second == null && it.first != ReferralJson.LINK })

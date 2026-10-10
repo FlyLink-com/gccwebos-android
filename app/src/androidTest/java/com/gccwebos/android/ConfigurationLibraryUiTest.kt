@@ -30,10 +30,17 @@ class ConfigurationLibraryUiTest {
     private val nodes = listOf(SafeProxyConfig.NodeSummary(0, "Synthetic Japan", "vless", true))
     private var snapshot by mutableStateOf(ConfigurationLibrarySnapshot(listOf(
         ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
-        ConfigurationItem(first, "合成配置", ManualSourceKind.ImportedLocal, nodes, LocalSubscriptionStatus.READY, true),
-        ConfigurationItem(second, "合成配置", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, false),
+        ConfigurationItem(first, "合成配置", ManualSourceKind.ImportedLocal, nodes, LocalSubscriptionStatus.READY, true,
+            nodeKeys = listOf("k1")),
+        ConfigurationItem(second, "合成配置", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, false,
+            nodeKeys = listOf("k2")),
     )))
     private var busy by mutableStateOf(false)
+    private var tunnelActive by mutableStateOf(false)
+    private val chosen = mutableListOf<Pair<ConfigurationHandle, NodeTarget>>()
+    private val nodeRenames = mutableListOf<Triple<ConfigurationItem, Int, String>>()
+    private val nodeDeletes = mutableListOf<Pair<ConfigurationItem, Int>>()
+    private val nodeRestores = mutableListOf<Pair<ConfigurationItem, Int>>()
     private val activations = mutableListOf<ConfigurationHandle>()
     private val renames = mutableListOf<Pair<ConfigurationHandle, String>>()
     private val replacements = mutableListOf<ConfigurationHandle>()
@@ -55,12 +62,20 @@ class ConfigurationLibraryUiTest {
                             onMeasure = { measurements++ }, onImport = { imports++ },
                             onActivate = { activations += it }, onRename = { handle, name -> renames += handle to name },
                             onRemove = { removals += it }, onReplace = { replacements += it },
+                            onChooseNode = { handle, target -> chosen += handle to target },
+                            onRenameNode = { item, position, alias -> nodeRenames += Triple(item, position, alias) },
+                            onDeleteNode = { item, position -> nodeDeletes += item to position },
+                            onRestoreNode = { item, position -> nodeRestores += item to position },
+                            tunnelActive = tunnelActive,
                             namingEntryId = namingEntryId, onNamingDone = { namingDone++; namingEntryId = null },
-                            activeContent = { item, menu ->
+                            activeContent = { item, list ->
                                 DisposableEffect(Unit) { onDispose { activeDisposals++ } }
-                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("library-active-fixture")) {
-                                    Text(item.name, Modifier.weight(1f).testTag("library-active-name"))
-                                    menu()
+                                Column(Modifier.testTag("library-active-fixture")) {
+                                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                                        Text(item.name, Modifier.weight(1f).testTag("library-active-name"))
+                                        list.rowTrailing?.invoke(0)
+                                    }
+                                    list.extraRows(this)
                                 }
                             })
                     }
@@ -77,24 +92,132 @@ class ConfigurationLibraryUiTest {
     private fun assertNoSourceMutation() = compose.runOnIdle {
         assertTrue(activations.isEmpty()); assertTrue(renames.isEmpty())
         assertTrue(replacements.isEmpty()); assertTrue(removals.isEmpty())
+        assertTrue(nodeRenames.isEmpty()); assertTrue(nodeDeletes.isEmpty()); assertTrue(nodeRestores.isEmpty())
     }
 
-    @Test fun allConfigurationsRemainVisibleAndInactiveRowsCannotSelectNodes() {
+    @Test fun allConfigurationsRemainVisibleAndEveryNodeOfEverySourceIsChosenInOneTap() {
         launch()
         compose.onNodeWithTag("configuration-group-0").assertExists()
         compose.onNodeWithTag("library-active-name").assertTextEquals("合成配置")
         compose.onNodeWithTag("configuration-group-2").assertExists()
-        compose.onAllNodesWithText("合成配置", useUnmergedTree = true).assertCountEquals(2)
-        compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasNoClickAction()
+        // No expanding and no separate "选择配置" step: the other sources' nodes are rows of the same list.
+        compose.onNodeWithTag("configuration-toggle-2").assertDoesNotExist()
+        compose.onNodeWithTag("configuration-activate-2").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
-        compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-node-2-0").assertDoesNotExist()
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction().performClick()
+        compose.runOnIdle {
+            assertEquals(1, chosen.size); assertSame(second, chosen.single().first)
+            assertEquals(NodeTarget(0, "Synthetic Japan", "vless"), chosen.single().second)
+        }
         assertNoSourceMutation()
-        compose.onNodeWithTag("configuration-toggle-2").performClick()
-        compose.onNodeWithTag("configuration-activate-2").performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(1, activations.size); assertSame(second, activations.single()) }
         compose.onNodeWithTag("library-active-name").assertTextEquals("合成配置")
+    }
+
+    @Test fun everyNodeRowSaysWhereItComesFrom() {
+        launch()
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("账户订阅 · 只读", useUnmergedTree = true).assertCountEquals(1)
+        compose.onAllNodesWithText("合成配置 · 第三方订阅", useUnmergedTree = true).assertCountEquals(1)
+    }
+
+    @Test fun accountNodesAreReadOnlyAndImportedNodesCanBeEdited() {
+        launch()
+        compose.onNodeWithTag("node-menu-0-0").assertDoesNotExist()
+        compose.onNodeWithTag("node-menu-2-0").performScrollTo().assertHeightIsAtLeast(40.dp).performClick()
+        compose.onNodeWithTag("node-rename-2-0").assertExists()
+        compose.onNodeWithTag("node-delete-2-0").assertIsEnabled()
+    }
+
+    @Test fun renamingANodeSubmitsOnlyTheLocalAlias() {
+        launch()
+        compose.onNodeWithTag("node-menu-2-0").performScrollTo().performClick()
+        compose.onNodeWithTag("node-rename-2-0").performClick()
+        compose.onNodeWithTag("node-name-input").performTextReplacement("我的东京")
+        compose.onNodeWithTag("node-dialog-confirm").performClick()
+        compose.runOnIdle {
+            assertEquals(1, nodeRenames.size); assertSame(second, nodeRenames.single().first.handle)
+            assertEquals(0, nodeRenames.single().second); assertEquals("我的东京", nodeRenames.single().third)
+            assertTrue(nodeDeletes.isEmpty()); assertTrue(renames.isEmpty())
+        }
+    }
+
+    @Test fun deletingANodeNeedsConfirmationAndCancelChangesNothing() {
+        launch()
+        compose.onNodeWithTag("node-menu-2-0").performScrollTo().performClick()
+        compose.onNodeWithTag("node-delete-2-0").performClick()
+        compose.onNodeWithTag("node-dialog-name").assertTextEquals("Synthetic Japan")
+        compose.onNodeWithTag("node-dialog-cancel").performClick()
+        compose.runOnIdle { assertTrue(nodeDeletes.isEmpty()) }
+        compose.onNodeWithTag("node-menu-2-0").performClick()
+        compose.onNodeWithTag("node-delete-2-0").performClick()
+        compose.onNodeWithTag("node-dialog-confirm").performClick()
+        compose.runOnIdle { assertEquals(1, nodeDeletes.size); assertSame(second, nodeDeletes.single().first.handle) }
+    }
+
+    @Test fun whileConnectedOtherSourceNodesAreDisabledWithAHintAndTheActiveSourceCannotDeleteNodes() {
+        tunnelActive = true
+        launch()
+        compose.onNodeWithTag("unified-connected-hint").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("node-menu-active-0").performClick()
+        compose.onNodeWithTag("node-delete-active-0").assertIsNotEnabled()
+        compose.onNodeWithTag("node-rename-active-0").assertIsEnabled()
+        compose.runOnIdle { assertTrue(chosen.isEmpty()) }
+    }
+
+    private fun withDeletedNode() {
+        snapshot = snapshot.copy(items = snapshot.items.map { item ->
+            if (item.handle === second) item.copy(
+                nodes = nodes + SafeProxyConfig.NodeSummary(1, "Synthetic Deleted", "vless", true, info = true),
+                nodeKeys = listOf("k2", "k3"), nodeDeleted = setOf(1))
+            else item
+        })
+    }
+
+    @Test fun deletedNodesSectionIsHiddenWhenNothingIsDeleted() {
+        launch()
+        compose.onNodeWithTag("unified-deleted").assertDoesNotExist()
+    }
+
+    @Test fun deletedNodesAreCollapsedAtTheBottomNotListedAsNodesAndOnlyRestorable() {
+        withDeletedNode()
+        launch()
+        compose.onNodeWithTag("unified-deleted").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("unified-deleted-count", useUnmergedTree = true).assertTextEquals("1 条")
+        compose.onNodeWithTag("deleted-node-2-1").assertDoesNotExist() // collapsed by default
+        compose.onNodeWithTag("configuration-node-2-1").assertDoesNotExist() // never a main-list row
+        compose.onNodeWithTag("unified-deleted-toggle").performClick()
+        compose.onNodeWithTag("deleted-node-2-1").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("deleted-node-2-1").assertHasNoClickAction() // not selectable
+        compose.onNodeWithTag("deleted-menu-2-1").performClick()
+        compose.onNodeWithTag("deleted-restore-2-1").assertExists()
+        compose.onAllNodesWithText("重命名").assertCountEquals(0)
+        compose.onAllNodesWithText("删除").assertCountEquals(0)
+        compose.onNodeWithTag("deleted-restore-2-1").performClick()
+        compose.runOnIdle {
+            assertEquals(1, nodeRestores.size); assertSame(second, nodeRestores.single().first.handle)
+            assertEquals(1, nodeRestores.single().second)
+            assertTrue(chosen.isEmpty()); assertTrue(nodeRenames.isEmpty()); assertTrue(nodeDeletes.isEmpty())
+        }
+    }
+
+    @Test fun deletedSectionFollowsTheSourceFilter() {
+        withDeletedNode()
+        launch()
+        compose.onNodeWithTag("unified-filter-1").performClick()
+        compose.onNodeWithTag("unified-deleted").assertDoesNotExist()
+        compose.onNodeWithTag("unified-filter-2").performClick()
+        compose.onNodeWithTag("unified-deleted").performScrollTo().assertExists()
+    }
+
+    @Test fun filterChipsNarrowTheListToOneSource() {
+        launch()
+        compose.onNodeWithTag("unified-filter-all").assertExists()
+        compose.onNodeWithTag("unified-filter-2").performClick()
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertExists()
+        compose.onNodeWithTag("configuration-node-0-0").assertDoesNotExist()
+        compose.onNodeWithTag("unified-filter-all").performClick()
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertExists()
     }
 
     @Test fun accountConfigurationHasOnlyMetadataView() {
@@ -171,6 +294,7 @@ class ConfigurationLibraryUiTest {
         snapshot = snapshot.copy(items = snapshot.items.map { it.copy(active = false) })
         launch()
         compose.onNodeWithTag("configuration-unselected").assertTextEquals("未选择配置")
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction()
         (0..2).forEach { compose.onNodeWithTag("configuration-group-$it").assertExists() }
         compose.onNodeWithTag("library-active-fixture").assertDoesNotExist()
         compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
@@ -190,29 +314,25 @@ class ConfigurationLibraryUiTest {
         assertNoSourceMutation()
     }
 
-    @Test fun refreshedOperationHandlesKeepAnExpandedInactiveGroupOpen() {
+    @Test fun refreshedOperationHandlesKeepTheOtherSourceNodesAndChooseWithTheNewHandle() {
         launch()
-        compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertExists()
         val replacement = ConfigurationHandle(owner, "synthetic-next-revision", "synthetic-second", 0)
         compose.runOnIdle {
             snapshot = snapshot.copy(items = snapshot.items.map { if (it.handle === second) it.copy(handle = replacement) else it })
         }
-        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasNoClickAction()
-        compose.onNodeWithTag("configuration-activate-2").performScrollTo().performClick()
-        compose.runOnIdle { assertSame(replacement, activations.single()) }
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction().performClick()
+        compose.runOnIdle { assertSame(replacement, chosen.single().first); assertTrue(activations.isEmpty()) }
     }
 
-    @Test fun doubledFontInactiveRowsAndActivationStayInsideTheViewport() {
+    @Test fun doubledFontOtherSourceRowsStayInsideTheViewport() {
         launch(fontScale = 2f)
-        compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()
         val host = compose.onNodeWithTag("library-fixture-host").fetchSemanticsNode().boundsInRoot
         val row = compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertIsDisplayed()
         val bounds = row.fetchSemanticsNode().boundsInRoot
         assertTrue(bounds.left >= host.left); assertTrue(bounds.right <= host.right)
-        compose.onNodeWithTag("configuration-activate-2").performScrollTo().assertIsDisplayed()
-            .assertHeightIsAtLeast(48.dp).performClick()
-        compose.runOnIdle { assertSame(second, activations.single()) }
+        row.assertHeightIsAtLeast(48.dp).performClick()
+        compose.runOnIdle { assertSame(second, chosen.single().first) }
     }
 
     @Test fun renameToAnotherSavedNameShowsTheDuplicateMessageAndBlocksSaving() {

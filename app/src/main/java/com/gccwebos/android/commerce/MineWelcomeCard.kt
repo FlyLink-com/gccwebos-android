@@ -59,12 +59,15 @@ internal fun MineWelcomeCard(account: AccountController, embedded: Boolean = fal
                             Text(identity.title, style = MaterialTheme.typography.displaySmall, color = Brand.Text,
                                 maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("mine-account-identity"))
+                            // The ID is the title itself (no known email): the square copy button sits right beside it.
+                            if (identity.idLine == null) copyId?.let { MineCopyIdButton(it, copyOverride) }
                             PlanCapsule(plan)
                         }
-                        if (identity.idLine != null || copyId != null) Row(verticalAlignment = Alignment.CenterVertically,
+                        // With a masked email as the title, the ID has its own line and the button follows it.
+                        if (identity.idLine != null) Row(verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(GccSpacing.Small)) {
-                            identity.idLine?.let { Text(it, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).testTag("mine-account-id")) }
+                            Text(identity.idLine, color = Brand.Muted, style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).testTag("mine-account-id"))
                             copyId?.let { MineCopyIdButton(it, copyOverride) }
                         }
                         val expiry = display.expiresAtText

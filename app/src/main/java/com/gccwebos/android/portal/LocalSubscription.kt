@@ -1279,6 +1279,57 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         currentCoroutineContext().ensureActive()
         if (ticket != null) finishUnlink(ticket, commitFence)
     }
+    /**
+     * Logout: forget only the account subscription on this device (its cached configuration, delivery record and
+     * remembered node). Imported / local library entries and their node edits are untouched. When the account is the
+     * active source the selector moves to "none" (entries kept) after [ownerCleanup] has stopped the owner.
+     * Without the library store (legacy single-source layout) there is nothing else to keep, so it falls back to the full unlink.
+     */
+    suspend fun clearAccountSubscription(ownerCleanup: suspend () -> Unit, commitFence: ((() -> Unit) -> Unit)) {
+        if (manualSources !is LibraryManualSourceStore) return unlinkAndAwait(ownerCleanup, commitFence)
+        var observer: (() -> Unit)? = null
+        val clearVersion: Long
+        val accountActive: Boolean
+        try {
+            synchronized(lock) {
+                accountActive = readLibrary().use { it.selector == ConfigurationSelector.Account }
+                val before = state // Read before the version moves: the getter shows MISSING for a stale stamp.
+                revision++; authority.clearVersion++; invalidateSelections()
+                clearVersion = authority.clearVersion
+                try { nodeChoices?.remove("account") } catch (_: Exception) { }
+                if (accountActive) {
+                    observer = authority.clearObserver
+                    state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.STORAGE_ERROR, sourceKind = ManualSourceKind.LegacyRemote)
+                } else state = before // Keep the selected imported source readable; only the version stamp moves.
+                try { profiles.clear() } finally { delivery.clear() }
+                verifyLegacyAbsent()
+            }
+        } catch (_: Exception) {
+            synchronized(lock) { authority.manualStorageBlocked = true; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR) }
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        } finally { observer?.invoke() } // Never call the owner while holding the capability lock.
+        if (!accountActive) return
+        ownerCleanup() // Stops the tunnel / removes prepared material of the account source.
+        currentCoroutineContext().ensureActive()
+        var completed = false
+        commitFence { synchronized(lock) {
+            if (completed || authority.clearVersion != clearVersion) throw CancellationException("Account clear superseded")
+            readLibrary().use { library ->
+                if (library.selector != ConfigurationSelector.Account) { completed = true; return@use }
+                val nextRevision = UUID.randomUUID().toString()
+                ConfigurationLibrary(entries = library.entries, selector = ConfigurationSelector.None,
+                    selectorRevision = nextRevision).use { next ->
+                    writeLibrary(next)
+                    authority.selectionSourceKind = ManualSourceKind.None
+                    authority.selectionSourceRevision = nextRevision
+                    invalidateSelections(LocalSubscriptionStatus.MISSING)
+                    state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = ManualSourceKind.None)
+                    completed = true
+                }
+            }
+        } }
+        if (!completed) throw PortalFailure(PortalFailure.Reason.STORAGE)
+    }
     private fun rememberObservation(kind: LocalSubscriptionStatus) {
         if (kind !in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.INVALID_LINK)) return
         val selectedSource = readManualSource()

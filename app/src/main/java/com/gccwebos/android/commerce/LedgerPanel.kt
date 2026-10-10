@@ -25,22 +25,21 @@ import com.gccwebos.android.portal.AccountController
 internal fun LedgerPanel(account: AccountController, state: CommerceController) {
     var selectedGroup by remember(state, account.authSessionGeneration) { mutableStateOf<LedgerDisplayGroup?>(null) }
     val rows = state.ledgerPage?.entries
-    val groups = rows?.let(LedgerPresentation::displayGroups)
+    val groups = remember(rows) { rows?.let(LedgerPresentation::displayGroups) }
     val detail = selectedGroup?.takeIf { state.canOperate() && groups?.any { g -> g.id == it.id } == true }
+    // One flat 流水: every balance change in server order, no tabs, no date or category sections.
     HistoryListCard(Modifier.testTag("ledger-container")) {
         CommerceReadNotice(state, state.error?.takeUnless { state.busy }, "ledger-error")
         when {
-            state.busy || rows == null -> Unit
-            groups.isNullOrEmpty() -> SupportingText("暂无账单", Modifier.testTag("ledger-empty"))
+            // First read in flight: the card and title are already on screen with row placeholders.
+            rows == null && (state.busy || state.error == null) ->
+                SkeletonCards(count = 4, cardHeight = 56.dp, spacing = 8.dp, shape = RoundedCornerShape(14.dp), lines = 0,
+                    modifier = Modifier.testTag("ledger-skeleton"))
+            groups.isNullOrEmpty() && rows != null -> SupportingText("暂无账单", Modifier.testTag("ledger-empty"))
         }
-        if (state.currentSession()) groups?.groupBy { LedgerPresentation.dayKey(it.occurredAt) }?.forEach { (date, dayGroups) ->
-            val heading = LedgerPresentation.dateHeading(dayGroups.first().occurredAt)
-            Text(heading, style = MaterialTheme.typography.labelLarge, color = Brand.Muted,
-                modifier = Modifier.testTag("ledger-date-$date"))
-            dayGroups.forEachIndexed { index, group ->
-                if (index > 0) HorizontalDivider(color = Brand.RowDivider)
-                LedgerRow(group, enabled = !state.busy && state.canOperate()) { selectedGroup = group }
-            }
+        if (state.currentSession()) groups?.forEachIndexed { index, group ->
+            if (index > 0) HorizontalDivider(color = Brand.RowDivider)
+            LedgerRow(group, enabled = !state.busy && state.canOperate()) { selectedGroup = group }
         }
         if (state.ledgerPage?.nextCursor != null) TextButton(onClick = { selectedGroup = null; state.loadLedger(true) },
             enabled = !state.busy && state.canOperate(),
@@ -102,25 +101,12 @@ private fun LedgerRow(group: LedgerDisplayGroup, enabled: Boolean, onClick: () -
                 null, tint = Brand.Cyan, modifier = Modifier.size(24.dp))
             val heading: @Composable () -> Unit = {
                 Text(group.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                val subtitle = buildString {
-                    append(LedgerPresentation.clock(group.occurredAt))
-                    if (group.entries.size == 1) {
-                        append(" · ")
-                        append(LedgerPresentation.coinTypeLabel(group.entries.first().coinType))
-                    } else {
-                        append(" · ")
-                        append("${group.entries.size} 笔明细")
-                    }
-                }
+                val subtitle = LedgerPresentation.rowTime(group.occurredAt)
                 SupportingText(subtitle)
             }
             val amount: @Composable () -> Unit = {
                 Text(LedgerPresentation.signedCoins(net), color = amountColor, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.testTag("ledger-amount-$primaryRef"))
-                if (group.entries.size > 1) {
-                    Text("含赠送/已购明细", style = MaterialTheme.typography.labelSmall, color = Brand.Muted,
-                        modifier = Modifier.testTag("ledger-qualifier-$primaryRef"))
-                }
             }
             if (largeFont) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) { heading(); amount() }
             else {

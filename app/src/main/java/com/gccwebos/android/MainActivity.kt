@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
                 val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodeLatencyProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
                     nodeLatencyProbe = nodeProbe,
-                    sourceCommitFence = current::commitSourceChange, clearLocalData = current::clearLocalData,
+                    sourceCommitFence = current::commitSourceChange, logoutClearingAccount = current::logoutClearingAccountSubscription,
                     onConnectionPowerAction = { action -> current.power(action) })
             }
             }
@@ -236,7 +236,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     nodeLatencyProbe: com.gccwebos.android.portal.NodeLatencyProbe? = null,
     autoRefreshPages: Boolean = autoLoadCommerce,
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
-    clearLocalData: (suspend () -> Unit)? = null) {
+    logoutClearingAccount: (suspend () -> Unit)? = null) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
@@ -245,7 +245,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
             val repository = repositoryOverride ?: productionRepository(context)
             accountOverride ?: AccountController(repository, scope,
                 nodeLatencyProbe = nodeLatencyProbe, sourceCommitFence = sourceCommitFence,
-                clearLocalData = clearLocalData ?: { repository.clearLocalData() })
+                logoutClearingAccount = logoutClearingAccount ?: { repository.logoutClearingAccountSubscription() })
         }
     }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.

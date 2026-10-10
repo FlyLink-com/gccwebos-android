@@ -66,7 +66,7 @@ internal object ReferralPresentation {
 
     fun rules(profile: ReferralProfile): List<Rule> = buildList {
         profile.attributionDays?.let { days ->
-            add(Rule("attribution", "$days 天有效追踪", "好友点击你的链接后 $days 天内完成注册，即为你邀请的好友。"))
+            add(Rule("attribution", "$days 天内注册有效", "好友点击你的链接后 $days 天内完成注册，即为你邀请的好友。"))
         }
         profile.policy?.let { policy ->
             val days = policy.confirmationDays

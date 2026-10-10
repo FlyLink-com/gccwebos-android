@@ -121,7 +121,7 @@ class NodeForegroundRecoveryUiTest {
                 }
         }
         compose.onNodeWithTag("node-choice-0").assertIsEnabled()
-        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertTextEquals("17 ms")
+        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertContentDescriptionEquals("节点延迟 17 毫秒")
         compose.runOnIdle {
             assertEquals(1, subscriptionReads.get())
             assertEquals(until, account.nodeSelection.snapshot.validUntil)
@@ -140,7 +140,7 @@ class NodeForegroundRecoveryUiTest {
         }
         compose.waitUntil(5_000) { overviewReads.get() == 3 && account.foregroundCheckPending }
         compose.onNodeWithTag("node-choice-0").assertIsNotEnabled()
-        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertTextEquals("— ms")
+        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertContentDescriptionEquals("节点延迟：未测试")
         compose.runOnIdle {
             assertFalse(account.nodeSelection.select(previous))
             assertNull(account.nodeLatency.reading(previous))
@@ -166,7 +166,7 @@ class NodeForegroundRecoveryUiTest {
         }
         compose.onNodeWithTag("page-Lines").assertIsDisplayed()
         compose.onNodeWithTag("node-choice-0").assertIsEnabled()
-        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertTextEquals("17 ms")
+        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertContentDescriptionEquals("节点延迟 17 毫秒")
         compose.runOnIdle {
             assertEquals(2, subscriptionReads.get())
             assertEquals(4, overviewReads.get())
@@ -236,7 +236,7 @@ class NodeForegroundRecoveryUiTest {
                 }
         }
         compose.onNodeWithTag("node-choice-0").assertIsEnabled()
-        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertTextEquals("17 ms")
+        compose.onNodeWithTag("node-latency-0", useUnmergedTree = true).assertContentDescriptionEquals("节点延迟 17 毫秒")
         compose.runOnIdle {
             assertEquals(2, subscriptionReads.get())
             assertEquals(4, overviewReads.get())

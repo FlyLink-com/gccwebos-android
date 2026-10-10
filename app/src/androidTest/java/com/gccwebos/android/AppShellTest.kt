@@ -92,7 +92,9 @@ class AppShellTest {
         // A saved local profile cannot authenticate this account card or open a production engine.
         compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
         compose.onNodeWithText("已连接").assertDoesNotExist()
-        compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
+        // Signed-out + READY local config with no subscription usage hides the usage card (C10/C11).
+        compose.onNodeWithTag("account-usage-remaining").assertDoesNotExist()
+        compose.onNodeWithTag("connection-account-surface").assertDoesNotExist()
         compose.onNodeWithTag("subscription-usage-unavailable").assertDoesNotExist()
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
     }
@@ -153,6 +155,10 @@ class AppShellTest {
     @Test fun profileLoginAndRegistrationRemainLocalAndReturnToConnection() {
         val state = launch()
         compose.onNodeWithTag("nav-Profile").performClick()
+        // Signed-out 「我的」 is the ordinary Mine layout; login appears only after 去登录.
+        compose.onNodeWithTag("mine-welcome").assertExists()
+        compose.onNodeWithTag("login-screen").assertDoesNotExist()
+        compose.onNodeWithTag("mine-go-login").performScrollTo().performClick()
         compose.onNodeWithTag("login-screen").assertExists()
         compose.onNodeWithTag("login-account").performScrollTo().performTextInput("navigation@example.invalid")
         compose.onNodeWithTag("login-register").performScrollTo().performClick()

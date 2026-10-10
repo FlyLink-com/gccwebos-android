@@ -87,6 +87,15 @@ class ConfigurationLibraryFlowUiTest {
         submitPlatformReturn(yaml(name, count + 10), kind)
         awaitItems(count)
         compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+        dismissNamePrompt()
+    }
+
+    /** A new subscription asks for a name first; keep the default name ("跳过") so the page has a single root again. */
+    private fun dismissNamePrompt() {
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("configuration-dialog").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("configuration-dialog-cancel").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("configuration-dialog").fetchSemanticsNodes().isEmpty() }
+        awaitIdle()
     }
 
     private fun submitPlatformReturn(bytes: ByteArray, kind: ManualImportInputKind) {

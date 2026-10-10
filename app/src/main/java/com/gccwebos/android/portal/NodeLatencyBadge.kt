@@ -4,11 +4,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,7 +20,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.Brand
 
-private val LatencyPoor = Color(0xFFFF5D5D)
+/** Green tier, at or under [LatencyGoodUpToMs]. */
+internal val LatencyGoodColor = Brand.Green
+/** Blue tier, above 150 ms and below [LatencyModerateBelowMs]. */
+internal val LatencyModerateColor = Brand.Blue
+/** Orange tier, from 200 ms up to but not including [LatencySlowBelowMs]. Brand has no orange token. */
+internal val LatencySlowColor = Color(0xFFFF9F43)
+/** Red tier at or above 300 ms, and the timeout capsule. */
+internal val LatencyPoor = Color(0xFFFF5D5D)
+/** Unmeasured, unavailable, skipped, and network-change text. */
+internal val LatencyNeutralColor = Brand.Muted.copy(alpha = .75f)
+
+internal fun nodeLatencyToneColor(tone: NodeLatencyTone): Color = when (tone) {
+    NodeLatencyTone.Good -> LatencyGoodColor
+    NodeLatencyTone.Moderate -> LatencyModerateColor
+    NodeLatencyTone.Slow -> LatencySlowColor
+    NodeLatencyTone.Poor -> LatencyPoor
+    NodeLatencyTone.Neutral -> LatencyNeutralColor
+}
+
 private val LatencyCapsuleShape = RoundedCornerShape(999.dp)
 
 /** Node transport RTT is diagnostic information, never node admission or proxy request evidence. */
@@ -36,12 +52,7 @@ internal fun NodeLatencyBadge(
 ) {
     val presentation = nodeLatencyPresentation(observation, measuring, tunnelActive)
     val description = nodeLatencyContentDescription(presentation)
-    val color = when (presentation.tone) {
-        NodeLatencyTone.Good -> Brand.Green
-        NodeLatencyTone.Fair -> Brand.Amber
-        NodeLatencyTone.Poor -> LatencyPoor
-        NodeLatencyTone.Neutral -> Brand.Muted.copy(alpha = .75f)
-    }
+    val color = nodeLatencyToneColor(presentation.tone)
     val clickable = if (onRetest != null) {
         Modifier
             .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
@@ -54,11 +65,6 @@ internal fun NodeLatencyBadge(
         contentAlignment = Alignment.CenterEnd,
     ) {
         when {
-            presentation.measuring -> CircularProgressIndicator(
-                modifier = Modifier.size(14.dp),
-                color = Brand.Cyan,
-                strokeWidth = 1.6.dp,
-            )
             presentation.label == "超时" -> Surface(
                 color = LatencyPoor.copy(alpha = .18f),
                 contentColor = LatencyPoor,

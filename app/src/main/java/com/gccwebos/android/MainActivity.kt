@@ -449,8 +449,9 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         setOf(ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
                 }
                 else if (account.authenticated) account.refreshAccountUsage()
-                snapshotFlow { !account.busy && !account.nodeSelection.busy }.first { it }
-                account.nodeLatency.refresh()
+                // Do not force a latency sweep on entry. The nodes panel starts a non-forced
+                // pass after the first frame. A connected visit stays on the local rebuild
+                // below and must not gain a probe from this effect.
             } else if (!account.nodeSelection.busy && connectionActive &&
                 account.localSubscription.hasCapability && account.nodeSelection.snapshot.choices.isEmpty()) {
                 // Login/foreground revoked opaque handles while the tunnel stayed up. Rebuild from

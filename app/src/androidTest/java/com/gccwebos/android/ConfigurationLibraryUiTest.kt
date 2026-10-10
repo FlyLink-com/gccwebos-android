@@ -86,7 +86,7 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("configuration-group-2").assertExists()
         compose.onAllNodesWithText("合成配置", useUnmergedTree = true).assertCountEquals(2)
         compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasNoClickAction()
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction()
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
         compose.onNodeWithTag("configuration-toggle-2").performScrollTo().performClick()
         compose.onNodeWithTag("configuration-node-2-0").assertDoesNotExist()
@@ -198,7 +198,7 @@ class ConfigurationLibraryUiTest {
         compose.runOnIdle {
             snapshot = snapshot.copy(items = snapshot.items.map { if (it.handle === second) it.copy(handle = replacement) else it })
         }
-        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasNoClickAction()
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction()
         compose.onNodeWithTag("configuration-activate-2").performScrollTo().performClick()
         compose.runOnIdle { assertSame(replacement, activations.single()) }
     }

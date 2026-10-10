@@ -136,12 +136,12 @@ class ConfigurationLibraryFlowUiTest {
         compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("配置 2")
         compose.onNodeWithTag("configuration-name-0", useUnmergedTree = true).assertTextEquals("配置 1")
         compose.onNodeWithTag("configuration-toggle-0").performScrollTo().performClick()
-        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasNoClickAction()
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasClickAction()
         // A background library refresh replaces every opaque handle; an expanded group must stay open.
         val before = compose.runOnIdle { account.configurationLibrary.snapshot.items[0].handle }
         compose.runOnIdle { account.configurationLibrary.refresh() }
         compose.waitUntil(10_000) { idle() && account.configurationLibrary.snapshot.items[0].handle !== before }
-        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasNoClickAction()
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasClickAction()
         compose.onNodeWithText("Synthetic Alpha", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("Synthetic Beta", useUnmergedTree = true).assertExists()
         assertNoExternalEffects()

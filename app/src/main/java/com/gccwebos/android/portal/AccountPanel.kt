@@ -639,7 +639,7 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                 else -> null
             }, Modifier.testTag("account-read-error"))
             TextButton(onClick = { confirmReset = true }, enabled = !state.clearing,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text(CLEAR_LOCAL_LABEL) }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-reset")) { Text("清除本地订阅与登录") }
             TextButton(onClick = state::logout, enabled = !state.clearing, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("account-signout")) { Text("退出账户（保留本地订阅）") }
         } else if (state.factorReference != null) {
             SupportingText("请输入身份验证器中的 TOTP 验证码")
@@ -673,11 +673,11 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
 }
 
 /** 账户与安全 bottom action and its confirmation: plain words, local device only, server account untouched. */
-internal const val CLEAR_LOCAL_LABEL = "退出登录并清除当前设备订阅配置"
-internal const val CLEAR_LOCAL_TITLE = "退出登录并清除当前设备订阅配置？"
-internal const val CLEAR_LOCAL_BODY = "将退出登录，并清除保存在这台设备上的订阅配置。只影响当前设备，不会删除或更改服务器上的账户。" +
+internal const val CLEAR_LOCAL_LABEL = "退出登录"
+internal const val CLEAR_LOCAL_TITLE = "是否退出登录并清除当前设备订阅配置？"
+internal const val CLEAR_LOCAL_BODY = "只影响当前设备：退出登录，并清除保存在这台设备上的订阅配置。不会删除或更改服务器上的账户。" +
     "已领取的订阅清除后，可能需要重新登录获取，或联系客服恢复。"
-internal const val CLEAR_LOCAL_CONFIRM = "退出并清除"
+internal const val CLEAR_LOCAL_CONFIRM = "退出登录"
 
 @Composable
 private fun ClearLocalDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {

@@ -314,11 +314,12 @@ class MobileParityUiTest {
         compose.onNodeWithTag("login-submit").performScrollTo().performClick()
         compose.waitUntil(10_000) { state.authenticated && !state.busy }
         compose.onNodeWithTag("mine-security").performScrollTo().performClick()
-        compose.onNodeWithTag("account-reset", useUnmergedTree = true).performScrollTo()
-        compose.onNodeWithText("退出登录并清除当前设备订阅配置").assertExists()
+        compose.onNodeWithTag("account-reset").performScrollTo().assertTextEquals("退出登录")
         compose.onNodeWithText("清除本地订阅与登录").assertDoesNotExist()
         compose.onNodeWithTag("account-reset").performClick()
-        compose.onNodeWithTag("reset-title").assertTextEquals("退出登录并清除当前设备订阅配置？")
+        compose.onNodeWithTag("reset-title").assertTextEquals("是否退出登录并清除当前设备订阅配置？")
+        compose.onNodeWithTag("reset-confirm").assertTextEquals("退出登录")
+        compose.onNodeWithTag("reset-cancel").assertTextEquals("取消")
         compose.onNodeWithTag("reset-body").assertTextContains("只影响当前设备", substring = true)
         compose.onNodeWithTag("reset-body").assertTextContains("不会删除或更改服务器上的账户", substring = true)
         compose.runOnIdle { assertTrue(state.localSubscription.hasProfile); assertNotNull(saved.read()) }

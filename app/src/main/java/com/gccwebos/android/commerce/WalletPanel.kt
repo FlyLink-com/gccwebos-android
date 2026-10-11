@@ -239,9 +239,8 @@ internal fun PaymentReviewDialog(flow: RechargeFlowController, state: CommerceCo
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("实际应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
                 Text("到账目标：${formatCoins(order.expectedPaidCoinUnits)}")
-                Text("支付宝 · 飞连vpn · portal.gccwebos.com")
-                Text("将打开：${order.nextAction?.let { java.net.URI(it.url).host } ?: "入口不可用"}")
-                Text("请核对实际金额；选项价格变化时，以此订单为准。暂不付款会保留订单。")
+                Text("付款方式：支付宝")
+                Text("请核对实际金额；选项价格变化时，以此订单为准。点击后会在应用内打开付款页面，暂不付款会保留订单。")
                 if (!state.canOpenPayment(order, now)) Text("订单已更新或入口已失效，请关闭并查询。")
             } }, confirmButton = { AlipayButton("支付宝支付", { flow.openPayment(Instant.now()) },
                 enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },

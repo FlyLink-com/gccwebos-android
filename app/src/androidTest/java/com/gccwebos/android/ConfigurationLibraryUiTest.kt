@@ -29,7 +29,7 @@ class ConfigurationLibraryUiTest {
     private val second = ConfigurationHandle(owner, "synthetic-revision", "synthetic-second", 0)
     private val nodes = listOf(SafeProxyConfig.NodeSummary(0, "Synthetic Japan", "vless", true))
     private var snapshot by mutableStateOf(ConfigurationLibrarySnapshot(listOf(
-        ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
+        ConfigurationItem(account, "官方", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
         ConfigurationItem(first, "合成配置", ManualSourceKind.ImportedLocal, nodes, LocalSubscriptionStatus.READY, true,
             nodeKeys = listOf("k1")),
         ConfigurationItem(second, "合成配置", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, false,
@@ -50,6 +50,9 @@ class ConfigurationLibraryUiTest {
     private var namingDone = 0
     private var measurements = 0
     private var activeDisposals = 0
+    private var latencies by mutableStateOf<Map<String?, Long>>(emptyMap())
+    /** Added to a source's latency per node position (negative: later nodes are faster), to exercise sorting inside a source. */
+    private var latencyStepPerPosition = 0L
 
     private fun launch(fontScale: Float = 1f) {
         compose.setContent {
@@ -60,6 +63,7 @@ class ConfigurationLibraryUiTest {
                         .verticalScroll(rememberScrollState())) {
                         ConfigurationLibraryContent(snapshot, busy, null, canMeasure = true,
                             onMeasure = { measurements++ }, onImport = { imports++ },
+                            latencyFor = { item, position -> latencies[item.handle.entryId]?.let { NodeLatencyObservation.Success(it + position * latencyStepPerPosition, 7) } },
                             onActivate = { activations += it }, onRename = { handle, name -> renames += handle to name },
                             onRemove = { removals += it }, onReplace = { replacements += it },
                             onChooseNode = { handle, target -> chosen += handle to target },
@@ -70,13 +74,18 @@ class ConfigurationLibraryUiTest {
                             namingEntryId = namingEntryId, onNamingDone = { namingDone++; namingEntryId = null },
                             activeContent = { item, list ->
                                 DisposableEffect(Unit) { onDispose { activeDisposals++ } }
-                                Column(Modifier.testTag("library-active-fixture")) {
+                                Box(Modifier.testTag("nodes-configuration-group")) { Column(Modifier.testTag("library-active-fixture")) {
+                                    // Like the real card: 节点列表 on the left, the page's sort + 延迟测试 icons at the right.
+                                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                        Text("节点列表", Modifier.weight(1f).testTag("nodes-group-title"))
+                                        list.headerAction(this)
+                                    }
                                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                                         Text(item.name, Modifier.weight(1f).testTag("library-active-name"))
                                         list.rowTrailing?.invoke(0)
                                     }
                                     list.extraRows(this)
-                                }
+                                } }
                             })
                     }
                 }
@@ -105,6 +114,7 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("configuration-activate-2").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction().performClick()
+        compose.onNodeWithTag("unknown-node-continue").performClick()
         compose.runOnIdle {
             assertEquals(1, chosen.size); assertSame(second, chosen.single().first)
             assertEquals(NodeTarget(0, "Synthetic Japan", "vless"), chosen.single().second)
@@ -116,8 +126,11 @@ class ConfigurationLibraryUiTest {
     @Test fun everyNodeRowSaysWhereItComesFrom() {
         launch()
         compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertIsDisplayed()
-        compose.onAllNodesWithText("账户订阅 · 只读", useUnmergedTree = true).assertCountEquals(1)
-        compose.onAllNodesWithText("合成配置 · 第三方订阅", useUnmergedTree = true).assertCountEquals(1)
+        compose.onAllNodesWithText("官方 · 只读", useUnmergedTree = true).assertCountEquals(1)
+        // Imported rows carry the source name only (the kind sits on the 来源 card), so the label is never cut off.
+        compose.onNode(hasTestTag("node-source-label") and hasAnyAncestor(hasTestTag("configuration-node-2-0")), useUnmergedTree = true)
+            .assertTextEquals("合成配置")
+        compose.onAllNodesWithText("合成配置 · 第三方订阅", useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test fun accountNodesAreReadOnlyAndImportedNodesCanBeEdited() {
@@ -210,6 +223,99 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("unified-deleted").performScrollTo().assertExists()
     }
 
+    @Test fun addButtonEndsTheSwitcherRowAtTheFarRight() {
+        launch()
+        val plus = compose.onNodeWithTag("nodes-import").fetchSemanticsNode().boundsInRoot
+        val last = compose.onNodeWithTag("unified-filter-2").fetchSemanticsNode().boundsInRoot
+        val all = compose.onNodeWithTag("unified-filter-all").fetchSemanticsNode().boundsInRoot
+        val row = compose.onNodeWithTag("unified-filter").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            assertTrue("+ is the rightmost control of the switcher row", plus.right >= row.right - 1f)
+            assertTrue("+ comes after every tab", plus.left >= last.right - 1f && plus.left > all.right)
+            assertTrue("+ shares the row vertically with the tabs", plus.top < row.bottom && plus.bottom > row.top)
+        }
+        compose.onNodeWithTag("unified-filter-all").assertIsSelected()
+        compose.onNodeWithTag("unified-filter-0").assertExists()
+        compose.onNodeWithTag("unified-filter-1").assertExists()
+        compose.onNodeWithTag("unified-filter-2").assertExists()
+        // The capsule bar itself (brand gradient, colours covered by SlidingTabContrastTest) holds every tab and not the +.
+        val bar = compose.onNodeWithTag("unified-filter-bar").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { assertTrue(last.right <= bar.right + 1f && all.left >= bar.left - 1f && plus.left >= bar.right - 1f) }
+    }
+
+    @Test fun thereIsNoPageTitleAboveTheSwitcherAndNoSelectionHelperCopy() {
+        launch()
+        compose.onNodeWithTag("configuration-library-header").assertDoesNotExist()
+        compose.onNodeWithTag("configuration-library-title").assertDoesNotExist()
+        compose.onAllNodesWithText("全部节点", substring = true).assertCountEquals(0)
+        compose.onNodeWithTag("nodes-selection-summary").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-select-prompt").assertDoesNotExist()
+        compose.onAllNodesWithText("请点选下方一个节点", substring = true).assertCountEquals(0)
+        compose.onNodeWithTag("nodes-select-lost").assertDoesNotExist()
+        compose.onAllNodesWithText("已不在配置里", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("未选择", substring = false).assertCountEquals(0)
+    }
+
+    private fun density() = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+
+    @Test fun nodeListHeadingAndLatencyTestShareOneRowWithTheActionAtTheRight() {
+        launch()
+        val title = compose.onNodeWithTag("nodes-group-title").fetchSemanticsNode().boundsInRoot
+        val action = compose.onNodeWithTag("nodes-latency-refresh").fetchSemanticsNode().boundsInRoot
+        val group = compose.onNodeWithTag("nodes-configuration-group").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithTag("nodes-group-title").assertTextEquals("节点列表")
+        compose.onNodeWithTag("nodes-latency-refresh").assertContentDescriptionEquals("延迟测试")
+            .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+        compose.runOnIdle {
+            assertTrue("same row", action.top < title.bottom && action.bottom > title.top)
+            assertTrue("action is right of the heading", action.left >= title.right - 1f)
+            // Order on the row: 节点列表 ... ⚡ then the sort funnel at the far right.
+            assertTrue("lightning sits just left of the sort icon at the card's right edge", action.right >= group.right - 24f - 48f * density())
+        }
+        // Icon only: no 延迟测试 text anywhere, no toolbar, no last-test caption, no old sort text.
+        compose.onNodeWithTag("nodes-latency-one-tap").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-latency-toolbar").assertDoesNotExist()
+        compose.onAllNodesWithText("延迟测试").assertCountEquals(0)
+        compose.onAllNodesWithText("上次延迟测试", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("按延迟排序").assertCountEquals(0)
+    }
+
+    @Test fun sortIsAFunnelIconRightOfTheLightningWithADefaultAndLatencyMenu() {
+        // 配置 2 has two nodes; the second one is faster. Default order keeps the delivered order; 按延迟 puts the fast one first.
+        val two = nodes + SafeProxyConfig.NodeSummary(1, "Synthetic Singapore", "hysteria2", true)
+        snapshot = snapshot.copy(items = snapshot.items.map { if (it.handle === second) it.copy(nodes = two, nodeKeys = listOf("k2", "k3")) else it })
+        latencies = mapOf(null to 400L, "synthetic-second" to 300L); latencyStepPerPosition = -100L
+        launch()
+        val sort = compose.onNodeWithTag("nodes-sort").assertContentDescriptionEquals("排序")
+            .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+        val bolt = compose.onNodeWithTag("nodes-latency-refresh").fetchSemanticsNode().boundsInRoot
+        val group = compose.onNodeWithTag("nodes-configuration-group").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            assertTrue("same row", sort.top < bolt.bottom && sort.bottom > bolt.top)
+            assertTrue("directly right of the lightning, at the far right", sort.left >= bolt.right - 1f && sort.left - bolt.right < 24f)
+            assertTrue("sort icon ends the row", sort.right >= group.right - 24f)
+        }
+        fun top(tag: String) = compose.onNodeWithTag(tag).performScrollTo().fetchSemanticsNode().boundsInRoot.top
+        assertTrue("default order", top("configuration-node-2-0") < top("configuration-node-2-1"))
+        compose.onNodeWithTag("nodes-sort").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-sort-default").assertIsDisplayed()
+        compose.onNodeWithText("默认顺序").assertIsDisplayed()
+        compose.onNodeWithText("按延迟").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("nodes-sort-default").assertDoesNotExist()
+        assertTrue("sorted by latency: the 200 ms node above the 300 ms node", top("configuration-node-2-1") < top("configuration-node-2-0"))
+        // And back to the default order.
+        compose.onNodeWithTag("nodes-sort").performScrollTo().performClick()
+        compose.onNodeWithText("默认顺序").performClick()
+        assertTrue("default again", top("configuration-node-2-0") < top("configuration-node-2-1"))
+    }
+
+    @Test fun nodesOfOtherSourcesShowTheirOwnLatency() {
+        latencies = mapOf("synthetic-second" to 187L)
+        launch()
+        compose.onNodeWithTag("configuration-latency-2-0", useUnmergedTree = true).performScrollTo()
+            .assertContentDescriptionEquals("节点延迟 187 毫秒")
+    }
+
     @Test fun filterChipsNarrowTheListToOneSource() {
         launch()
         compose.onNodeWithTag("unified-filter-all").assertExists()
@@ -264,7 +370,7 @@ class ConfigurationLibraryUiTest {
         compose.onAllNodesWithTag("nodes-latency-refresh").assertCountEquals(1)
         compose.onNodeWithTag("nodes-import").assertContentDescriptionEquals("新增配置")
             .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
-        compose.onNodeWithTag("nodes-latency-refresh").assertContentDescriptionEquals("测试节点延迟").performClick()
+        compose.onNodeWithTag("nodes-latency-refresh").assertContentDescriptionEquals("延迟测试").performClick()
         compose.onNodeWithText("测试节点延迟").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, imports); assertEquals(1, measurements) }
         assertNoSourceMutation()
@@ -290,14 +396,16 @@ class ConfigurationLibraryUiTest {
         assertNoSourceMutation()
     }
 
-    @Test fun noActiveSourceRetainsAllSavedGroupsAndDisablesLatency() {
+    @Test fun noActiveSourceRetainsAllSavedGroupsAndStillMeasuresTheirNodes() {
         snapshot = snapshot.copy(items = snapshot.items.map { it.copy(active = false) })
         launch()
         compose.onNodeWithTag("configuration-unselected").assertTextEquals("未选择配置")
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction()
         (0..2).forEach { compose.onNodeWithTag("configuration-group-$it").assertExists() }
         compose.onNodeWithTag("library-active-fixture").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
+        // The heading row still carries 排序 and 延迟测试: the saved sources' own nodes can be measured without an active one.
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
+        compose.onNodeWithTag("nodes-sort").assertExists()
         compose.onNodeWithTag("nodes-import").assertIsEnabled()
         assertNoSourceMutation()
     }
@@ -322,7 +430,27 @@ class ConfigurationLibraryUiTest {
             snapshot = snapshot.copy(items = snapshot.items.map { if (it.handle === second) it.copy(handle = replacement) else it })
         }
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction().performClick()
+        compose.onNodeWithTag("unknown-node-continue").performClick()
         compose.runOnIdle { assertSame(replacement, chosen.single().first); assertTrue(activations.isEmpty()) }
+    }
+
+    @Test fun choosingAnUnknownNodeAsksFirstAndTheOfficialSourceNeverDoes() {
+        launch()
+        // 取消: nothing is chosen, the dialog closes.
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().performClick()
+        compose.onNodeWithTag("unknown-node-dialog").assertIsDisplayed()
+        compose.onNodeWithTag("unknown-node-dialog-body", useUnmergedTree = true).assertTextEquals("未知节点存在数据泄露风险，请谨慎选择")
+        compose.onNodeWithTag("unknown-node-cancel").assertHeightIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("unknown-node-dialog").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(chosen.isEmpty()) }
+        // 继续选择: the same tap path now selects exactly that node.
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().performClick()
+        compose.onNodeWithTag("unknown-node-continue").assertHeightIsAtLeast(48.dp).performClick()
+        compose.runOnIdle { assertSame(second, chosen.single().first) }
+        // 官方 (account) nodes are chosen without any warning.
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().performClick()
+        compose.onNodeWithTag("unknown-node-dialog").assertDoesNotExist()
+        compose.runOnIdle { assertSame(account, chosen.last().first) }
     }
 
     @Test fun doubledFontOtherSourceRowsStayInsideTheViewport() {
@@ -332,6 +460,7 @@ class ConfigurationLibraryUiTest {
         val bounds = row.fetchSemanticsNode().boundsInRoot
         assertTrue(bounds.left >= host.left); assertTrue(bounds.right <= host.right)
         row.assertHeightIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("unknown-node-continue").performClick()
         compose.runOnIdle { assertSame(second, chosen.single().first) }
     }
 
@@ -341,7 +470,7 @@ class ConfigurationLibraryUiTest {
         menu(2, "rename")
         compose.onNodeWithTag("configuration-name-duplicate").assertTextEquals("已有同名订阅，请重新命名你的订阅")
         compose.onNodeWithTag("configuration-dialog-confirm").assertIsNotEnabled()
-        compose.onNodeWithTag("configuration-name-input").performTextReplacement("  账户订阅 ")
+        compose.onNodeWithTag("configuration-name-input").performTextReplacement("  官方 ")
         compose.onNodeWithTag("configuration-dialog-confirm").assertIsNotEnabled()
         compose.onNodeWithTag("configuration-name-input").performTextReplacement("唯一名称")
         compose.onNodeWithTag("configuration-name-duplicate").assertDoesNotExist()
@@ -351,13 +480,13 @@ class ConfigurationLibraryUiTest {
 
     @Test fun aNewlyImportedEntryAsksForANameThatSurvivesARefreshAndRejectsDuplicates() {
         snapshot = ConfigurationLibrarySnapshot(listOf(
-            ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
+            ConfigurationItem(account, "官方", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
             ConfigurationItem(first, "Kitty", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, false),
-            ConfigurationItem(second, "配置 3", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, true)))
+            ConfigurationItem(second, "未知3", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, true)))
         namingEntryId = "synthetic-second"
         launch()
         compose.onNodeWithText("为订阅命名").assertExists()
-        compose.onNodeWithTag("configuration-name-input").assertTextContains("配置 3")
+        compose.onNodeWithTag("configuration-name-input").assertTextContains("未知3")
         compose.runOnIdle { assertEquals(1, namingDone); assertNull(namingEntryId) }
         // The import's settle refresh replaces handles; the dialog stays on the same saved entry.
         val refreshed = ConfigurationHandle(owner, "synthetic-revision-2", "synthetic-second", 0)

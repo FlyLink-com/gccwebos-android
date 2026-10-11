@@ -84,7 +84,7 @@ private fun CatalogOfferCard(offer: Offer, selected: Boolean, enabled: Boolean, 
         }
         .clip(shape)
         .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect)) {
-        GlassSurface(Modifier.fillMaxWidth(), shape = shape) {
+        GlassSurface(Modifier.fillMaxWidth(), shape = shape, moreOpaque = true) {
             Box(Modifier.fillMaxWidth()
                 .drawBehind {
                     if (glow > 0f) drawRect(Brush.linearGradient(listOf(Brand.Cyan.copy(alpha = .16f * glow),

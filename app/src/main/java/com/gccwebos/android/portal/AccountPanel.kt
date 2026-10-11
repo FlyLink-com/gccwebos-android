@@ -38,7 +38,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.gccwebos.android.ResourceCard
 import com.gccwebos.android.design.*
+import com.gccwebos.android.design.dialog.GccDialog
+import com.gccwebos.android.design.dialog.GccDialogAction
+import com.gccwebos.android.design.dialog.GccDialogIcon
+import com.gccwebos.android.design.dialog.GccDialogTone
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.role
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,9 +106,30 @@ internal class AccountController(private val repository: PortalRepository, priva
     nodeLatencyProbe: NodeLatencyProbe? = null,
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
     /** 退出登录: revokes the session and forgets this device's account subscription; imported configurations stay. */
-    private val logoutClearingAccount: suspend () -> Unit = { repository.logoutClearingAccountSubscription() }) {
+    private val logoutClearingAccount: suspend () -> Unit = { repository.logoutClearingAccountSubscription() },
+    /** 「记住账号」: the account identifier only (never a password or token). Logout keeps it; unticking clears it. */
+    private val rememberedAccounts: RememberedAccountStore = MemoryRememberedAccountStore(),
+    private val rememberedIo: kotlin.coroutines.CoroutineContext = kotlinx.coroutines.Dispatchers.IO) {
     var account by mutableStateOf("")
     var password by mutableStateOf("")
+    /** Ticked by default on every launch. Unticking forgets the remembered account right away. */
+    var rememberAccount by mutableStateOf(true)
+        private set
+    /** True once the field was filled from the remembered account (focus then goes to the password field). */
+    var accountPrefilled by mutableStateOf(false)
+        private set
+    private var pendingRemember: String? = null
+    fun updateRememberAccount(value: Boolean) {
+        rememberAccount = value
+        if (!value) { pendingRemember = null; accountPrefilled = false; scope.launch(rememberedIo) { rememberedAccounts.clear() } }
+    }
+    /** Reads the sidecar off the main thread; never overwrites what the user already typed. */
+    fun prefillRememberedAccount() {
+        scope.launch(rememberedIo) {
+            val remembered = rememberedAccounts.read() ?: return@launch
+            if (account.isBlank() && !authenticated && rememberAccount) { account = remembered; accountPrefilled = true }
+        }
+    }
     var answer by mutableStateOf("")
     var code by mutableStateOf("")
     var challenge by mutableStateOf<HumanChallenge?>(null)
@@ -166,12 +200,18 @@ internal class AccountController(private val repository: PortalRepository, priva
     val nodeLatency: NodeLatencyController = NodeLatencyController(repository.localSubscriptions, scope, nodeLatencyProbe,
         authGeneration = { authSessionGeneration },
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !configurationLibrary.busy })
+    /**
+     * The signed-in account's own subscription load: its state is shown on the nodes page (loading / failed with a retry),
+     * and a failed request is retried a few times with growing pauses. A page load, not the connect step.
+     */
+    internal val accountLoad: AccountLoadCoordinator = AccountLoadCoordinator(scope, start = { report -> startAccountLoad(report) })
     val configurationLibrary: ConfigurationLibraryController = ConfigurationLibraryController(repository.localSubscriptions, scope,
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !nodeSelection.busy },
         commitFence = sourceCommitFence,
         onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() },
         accountSignedIn = { authenticated },
         nodesChanged = { nodeLatency.cancel(); nodeSelection.expireIfNeeded() },
+        accountNeedsLoad = { if (accountLoadEnabled) accountLoad.request() },
         chooseNode = { target ->
             nodeSelection.expireIfNeeded()
             val match = matchNodeTarget(nodeSelection.snapshot.choices, target)
@@ -188,6 +228,24 @@ internal class AccountController(private val repository: PortalRepository, priva
             configurationLibrary.refresh()
             if (foregroundCheckPending && authenticated && !busy && !manualImport.busy && !clearing) revalidateAccount()
         } })
+    /** One attempt of the account's own delivery request; false when something else is busy right now. */
+    private fun startAccountLoad(report: (AccountLoadOutcome) -> Unit): Boolean {
+        if (!authenticated || busy || manualImport.busy || restoring || foregroundCheckPending || clearing) return false
+        run {
+            try {
+                loadResource()
+                report(if (localSubscription.status == LocalSubscriptionStatus.READY && localSubscription.nodes.isNotEmpty())
+                    AccountLoadOutcome.Loaded else AccountLoadOutcome.NotLoaded)
+            } catch (cancel: CancellationException) { report(AccountLoadOutcome.Cancelled); throw cancel }
+            catch (failure: Exception) { report(AccountLoadOutcome.Failed); throw failure }
+            finally { scope.launch { configurationLibrary.refresh() } }
+        }
+        return true
+    }
+    /** The user's own retry after a failed account load. */
+    fun retryAccountLoad() { if (authenticated && accountLoadEnabled) accountLoad.request(manual = true) }
+    /** Test seam for display-only fixtures that own no delivery endpoint: false keeps the account from requesting its subscription (always true in the app). */
+    internal var accountLoadEnabled = true
     fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
     fun cancelAccountUsageUpdate() = accountUsage.cancel()
     private fun clearAccountUsage() {
@@ -363,6 +421,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         emailHint = null; secondFactorEmail = null
         restorationPending = false
         val submittedPassword = password; password = ""
+        pendingRemember = if (rememberAccount) submittedAccount else null
         val submittedAnswer = answer; answer = ""
         // A submitted challenge may be consumed even when the response is lost or rejected.
         cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
@@ -393,6 +452,8 @@ internal class AccountController(private val repository: PortalRepository, priva
             commerceSessionIdentity = CommerceSessionIdentity()
         if (acceptedAccountId != value.accountId || acceptedSessionBinding != binding)
             referralGenerationGuard = ReferralGenerationGuard()
+        pendingRemember?.takeIf { rememberAccount }?.let { identifier -> scope.launch(rememberedIo) { rememberedAccounts.put(identifier) } }
+        pendingRemember = null
         val email = submittedEmail ?: emailHint?.takeIf { it.accountId == value.accountId && it.session == binding }?.email
         acceptedAccountId = value.accountId; acceptedSessionBinding = binding
         nodeSelection.invalidate()
@@ -476,7 +537,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
-    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { accountLoad.cancel(); clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource(onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
         val expectedUsage = usageAuthentication
@@ -518,6 +579,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     /** Abandon an in-progress sign-in; keeps whatever local subscription exists. */
     fun cancelAuthentication() = reset(clearAccountSubscription = false)
     private fun reset(clearAccountSubscription: Boolean) {
+        accountLoad.cancel()
         manualImport.cancel()
         configurationLibrary.clearDisplay()
         nodeLatency.cancel()
@@ -535,7 +597,10 @@ internal class AccountController(private val repository: PortalRepository, priva
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
         referralGenerationGuard = ReferralGenerationGuard()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
+        pendingRemember = null
         authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
+        // 退出登录 keeps a remembered account (it only clears the account subscription); unticked means nothing is kept.
+        if (!rememberAccount) { account = ""; accountPrefilled = false }
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -678,20 +743,17 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
 
 /** The one logout action: plain words, this device only, server account untouched. */
 internal const val LOGOUT_LABEL = "退出登录"
-internal const val LOGOUT_TITLE = "是否退出登录并清除当前设备订阅配置？"
-internal const val LOGOUT_BODY = "将退出登录，并清除这台设备上保存的账户订阅配置。只影响当前设备，不会删除或更改服务器上的账户；" +
-    "你自己导入的配置会保留。账户订阅清除后，重新登录即可再次获取。"
+internal const val LOGOUT_TITLE = "退出登录？"
+internal const val LOGOUT_BODY = "只清除这台设备上保存的账户订阅配置，不会删除或更改服务器上的账户；" +
+    "你自己导入的配置会保留，重新登录即可再次获取。"
 internal const val LOGOUT_CONFIRM = "退出登录"
 
 @Composable
 internal fun LogoutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text(LOGOUT_TITLE, modifier = Modifier.testTag("logout-title")) },
-        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            Text(LOGOUT_BODY, modifier = Modifier.testTag("logout-body"))
-        } },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("logout-confirm")) { Text(LOGOUT_CONFIRM) } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("logout-cancel")) { Text("取消") } })
+    GccDialog(onDismissRequest = onDismiss, title = LOGOUT_TITLE, body = LOGOUT_BODY,
+        icon = GccDialogIcon.Warning, tone = GccDialogTone.Danger, testTag = "logout",
+        primary = GccDialogAction(LOGOUT_CONFIRM, onConfirm, testTag = "logout-confirm"),
+        secondary = GccDialogAction("取消", onDismiss, testTag = "logout-cancel"))
 }
 
 internal const val OFFICIAL_REGISTRATION_URL = "https://portal.gccwebos.com/portal/register/"
@@ -718,6 +780,17 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
     LaunchedEffect(state, loginLease, state.busy, state.restoring, state.foregroundCheckPending) {
         loginLease?.let(state::ensureLoginChallenge)
     }
+    // 「记住账号」: the remembered account is read off the main thread after the first frame; when it fills the
+    // account field the cursor goes to the password field, once the page's enter motion has settled (so the
+    // keyboard never opens in the middle of the transition).
+    val passwordFocus = remember { FocusRequester() }
+    LaunchedEffect(state) { state.prefillRememberedAccount() }
+    LaunchedEffect(state.accountPrefilled) {
+        if (state.accountPrefilled) {
+            kotlinx.coroutines.delay(LoginFocusSettleMillis)
+            if (state.password.isEmpty() && !state.busy) try { passwordFocus.requestFocus() } catch (_: IllegalStateException) {}
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(top = topGap).testTag("plain-login-layout"),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.fillMaxWidth().testTag("login-form"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -725,10 +798,15 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                 Text("欢迎回来", style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.weight(1f).testTag("login-welcome"))
             }
+            // Autofill hints let the system password manager fill the account and password; the app itself
+            // never stores the password (it is cleared the moment 登录 is tapped).
             CompactLoginField(state.account, { state.account = it }, "邮箱", "login-account",
-                enabled = !state.busy, keyboardType = KeyboardType.Email)
+                enabled = !state.busy, keyboardType = KeyboardType.Email,
+                modifier = Modifier.semantics { contentType = ContentType.Username + ContentType.EmailAddress })
             CompactLoginField(state.password, { state.password = it }, "密码", "login-password",
-                enabled = !state.busy, keyboardType = KeyboardType.Password, password = true)
+                enabled = !state.busy, keyboardType = KeyboardType.Password, password = true,
+                modifier = Modifier.focusRequester(passwordFocus).semantics { contentType = ContentType.Password })
+            RememberAccountRow(state.rememberAccount, enabled = !state.busy, onChange = state::updateRememberAccount)
             BoxWithConstraints(Modifier.fillMaxWidth().testTag("login-answer-question-row")) {
                 val answerField: @Composable (Modifier) -> Unit = { modifier ->
                     CompactLoginField(state.answer, { state.answer = it }, "输入算术题答案", "login-answer",
@@ -765,6 +843,24 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                     modifier = Modifier.heightIn(min = 48.dp).testTag("login-register")) { Text("注册") }
             }
         }
+    }
+}
+
+/** Longer than the page enter motion (FadeInMillis) so focus, and with it the keyboard, never lands mid-transition. */
+internal const val LoginFocusSettleMillis = 420L
+
+/** 「记住账号」: ticked by default; only the account is remembered, never the password. */
+@Composable
+internal fun RememberAccountRow(checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onChange)
+        .testTag("login-remember"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Checkbox(checked, onCheckedChange = null, enabled = enabled, modifier = Modifier.padding(start = 4.dp),
+            colors = CheckboxDefaults.colors(checkedColor = Brand.Cyan, uncheckedColor = Brand.Muted,
+                checkmarkColor = Brand.Background, disabledCheckedColor = Brand.Muted, disabledUncheckedColor = Brand.Muted))
+        Text("记住账号", color = Brand.Text, style = MaterialTheme.typography.bodyMedium)
+        Text("（不保存密码）", color = Brand.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

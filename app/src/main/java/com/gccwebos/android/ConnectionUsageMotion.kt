@@ -62,3 +62,40 @@ internal const val UsageRollThrottleMillis = 400L
 /** A roll may start only once per throttle window; faster changes snap to the latest value instead. */
 internal fun usageRollAllowed(lastRollAtMillis: Long?, nowMillis: Long, throttleMillis: Long = UsageRollThrottleMillis): Boolean =
     lastRollAtMillis == null || nowMillis - lastRollAtMillis >= throttleMillis
+
+/** What the card's bar animation says about confirmed traffic; display-only, never gates admission. */
+internal enum class UsageCardState { Normal, Low, Exhausted }
+
+/** Below this remaining share the bar turns amber and pulses (the existing 10% threshold). */
+internal const val UsageLowRemainingFraction = UsageCriticalRemainingFraction
+
+/**
+ * [progress] is the confirmed used fraction (null when unknown, which never animates as a warning).
+ * Exhausted: nothing left. Low: less than 10% left but not none. Rounded to 0.01% like [usageSeverity].
+ */
+internal fun usageCardState(progress: Float?): UsageCardState {
+    val remaining = progress?.takeIf { it.isFinite() }?.let { Math.round((1.0 - it.coerceIn(0f, 1f)) * 10_000) / 10_000.0 }
+        ?: return UsageCardState.Normal
+    return when {
+        remaining <= 0.0 -> UsageCardState.Exhausted
+        remaining < UsageLowRemainingFraction -> UsageCardState.Low
+        else -> UsageCardState.Normal
+    }
+}
+
+/** The low-traffic pulse is the second infinite animation; it too runs only while shown, resumed and motion is allowed. */
+internal fun usagePulseActive(state: UsageCardState, shownAndResumed: Boolean, motionEnabled: Boolean): Boolean =
+    state == UsageCardState.Low && shownAndResumed && motionEnabled
+
+/** Alpha of the connected rim glow: calm 0.22..0.40 pulse; static 0.28 when paused or motion is off. */
+internal const val UsageRimAlphaMin = 0.22f
+internal const val UsageRimAlphaMax = 0.40f
+internal const val UsageRimAlphaStatic = 0.28f
+/** The idle (not connected) rim never animates. */
+internal const val UsageRimAlphaIdle = 0.14f
+/** Low-traffic glow: 0.12..0.36 pulse, static 0.22 when paused or motion is off. */
+internal const val UsagePulseAlphaMin = 0.12f
+internal const val UsagePulseAlphaMax = 0.36f
+internal const val UsagePulseAlphaStatic = 0.22f
+
+internal fun usageLerp(min: Float, max: Float, fraction: Float): Float = min + (max - min) * fraction.coerceIn(0f, 1f)

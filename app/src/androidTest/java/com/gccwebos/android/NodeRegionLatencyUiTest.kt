@@ -146,7 +146,7 @@ class NodeRegionLatencyUiTest {
         region(1).assertContentDescriptionEquals("地区未标注")
         assertBadge(0, "---")
         assertBadge(1, "---")
-        compose.onNodeWithTag("nodes-selected-region").assertContentDescriptionEquals("地区未标注")
+        compose.onNodeWithTag("nodes-selected-region").assertDoesNotExist()
         compose.onNodeWithTag("nodes-latency-refresh").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").performScrollTo().performClick()
         compose.onNodeWithTag("nodes-selected-region").assertDoesNotExist()
@@ -198,7 +198,7 @@ class NodeRegionLatencyUiTest {
             response = { NodeLatencyObservation.Success(19L, 7L) }
         }
         compose.onNodeWithTag("nodes-latency-refresh")
-            .assertContentDescriptionEquals("测试节点延迟")
+            .assertContentDescriptionEquals("延迟测试")
             .assertHeightIsAtLeast(48.dp).assertWidthIsAtLeast(48.dp)
             .assertIsEnabled().performClick()
         compose.waitUntil(5000) {

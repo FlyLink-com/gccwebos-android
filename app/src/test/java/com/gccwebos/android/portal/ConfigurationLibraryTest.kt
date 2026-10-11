@@ -68,7 +68,7 @@ class ConfigurationLibraryTest {
                     if (source.kind in ConfigurationEntry.MANUAL_KINDS) {
                         assertEquals(ConfigurationSelector.Entry, normalized.selector)
                         assertEquals(source.revision, normalized.entries.single().id)
-                        assertEquals("配置 1", normalized.entries.single().name)
+                        assertEquals("未知1", normalized.entries.single().name)
                     } else assertTrue(normalized.entries.isEmpty())
                     assertEquals(source.clearPending, normalized.clearPending)
                 }
@@ -171,7 +171,7 @@ class ConfigurationLibraryTest {
                 store.save(added)
                 store.readLibrary()!!.use { appended ->
                     assertEquals(3, appended.entries.size); assertEquals(added.revision, appended.selectedEntryId)
-                    assertEquals("配置 3", appended.entries.last().name)
+                    assertEquals("未知3", appended.entries.last().name)
                 }
             }
             for (kind in listOf(ManualSourceKind.None, ManualSourceKind.LegacyRemote)) {

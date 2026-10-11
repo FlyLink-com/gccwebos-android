@@ -99,6 +99,44 @@ class ManualImportControllerTest {
         assertEquals(1, f.fenceCalls); assertFalse(f.controller.busy)
     }
 
+    @Test fun fileImportReportsParsingThenSavingAndClearsTheStageWhenSettled() = runTest {
+        val f = Fixture(this)
+        val stages = mutableListOf<com.gccwebos.android.manualimport.ImportStage>()
+        val bytes = yaml()
+        try { f.manager.importManual(bytes, progress = { stages += it }) { it() } } finally { bytes.fill(0) }
+        assertEquals(listOf(com.gccwebos.android.manualimport.ImportStage.Parsing,
+            com.gccwebos.android.manualimport.ImportStage.Saving), stages)
+        val ticket = f.ticket()
+        assertNull(f.controller.stage)
+        f.controller.submit(ticket, yaml("192.0.2.77"), ManualImportInputKind.Document); runCurrent()
+        assertNull(f.controller.stage); assertFalse(f.controller.busy)
+    }
+
+    @Test fun linkImportShowsReadingWhileTheDownloadIsPendingThenSettles() = runTest {
+        val f = Fixture(this)
+        val gate = CompletableDeferred<Unit>()
+        f.response = { gate.await(); yaml() }
+        val ticket = f.ticket()
+        f.controller.submit(ticket, url(), ManualImportInputKind.Link); runCurrent()
+        assertTrue(f.controller.busy)
+        assertEquals(com.gccwebos.android.manualimport.ImportStage.Reading, f.controller.stage)
+        gate.complete(Unit); runCurrent()
+        assertFalse(f.controller.busy); assertNull(f.controller.stage)
+        assertEquals(1, f.snapshots.size)
+    }
+
+    @Test fun cancelDuringTheReadClearsTheStageAndSavesNothing() = runTest {
+        val f = Fixture(this)
+        val gate = CompletableDeferred<Unit>()
+        f.response = { gate.await(); yaml() }
+        val ticket = f.ticket()
+        f.controller.submit(ticket, url(), ManualImportInputKind.Link); runCurrent()
+        assertEquals(com.gccwebos.android.manualimport.ImportStage.Reading, f.controller.stage)
+        f.controller.cancel(); runCurrent()
+        assertNull(f.controller.stage); assertFalse(f.controller.busy); assertFalse(f.controller.visible)
+        assertEquals(0, f.saves); assertTrue(f.snapshots.isEmpty())
+    }
+
     @Test fun canceledAsyncCaptureCannotIssueATicketOrReplaceTheNextOpenOwner() = runTest {
         val gate = GatedDispatcher(StandardTestDispatcher(testScheduler))
         val f = Fixture(this, gate); f.controller.open()
@@ -248,7 +286,7 @@ class ManualImportControllerTest {
         runCurrent()
         val library = f.manager.configurationLibrarySnapshot().items
         val created = library.single { it.active }
-        assertTrue(created.name.startsWith("配置 ")) // single-slot test store: one synthesized entry
+        assertTrue(created.name.startsWith("未知")) // single-slot test store: one synthesized entry
         assertEquals(created.handle.entryId, f.controller.namingEntryId)
         f.controller.namingHandled()
         assertNull(f.controller.namingEntryId)

@@ -24,6 +24,18 @@ The app removes the library's generic CaptureActivity registration and declares 
 non-exported `ManualQrScannerActivity`. CAMERA is requested only after selecting Scan.
 No GMS, external scanner, external image capture, model download or remote decoder is used.
 
+### Scanning a QR from a photo (相册)
+
+The scanner screen has a 「从相册选择图片」 button. It opens the system Photo Picker
+(`ActivityResultContracts.PickVisualMedia.ImageOnly`, no storage permission; the app receives only the one image the user picks).
+The image is read into memory (at most 32 MiB, `content://` only), decoded with BitmapFactory sampling to at most 2048 px per side
+and then decoded by the same ZXing QR reader as the camera: as is, inverted (light-on-dark screenshots), then 2x/4x box-downscaled.
+Exactly one code is accepted; zero or several are reported, never guessed. The text then takes the same path as a camera result
+(`ManualInputBytes.fromText` -> private mailbox -> host confirmation), so every downstream trust check is unchanged.
+Nothing is written to disk, the clipboard is never read, nothing is logged, and every buffer holding image data is wiped.
+Messages: 图片中没有识别到二维码 / 图片中有多个二维码 / 图片无法读取. The screen keeps `FLAG_SECURE`. Camera permission is still requested first
+(a denial still ends the scan with the fixed permission failure).
+
 The scanner uses `BarcodeView` with a QR-only decoder. Multiple detected QR results in the
 same decoder frame are rejected. It never reads a result bitmap or writes a camera image.
 FLAG_SECURE prevents ordinary window/recents capture. The result Intent contains only a

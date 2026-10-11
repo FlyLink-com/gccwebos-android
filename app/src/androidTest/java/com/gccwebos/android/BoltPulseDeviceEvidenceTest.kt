@@ -151,15 +151,15 @@ class BoltPulseDeviceEvidenceTest {
         fun collect(n: android.view.accessibility.AccessibilityNodeInfo?) {
             if (n == null) return
             val label = (n.contentDescription ?: n.text)?.toString().orEmpty()
-            if (label.contains("测试节点延迟") || label.contains("节点延迟")) nodes.add(n)
+            if (label.contains("延迟测试") || label.contains("节点延迟")) nodes.add(n)
             for (i in 0 until n.childCount) collect(n.getChild(i))
         }
         collect(ui.rootInActiveWindow)
         val dump = StringBuilder()
         nodes.forEach { n -> val r = android.graphics.Rect(); n.getBoundsInScreen(r); dump.append("${n.contentDescription ?: n.text} $r clickable=${n.isClickable} enabled=${n.isEnabled}\n") }
         File(directory(), "$tag-bolt-nodes.txt").writeText(dump.toString())
-        val boltNode = requireNotNull(nodes.firstOrNull { (it.contentDescription ?: it.text)?.toString()?.startsWith("测试节点延迟") == true && it.isClickable }
-            ?: nodes.firstOrNull { (it.contentDescription ?: it.text)?.toString()?.startsWith("测试节点延迟") == true }) { "bolt node not found: $dump" }
+        val boltNode = requireNotNull(nodes.firstOrNull { (it.contentDescription ?: it.text)?.toString()?.startsWith("延迟测试") == true && it.isClickable }
+            ?: nodes.firstOrNull { (it.contentDescription ?: it.text)?.toString()?.startsWith("延迟测试") == true }) { "bolt node not found: $dump" }
         val bounds = android.graphics.Rect(); boltNode.getBoundsInScreen(bounds)
         val density = instrumentation.targetContext.resources.displayMetrics.density
         val box = (14 * density).toInt()

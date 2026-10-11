@@ -439,7 +439,7 @@ class ConfigurationLibraryUiTest {
         // 取消: nothing is chosen, the dialog closes.
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().performClick()
         compose.onNodeWithTag("unknown-node-dialog").assertIsDisplayed()
-        compose.onNodeWithTag("unknown-node-body", useUnmergedTree = true).assertTextEquals("未知节点存在数据泄露风险，请谨慎选择")
+        compose.onNodeWithTag("unknown-node-dialog-body", useUnmergedTree = true).assertTextEquals("未知节点存在数据泄露风险，请谨慎选择")
         compose.onNodeWithTag("unknown-node-cancel").assertHeightIsAtLeast(48.dp).performClick()
         compose.onNodeWithTag("unknown-node-dialog").assertDoesNotExist()
         compose.runOnIdle { assertTrue(chosen.isEmpty()) }

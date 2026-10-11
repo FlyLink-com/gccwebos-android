@@ -471,7 +471,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                         throw PortalFailure(PortalFailure.Reason.SUBSCRIPTION_EXPIRED)
                     val downloaded = when (old.kind) {
                         ManualSourceKind.ImportedRemote -> source.read(requireNotNull(old.url))
-                        ManualSourceKind.ExternalRemote -> (externalSource ?: throw UnsupportedManualSubscriptionLink()).read(requireNotNull(old.url))
+                        // Tapping a saved source is a page load the user watches, not the connect step: it gets the import budget.
+                        ManualSourceKind.ExternalRemote -> (externalSource ?: throw UnsupportedManualSubscriptionLink()).readForImport(requireNotNull(old.url))
                         else -> null
                     }
                     val raw = downloaded?.bytes ?: requireNotNull(old.copyBytes())
@@ -1565,7 +1566,10 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         PrepTrace.mark("refresh-download-begin")
         val downloaded = when (record.kind) {
             ManualSourceKind.ImportedRemote -> source.read(requireNotNull(record.url))
-            ManualSourceKind.ExternalRemote -> (externalSource ?: throw UnsupportedManualSubscriptionLink()).read(requireNotNull(record.url))
+            // `prepared != null` is the connect step (30 s, fresh read, unchanged); a plain refresh is a page load (import budget).
+            ManualSourceKind.ExternalRemote -> (externalSource ?: throw UnsupportedManualSubscriptionLink()).let { external ->
+                if (prepared == null) external.readForImport(requireNotNull(record.url)) else external.read(requireNotNull(record.url))
+            }
             else -> null
         }
         PrepTrace.mark("refresh-download-end")

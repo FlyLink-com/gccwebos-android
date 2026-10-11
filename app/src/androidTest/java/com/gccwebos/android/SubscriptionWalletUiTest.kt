@@ -589,6 +589,8 @@ class SubscriptionWalletUiTest {
         launchCommerce(CommerceMode.Plans) { quote = fixture }
         repeat(2) {
             compose.onNodeWithTag("purchase-confirm").assertIsEnabled()
+            compose.onNodeWithText("portal.gccwebos.com", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("服务：飞连vpn").assertIsDisplayed()
             compose.onNodeWithTag("purchase-cancel").performClick()
             compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
             compose.runOnIdle { assertNull(commerce.quote); assertNull(commerce.purchase) }

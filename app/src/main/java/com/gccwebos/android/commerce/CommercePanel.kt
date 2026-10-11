@@ -613,7 +613,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape,
             title = { Text(if (quote.offer.category == "data_pack") "确认购买${quote.offer.trafficGb} GB流量包" else "确认购买${quote.offer.durationDays}天套餐") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("服务平台：飞连vpn · portal.gccwebos.com")
+                Text("服务：飞连vpn")
                 Text("本次扣除：${formatCoins(quote.amountUnits)}")
                 quote.allocation.forEach { Text("${ledgerCoinType(it.coinType)}：${formatCoins(it.amountUnits)}") }
                 Text("确认后预留：${formatCoins(quote.balances.after.heldCoins)}")

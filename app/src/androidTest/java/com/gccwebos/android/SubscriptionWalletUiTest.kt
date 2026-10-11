@@ -838,7 +838,11 @@ class SubscriptionWalletUiTest {
             compose.onNodeWithText("核对服务器付款信息").assertIsDisplayed()
             // This only asserts the action; the test deliberately never invokes the external Intent.
             compose.onNodeWithTag("payment-open-confirm").assertIsDisplayed().assertIsEnabled()
-            compose.onNodeWithText("将打开：www.xsd8866.com").performScrollTo().assertIsDisplayed()
+            // Payment dialogs show no host name; the pinned-origin check still gates the button silently.
+            compose.onNodeWithText("将打开", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("xsd8866", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("portal.gccwebos.com", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("付款方式：支付宝").performScrollTo().assertIsDisplayed()
             if (it == 0) capture("payment-review-font-200")
             if (it == 1) {
                 compose.runOnIdle { commerce.recharge = fixture.copy(status = "payment_verified", nextAction = null) }

@@ -150,7 +150,6 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)} → ${formatCoins(offer.paidCoinUnits)}")
                 Text("本次选项尚未锁价。创建后按服务器返回金额再次核对，再主动打开支付宝。")
-                Text("服务平台：飞连vpn · portal.gccwebos.com")
             } }, confirmButton = { TextButton(onClick = flow::confirmSelection, enabled = !state.busy,
                 modifier = Modifier.testTag("recharge-confirm")) { Text("确认金额并创建订单") } },
             dismissButton = { TextButton(onClick = flow::cancelSelection, modifier = Modifier.testTag("recharge-cancel")) { Text("取消") } })
@@ -160,9 +159,8 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("实际应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
                 Text("到账目标：${formatCoins(order.expectedPaidCoinUnits)}")
-                Text("支付宝 · 飞连vpn · portal.gccwebos.com")
-                Text("将打开：${order.nextAction?.let { java.net.URI(it.url).host } ?: "入口不可用"}")
-                Text("请核对实际金额；选项价格变化时，以此订单为准。暂不付款会保留订单。")
+                Text("付款方式：支付宝")
+                Text("请核对实际金额；选项价格变化时，以此订单为准。点击后会在应用内打开付款页面，暂不付款会保留订单。")
                 if (!state.canOpenPayment(order, now)) Text("订单已更新或入口已失效，请关闭并查询。")
             } }, confirmButton = { AlipayButton("支付宝支付", { flow.openPayment(Instant.now()) },
                 enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },

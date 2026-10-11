@@ -519,7 +519,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
     }
     if (walletMode) {
-        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger, embeddedWallet,
+        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> com.gccwebos.android.payment.PaymentPage.open(context, url) }, onRecharge, onLedger, embeddedWallet,
             onBack = onWalletBack, onRechargeRecords = onRechargeRecords)
         return // Wallet never inherits a retained purchase confirmation from another destination.
     } else if (mode == CommerceMode.Plans) {

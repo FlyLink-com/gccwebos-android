@@ -29,9 +29,11 @@ import androidx.activity.enableEdgeToEdge
 import com.gccwebos.android.design.GccTheme
 
 /**
- * Full-screen payment page for the xsd gateway. It loads only the already validated, pinned https URL, keeps every
- * later navigation on that origin, and hands `alipays:`/`alipay:`/`intent:` links to the Alipay app. It shares no
- * data with the rest of the app: no JavaScript bridge, no file or content access, no persisted cookies, no screenshots.
+ * Full-screen payment page for the xsd gateway. It loads the already validated, pinned gateway https URL, lets the top-level
+ * redirect chain that starts there follow https hops to other hosts (the gateway rotates its cashier page per order; see
+ * [PaymentNavigationPolicy] for the caps and rules), and hands `alipays:`/`alipay:`/`intent:` links to the Alipay app only.
+ * No host is shown to the user. It shares no data with the rest of the app: no JavaScript bridge, no file or
+ * content access, no persisted cookies, no screenshots, no pop-up windows.
  */
 open class PaymentActivity : ComponentActivity() {
     private val state = PaymentPageState()
@@ -94,7 +96,8 @@ open class PaymentActivity : ComponentActivity() {
         }
         view.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                when (val decision = policy?.decide(request.url.toString()) ?: PaymentNavigation.Block(BlockReason.MalformedUrl)) {
+                when (val decision = policy?.decide(request.url.toString(), mainFrame = request.isForMainFrame,
+                    redirect = request.isRedirect, userGesture = request.hasGesture()) ?: PaymentNavigation.Block(BlockReason.MalformedUrl)) {
                     PaymentNavigation.Allow -> false
                     is PaymentNavigation.Alipay -> { handOff(decision.uri); true }
                     is PaymentNavigation.Block -> {
@@ -168,6 +171,7 @@ open class PaymentActivity : ComponentActivity() {
         state.failure = null
         state.progress = 0
         state.pageShown = false
+        policy?.restart() // A reload of the gateway entry is a new chain.
         loadPage(view, pageUrl)
     }
 

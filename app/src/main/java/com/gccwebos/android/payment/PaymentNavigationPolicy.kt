@@ -6,10 +6,10 @@ import java.net.URI
 internal const val ALIPAY_PACKAGE = "com.eg.android.AlipayGphone"
 
 /** Why a navigation was refused; only used for the plain-language notice and tests, never logged with a URL. */
-internal enum class BlockReason { OtherOrigin, UnsupportedScheme, MalformedUrl, WrongPackage }
+internal enum class BlockReason { OtherOrigin, UnsupportedScheme, MalformedUrl, WrongPackage, InsecureScheme, HopLimit }
 
 internal sealed interface PaymentNavigation {
-    /** Same pinned https origin: let the WebView continue. */
+    /** An https page inside the chain that started at the gateway entry: let the WebView continue. */
     data object Allow : PaymentNavigation
 
     /** An Alipay deep link (`alipays:`/`alipay:` URI, already mapped from any `intent:` form) for the Alipay package only. */
@@ -19,25 +19,62 @@ internal sealed interface PaymentNavigation {
 }
 
 /**
- * Pure decision table for every navigation the payment page attempts. The page URL itself has already been checked by
- * `CommerceJson.trustedPaymentRedirect`; this policy then pins all later navigations to that single https origin and
- * lets only Alipay deep links leave it. Nothing here reads, logs or stores a URL beyond the call.
+ * Pure decision table for every navigation the payment page attempts, with one piece of state: the chain of hosts.
+ *
+ * The page starts at the trusted gateway entry (`CommerceJson.trustedPaymentRedirect` has already pinned it to
+ * www.xsd8866.com). That gateway sends every order to a different, rotating third-party https page, so a per-domain allowlist
+ * cannot work. Instead the *chain* is trusted, not the hosts: the top-level redirect chain that starts at the gateway may
+ * follow https hops to other hosts, subject to
+ *  - https only (never http, no mixed content, no SSL-error bypass: those are WebView settings/handlers);
+ *  - at most [MAX_HOPS] distinct hosts beyond the gateway (and [MAX_NAVIGATIONS] navigations in total, against loops);
+ *  - a hop to a host the chain has not established yet is accepted only when the page moved there by itself (a server
+ *    redirect or a script/meta navigation without a user gesture), never because the user tapped a link;
+ *  - sub-frames never extend the chain: they may only load established hosts;
+ *  - no userinfo, no non-443 port, no IP literal or single-label host, no trailing dot.
+ * Alipay deep links are the only thing allowed to leave https, and only for the Alipay package. Nothing here reads, logs
+ * or stores a URL beyond the call.
  */
 internal class PaymentNavigationPolicy(pinnedUrl: String) {
-    private val host: String = requireNotNull(hostOf(pinnedUrl)) { "Invalid pinned payment URL" }
+    private val gatewayHost: String = requireNotNull(hostOf(pinnedUrl)) { "Invalid pinned payment URL" }
+    private val hosts = linkedSetOf(gatewayHost)
+    private var navigations = 0
 
-    fun decide(url: String?): PaymentNavigation {
+    /** Hosts the chain has established so far, gateway first. */
+    val establishedHosts: List<String> get() = hosts.toList()
+
+    /** Distinct hosts beyond the gateway. */
+    val hops: Int get() = hosts.size - 1
+
+    /** A manual reload of the gateway entry starts a new chain. */
+    fun restart() { hosts.clear(); hosts.add(gatewayHost); navigations = 0 }
+
+    fun decide(url: String?, mainFrame: Boolean = true, redirect: Boolean = false, userGesture: Boolean = false): PaymentNavigation {
         if (url.isNullOrEmpty() || url.length > MAX_URL_LENGTH || url.any { it.code !in 0x21..0x7e }) {
             return PaymentNavigation.Block(BlockReason.MalformedUrl)
         }
         val colon = url.indexOf(':')
         if (colon <= 0) return PaymentNavigation.Block(BlockReason.MalformedUrl)
         return when (url.substring(0, colon).lowercase()) {
-            "https" -> if (hostOf(url) == host) PaymentNavigation.Allow else PaymentNavigation.Block(BlockReason.OtherOrigin)
+            "https" -> decideHttps(url, mainFrame, redirect, userGesture)
+            "http" -> PaymentNavigation.Block(BlockReason.InsecureScheme)
             "alipays", "alipay" -> if (wellFormed(url)) PaymentNavigation.Alipay(url) else PaymentNavigation.Block(BlockReason.MalformedUrl)
             "intent" -> fromIntentUri(url)
             else -> PaymentNavigation.Block(BlockReason.UnsupportedScheme)
         }
+    }
+
+    private fun decideHttps(url: String, mainFrame: Boolean, redirect: Boolean, userGesture: Boolean): PaymentNavigation {
+        val host = hostOf(url) ?: return PaymentNavigation.Block(BlockReason.OtherOrigin)
+        if (host in hosts) {
+            if (mainFrame && ++navigations > MAX_NAVIGATIONS) return PaymentNavigation.Block(BlockReason.HopLimit)
+            return PaymentNavigation.Allow
+        }
+        // A host the chain has not reached yet: only the main page, only by itself (redirect or no user tap), only within the cap.
+        if (!mainFrame) return PaymentNavigation.Block(BlockReason.OtherOrigin)
+        if (userGesture && !redirect) return PaymentNavigation.Block(BlockReason.OtherOrigin)
+        if (hosts.size - 1 >= MAX_HOPS || ++navigations > MAX_NAVIGATIONS) return PaymentNavigation.Block(BlockReason.HopLimit)
+        hosts.add(host)
+        return PaymentNavigation.Allow
     }
 
     /**
@@ -77,8 +114,24 @@ internal class PaymentNavigationPolicy(pinnedUrl: String) {
     private fun hostOf(url: String): String? = try {
         val uri = URI(url)
         val host = uri.host?.lowercase()
-        if (host != null && uri.scheme.equals("https", ignoreCase = true) && uri.rawUserInfo == null && uri.port in setOf(-1, 443)) host else null
+        if (host != null && uri.scheme.equals("https", ignoreCase = true) && uri.rawUserInfo == null && uri.port in setOf(-1, 443) &&
+            plausibleHostName(host)) host else null
     } catch (_: Exception) { null }
 
-    private companion object { const val MAX_URL_LENGTH = 8192 }
+    /** A registrable-looking DNS name: labels of letters/digits/hyphen, at least two of them, no IP literal, no trailing dot. */
+    private fun plausibleHostName(host: String): Boolean {
+        if (host.length > 253 || host.endsWith('.') || ':' in host) return false
+        val labels = host.split('.')
+        if (labels.size < 2 || labels.any { it.isEmpty() || it.length > 63 || it.startsWith('-') || it.endsWith('-') ||
+                !it.all { c -> c in 'a'..'z' || c in '0'..'9' || c == '-' } }) return false
+        return !labels.all { label -> label.all { it in '0'..'9' } } // dotted-decimal IPv4
+    }
+
+    companion object {
+        const val MAX_URL_LENGTH = 8192
+        /** Distinct hosts the chain may add beyond the gateway entry. */
+        const val MAX_HOPS = 5
+        /** Total top-level navigations of one chain, so a redirect loop among established hosts also ends. */
+        const val MAX_NAVIGATIONS = 25
+    }
 }

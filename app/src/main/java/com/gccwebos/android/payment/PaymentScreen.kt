@@ -46,18 +46,18 @@ import com.gccwebos.android.design.GccSpacing
 import com.gccwebos.android.design.SupportingText
 import com.gccwebos.android.design.rememberUiMotionEnabled
 
-/** Plain-language notices; none of them names a host, URL, order number or amount. */
+/** Plain-language notices; none of them names a URL, order number or amount (no host or domain is ever shown). */
 internal object PaymentCopy {
     const val Title = "支付宝付款"
-    const val Loading = "正在打开付款页面…"
+    const val Loading = "正在前往支付宝…"
     const val AlipayMissing = "没有找到支付宝 App。你可以在当前页面选择其他付款方式或扫码支付，也可以先安装支付宝。"
     const val HandedOff = "已打开支付宝。付款完成后返回本应用，到账状态会自动刷新。"
-    const val BlockedOrigin = "为保护支付安全，已阻止页面跳转到其他网站。如果无法继续，可点右上角“浏览器打开”。"
+    const val BlockedOrigin = "为保护支付安全，已阻止页面跳转到本次付款流程之外的网站。如果无法继续，可点右上角“浏览器打开”。"
     fun failure(kind: PaymentFailure) = when (kind) {
         PaymentFailure.Network -> "付款页面打开失败，请检查网络后重试。订单会保留，请不要重复创建充值。"
         PaymentFailure.Insecure -> "无法确认付款页面的安全性，已停止加载。请稍后重试，或返回应用查询订单。"
         PaymentFailure.Interrupted -> "付款页面意外中断。订单会保留，请重试或返回应用查询。"
-        PaymentFailure.Blocked -> "付款页面要跳转到其他网站，为保护支付安全已阻止，所以页面无法在应用内继续。订单会保留，请点右上角“浏览器打开”继续付款，付款后回到应用查询。"
+        PaymentFailure.Blocked -> "付款页面要跳转到不在本次付款流程内的网站（或跳转次数过多），为保护支付安全已阻止，所以页面无法在应用内继续。订单会保留，请点右上角“浏览器打开”继续付款，付款后回到应用查询。"
         PaymentFailure.Unavailable -> "这台设备上无法使用内置付款页面。订单会保留，可点右上角“浏览器打开”继续付款。"
     }
 }

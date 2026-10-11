@@ -14,24 +14,74 @@ class PaymentNavigationPolicyTest {
         if (reason != null) assertEquals(reason, (decision as PaymentNavigation.Block).reason)
     }
 
-    @Test fun samePinnedOriginContinuesInsideTheWebView() {
+    private fun chain(vararg urls: String) = urls.forEach { assertEquals(it, PaymentNavigation.Allow, policy.decide(it, redirect = true)) }
+
+    @Test fun gatewayPagesContinueInsideTheWebView() {
         for (url in listOf(pinned, "https://www.xsd8866.com/", "HTTPS://WWW.XSD8866.COM/next?a=1#frag", "https://www.xsd8866.com:443/x")) {
             assertEquals(url, PaymentNavigation.Allow, policy.decide(url))
         }
+        assertEquals(listOf("www.xsd8866.com"), policy.establishedHosts)
     }
 
-    @Test fun otherHttpsOriginsAreBlockedIncludingLookalikes() {
-        for (url in listOf("https://example.com/", "https://xsd8866.com/", "https://pay.xsd8866.com/", "https://www.xsd8866.com.evil.invalid/",
-            "https://evilwww.xsd8866.com/", "https://www.xsd8866.com@evil.invalid/", "https://user@www.xsd8866.com/",
-            "https://www.xsd8866.com:8443/", "https://www.xsd8866.com./", "https://openapi.alipay.com/gateway.do?x=1")) {
-            blocked(url, BlockReason.OtherOrigin)
+    @Test fun theRedirectChainFromTheGatewayMayFollowHttpsHopsToRotatingThirdPartyHosts() {
+        chain("https://news.planhappytrip.com/cashier?o=1", "https://pay.other-rotating-domain.example/go")
+        assertEquals(listOf("www.xsd8866.com", "news.planhappytrip.com", "pay.other-rotating-domain.example"), policy.establishedHosts)
+        // Script/meta navigations without a user gesture count as the page moving on by itself.
+        assertEquals(PaymentNavigation.Allow, policy.decide("https://third.example.net/x", userGesture = false))
+        // Pages already in the chain stay reachable, also by a tap, and cost no further hop.
+        assertEquals(PaymentNavigation.Allow, policy.decide("https://news.planhappytrip.com/other", userGesture = true))
+        assertEquals(3, policy.hops)
+    }
+
+    @Test fun theChainIsCappedAtFiveHostsBeyondTheGateway() {
+        for (i in 1..PaymentNavigationPolicy.MAX_HOPS) assertEquals(PaymentNavigation.Allow, policy.decide("https://hop$i.example.com/", redirect = true))
+        assertEquals(PaymentNavigation.Block(BlockReason.HopLimit), policy.decide("https://hop6.example.com/", redirect = true))
+        assertEquals(PaymentNavigation.Block(BlockReason.HopLimit), policy.decide("https://hop7.example.com/"))
+        assertEquals(PaymentNavigation.Allow, policy.decide("https://hop3.example.com/x")) // established hosts still work
+        assertEquals(PaymentNavigationPolicy.MAX_HOPS, policy.hops)
+        policy.restart()
+        assertEquals(listOf("www.xsd8866.com"), policy.establishedHosts)
+        assertEquals(PaymentNavigation.Allow, policy.decide("https://hop6.example.com/", redirect = true))
+    }
+
+    @Test fun aRedirectLoopAmongEstablishedHostsEventuallyStops() {
+        var last: PaymentNavigation = PaymentNavigation.Allow
+        repeat(PaymentNavigationPolicy.MAX_NAVIGATIONS + 1) { last = policy.decide("https://www.xsd8866.com/again", redirect = true) }
+        assertEquals(PaymentNavigation.Block(BlockReason.HopLimit), last)
+    }
+
+    @Test fun theUserTappingALinkToANewHostIsBlocked() {
+        assertEquals(PaymentNavigation.Block(BlockReason.OtherOrigin), policy.decide("https://example.com/", redirect = false, userGesture = true))
+        chain("https://news.planhappytrip.com/cashier")
+        assertEquals(PaymentNavigation.Block(BlockReason.OtherOrigin), policy.decide("https://elsewhere.example.org/", userGesture = true))
+        assertEquals(listOf("www.xsd8866.com", "news.planhappytrip.com"), policy.establishedHosts)
+        // A tapped link on an established host that the server then redirects out of is still the chain moving on.
+        assertEquals(PaymentNavigation.Allow, policy.decide("https://redirected.example.org/", redirect = true, userGesture = true))
+    }
+
+    @Test fun framesNeverExtendTheChain() {
+        assertEquals(PaymentNavigation.Block(BlockReason.OtherOrigin), policy.decide("https://ads.example.com/frame", mainFrame = false, redirect = true))
+        assertEquals(PaymentNavigation.Allow, policy.decide("https://www.xsd8866.com/frame", mainFrame = false))
+        assertEquals(listOf("www.xsd8866.com"), policy.establishedHosts)
+    }
+
+    @Test fun hostsThatAreNotPlainDnsNamesOrCarryUserinfoOrPortsAreNeverFollowed() {
+        for (url in listOf("https://www.xsd8866.com@evil.example.com/", "https://user@evil.example.com/", "https://evil.example.com:8443/",
+            "https://evil.example.com./", "https://127.0.0.1/", "https://10.1.2.3/pay", "https://[::1]/", "https://localhost/", "https://intranet/",
+            "https://-bad.example.com/", "https://under_score.example.com/", "https://www.xsd8866.com\\@evil.invalid/")) {
+            assertTrue(url, policy.decide(url, redirect = true) is PaymentNavigation.Block)
         }
+        assertEquals(listOf("www.xsd8866.com"), policy.establishedHosts)
     }
 
     @Test fun cleartextAndLocalSchemesAreNeverLoaded() {
-        for (url in listOf("http://www.xsd8866.com/pay", "file:///data/data/com.gccwebos.android/files/x", "content://com.gccwebos.android.updatefiles/x",
+        blocked("http://www.xsd8866.com/pay", BlockReason.InsecureScheme)
+        blocked("http://news.planhappytrip.com/", BlockReason.InsecureScheme)
+        assertEquals(PaymentNavigation.Block(BlockReason.InsecureScheme), policy.decide("http://hop.example.com/", redirect = true))
+        for (url in listOf("file:///data/data/com.gccwebos.android/files/x", "content://com.gccwebos.android.updatefiles/x",
             "javascript:alert(1)", "data:text/html,hi", "about:blank", "blob:https://www.xsd8866.com/uuid", "wss://www.xsd8866.com/", "market://details?id=x",
             "weixin://dl/business", "tel:123", "intent-extra://x")) blocked(url, BlockReason.UnsupportedScheme)
+        assertEquals(listOf("www.xsd8866.com"), policy.establishedHosts)
     }
 
     @Test fun malformedOrOversizedUrlsAreBlocked() {
@@ -39,6 +89,17 @@ class PaymentNavigationPolicyTest {
         blocked("https://www.xsd8866.com/a b"); blocked("https://www.xsd8866.com/\n"); blocked("https://www.xsd8866.com/支付")
         blocked("https://www.xsd8866.com/" + "a".repeat(9000), BlockReason.MalformedUrl)
         blocked("https://www.xsd8866.com\\@evil.invalid/")
+    }
+
+    @Test fun alipayLinksAreHandedOverFromAnyHostOfTheChainAndOnlyToTheAlipayPackage() {
+        chain("https://news.planhappytrip.com/cashier")
+        val link = "alipays://platformapi/startapp?appId=20000067"
+        assertEquals(PaymentNavigation.Alipay(link), policy.decide(link, userGesture = true))
+        val activity = File("src/main/java/com/gccwebos/android/payment/PaymentActivity.kt").readText()
+        assertTrue(activity.contains("setPackage(handoffPackage)"))
+        assertTrue(activity.contains("protected open val handoffPackage: String get() = ALIPAY_PACKAGE"))
+        assertFalse("no chooser", activity.contains("createChooser"))
+        assertEquals("com.eg.android.AlipayGphone", ALIPAY_PACKAGE)
     }
 
     @Test fun alipayLinksAreHandedOverUnchanged() {
@@ -88,7 +149,7 @@ class PaymentNavigationPolicyTest {
         }
     }
 
-    @Test fun noticesNeverShowAHostOrUrl() {
+    @Test fun noticesNeverShowAUrlOrOrderData() {
         val copy = listOf(PaymentCopy.Title, PaymentCopy.Loading, PaymentCopy.AlipayMissing, PaymentCopy.HandedOff, PaymentCopy.BlockedOrigin) +
             PaymentFailure.entries.map(PaymentCopy::failure)
         for (text in copy) assertFalse(text, Regex("xsd8866|gccwebos|https?:|\\.com", RegexOption.IGNORE_CASE).containsMatchIn(text))
@@ -101,6 +162,18 @@ class PaymentNavigationPolicyTest {
         assertFalse(source.contains("URI(it.url).host"))
         // The pinning check stays: opening is still gated by the validated redirect.
         assertTrue(source.contains("state.canOpenPayment(order, now)"))
+    }
+
+    @Test fun noHostIsShownAndTheChainNeverSharesAnythingWithTheApp() {
+        val screen = File("src/main/java/com/gccwebos/android/payment/PaymentScreen.kt").readText()
+        assertFalse("no domain in the UI", screen.contains("payment-host"))
+        assertFalse(screen.contains(".host"))
+        val activity = File("src/main/java/com/gccwebos/android/payment/PaymentActivity.kt").readText()
+        assertFalse("host never reaches page state", activity.contains("state.host"))
+        assertTrue(activity.contains("override fun onCreateWindow") && activity.contains("= false"))
+        assertTrue(activity.contains("request.hasGesture()"))
+        assertTrue(activity.contains("setSupportMultipleWindows(false)"))
+        assertTrue(activity.contains("policy?.restart()"))
     }
 
     @Test fun webViewHardeningStaysInTheActivitySource() {

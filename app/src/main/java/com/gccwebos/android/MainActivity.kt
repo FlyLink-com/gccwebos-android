@@ -66,6 +66,12 @@ import com.gccwebos.android.portal.ConfigurationLibraryPanel
 import com.gccwebos.android.portal.ManualSourceKind
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.productionRepository
+import com.gccwebos.android.renewal.RenewalBanner
+import com.gccwebos.android.renewal.RenewalPopup
+import com.gccwebos.android.renewal.RenewalReminderEffects
+import com.gccwebos.android.renewal.RenewalSpec
+import com.gccwebos.android.renewal.rememberRenewalReminderState
+import com.gccwebos.android.renewal.reminderSignedOut
 import com.gccwebos.android.vpn.ActivityVpnPermission
 import com.gccwebos.android.vpn.ConnectionOwnerService
 import java.time.Instant
@@ -81,6 +87,8 @@ class MainActivity : ComponentActivity() {
     )
     private var owner by mutableStateOf<ConnectionOwnerService.LocalBinder?>(null)
     private var bindingFailure by mutableStateOf(false)
+    /** Bumped when a renewal notification asks to open the plans page; a recreated activity never replays it. */
+    private var openPlansRequest by mutableStateOf(0)
     private var bound = false
     private var attachedPermission: ConsentAttachment? = null
     private var launchedPermission: ConsentAttachment? = null
@@ -119,6 +127,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null && intent?.action == RenewalSpec.ACTION_OPEN_PLANS) openPlansRequest++
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         setContent {
@@ -140,7 +149,7 @@ class MainActivity : ComponentActivity() {
                 val control by current.control.collectAsState()
                 val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodeLatencyProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
-                    nodeLatencyProbe = nodeProbe,
+                    nodeLatencyProbe = nodeProbe, openPlansRequest = openPlansRequest,
                     sourceCommitFence = current::commitSourceChange, logoutClearingAccount = current::logoutClearingAccountSubscription,
                     onConnectionPowerAction = { action -> current.power(action) })
             }
@@ -149,6 +158,12 @@ class MainActivity : ComponentActivity() {
         bound = try { bindService(Intent(this, ConnectionOwnerService::class.java), ownerConnection, Context.BIND_AUTO_CREATE) }
             catch (_: Exception) { false }
         if (!bound) bindingFailure = true
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == RenewalSpec.ACTION_OPEN_PLANS) openPlansRequest++
     }
 
     private fun bindingUnavailable() {
@@ -236,7 +251,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     nodeLatencyProbe: com.gccwebos.android.portal.NodeLatencyProbe? = null,
     autoRefreshPages: Boolean = autoLoadCommerce,
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
-    logoutClearingAccount: (suspend () -> Unit)? = null) {
+    logoutClearingAccount: (suspend () -> Unit)? = null,
+    openPlansRequest: Int = 0,
+    renewalReminders: Boolean = autoLoadCommerce) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
@@ -300,6 +317,19 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     val catalogDisplayCache = remember(account, account.commerceSessionIdentity) {
         com.gccwebos.android.commerce.CatalogDisplayCache(account.commerceSessionIdentity)
     }
+    val openPlansTab = { plansVisit++; navigationRequest++; selectedName = Destination.Plans.name }
+    LaunchedEffect(openPlansRequest) { if (openPlansRequest > 0) openPlansTab() }
+    // Renewal reminder (popup, top banner, 20:00 notification): account subscription only, real expiry only.
+    val renewal = if (renewalReminders) rememberRenewalReminderState() else null
+    if (renewal != null) {
+        val usageForReminder by account.accountUsage.state.collectAsState()
+        val verifiedForReminder = account.authenticated && !account.restoring && !account.foregroundCheckPending &&
+            !account.clearing && !usageForReminder.verifying
+        val reminderResource = if (verifiedForReminder) account.resource ?: usageForReminder.resource.takeIf { usageForReminder.authenticated } else null
+        RenewalReminderEffects(renewal, reminderResource, reminderSignedOut(account.authenticated, loginStartupReady,
+            account.restoring, account.restorationPending, account.foregroundCheckPending, account.busy, account.clearing,
+            account.retainingCommerceSession))
+    }
     BackHandler(enabled = selected != Destination.Connect) {
         if (selected == Destination.Profile && shouldCancelLoginOnBack(account)) account.cancelAuthentication()
         else if (selected == Destination.Profile && loginRequested && !account.authenticated) {
@@ -316,7 +346,9 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                 val backdropModifier = if (loginPage) Modifier.fillMaxSize() else Modifier.widthIn(max = 680.dp).fillMaxSize()
                 BrandBackdrop(backdropModifier, loginPage = loginPage, strongScrim = selected == Destination.Plans)
                 CompositionLocalProvider(LocalCatalogPurchaseDock provides catalogDock) {
-                Scaffold(containerColor = Color.Transparent, bottomBar = {
+                Scaffold(containerColor = Color.Transparent, topBar = {
+                    if (renewal != null) RenewalBanner(renewal, openPlansTab)
+                }, bottomBar = {
                     Column(Modifier.fillMaxWidth().navigationBarsPadding()
                         .padding(start = 12.dp, end = 12.dp, bottom = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -385,7 +417,7 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
                         catalogDisplayCache = catalogDisplayCache) } }
                 }
                 }
-
+                if (renewal != null) RenewalPopup(renewal, openPlansTab)
             }
         }
     }

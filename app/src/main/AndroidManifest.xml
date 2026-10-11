@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Alarms are cleared by a reboot; this re-arms the single daily renewal alarm. No other use. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
         android:allowBackup="false"
         android:label="${connectionAppLabel}"
@@ -19,6 +21,12 @@
             android:excludeFromRecents="true" />
         <activity android:name="com.journeyapps.barcodescanner.CaptureActivity" tools:node="remove" />
         <service android:name=".vpn.ConnectionOwnerService" android:exported="false" />
+        <receiver android:name=".renewal.RenewalReminderReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <!-- A user-configured VPN qualifies for systemExempted. Lint models only the
              exact-alarm permission alternative. prepare() is checked before foreground().
              https://developer.android.com/develop/background-work/services/fgs/service-types -->

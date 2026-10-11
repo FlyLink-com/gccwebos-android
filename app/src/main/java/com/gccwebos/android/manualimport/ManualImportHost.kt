@@ -283,8 +283,11 @@ internal fun <T : Any> ManualImportHost(
     }
 }
 
-/** Slow-read hint appears after this long without leaving the read phase; the transport itself gives up at 30 s. */
+/** Slow-read hint appears after this long without leaving the read phase; the second (hedged) request starts at the same moment. */
 internal const val SlowReadHintMillis = 15_000L
+
+/** The read gives up after this many seconds (the import budget of the subscription transport). */
+internal val ImportReadBudgetSeconds: Long = com.gccwebos.android.portal.ManualSubscriptionTransport.IMPORT_OVERALL_MILLIS / 1_000L
 
 /**
  * Staged import progress: the read length is unknown, so reading is an indeterminate bar (a still one-third bar when
@@ -308,7 +311,7 @@ internal fun ManualImportProgress(stage: ImportStage?, slowHintMillis: Long = Sl
         else androidx.compose.material3.LinearProgressIndicator(
             progress = { (stage ?: ImportStage.Reading).step.toFloat() / ImportStage.Steps },
             modifier = Modifier.fillMaxWidth().testTag("manual-import-bar"), color = Brand.Cyan, trackColor = track)
-        if (slow && reading) Text("服务器响应较慢，最长等待约 30 秒，可随时取消。", fontSize = 12.sp, color = Brand.Muted,
+        if (slow && reading) Text("服务器响应较慢，最长等待约 ${ImportReadBudgetSeconds} 秒，可随时取消。", fontSize = 12.sp, color = Brand.Muted,
             modifier = Modifier.testTag("manual-import-slow"))
     }
 }

@@ -570,6 +570,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         ManualSourceKind.ExternalRemote -> "external:${record.revision}:${sessionBinding(requireNotNull(record.url))}"
         else -> throw PortalFailure(PortalFailure.Reason.STORAGE)
     }
+    /** Debug only: when parsing rejects, logs the failure class and rejection enum name (never the message) and rethrows. */
+    private inline fun <T> tracedParse(block: () -> T): T = try { block() }
+    catch (failure: Exception) { PrepTrace.markLazy { ReadSummary.rejection(failure) }; throw failure }
     private fun manualSnapshot(raw: ByteArray, record: ManualSourceRecord): LocalSubscriptionSnapshot {
         val parsed = describe(raw, record.validUntil)
         return parsed.copy(sourceKind = record.kind, validity = sourceValidity(record.kind, record.validUntil), usage = record.usage)
@@ -703,7 +706,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 val reader = if (kind == ManualSourceKind.ImportedRemote) source else externalSource
                     ?: throw UnsupportedManualSubscriptionLink()
                 progress(ImportStage.Reading)
-                val result = PrepTrace.span("import-read") { reader.read(url) }
+                val result = PrepTrace.span("import-read") { reader.readForImport(url) }
                 try {
                     currentCoroutineContext().ensureActive()
                     val known = if (expirySource.kind == kind && expirySource.url?.value == url.value &&
@@ -723,12 +726,12 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     staged = ManualSourceRecord(kind = kind, bytes = result.bytes, url = url,
                         validUntil = until, usage = result.usage?.let { SubscriptionUsage.observed(it, now()) })
                     progress(ImportStage.Parsing)
-                    next = PrepTrace.span("import-parse") { manualSnapshot(result.bytes, requireNotNull(staged)) }
+                    next = PrepTrace.span("import-parse") { tracedParse { manualSnapshot(result.bytes, requireNotNull(staged)) } }
                 } finally { result.bytes.fill(0) }
             } else {
                 staged = ManualSourceRecord(kind = ManualSourceKind.ImportedLocal, bytes = owned)
                 progress(ImportStage.Parsing)
-                next = PrepTrace.span("import-parse") { manualSnapshot(owned, requireNotNull(staged)) }
+                next = PrepTrace.span("import-parse") { tracedParse { manualSnapshot(owned, requireNotNull(staged)) } }
             }
             currentCoroutineContext().ensureActive()
             val edit: (ConfigurationLibrary) -> ConfigurationLibrary = { library ->

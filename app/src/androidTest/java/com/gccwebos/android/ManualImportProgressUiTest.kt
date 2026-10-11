@@ -38,7 +38,7 @@ class ManualImportProgressUiTest {
     @Test fun slowReadShowsTheTimeoutHint() {
         show(ImportStage.Reading, slowHintMillis = 300)
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("manual-import-slow").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("manual-import-slow").assertTextContains("最长等待约 30 秒", substring = true)
+        compose.onNodeWithTag("manual-import-slow").assertTextContains("最长等待约 60 秒", substring = true)
     }
 
     @Test fun withAnimationsOffTheReadingBarDoesNotAnimate() {

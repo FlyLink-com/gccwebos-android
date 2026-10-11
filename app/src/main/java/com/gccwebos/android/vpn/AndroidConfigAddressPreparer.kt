@@ -8,6 +8,7 @@ import com.gccwebos.android.core.ConnectionTransportLease
 import com.gccwebos.android.core.PreparationFailure
 import com.gccwebos.android.core.PreparationRejected
 import com.gccwebos.android.portal.ConfigAddressPreparer
+import com.gccwebos.android.portal.PrepTrace
 import com.gccwebos.android.portal.PreparedAddressConfig
 import java.io.Closeable
 import java.net.Inet4Address
@@ -47,11 +48,15 @@ class AndroidConfigAddressPreparer internal constructor(
         var projected: ByteArray? = null
         var transferred = false
         try {
+            PrepTrace.mark("address-lease-begin")
             val reserved = reserveNetwork()
+            PrepTrace.mark("address-lease-held")
             network = reserved
             if (!reserved.lease.isCurrent() || !reserved.readbackCurrent()) throw PreparationRejected(PreparationFailure.STALE)
             val ipv4 = if (endpoint.any { it in 'A'..'Z' || it in 'a'..'z' }) {
+                PrepTrace.mark("address-dns-begin")
                 val answers = withTimeout(DNS_TIMEOUT_MILLIS) { reserved.resolveA(endpoint) }
+                PrepTrace.mark("address-dns-end")
                 currentCoroutineContext().ensureActive()
                 if (!reserved.lease.isCurrent() || !reserved.readbackCurrent()) throw PreparationRejected(PreparationFailure.STALE)
                 answers.firstOrNull(::canonicalIpv4) ?: throw PreparationRejected(PreparationFailure.NETWORK)

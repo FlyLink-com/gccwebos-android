@@ -1450,11 +1450,13 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             invalidateSelections(LocalSubscriptionStatus.MISSING)
             state = LocalSubscriptionSnapshot(LocalSubscriptionStatus.MISSING, sourceKind = record.kind); state
         }
+        PrepTrace.mark("refresh-download-begin")
         val downloaded = when (record.kind) {
             ManualSourceKind.ImportedRemote -> source.read(requireNotNull(record.url))
             ManualSourceKind.ExternalRemote -> (externalSource ?: throw UnsupportedManualSubscriptionLink()).read(requireNotNull(record.url))
             else -> null
         }
+        PrepTrace.mark("refresh-download-end")
         val bytes = downloaded?.bytes ?: record.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
         try {
             currentCoroutineContext().ensureActive()
@@ -1468,6 +1470,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 return synchronized(lock) {
                     requireSameSource(record, epoch)
                     if (downloaded != null) writeManualSource(fresh)
+                    PrepTrace.mark("refresh-stored")
                     authority.selectionSourceKind = record.kind; authority.selectionSourceRevision = record.revision
                     if (next.status == LocalSubscriptionStatus.READY)
                         observeContent(bytes, sourceBinding(fresh), next.nodes, next.validUntil, fresh.kind, fresh.revision)
@@ -1528,7 +1531,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         var selectionAtPreparation: ConnectionSelection? = null
         var preparedNode: com.gccwebos.android.core.PreparedNodeLabel? = null
         try {
+            PrepTrace.mark("prepare-begin")
             mutex.withLock {
+                PrepTrace.mark("prepare-mutex-held")
                 val snapshot = refreshLocked(expectedEpoch) { fresh, raw, freshBinding, freshEpoch ->
                     if (fresh.status != LocalSubscriptionStatus.READY) return@refreshLocked
                     val selected = (intent as? SelectionIntent.Selected)?.selection
@@ -1554,8 +1559,10 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             }
             // Network waits hold neither the subscription monitor nor its operation mutex.
             // A refresh, unlink, changed selection or cancellation can revoke this epoch immediately.
+            PrepTrace.mark("prepare-refreshed")
             rawCopy?.let { raw ->
                 address = addressPreparer.prepare(raw, index)
+                PrepTrace.mark("prepare-address-ready")
                 currentCoroutineContext().ensureActive()
                 val prepared = requireNotNull(address)
                 fun current() {

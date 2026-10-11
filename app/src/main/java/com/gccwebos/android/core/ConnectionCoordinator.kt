@@ -122,8 +122,13 @@ data class ConnectionTimeouts(
     val stepMillis: Long = 20_000,
     val permissionMillis: Long = 120_000,
     val cleanupMillis: Long = 5_000,
+    /**
+     * The CONFIG step contains the fresh subscription read, whose own bound is longer than an
+     * ordinary step; a shorter budget cancelled a read that was still legitimately in progress.
+     */
+    val configMillis: Long = stepMillis,
 ) {
-    init { require(stepMillis > 0 && permissionMillis > 0 && cleanupMillis > 0) }
+    init { require(stepMillis > 0 && permissionMillis > 0 && cleanupMillis > 0 && configMillis > 0) }
 }
 
 /**
@@ -399,7 +404,11 @@ class ConnectionCoordinator(
                     stage = value
                     checkpoint(ticket)
                     publishActive(ticket, ConnectionState.Working(value, ticket.operation))
-                    val budget = if (value == Step.PERMISSION) timeouts.permissionMillis else timeouts.stepMillis
+                    val budget = when (value) {
+                        Step.PERMISSION -> timeouts.permissionMillis
+                        Step.CONFIG -> timeouts.configMillis
+                        else -> timeouts.stepMillis
+                    }
                     return withTimeout(budget) { action() }.also { checkpoint(ticket) }
                 }
 

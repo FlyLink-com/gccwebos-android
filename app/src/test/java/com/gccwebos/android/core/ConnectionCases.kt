@@ -35,6 +35,8 @@ object ConnectionCases {
         var wrongLine = false
         var failStep: Step? = null
         var waitStep: Step? = null
+        var delayStep: Step? = null
+        var delayMillis = 0L
         var stopFails = false
         var stopWaits = false
         var stopGate: CompletableDeferred<Unit>? = null
@@ -54,6 +56,7 @@ object ConnectionCases {
                 entered.complete(Unit)
                 awaitCancellation()
             }
+            if (delayStep == step) kotlinx.coroutines.delay(delayMillis)
         }
 
         val coordinator = ConnectionCoordinator(
@@ -221,6 +224,23 @@ object ConnectionCases {
                 }
             })
         }
+        add(Case("config_step_has_its_own_longer_budget") {
+            // A slow but still progressing fresh subscription read must not be cut at the ordinary step budget.
+            withRig(ConnectionTimeouts(stepMillis = 40, permissionMillis = 1_000, cleanupMillis = 100, configMillis = 600)) {
+                delayStep = Step.CONFIG; delayMillis = 150
+                equal(ConnectionState.Connected("line-a"), coordinator.connect("line-a"))
+                equal(true, active)
+            }
+        })
+        add(Case("config_budget_defaults_to_the_step_budget_and_other_steps_keep_the_short_one") {
+            withRig(ConnectionTimeouts(stepMillis = 40, permissionMillis = 1_000, cleanupMillis = 100, configMillis = 600)) {
+                delayStep = Step.TUNNEL; delayMillis = 150
+                equal(ConnectionState.Failed(Failure.TIMEOUT), coordinator.connect("line-a"))
+                equal(false, active)
+            }
+            equal(40L, ConnectionTimeouts(stepMillis = 40).configMillis)
+            equal(20_000L, ConnectionTimeouts().configMillis)
+        })
         add(Case("switch_stops_a_before_b_and_keeps_real_line") {
             withRig {
                 coordinator.connect("line-a")

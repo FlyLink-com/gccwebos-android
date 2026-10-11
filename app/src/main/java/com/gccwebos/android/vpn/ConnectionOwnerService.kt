@@ -21,7 +21,9 @@ import com.gccwebos.android.core.Failure
 import com.gccwebos.android.core.LocalConfigGateway
 import com.gccwebos.android.core.SelectionIntent
 import com.gccwebos.android.portal.AtomicPreparedConfigStore
+import com.gccwebos.android.portal.ManualSubscriptionTransport
 import com.gccwebos.android.portal.OneClickConfigGateway
+import com.gccwebos.android.portal.PrepTrace
 import com.gccwebos.android.portal.LiteralConfigAddressPreparer
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.PortalFailure
@@ -95,6 +97,7 @@ internal class ConnectionOwnerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.DEBUG) PrepTrace.sink = { Log.i("GCCPrep", it) }
         repository = connectionRepository(applicationContext)
         permission = ActivityVpnPermission(applicationContext)
         val directory = File(noBackupFilesDir, "connection-preparation")
@@ -140,7 +143,7 @@ internal class ConnectionOwnerService : Service() {
         handoff = ConnectionOwnerHandoff(scope,
             awaitClaim = { factory -> repository.localSubscriptions.awaitConnectionOwner(factory) },
             factory = { ConnectionCoordinator(ownedGateway, permission,
-                tunnel, tunnel, scope, ConnectionTimeouts(cleanupMillis = 6_500)) })
+                tunnel, tunnel, scope, ConnectionTimeouts(cleanupMillis = 6_500, configMillis = CONFIG_STEP_MILLIS)) })
         scope.launch {
             handoff.state.collectLatest { available ->
                 if (available !is ConnectionOwnerAvailability.Ready) {
@@ -223,7 +226,11 @@ internal class ConnectionOwnerService : Service() {
         }
         super.onDestroy()
     }
-    companion object { const val ACTION_HOLD = "com.gccwebos.android.vpn.OWNER_HOLD" }
+    companion object {
+        const val ACTION_HOLD = "com.gccwebos.android.vpn.OWNER_HOLD"
+        /** Fresh subscription read (its own 30 s bound) plus the 2 s network lease and 5 s DNS bound. */
+        const val CONFIG_STEP_MILLIS = ManualSubscriptionTransport.OVERALL_MILLIS + 8_000L
+    }
 }
 
 /** [activeNode] is attached only to Connected; every other phase drops it so stale labels never show. */

@@ -151,6 +151,9 @@ class MainActivity : ComponentActivity() {
                 val control by current.control.collectAsState()
                 val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodeLatencyProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
+                    // The production repository is passed as an "override" here, so the store must be named explicitly: otherwise
+                    // 记住账号 would silently fall back to the in-memory store and forget the account on every restart.
+                    rememberedAccountStore = remember(applicationContext) { EncryptedRememberedAccountStore(applicationContext) },
                     nodeLatencyProbe = nodeProbe, openPlansRequest = openPlansRequest,
                     sourceCommitFence = current::commitSourceChange, logoutClearingAccount = current::logoutClearingAccountSubscription,
                     onConnectionPowerAction = { action -> current.power(action) })
@@ -255,18 +258,19 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
     logoutClearingAccount: (suspend () -> Unit)? = null,
     openPlansRequest: Int = 0,
-    renewalReminders: Boolean = autoLoadCommerce) {
+    renewalReminders: Boolean = autoLoadCommerce,
+    rememberedAccountStore: com.gccwebos.android.portal.RememberedAccountStore? = null) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
         val scope = rememberCoroutineScope()
-        remember(accountOverride, repositoryOverride, nodeLatencyProbe) {
+        remember(accountOverride, repositoryOverride, nodeLatencyProbe, rememberedAccountStore) {
             val repository = repositoryOverride ?: productionRepository(context)
             accountOverride ?: AccountController(repository, scope,
                 nodeLatencyProbe = nodeLatencyProbe, sourceCommitFence = sourceCommitFence,
                 logoutClearingAccount = logoutClearingAccount ?: { repository.logoutClearingAccountSubscription() },
                 // Tests that inject their own repository never touch the real Keystore-backed sidecar.
-                rememberedAccounts = if (repositoryOverride == null) EncryptedRememberedAccountStore(context)
+                rememberedAccounts = rememberedAccountStore ?: if (repositoryOverride == null) EncryptedRememberedAccountStore(context)
                     else MemoryRememberedAccountStore())
         }
     }

@@ -81,6 +81,17 @@ class OfficialWebsiteCardUiTest {
         compose.runOnIdle { assertEquals(listOf("https://gccwebos.com"), fixture.first) }
     }
 
+    @Test fun theBreathingGlowIsASeparateOverlayThatFillsTheCardAndNeverTakesTouches() {
+        val fixture = Fixture()
+        show(fixture)
+        val card = compose.onNodeWithTag("official-website-card").fetchSemanticsNode().size
+        val glow = compose.onNodeWithTag("official-website-glow", useUnmergedTree = true).fetchSemanticsNode().size
+        assertEquals(card, glow)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(1)
+        compose.onNodeWithTag("official-website-open").performClick()
+        compose.runOnIdle { assertEquals(listOf("https://gccwebos.com"), fixture.first) }
+    }
+
     @Test fun eachExplicitClickUsesTheLatestOpenerWithoutAddingAnotherTouchTarget() {
         val fixture = Fixture()
         show(fixture)

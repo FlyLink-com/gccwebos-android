@@ -6,6 +6,7 @@ import argparse
 import hashlib
 from pathlib import Path
 import re
+import xml.etree.ElementTree as ET
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,35 @@ FLAGS = {
     "NATIVE_VPN_LAB": "false",
     "NATIVE_TUN_ACCEPTANCE": "false",
 }
+
+
+ANDROID = '{http://schemas.android.com/apk/res/android}'
+
+
+def verify_update_boundary(manifest_xml: str, paths_xml: str) -> None:
+    """In-app update: one non-exported FileProvider that shares only cache/update/, plus the install permission."""
+    manifest = ET.fromstring(manifest_xml)
+    permissions = {p.get(ANDROID + 'name') for p in manifest.findall('uses-permission')}
+    assert 'android.permission.REQUEST_INSTALL_PACKAGES' in permissions, "In-app update needs REQUEST_INSTALL_PACKAGES"
+    for forbidden in ('android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE',
+                      'android.permission.MANAGE_EXTERNAL_STORAGE', 'android.permission.INSTALL_PACKAGES',
+                      'android.permission.REQUEST_DELETE_PACKAGES', 'android.permission.QUERY_ALL_PACKAGES'):
+        assert forbidden not in permissions, f"Not allowed: {forbidden}"
+    providers = manifest.findall('.//provider')
+    assert len(providers) == 1, "Exactly one content provider (the update FileProvider) is allowed"
+    provider = providers[0]
+    assert provider.get(ANDROID + 'name') == 'androidx.core.content.FileProvider'
+    assert provider.get(ANDROID + 'authorities') == '${applicationId}.updatefiles'
+    assert provider.get(ANDROID + 'exported') == 'false', "The update FileProvider must never be exported"
+    assert provider.get(ANDROID + 'grantUriPermissions') == 'true'
+    meta = provider.findall('meta-data')
+    assert len(meta) == 1 and meta[0].get(ANDROID + 'name') == 'android.support.FILE_PROVIDER_PATHS'
+    assert meta[0].get(ANDROID + 'resource') == '@xml/update_file_paths'
+    paths = ET.fromstring(paths_xml)
+    entries = list(paths)
+    assert len(entries) == 1 and entries[0].tag == 'cache-path', "Only one cache-path root may be shared"
+    assert entries[0].get('path') == 'update/', "Only cache/update/ may be shared"
+    assert entries[0].get('name') == 'update'
 
 
 def verify_configuration(source: str) -> None:
@@ -82,6 +112,8 @@ def main() -> None:
     parser.add_argument('--apk', type=Path, help='Also verify release native payloads and lab exclusion')
     args = parser.parse_args()
     verify_configuration((ROOT / 'app/build.gradle.kts').read_text(encoding='utf-8'))
+    verify_update_boundary((ROOT / 'app/src/main/AndroidManifest.xml').read_text(encoding='utf-8'),
+                           (ROOT / 'app/src/main/res/xml/update_file_paths.xml').read_text(encoding='utf-8'))
     if args.inputs:
         verify_payload(lambda name: (ROOT / name).read_bytes(), apk=False)
     if args.apk:

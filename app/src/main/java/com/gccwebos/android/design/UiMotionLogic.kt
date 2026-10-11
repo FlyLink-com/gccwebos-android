@@ -50,3 +50,32 @@ internal fun indicatorIndex(selectedIndex: Int, count: Int): Int = if (selectedI
 /** Haptics are reserved for user-initiated changes; re-tapping the current tab is not a change. */
 internal fun tabTapHaptic(fromIndex: Int, toIndex: Int, userInitiated: Boolean): Boolean =
     userInitiated && toIndex >= 0 && fromIndex != toIndex
+
+/**
+ * Busy "lightning" icon (node-page speed test): it never rotates. It fades from dim to bright and back.
+ * With motion off (or a screen that is not resumed) the busy icon is shown static and fully bright.
+ */
+internal object BoltPulseSpec {
+    /** Alpha at the dim end of the pulse; still clearly visible on the dark backdrop. */
+    const val DimAlpha = 0.28f
+    const val BrightAlpha = 1f
+    /** Dim -> bright ramp, then a short fall back to dim; the whole cycle is under 1.2 s. */
+    const val RiseMillis = 700
+    const val FallMillis = 300
+    const val CycleMillis = RiseMillis + FallMillis
+}
+
+/** The pulse (infinite animation) only runs while busy, motion is allowed and the screen is resumed. */
+internal fun boltPulseActive(busy: Boolean, motionEnabled: Boolean, resumed: Boolean): Boolean =
+    busy && motionEnabled && resumed
+
+/** Alpha of the icon. Static bright when busy without motion; idle icons are never faded by the pulse. */
+internal fun boltStaticAlpha(busy: Boolean): Float = if (busy) BoltPulseSpec.BrightAlpha else 1f
+
+/** Alpha at [timeMillis] into the (repeating) cycle: linear-ish rise to bright, then a fall back to dim. */
+internal fun boltPulseAlphaAt(timeMillis: Int): Float {
+    val t = ((timeMillis % BoltPulseSpec.CycleMillis) + BoltPulseSpec.CycleMillis) % BoltPulseSpec.CycleMillis
+    val span = BoltPulseSpec.BrightAlpha - BoltPulseSpec.DimAlpha
+    return if (t <= BoltPulseSpec.RiseMillis) BoltPulseSpec.DimAlpha + span * (t / BoltPulseSpec.RiseMillis.toFloat())
+    else BoltPulseSpec.BrightAlpha - span * ((t - BoltPulseSpec.RiseMillis) / BoltPulseSpec.FallMillis.toFloat())
+}

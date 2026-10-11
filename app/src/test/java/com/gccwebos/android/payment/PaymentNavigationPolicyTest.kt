@@ -59,6 +59,16 @@ class PaymentNavigationPolicyTest {
         assertEquals(PaymentNavigation.Allow, policy.decide("https://redirected.example.org/", redirect = true, userGesture = true))
     }
 
+    @Test fun aTapOnTheGatewayPagesAlipayButtonMayGoToAlipaysOwnDomainOnly() {
+        chain("https://news.planhappytrip.com/cashier", "https://www.gzshengli.top/pay")
+        assertEquals(PaymentNavigation.Allow, policy.decide("https://openapi.alipay.com/gateway.do?x=1", userGesture = true))
+        for (url in listOf("https://alipay.com.evil.example/", "https://evilalipay.com/", "https://openapi.alipay.com.evil.example/x", "https://notalipay.com/",
+            "https://alipay.com@evil.example/", "https://xalipay.com/")) {
+            assertEquals(url, PaymentNavigation.Block(BlockReason.OtherOrigin), policy.decide(url, userGesture = true))
+        }
+        assertTrue(policy.decide("http://openapi.alipay.com/x", userGesture = true) is PaymentNavigation.Block)
+    }
+
     @Test fun framesNeverExtendTheChain() {
         assertEquals(PaymentNavigation.Block(BlockReason.OtherOrigin), policy.decide("https://ads.example.com/frame", mainFrame = false, redirect = true))
         assertEquals(PaymentNavigation.Allow, policy.decide("https://www.xsd8866.com/frame", mainFrame = false))

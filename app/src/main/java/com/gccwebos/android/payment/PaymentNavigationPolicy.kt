@@ -28,7 +28,8 @@ internal sealed interface PaymentNavigation {
  *  - https only (never http, no mixed content, no SSL-error bypass: those are WebView settings/handlers);
  *  - at most [MAX_HOPS] distinct hosts beyond the gateway (and [MAX_NAVIGATIONS] navigations in total, against loops);
  *  - a hop to a host the chain has not established yet is accepted only when the page moved there by itself (a server
- *    redirect or a script/meta navigation without a user gesture), never because the user tapped a link;
+ *    redirect or a script/meta navigation without a user gesture), never because the user tapped a link, except a tap that
+ *    goes to Alipay's own domain (alipay.com and its subdomains, https only);
  *  - sub-frames never extend the chain: they may only load established hosts;
  *  - no userinfo, no non-443 port, no IP literal or single-label host, no trailing dot.
  * Alipay deep links are the only thing allowed to leave https, and only for the Alipay package. Nothing here reads, logs
@@ -71,7 +72,9 @@ internal class PaymentNavigationPolicy(pinnedUrl: String) {
         }
         // A host the chain has not reached yet: only the main page, only by itself (redirect or no user tap), only within the cap.
         if (!mainFrame) return PaymentNavigation.Block(BlockReason.OtherOrigin)
-        if (userGesture && !redirect) return PaymentNavigation.Block(BlockReason.OtherOrigin)
+        // The user's own tap may only go on to Alipay's own domain (the gateway page's 唤起支付宝 button opens an alipay.com
+        // link that then hands over to the app); any other tapped exit from the chain is refused.
+        if (userGesture && !redirect && !alipayOwned(host)) return PaymentNavigation.Block(BlockReason.OtherOrigin)
         if (hosts.size - 1 >= MAX_HOPS || ++navigations > MAX_NAVIGATIONS) return PaymentNavigation.Block(BlockReason.HopLimit)
         hosts.add(host)
         return PaymentNavigation.Allow
@@ -117,6 +120,8 @@ internal class PaymentNavigationPolicy(pinnedUrl: String) {
         if (host != null && uri.scheme.equals("https", ignoreCase = true) && uri.rawUserInfo == null && uri.port in setOf(-1, 443) &&
             plausibleHostName(host)) host else null
     } catch (_: Exception) { null }
+
+    private fun alipayOwned(host: String) = host == "alipay.com" || host.endsWith(".alipay.com")
 
     /** A registrable-looking DNS name: labels of letters/digits/hyphen, at least two of them, no IP literal, no trailing dot. */
     private fun plausibleHostName(host: String): Boolean {

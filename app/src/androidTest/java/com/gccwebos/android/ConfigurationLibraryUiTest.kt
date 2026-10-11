@@ -227,7 +227,7 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("unified-filter-0").assertExists()
         compose.onNodeWithTag("unified-filter-1").assertExists()
         compose.onNodeWithTag("unified-filter-2").assertExists()
-        // The capsule bar itself (dark surface, colours covered by SlidingTabContrastTest) holds every tab and not the +.
+        // The capsule bar itself (brand gradient, colours covered by SlidingTabContrastTest) holds every tab and not the +.
         val bar = compose.onNodeWithTag("unified-filter-bar").fetchSemanticsNode().boundsInRoot
         compose.runOnIdle { assertTrue(last.right <= bar.right + 1f && all.left >= bar.left - 1f && plus.left >= bar.right - 1f) }
     }

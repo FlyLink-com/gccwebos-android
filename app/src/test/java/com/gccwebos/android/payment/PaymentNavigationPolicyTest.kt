@@ -165,6 +165,14 @@ class PaymentNavigationPolicyTest {
         for (text in copy) assertFalse(text, Regex("xsd8866|gccwebos|https?:|\\.com", RegexOption.IGNORE_CASE).containsMatchIn(text))
     }
 
+    @Test fun theCoinPurchaseConfirmationShowsNoDomain() {
+        val source = File("src/main/java/com/gccwebos/android/commerce/CommercePanel.kt").readText()
+        assertFalse(source.contains("服务平台"))
+        assertFalse(source.contains("Text(\"服务：飞连vpn · "))
+        assertTrue(source.contains("Text(\"服务：飞连vpn\")"))
+        assertFalse(Regex("Text\\(\"[^\"]*portal\\.gccwebos\\.com").containsMatchIn(source))
+    }
+
     @Test fun walletDialogsNoLongerShowTheHostConfirmation() {
         val source = listOf("src/main/java/com/gccwebos/android/commerce/WalletPanel.kt").map { File(it) }.single { it.exists() }.readText()
         assertFalse(source.contains("将打开"))

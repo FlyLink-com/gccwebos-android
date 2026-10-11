@@ -39,6 +39,15 @@ import androidx.compose.foundation.verticalScroll
 import com.gccwebos.android.ResourceCard
 import com.gccwebos.android.design.*
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.role
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,9 +102,30 @@ internal class AccountController(private val repository: PortalRepository, priva
     nodeLatencyProbe: NodeLatencyProbe? = null,
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
     /** 退出登录: revokes the session and forgets this device's account subscription; imported configurations stay. */
-    private val logoutClearingAccount: suspend () -> Unit = { repository.logoutClearingAccountSubscription() }) {
+    private val logoutClearingAccount: suspend () -> Unit = { repository.logoutClearingAccountSubscription() },
+    /** 「记住账号」: the account identifier only (never a password or token). Logout keeps it; unticking clears it. */
+    private val rememberedAccounts: RememberedAccountStore = MemoryRememberedAccountStore(),
+    private val rememberedIo: kotlin.coroutines.CoroutineContext = kotlinx.coroutines.Dispatchers.IO) {
     var account by mutableStateOf("")
     var password by mutableStateOf("")
+    /** Ticked by default on every launch. Unticking forgets the remembered account right away. */
+    var rememberAccount by mutableStateOf(true)
+        private set
+    /** True once the field was filled from the remembered account (focus then goes to the password field). */
+    var accountPrefilled by mutableStateOf(false)
+        private set
+    private var pendingRemember: String? = null
+    fun updateRememberAccount(value: Boolean) {
+        rememberAccount = value
+        if (!value) { pendingRemember = null; accountPrefilled = false; scope.launch(rememberedIo) { rememberedAccounts.clear() } }
+    }
+    /** Reads the sidecar off the main thread; never overwrites what the user already typed. */
+    fun prefillRememberedAccount() {
+        scope.launch(rememberedIo) {
+            val remembered = rememberedAccounts.read() ?: return@launch
+            if (account.isBlank() && !authenticated && rememberAccount) { account = remembered; accountPrefilled = true }
+        }
+    }
     var answer by mutableStateOf("")
     var code by mutableStateOf("")
     var challenge by mutableStateOf<HumanChallenge?>(null)
@@ -385,6 +415,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         emailHint = null; secondFactorEmail = null
         restorationPending = false
         val submittedPassword = password; password = ""
+        pendingRemember = if (rememberAccount) submittedAccount else null
         val submittedAnswer = answer; answer = ""
         // A submitted challenge may be consumed even when the response is lost or rejected.
         cancelLoginQuestionWork(); automaticQuestionLease = loginFormLease
@@ -415,6 +446,8 @@ internal class AccountController(private val repository: PortalRepository, priva
             commerceSessionIdentity = CommerceSessionIdentity()
         if (acceptedAccountId != value.accountId || acceptedSessionBinding != binding)
             referralGenerationGuard = ReferralGenerationGuard()
+        pendingRemember?.takeIf { rememberAccount }?.let { identifier -> scope.launch(rememberedIo) { rememberedAccounts.put(identifier) } }
+        pendingRemember = null
         val email = submittedEmail ?: emailHint?.takeIf { it.accountId == value.accountId && it.session == binding }?.email
         acceptedAccountId = value.accountId; acceptedSessionBinding = binding
         nodeSelection.invalidate()
@@ -558,7 +591,10 @@ internal class AccountController(private val repository: PortalRepository, priva
         purchaseReturnRef = null; acceptedAccountId = null; acceptedSessionBinding = null; emailHint = null; secondFactorEmail = null
         referralGenerationGuard = ReferralGenerationGuard()
         password = ""; answer = ""; code = ""; factorReference = null; challenge = null
+        pendingRemember = null
         authenticated = false; security = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false
+        // 退出登录 keeps a remembered account (it only clears the account subscription); unticked means nothing is kept.
+        if (!rememberAccount) { account = ""; accountPrefilled = false }
         // Keep sign-in disabled until previous operation and local deletion complete.
         busy = true; clearing = true
         task = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
@@ -741,6 +777,17 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
     LaunchedEffect(state, loginLease, state.busy, state.restoring, state.foregroundCheckPending) {
         loginLease?.let(state::ensureLoginChallenge)
     }
+    // 「记住账号」: the remembered account is read off the main thread after the first frame; when it fills the
+    // account field the cursor goes to the password field, once the page's enter motion has settled (so the
+    // keyboard never opens in the middle of the transition).
+    val passwordFocus = remember { FocusRequester() }
+    LaunchedEffect(state) { state.prefillRememberedAccount() }
+    LaunchedEffect(state.accountPrefilled) {
+        if (state.accountPrefilled) {
+            kotlinx.coroutines.delay(LoginFocusSettleMillis)
+            if (state.password.isEmpty() && !state.busy) try { passwordFocus.requestFocus() } catch (_: IllegalStateException) {}
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(top = topGap).testTag("plain-login-layout"),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.fillMaxWidth().testTag("login-form"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -748,10 +795,15 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                 Text("欢迎回来", style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.weight(1f).testTag("login-welcome"))
             }
+            // Autofill hints let the system password manager fill the account and password; the app itself
+            // never stores the password (it is cleared the moment 登录 is tapped).
             CompactLoginField(state.account, { state.account = it }, "邮箱", "login-account",
-                enabled = !state.busy, keyboardType = KeyboardType.Email)
+                enabled = !state.busy, keyboardType = KeyboardType.Email,
+                modifier = Modifier.semantics { contentType = ContentType.Username + ContentType.EmailAddress })
             CompactLoginField(state.password, { state.password = it }, "密码", "login-password",
-                enabled = !state.busy, keyboardType = KeyboardType.Password, password = true)
+                enabled = !state.busy, keyboardType = KeyboardType.Password, password = true,
+                modifier = Modifier.focusRequester(passwordFocus).semantics { contentType = ContentType.Password })
+            RememberAccountRow(state.rememberAccount, enabled = !state.busy, onChange = state::updateRememberAccount)
             BoxWithConstraints(Modifier.fillMaxWidth().testTag("login-answer-question-row")) {
                 val answerField: @Composable (Modifier) -> Unit = { modifier ->
                     CompactLoginField(state.answer, { state.answer = it }, "输入算术题答案", "login-answer",
@@ -788,6 +840,24 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                     modifier = Modifier.heightIn(min = 48.dp).testTag("login-register")) { Text("注册") }
             }
         }
+    }
+}
+
+/** Longer than the page enter motion (FadeInMillis) so focus, and with it the keyboard, never lands mid-transition. */
+internal const val LoginFocusSettleMillis = 420L
+
+/** 「记住账号」: ticked by default; only the account is remembered, never the password. */
+@Composable
+internal fun RememberAccountRow(checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onChange)
+        .testTag("login-remember"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Checkbox(checked, onCheckedChange = null, enabled = enabled, modifier = Modifier.padding(start = 4.dp),
+            colors = CheckboxDefaults.colors(checkedColor = Brand.Cyan, uncheckedColor = Brand.Muted,
+                checkmarkColor = Brand.Background, disabledCheckedColor = Brand.Muted, disabledUncheckedColor = Brand.Muted))
+        Text("记住账号", color = Brand.Text, style = MaterialTheme.typography.bodyMedium)
+        Text("（不保存密码）", color = Brand.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

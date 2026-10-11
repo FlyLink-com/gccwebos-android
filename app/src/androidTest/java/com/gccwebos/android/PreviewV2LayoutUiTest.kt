@@ -251,7 +251,8 @@ class PreviewV2LayoutUiTest {
         capture("$prefix-connect")
 
         open("Lines")
-        compose.onNodeWithTag("nodes-selection-summary").assertExists()
+        // No "未选择 / 请选择" helper row on the nodes page.
+        compose.onNodeWithTag("nodes-selection-summary").assertDoesNotExist()
         capture("$prefix-nodes")
         reachable("node-choice-1").performClick()
         compose.onNodeWithTag("page-Connect").assertExists()

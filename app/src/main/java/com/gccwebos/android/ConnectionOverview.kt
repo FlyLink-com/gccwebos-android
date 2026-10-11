@@ -678,6 +678,6 @@ internal fun connectionUsageCardHidden(
 /** C11: share of the screen height the connect page is padded out to while its usage card is hidden. */
 internal const val ConnectionBalancedPageFraction = 0.66f
 
-/** C12: "上次测速" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
+/** C12: "上次延迟测试" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
 internal fun connectionNodeLatencyLabel(observation: NodeLatencyObservation?): String =
-    if (observation is NodeLatencyObservation.Success) "上次测速" else "延迟"
+    if (observation is NodeLatencyObservation.Success) "上次延迟测试" else "延迟"

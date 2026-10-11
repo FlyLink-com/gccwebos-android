@@ -113,7 +113,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                     val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
                     HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
                         formatMoney(order.amountMinor, order.currency, order.currencyExponent), "支付充值",
-                        listOf(OrderHistoryPresentation.rechargeListStatus(order.status)),
+                        listOf(OrderHistoryPresentation.rechargeListStatus(order, java.time.Instant.now())),
                         "预计 ${formatCoins(order.expectedPaidCoinUnits)}", order.orderRef, order.createdAt,
                         com.gccwebos.android.R.drawable.brand_wallet,
                         details.selected == selection, !state.busy && !details.busy) {
@@ -165,7 +165,7 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                             val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
                             HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
                                 formatMoney(order.amountMinor, order.currency, order.currencyExponent), "支付充值",
-                                listOf(OrderHistoryPresentation.rechargeListStatus(order.status)),
+                                listOf(OrderHistoryPresentation.rechargeListStatus(order, java.time.Instant.now())),
                                 "预计 ${formatCoins(order.expectedPaidCoinUnits)}", order.orderRef, order.createdAt,
                                 com.gccwebos.android.R.drawable.brand_wallet,
                                 details.selected == selection, !state.busy && !details.busy) { details.open(selection) }

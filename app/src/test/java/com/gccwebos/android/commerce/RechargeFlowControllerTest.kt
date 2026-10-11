@@ -132,8 +132,23 @@ class RechargeFlowControllerTest {
         assertTrue(fixture.recovery.saved.all { it.key == pending.key }); assertEquals(0, fixture.recovery.clears)
     }
 
-    @Test fun unreadOrUnreadySessionAndPendingRechargeCannotSelectOrConfirm() = runTest {
-        for (gate in listOf("unread", "auth", "restoring", "foreground", "busy", "pending", "method")) {
+    @Test fun aPendingUnpaidRechargeNeverBlocksStartingANewOne() = runTest {
+        val fixture = Fixture(this)
+        // An earlier order is still awaiting payment (its entry may well be expired).
+        fixture.recovery.save("synthetic_account", PendingCommerce("recharge", null, offer.offerRef, "older_key", "recharge_older_order"))
+        fixture.commerce.pendingRecharge = true
+        fixture.flow.select(offer)
+        assertEquals(offer, fixture.flow.selectedOffer)
+        fixture.flow.confirmSelection(); runCurrent()
+        assertEquals(1, fixture.calls.count { it.path == "/api/portal/coins/recharge/orders" })
+        // The new order replaces the local pointer; the server keeps the older one in its history.
+        assertEquals("synthetic_recharge_key", fixture.repo.pending("recharge")?.key)
+        assertEquals(order.orderRef, fixture.repo.pending("recharge")?.resultRef)
+        assertEquals(order.orderRef, fixture.commerce.recharge?.orderRef)
+    }
+
+    @Test fun unreadOrUnreadySessionCannotSelectOrConfirm() = runTest {
+        for (gate in listOf("unread", "auth", "restoring", "foreground", "busy", "method")) {
             val fixture = Fixture(this)
             when (gate) {
                 "unread" -> fixture.commerce.rechargeOffersLoaded = false
@@ -141,14 +156,13 @@ class RechargeFlowControllerTest {
                 "restoring" -> fixture.account.restoring = true
                 "foreground" -> fixture.account.foregroundCheckPending = true
                 "busy" -> fixture.commerce.busy = true
-                "pending" -> fixture.commerce.pendingRecharge = true
                 "method" -> fixture.commerce.rechargeOffers = listOf(offer.copy(paymentMethods = listOf("wechat_pay")))
             }
             fixture.flow.select(offer); fixture.flow.confirmSelection(); runCurrent()
             assertNull(fixture.flow.selectedOffer)
             assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty())
         }
-        for (gate in listOf("unread", "restoring", "foreground", "busy", "pending")) {
+        for (gate in listOf("unread", "restoring", "foreground", "busy")) {
             val fixture = Fixture(this)
             fixture.flow.select(offer)
             when (gate) {
@@ -156,7 +170,6 @@ class RechargeFlowControllerTest {
                 "restoring" -> fixture.account.restoring = true
                 "foreground" -> fixture.account.foregroundCheckPending = true
                 "busy" -> fixture.commerce.busy = true
-                "pending" -> fixture.commerce.pendingRecharge = true
             }
             fixture.flow.confirmSelection(); runCurrent()
             assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty())

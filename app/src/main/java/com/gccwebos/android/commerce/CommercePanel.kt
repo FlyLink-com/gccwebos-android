@@ -302,6 +302,10 @@ internal class CommerceController(private val account: AccountController, privat
     }
     fun cancelPurchase() = run { val next = requireNotNull(repo).cancelPurchase(); ensureCurrentSession(); purchase = next; wallet = null }
     fun finishPurchase() = run { requireNotNull(repo).finishPurchase(); ensureCurrentSession(); pendingPurchase = false; purchase = null; wallet = null; account.purchaseReturnRef = null; account.refresh() }
+    /** Drops the pointer to an unpaid order that cannot be paid any more (the server expires it by itself). */
+    fun abandonRecharge(now: Instant = Instant.now()) = run {
+        requireNotNull(repo).abandonRecharge(now); ensureCurrentSession(); pendingRecharge = false; recharge = null
+    }
     fun finishRecharge() = run { requireNotNull(repo).finishRecharge(); ensureCurrentSession(); pendingRecharge = false; recharge = null; wallet = null; walletLoaded = false; quote = null }
     fun currentSession() = account.authenticated && if (identity == null) account.authSessionGeneration == epoch
         else account.commerceSessionIdentity === identity
@@ -627,6 +631,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         confirmButton = { TextButton(onClick = { cancelConfirmation = false; state.cancelPurchase() }) { Text("确认取消订单") } },
         dismissButton = { TextButton(onClick = { cancelConfirmation = false }) { Text("返回") } })
 }
+internal const val RECHARGE_EXPIRED_STATUS = "已失效（付款入口已过期）"
 internal fun rechargeStatus(status: String) = when(status) {
     "created" -> "充值订单已创建，支付入口准备中"; "entry_ready", "pending" -> "等待付款或支付确认"
     "payment_verified" -> "支付已核验，Coins 尚待到账"; "credited" -> "Coins 已到账，购买套餐需另行确认"

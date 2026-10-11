@@ -95,6 +95,6 @@ internal class RechargeFlowController(
         !account.foregroundCheckPending && !commerce.busy
 
     private fun currentOffer(offer: RechargeOffer) = commerce.rechargeOffersLoaded &&
-        !commerce.pendingRecharge && "alipay" in offer.paymentMethods &&
+        "alipay" in offer.paymentMethods &&
         commerce.rechargeOffers.any { it == offer }
 }

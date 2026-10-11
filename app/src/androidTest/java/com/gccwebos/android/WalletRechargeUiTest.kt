@@ -114,4 +114,15 @@ class WalletRechargeUiTest {
         compose.onNodeWithTag("recharge-status-query").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { assertTrue(calls.isEmpty()); assertTrue(opened.isEmpty()) }
     }
+    @Test fun anExpiredUnpaidOrderIsShownAsInvalidAndNeverBlocksStartingANewRecharge() {
+        launch { pendingRecharge = true; recharge = order.copy(nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH)) }
+        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("已失效（付款入口已过期）")
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-abandon").performScrollTo().assertIsDisplayed()
+        // The amount grid and the checkout bar stay available beside the old order.
+        compose.onNodeWithTag("recharge-amount-card").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsEnabled()
+        compose.runOnIdle { assertTrue(calls.isEmpty()); assertTrue(opened.isEmpty()) }
+    }
 }

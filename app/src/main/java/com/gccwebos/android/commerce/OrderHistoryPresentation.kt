@@ -49,6 +49,15 @@ internal object OrderHistoryPresentation {
         else -> "确认中"
     }
 
+    /**
+     * List status for a recharge order that was created but not paid: 待付款 while its short window is open, 已失效 once it
+     * has passed (the server closes it by itself and never charges it). Every other state keeps [rechargeListStatus].
+     */
+    fun rechargeListStatus(order: RechargeOrder, now: java.time.Instant): String =
+        if (order.status in setOf("created", "entry_ready", "pending")) {
+            if (now < order.expiresAt) "待付款" else "已失效"
+        } else rechargeListStatus(order.status)
+
     /** Detail payment field — user-facing, no backend jargon. */
     fun paymentDetail(value: String): String = when (value) {
         "held", "capture_pending" -> "处理中"

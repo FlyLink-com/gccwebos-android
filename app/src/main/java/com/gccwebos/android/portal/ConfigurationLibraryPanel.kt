@@ -32,7 +32,9 @@ import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
 import com.gccwebos.android.design.NodeRegionIcon
 import com.gccwebos.android.design.SlidingTab
-import com.gccwebos.android.design.SlidingTabDarkSurface
+import com.gccwebos.android.design.SlidingTabGradient
+import com.gccwebos.android.design.SlidingTabGradientSelected
+import com.gccwebos.android.design.SlidingTabGradientSelectedEdge
 import com.gccwebos.android.design.SlidingTabRow
 import com.gccwebos.android.design.nodeDisplayName
 import com.gccwebos.android.vpn.SafeProxyConfig
@@ -373,7 +375,8 @@ private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, en
                 items.mapIndexed { index, item -> SlidingTab(item.name, "unified-filter-$index") }
             val selectedIndex = items.indexOfFirst { it.displayKey == selected }.let { if (it < 0) 0 else it + 1 }
             SlidingTabRow(tabs, selectedIndex, enabled = true, modifier = Modifier.weight(1f).testTag("unified-filter-bar"),
-                containerColor = SlidingTabDarkSurface, onSelect = { index ->
+                containerBrush = SlidingTabGradient, selectedColor = SlidingTabGradientSelected,
+                selectedEdge = SlidingTabGradientSelectedEdge, onSelect = { index ->
                 onSelect(if (index == 0) null else items[index - 1].displayKey.takeIf { it != selected })
             })
         } else Text("添加配置", fontSize = 13.sp, color = Brand.Muted,

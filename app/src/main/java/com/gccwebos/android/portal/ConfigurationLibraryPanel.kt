@@ -195,9 +195,9 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             showSourceRows = filterKey == null || snapshot.items.getOrNull(activeIndex)?.displayKey == filterKey,
             sortByLatency = sortByLatency,
             headerAction = {
-                if (snapshot.items.sumOf { item -> item.nodes.count { !it.info } } > 1) NodesSortAction(sortByLatency, { sortByLatency = it })
                 NodesLatencyTestAction(enabled = !actionsBlocked && canMeasureActive, busy = measuring,
                     onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() })
+                if (snapshot.items.sumOf { item -> item.nodes.count { !it.info } } > 1) NodesSortAction(sortByLatency, { sortByLatency = it })
             },
             extraRows = {
                 OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode, latencyFor, measuring, sortByLatency) { item, position, delete ->

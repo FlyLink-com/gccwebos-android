@@ -7,7 +7,8 @@ import org.junit.Test
 class LogoutWordingTest {
     @Test fun labelAndDialogNameTheRealEffect() {
         assertEquals("退出登录", LOGOUT_LABEL)
-        assertEquals("是否退出登录并清除当前设备订阅配置？", LOGOUT_TITLE)
+        assertEquals("退出登录？", LOGOUT_TITLE)
+        assertTrue("a title, not a sentence", LOGOUT_TITLE.length <= 8)
         assertEquals("退出登录", LOGOUT_CONFIRM)
         assertTrue(LOGOUT_BODY.contains("这台设备"))
         assertTrue(LOGOUT_BODY.contains("不会删除或更改服务器上的账户"))

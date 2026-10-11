@@ -59,6 +59,8 @@ import com.gccwebos.android.commerce.CatalogPurchaseDock
 import com.gccwebos.android.commerce.LocalCatalogPurchaseDock
 import com.gccwebos.android.portal.AccountController
 import com.gccwebos.android.portal.AccountPanel
+import com.gccwebos.android.portal.EncryptedRememberedAccountStore
+import com.gccwebos.android.portal.MemoryRememberedAccountStore
 import com.gccwebos.android.portal.RegistrationController
 import com.gccwebos.android.portal.Resource
 import com.gccwebos.android.portal.NodeSelectionPanel
@@ -262,7 +264,10 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
             val repository = repositoryOverride ?: productionRepository(context)
             accountOverride ?: AccountController(repository, scope,
                 nodeLatencyProbe = nodeLatencyProbe, sourceCommitFence = sourceCommitFence,
-                logoutClearingAccount = logoutClearingAccount ?: { repository.logoutClearingAccountSubscription() })
+                logoutClearingAccount = logoutClearingAccount ?: { repository.logoutClearingAccountSubscription() },
+                // Tests that inject their own repository never touch the real Keystore-backed sidecar.
+                rememberedAccounts = if (repositoryOverride == null) EncryptedRememberedAccountStore(context)
+                    else MemoryRememberedAccountStore())
         }
     }
     // Keep the local opaque selection synchronized outside keyed destinations; this never downloads.
@@ -427,7 +432,11 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
 private fun LoginScreen(account: AccountController, registrationOpener: ((String) -> Unit)?,
                          loginStartupReady: Boolean, registrationOverride: RegistrationController?,
                          padding: PaddingValues, startRegistration: Boolean) {
-    Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), contentAlignment = Alignment.TopCenter) {
+    // Short fade + slide from the end (existing enter motion, 220 ms); an instant switch under "remove animations".
+    // It only changes alpha/translation of one layer, so it adds no layout or composition work.
+    val enter = com.gccwebos.android.design.rememberEnterMotion(direction = 1)
+    Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()
+        .then(Modifier.enterMotion(enter)), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = 520.dp).fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp).testTag("login-screen"),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -521,6 +530,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     ConfigurationLibraryPanel(account.configurationLibrary, account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
+                        accountLoad = account.accountLoad.state, onRetryAccount = account::retryAccountLoad,
                         onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency,
                         namingEntryId = account.manualImport.namingEntryId, onNamingDone = account.manualImport::namingHandled,
                         onImport = account.manualImport::open, onReplace = account.manualImport::openForReplacement)
@@ -530,7 +540,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         visible = importer.visible,
                         busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
                             account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
-                        error = importer.error,
+                        error = importer.error, stage = importer.stage,
                         canUseAccount = canUseAccountSource(account.authenticated, account.localSubscription.sourceKind),
                         canRemove = false,
                         onDismiss = importer::cancel, onBegin = importer::beginAsync, onSubmit = importer::submit,

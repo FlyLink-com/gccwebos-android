@@ -62,6 +62,7 @@ internal fun <T : Any> ManualImportHost(
     visible: Boolean,
     busy: Boolean,
     error: String?,
+    stage: ImportStage? = null,
     canUseAccount: Boolean = false,
     canRemove: Boolean = false,
     onDismiss: () -> Unit,
@@ -271,12 +272,47 @@ internal fun <T : Any> ManualImportHost(
                         enabled = !busy && !submitted && (staged || (mode == ManualHostMode.Link && link.isNotBlank())),
                         modifier = Modifier.fillMaxWidth().testTag("manual-import-confirm"))
                 }
+                val progressing = busy && (stage != null || submitted)
+                if (progressing) ManualImportProgress(stage)
                 (failure?.caption ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.testTag("manual-import-error")) }
                 TextButton(::dismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    .testTag("manual-import-cancel")) { Text("取消") }
+                    .testTag("manual-import-cancel")) { Text(if (progressing) "取消导入" else "取消") }
             }
         }
+    }
+}
+
+/** Slow-read hint appears after this long without leaving the read phase; the second (hedged) request starts at the same moment. */
+internal const val SlowReadHintMillis = 15_000L
+
+/** The read gives up after this many seconds (the import budget of the subscription transport). */
+internal val ImportReadBudgetSeconds: Long = com.gccwebos.android.portal.ManualSubscriptionTransport.IMPORT_OVERALL_MILLIS / 1_000L
+
+/**
+ * Staged import progress: the read length is unknown, so reading is an indeterminate bar (a still one-third bar when
+ * the system animations are off); parsing and saving are steps 2 and 3 of 3. Shows no content, URL or host.
+ */
+@Composable
+internal fun ManualImportProgress(stage: ImportStage?, slowHintMillis: Long = SlowReadHintMillis) {
+    val motion = com.gccwebos.android.design.rememberUiMotionEnabled()
+    val reading = stage == null || stage == ImportStage.Reading
+    var slow by remember { mutableStateOf(false) }
+    LaunchedEffect(reading) {
+        slow = false
+        if (reading) { kotlinx.coroutines.delay(slowHintMillis); slow = true }
+    }
+    Column(Modifier.fillMaxWidth().testTag("manual-import-progress"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("${stage?.caption ?: "正在准备…"}（第 ${(stage ?: ImportStage.Reading).step}/${ImportStage.Steps} 步）",
+            fontSize = 13.sp, color = Brand.Text, modifier = Modifier.testTag("manual-import-stage"))
+        val track = Brand.Cyan.copy(alpha = .2f)
+        if (reading && motion) androidx.compose.material3.LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth().testTag("manual-import-bar-indeterminate"), color = Brand.Cyan, trackColor = track)
+        else androidx.compose.material3.LinearProgressIndicator(
+            progress = { (stage ?: ImportStage.Reading).step.toFloat() / ImportStage.Steps },
+            modifier = Modifier.fillMaxWidth().testTag("manual-import-bar"), color = Brand.Cyan, trackColor = track)
+        if (slow && reading) Text("服务器响应较慢，最长等待约 ${ImportReadBudgetSeconds} 秒，可随时取消。", fontSize = 12.sp, color = Brand.Muted,
+            modifier = Modifier.testTag("manual-import-slow"))
     }
 }
 

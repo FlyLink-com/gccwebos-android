@@ -89,6 +89,21 @@ URL 全体按秘密处理；异常、日志、截图、UI 和测试回执不含 
 客户端只连接已校验地址，仍按原主机执行 TLS/SNI。测试通过注入解析器/连接适配器验证边界，不给生产代码增加“允许私网”开关。
 
 已配置 connect/read/call 的 15/20/30 秒超时，并以协程 30 秒总预算处理晚到回调。
+连接（一键连接、刷新）保持上述 15/20/30 秒与 5 秒对冲。**导入**（用户在看进度条且可取消）使用独立预算：总预算 60 秒（call 60 秒、read 55 秒），
+第二个对冲请求在 15 秒后或第一个请求网络失败时立即发出；导入客户端逐地址连接超时 6 秒、地址按 v6/v4 交替并开启 `retryOnConnectionFailure`，
+因此第一个地址不可达只损失 6 秒，而不是整次尝试失败。所有隔离规则（无代理/Cookie/缓存/重定向/凭证、公网地址校验）不变；
+读取不会因导入预算而影响连接路径的 30 秒总预算。
+
+调试构建（`.debug`）会在 logcat 标签 `GCCPrep` 输出每个 HTTP 调用一行分阶段耗时，例如
+`read-timing import/primary dns=40ms(2 addr v4=1,v6=1) connect=[#1 v6 6000ms fail(SocketTimeoutException), #2 v4 280ms (incl tls) ok] tls=200ms wait=10000ms body=50ms total=16390ms result=ok`，
+以及 `read-hedge-start` / `read-result`。只含时长、地址数量与族（v4/v6）、失败异常类名；不含 URL、主机名、地址、头或正文。发布构建不安装 sink，不产生任何记录。
+
+调试构建另有一行响应摘要与一行解析拒绝原因（同样只写 GCCPrep，发布构建不产生）：
+`read-summary import/primary http=200 type=text/plain bytes=1234 gzip=no first=yaml-like`，
+`import-reject class=UnsafeProxyConfiguration reason=Protocol`。
+摘要只含 HTTP 状态、媒体类型/子类型（不含参数）、解码后字节数、服务器是否使用 gzip，以及前几个非空白字节的粗分类
+（json-object / json-array / xml/html / uri-list / yaml-like / base64-like / other / empty）；拒绝原因只写异常类名与拒绝枚举名，
+从不写异常消息。不含 URL、主机、头、令牌或任何正文片段。
 成功响应读取流按解压后大小限流；错误响应正文不读取。拒绝或取消时先取消 call 再关闭响应，避免为复用连接而继续排空恶意正文；不能先完整读入再判定大小。
 取消必须关闭当前请求/响应，擦除持有的可变字节。网络失败不重试为其他源、不使用缓存冒充新下载。
 
@@ -200,3 +215,10 @@ v2 整体 envelope 保存来源类型、随机 revision、确切秘密 URL、受
 批准后先完成代码与离线验证，再进入受控 staging；验收通过也不自动意味着发布或稳定版签名完成。
 这不包含后台/生产部署、账户 origin 放宽、Portal auth 改造、生产节点改造、协议/JNI 扩展或新的外部转换服务。
 实施批准已记录；实现 commit、构建产物和各阶段验收应在实际发生后补记，不能预填“已通过”。
+
+## 页面加载与连接步骤的读取预算
+
+- 导入、点按已保存的第三方来源（激活）、节点页刷新同一来源，都是用户在页面上等待的「页面加载」，使用与导入相同的预算：总 60 秒，15 秒或网络错误时才发起对冲请求，单地址 6 秒连接超时。
+- 连接步骤（`prepare`，带 `prepared` 回调的刷新）保持原样：每次连接都是新鲜读取，沿用 30 秒预算，不使用缓存副本。
+- 账户订阅（官方订阅服务）仍走原传输，预算不变；它的加载状态与重试见 configuration-library-plan.md。
+

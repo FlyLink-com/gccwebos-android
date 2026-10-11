@@ -131,7 +131,7 @@ class ConfigurationLibrary(
     companion object {
         const val MAX_ENTRIES = 20
         const val MAX_ENCODED_BYTES = 2 * 1024 * 1024
-        fun defaultName(number: Int): String { require(number > 0); return "配置 $number" }
+        fun defaultName(number: Int): String { require(number > 0); return "未知$number" }
         /** Pure normalization only: caller must explicitly saveLibrary to migrate the disk format. */
         fun fromLegacy(source: ManualSourceRecord): ConfigurationLibrary {
             if (source.kind in ConfigurationEntry.MANUAL_KINDS) {

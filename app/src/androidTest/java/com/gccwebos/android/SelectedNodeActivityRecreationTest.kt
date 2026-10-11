@@ -334,7 +334,7 @@ class SelectedNodeActivityRecreationTest {
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()
         compose.onNodeWithTag("node-choice-1").assertIsNotSelected()
         compose.onNodeWithTag("node-selection-status").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("未选择")
+        compose.onNodeWithTag("nodes-selected-name").assertDoesNotExist()
         screenshot("changed-cache-after-real-activity-recreation-nodes-unselected")
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")

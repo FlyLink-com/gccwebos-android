@@ -18,6 +18,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.*
+import com.gccwebos.android.design.dialog.GccDialogAction
+import com.gccwebos.android.design.dialog.GccSecondaryButton
+import com.gccwebos.android.design.dialog.GccSheet
 import com.gccwebos.android.portal.AccountController
 import java.time.Instant
 
@@ -167,14 +170,12 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
             dismissButton = { TextButton(onClick = flow::dismissPayment, modifier = Modifier.testTag("payment-open-cancel")) { Text("暂不付款") } })
     }
     // Read-only breakdown: a swipe-dismissable bottom sheet over the top-up page (same tags and fields).
-    if (balanceDetails && mode == CommerceMode.Wallet) GccBottomSheet(onDismissRequest = { balanceDetails = false },
-        modifier = Modifier.testTag("wallet-balance-details-dialog"), title = "余额明细") { close ->
-        Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            WalletBalanceMetrics(wallet)
-            SupportingText("订单预留和待确认奖励不计入可用余额。")
-        }
-        TextButton(onClick = close, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)
-            .testTag("wallet-balance-details-close")) { Text("知道了") }
+    if (balanceDetails && mode == CommerceMode.Wallet) GccSheet(onDismissRequest = { balanceDetails = false },
+        modifier = Modifier.testTag("wallet-balance-details-dialog"), title = "余额明细",
+        actions = { close -> GccSecondaryButton(GccDialogAction("知道了", close, testTag = "wallet-balance-details-close"),
+            modifier = Modifier.fillMaxWidth()) }) {
+        WalletBalanceMetrics(wallet)
+        SupportingText("订单预留和待确认奖励不计入可用余额。")
     }
     if (recoveryConfirmation) AlertDialog(onDismissRequest = { recoveryConfirmation = false }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("恢复原创建请求？") },
         text = { Text("仅沿用本机原幂等记录。未获得订单编号时可能重发原创建请求；这不是付款或到账确认。") },

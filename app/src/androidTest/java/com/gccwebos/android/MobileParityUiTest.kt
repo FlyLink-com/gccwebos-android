@@ -318,10 +318,10 @@ class MobileParityUiTest {
         compose.onNodeWithTag("account-logout").performScrollTo().assertTextEquals("退出登录")
         compose.onNodeWithText("清除本地订阅与登录").assertDoesNotExist()
         compose.onNodeWithTag("account-logout").performClick()
-        compose.onNodeWithTag("logout-title").assertTextEquals("是否退出登录并清除当前设备订阅配置？")
+        compose.onNodeWithTag("logout-title").assertTextEquals("退出登录？")
         compose.onNodeWithTag("logout-confirm").assertTextEquals("退出登录")
         compose.onNodeWithTag("logout-cancel").assertTextEquals("取消")
-        compose.onNodeWithTag("logout-body").assertTextContains("只影响当前设备", substring = true)
+        compose.onNodeWithTag("logout-body").assertTextContains("只清除这台设备", substring = true)
         compose.onNodeWithTag("logout-body").assertTextContains("不会删除或更改服务器上的账户", substring = true)
         compose.onNodeWithTag("logout-body").assertTextContains("你自己导入的配置会保留", substring = true)
         compose.runOnIdle { assertTrue(state.localSubscription.hasProfile); assertNotNull(saved.read()) }

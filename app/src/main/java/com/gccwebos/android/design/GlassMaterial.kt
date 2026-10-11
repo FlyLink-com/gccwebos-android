@@ -54,6 +54,9 @@ internal object GlassMaterialPolicy {
     // Raised from .72/.76: the city backdrop's bright windows showed through cards (design review C5).
     const val CardStartAlpha = .84f
     const val CardEndAlpha = .88f
+    /** Plans offer cards (月卡 / 年卡 / 流量包): clearer surface so price and benefits never sit on the backdrop's bright windows. */
+    const val OfferCardStartAlpha = .95f
+    const val OfferCardEndAlpha = .97f
     /** Dark wash over the clear backdrop outside cards; Plans uses the stronger value (review P2). */
     const val BackdropScrimAlpha = .26f
     const val BackdropScrimStrongAlpha = .44f
@@ -248,7 +251,7 @@ internal fun BrandBackdrop(modifier: Modifier = Modifier, loginPage: Boolean = f
 @Composable
 internal fun GlassSurface(modifier: Modifier = Modifier, shape: Shape = Brand.Shape,
                           kind: GlassSurfaceKind = GlassSurfaceKind.Card, selected: Boolean = false,
-                          edge: BorderStroke? = null, tint: Brush? = null,
+                          edge: BorderStroke? = null, tint: Brush? = null, moreOpaque: Boolean = false,
                           content: @Composable () -> Unit) {
     val state = LocalGlassBackdrop.current
     val requested = LocalGlassMode.current
@@ -277,9 +280,9 @@ internal fun GlassSurface(modifier: Modifier = Modifier, shape: Shape = Brand.Sh
                 .copy(alpha = if (frosted) GlassMaterialPolicy.NavigationEndAlpha else 1f)))
         else -> Brush.linearGradient(listOf(
             Color(if (frosted) GlassMaterialPolicy.CardStartArgb else GlassMaterialPolicy.CardSolidArgb)
-                .copy(alpha = if (frosted) GlassMaterialPolicy.CardStartAlpha else 1f),
+                .copy(alpha = if (!frosted) 1f else if (moreOpaque) GlassMaterialPolicy.OfferCardStartAlpha else GlassMaterialPolicy.CardStartAlpha),
             Color(if (frosted) GlassMaterialPolicy.CardEndArgb else GlassMaterialPolicy.CardSolidArgb)
-                .copy(alpha = if (frosted) GlassMaterialPolicy.CardEndAlpha else 1f)))
+                .copy(alpha = if (!frosted) 1f else if (moreOpaque) GlassMaterialPolicy.OfferCardEndAlpha else GlassMaterialPolicy.CardEndAlpha)))
     }
     Surface(modifier.onGloballyPositioned {
         // A scrolling card can extend past the viewport. Its clipped visible bounds would

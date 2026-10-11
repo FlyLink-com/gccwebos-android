@@ -55,40 +55,38 @@ internal fun nodeLatencyPresentation(
     null -> NodeLatencyPresentation("---", NodeLatencyTone.Neutral, measuring = measuring)
 }
 
-/** A quiet dash per cell; the toolbar note ([LatencySkippedNote]) and the spoken description carry the reason. */
+/** A quiet dash per cell; the note ([LatencySkippedNote]) and the spoken description carry the reason. */
 internal const val LatencySkippedLabel = "—"
-/** Shown in the toolbar instead of a "last tested" time while the tunnel is up and nothing could be measured. */
-internal const val LatencySkippedNote = "已连接时无法测速，断开后可测"
+/** Shown under the heading row while the tunnel is up and nothing can be measured. */
+internal const val LatencySkippedNote = "已连接时无法测延迟，断开后可测"
 
 /** Compact spoken description for accessibility; never invents a millisecond value. */
 internal fun nodeLatencyContentDescription(presentation: NodeLatencyPresentation): String = when {
     presentation.measuring -> "节点延迟：测试中"
     presentation.label == "---" -> "节点延迟：未测试"
     presentation.label == "超时" -> "节点延迟：超时"
-    presentation.label == LatencySkippedLabel -> "节点延迟：已连接时无法测速"
+    presentation.label == LatencySkippedLabel -> "节点延迟：已连接时无法测延迟"
     presentation.label.endsWith(" ms") ->
         "节点延迟 ${presentation.label.removeSuffix(" ms")} 毫秒"
     else -> "节点延迟：${presentation.label}"
 }
 
 /**
- * Relative "上次测速" caption from a monotonic elapsed-clock delta. Returns null when [agoMillis]
- * is null or negative so the toolbar can omit the line entirely.
+ * Plain-Chinese relative time of the last latency test for the heading row, from a monotonic elapsed-clock delta:
+ * under a minute 刚刚, then N 分钟前 / N 小时前 / N 天前. No seconds. Null (nothing shown) for no test yet or a clock that
+ * went backwards.
  */
-internal fun formatLastLatencyTestAgo(agoMillis: Long?): String? {
+internal fun formatLastTestedAgo(agoMillis: Long?): String? {
     if (agoMillis == null || agoMillis < 0L) return null
     val minutes = agoMillis / 60_000L
     val hours = agoMillis / 3_600_000L
     val days = agoMillis / 86_400_000L
-    val body = when {
-        agoMillis < 15_000L -> "刚刚"
-        minutes < 1L -> "不到1分钟前"
-        minutes < 60L -> "${minutes}分钟前"
-        hours < 24L -> "${hours}小时前"
-        days < 7L -> "${days}天前"
-        else -> return null // Stale enough that a relative label is not useful.
+    return when {
+        minutes < 1L -> "刚刚"
+        hours < 1L -> "${minutes} 分钟前"
+        days < 1L -> "${hours} 小时前"
+        else -> "${days} 天前"
     }
-    return "上次测速：$body"
 }
 
 /** Parsed pieces of provider notice names (info=true rows). All fields stay null when absent. */

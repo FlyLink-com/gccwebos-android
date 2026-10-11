@@ -34,6 +34,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onVisibilityChanged
+import androidx.compose.animation.core.keyframes
+import androidx.compose.ui.graphics.lerp
+import kotlinx.coroutines.delay
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -53,7 +57,9 @@ import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.AccountUsagePresentation
 import com.gccwebos.android.design.AccountUsageState
 import com.gccwebos.android.design.Brand
-import com.gccwebos.android.design.GccBottomSheet
+import com.gccwebos.android.design.dialog.GccDialogAction
+import com.gccwebos.android.design.dialog.GccSecondaryButton
+import com.gccwebos.android.design.dialog.GccSheet
 import com.gccwebos.android.design.UiHaptic
 import com.gccwebos.android.design.pressFeedback
 import com.gccwebos.android.design.rememberPressFeedback
@@ -91,8 +97,19 @@ internal fun ConnectionUsageCard(
     /** Navigation-only "续费" link to the existing 套餐 tab; null hides it. */
     onRenew: (() -> Unit)? = null,
 ) {
-    val motion = rememberUsageMotion(connected)
-    Column(modifier.fillMaxWidth().testTag("account-usage-card")) {
+    // Drawn motion runs only while this card is actually on screen (and resumed, and motion is allowed).
+    var shown by remember { mutableStateOf(true) }
+    val gate = rememberUsageMotion(connected, shown)
+    val shownProgress = when {
+        subscriptionUsage != null -> subscriptionUsage.asCardPresentation().progress
+        authenticated && presentation.state == AccountUsageState.Available -> presentation.progress
+        else -> null
+    }
+    val cardState = usageCardState(shownProgress)
+    val pulse = rememberUsagePulse(cardState, gate)
+    val motion = remember(gate, cardState, pulse) { gate.copy(cardState = cardState, pulse = pulse) }
+    Column(modifier.fillMaxWidth().onVisibilityChanged(minFractionVisible = .05f) { shown = it }
+        .testTag("account-usage-card")) {
         if (subscriptionUsage != null) ConnectionSubscriptionUsage(subscriptionUsage, motion, now, planText, activePlan)
         else if (!authenticated) ConnectionRemaining("暂未获取", motion) else when (presentation.state) {
             AccountUsageState.Unknown -> ConnectionRemaining("暂未获取", motion)
@@ -168,7 +185,16 @@ private fun ConnectionRemaining(value: String, motion: UsageMotion, amounts: Acc
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val density = LocalDensity.current
             val measurer = rememberTextMeasurer()
-            val style = MaterialTheme.typography.headlineLarge.copy(color = Brand.Cyan)
+            val low = motion.cardState == UsageCardState.Low
+            // Low traffic: the number turns amber (contrast stays far above 4.5:1 on the navy card) and glows slowly.
+            val style = MaterialTheme.typography.headlineLarge.copy(color = if (low) UsageWarningColor else Brand.Cyan)
+            val lowGlow = if (low) Modifier.drawBehind {
+                val alpha = usageLerp(UsagePulseAlphaMin, UsagePulseAlphaMax, motion.pulse())
+                val center = Offset(size.width * .18f, size.height / 2)
+                val radius = size.height * 1.5f
+                drawCircle(Brush.radialGradient(listOf(UsageWarningColor.copy(alpha = alpha * .6f), Color.Transparent), center, radius),
+                    radius, center)
+            } else Modifier
             val sizes = if (maxWidth < 300.dp) listOf(45, 37, 29, 24) else listOf(49, 45, 37, 29, 24)
             val width = with(density) { maxWidth.roundToPx() }
             RollingUsageValue(value, motion, Modifier.fillMaxWidth()) { text, textModifier, ghost ->
@@ -188,7 +214,7 @@ private fun ConnectionRemaining(value: String, motion: UsageMotion, amounts: Acc
                 // The outgoing odometer copy is decorative only and carries no semantics.
                 Text(amount(size), style = style, lineHeight = if (numeric) (size * 1.15f).sp else 40.sp,
                     softWrap = !ghost, modifier = if (ghost) textModifier
-                    else textModifier.fillMaxWidth().testTag("account-usage-remaining"))
+                    else textModifier.then(lowGlow).fillMaxWidth().testTag("account-usage-remaining"))
             }
         }
     }
@@ -291,10 +317,11 @@ private fun ConnectionUsageDates(presentation: AccountUsagePresentation, planTex
         }
     }
     // Read-only details: a swipe-dismissable sheet instead of a centred dialog; same texts and 知道了 action.
-    if (showDetails) GccBottomSheet(onDismissRequest = { showDetails = false }, title = "套餐时间") { close ->
+    if (showDetails) GccSheet(onDismissRequest = { showDetails = false }, title = "套餐时间",
+        actions = { close -> GccSecondaryButton(GccDialogAction("知道了", close, testTag = "account-usage-time-details-close"),
+            modifier = Modifier.fillMaxWidth()) }) {
         presentation.cycleText?.let { Text("统计周期\n$it") }
         presentation.expiresAtText?.let { Text("套餐到期\n$it") }
-        TextButton(close, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)) { Text("知道了") }
     }
 }
 
@@ -360,10 +387,15 @@ internal fun ConnectionActionButton(text: String, onClick: () -> Unit, modifier:
 }
 
 /** Lifecycle/settings gates for the card's motion; read in composition, never per frame. */
-internal data class UsageMotion(val enabled: Boolean, val breathing: Boolean, val connected: Boolean)
+internal data class UsageMotion(val enabled: Boolean, val breathing: Boolean, val connected: Boolean,
+                                /** Shown on screen, resumed and motion allowed: the gate for every looping animation. */
+                                val live: Boolean = breathing,
+                                val cardState: UsageCardState = UsageCardState.Normal,
+                                /** 0..1 position of the low-traffic pulse; read only in draw/graphicsLayer scopes. */
+                                val pulse: () -> Float = { 0f })
 
 @Composable
-private fun rememberUsageMotion(connected: Boolean): UsageMotion {
+internal fun rememberUsageMotion(connected: Boolean, shown: Boolean = true): UsageMotion {
     val context = LocalContext.current
     val state by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val resumed = state.isAtLeast(Lifecycle.State.RESUMED)
@@ -372,7 +404,23 @@ private fun rememberUsageMotion(connected: Boolean): UsageMotion {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
     }
     val enabled = usageMotionEnabled(scale)
-    return UsageMotion(enabled, usageBreathingActive(connected, resumed, enabled), connected)
+    val live = resumed && shown && enabled
+    return UsageMotion(enabled, usageBreathingActive(connected, resumed && shown, enabled), connected, live)
+}
+
+private const val UsagePulseStaticFraction = (UsagePulseAlphaStatic - UsagePulseAlphaMin) / (UsagePulseAlphaMax - UsagePulseAlphaMin)
+
+/** One slow pulse shared by the bar and the remaining number while traffic is low; static when paused or motion is off. */
+@Composable
+private fun rememberUsagePulse(state: UsageCardState, motion: UsageMotion): () -> Float {
+    val pulse = remember { Animatable(UsagePulseStaticFraction) }
+    val active = usagePulseActive(state, motion.live, motion.enabled)
+    LaunchedEffect(active) {
+        if (!active) { pulse.snapTo(UsagePulseStaticFraction); return@LaunchedEffect }
+        pulse.snapTo(0f)
+        pulse.animateTo(1f, infiniteRepeatable(tween(2_000, easing = FastOutSlowInEasing), RepeatMode.Reverse))
+    }
+    return remember(pulse) { { pulse.value } }
 }
 
 private val UsageEaseOutExpo = CubicBezierEasing(.16f, 1f, .3f, 1f)
@@ -387,8 +435,12 @@ private fun UsageSeverity.accent(): Color = when (this) {
 
 /**
  * Confirmed usage only (the caller has a real progress value). Sweeps from 0 on first show, then follows
- * changes; the end glow breathes only while connected, resumed and motion is allowed. Every per-frame value is
- * read in the draw phase, so animation frames never recompose the card.
+ * changes. States (display-only):
+ *  - normal: after the one-time fill, a single soft highlight passes over the filled bar to its leading edge;
+ *  - low (<10% left): amber bar with a slow pulse (shared with the remaining number), only while shown + resumed;
+ *  - exhausted: static red bar with one short horizontal shake once the fill has landed.
+ * Reduce motion: no fill, shimmer, pulse or shake; low shows a static amber glow. Every per-frame value is read
+ * in the draw/graphicsLayer phase, so animation frames never recompose the card.
  */
 @Composable
 private fun ConnectionUsageProgress(progress: Float, severity: UsageSeverity, motion: UsageMotion) {
@@ -404,30 +456,61 @@ private fun ConnectionUsageProgress(progress: Float, severity: UsageSeverity, mo
         }
         swept = true
     }
-    val accent by animateColorAsState(severity.accent(),
-        if (motion.enabled) tween(700, easing = FastOutSlowInEasing) else snap(), label = "usage-severity")
-    val breath = remember { Animatable(0f) }
-    LaunchedEffect(motion.breathing) {
-        if (!motion.breathing) { breath.snapTo(0f); return@LaunchedEffect }
-        breath.snapTo(.14f)
-        // ~2.6 s per cycle; Animatable runs it as an infinite animation (paused by tests' infinite policy).
-        breath.animateTo(.42f, infiniteRepeatable(tween(1_300, easing = FastOutSlowInEasing), RepeatMode.Reverse))
+    val state = motion.cardState
+    val accent by animateColorAsState(when (state) {
+        UsageCardState.Exhausted -> UsageCriticalColor
+        UsageCardState.Low -> UsageWarningColor
+        UsageCardState.Normal -> severity.accent()
+    }, if (motion.enabled) tween(700, easing = FastOutSlowInEasing) else snap(), label = "usage-severity")
+    // One-shot highlight pass for the normal state: starts once the fill has landed, never loops.
+    val shimmer = remember { Animatable(-1f) }
+    var shimmered by remember { mutableStateOf(false) }
+    LaunchedEffect(swept, state, motion.enabled) {
+        if (!swept || shimmered || state != UsageCardState.Normal || !motion.enabled || target <= 0f) return@LaunchedEffect
+        shimmered = true
+        delay(260)
+        shimmer.snapTo(0f)
+        shimmer.animateTo(1f, tween(640, easing = CubicBezierEasing(.65f, 0f, .35f, 1f)))
+        shimmer.snapTo(-1f)
     }
-    // Static (non-animated) emphasis for warnings, or for an established tunnel when motion is off/paused.
-    val resting = when {
-        severity != UsageSeverity.Normal -> .24f
-        motion.connected -> .2f
-        else -> 0f
+    // One short shake (280 ms, +-3 dp, three half cycles) when an exhausted bar appears.
+    val shake = remember { Animatable(0f) }
+    var shook by remember { mutableStateOf(false) }
+    LaunchedEffect(swept, state, motion.enabled) {
+        if (!swept || shook || state != UsageCardState.Exhausted || !motion.enabled) return@LaunchedEffect
+        shook = true
+        shake.snapTo(0f)
+        shake.animateTo(0f, keyframes { durationMillis = 280; 3f at 70; -3f at 140; 3f at 210; 0f at 280 })
     }
-    Box(Modifier.padding(top = 8.dp).fillMaxWidth().drawBehind {
-        val fraction = shown.value
-        val alpha = maxOf(breath.value, resting)
-        if (alpha <= 0f || fraction <= 0f) return@drawBehind
-        val radius = 11.dp.toPx()
-        val center = Offset(size.width * fraction, size.height / 2)
-        drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = alpha), Color.Transparent), center, radius),
-            radius, center)
-    }) {
+    // Static (non-animated) emphasis for warnings; the connected glow now lives on the card rim.
+    val resting = if (severity != UsageSeverity.Normal || state != UsageCardState.Normal) .24f else 0f
+    Box(Modifier.padding(top = 8.dp).fillMaxWidth()
+        .graphicsLayer { translationX = shake.value * density }
+        .drawWithContent {
+            val fraction = shown.value
+            if (fraction > 0f) {
+                val low = state == UsageCardState.Low
+                val alpha = if (low) usageLerp(UsagePulseAlphaMin, UsagePulseAlphaMax, motion.pulse()) else resting
+                if (alpha > 0f) {
+                    val radius = (if (low) 14.dp else 11.dp).toPx()
+                    val center = Offset(size.width * fraction, size.height / 2)
+                    drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = alpha), Color.Transparent), center, radius),
+                        radius, center)
+                }
+            }
+            drawContent()
+            val sweep = shimmer.value
+            if (sweep >= 0f && fraction > 0f) {
+                val filled = size.width * fraction
+                val band = 24.dp.toPx()
+                val x = filled * sweep
+                // Peak 0.28 alpha at the band centre; clipped to the filled part so it never lights the empty track.
+                clipRect(0f, 0f, filled, size.height) {
+                    drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.White.copy(alpha = .28f), Color.Transparent),
+                        startX = x - band, endX = x + band), topLeft = Offset(x - band, 0f), size = Size(band * 2, size.height))
+                }
+            }
+        }) {
         LinearProgressIndicator(progress = { shown.value }, color = accent, trackColor = Brand.SurfaceRaised,
             modifier = Modifier.fillMaxWidth().height(6.dp)
                 .clip(RoundedCornerShape(3.dp)).testTag("account-usage-progress"))

@@ -18,6 +18,11 @@ class SubscriptionRead(val bytes: ByteArray, val validUntil: java.time.Instant? 
 fun interface SubscriptionSource {
     suspend fun download(url: Secret): ByteArray
     suspend fun read(url: Secret): SubscriptionRead = SubscriptionRead(download(url))
+    /**
+     * The same read for an import the user is watching and can cancel. Sources with no separate import policy
+     * behave exactly like [read]; connect never calls this.
+     */
+    suspend fun readForImport(url: Secret): SubscriptionRead = read(url)
 }
 
 /** Input policy rejection is distinct from a server revoking an accepted subscription URL. */

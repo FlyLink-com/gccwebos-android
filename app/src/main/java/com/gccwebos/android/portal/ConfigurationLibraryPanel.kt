@@ -4,7 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.*
@@ -24,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.ConnectionControlState
@@ -31,6 +31,11 @@ import com.gccwebos.android.ConnectionPhase
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
 import com.gccwebos.android.design.NodeRegionIcon
+import com.gccwebos.android.design.SlidingTab
+import com.gccwebos.android.design.SlidingTabGradient
+import com.gccwebos.android.design.SlidingTabGradientSelected
+import com.gccwebos.android.design.SlidingTabGradientSelectedEdge
+import com.gccwebos.android.design.SlidingTabRow
 import com.gccwebos.android.design.nodeDisplayName
 import com.gccwebos.android.vpn.SafeProxyConfig
 
@@ -40,6 +45,8 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     state: NodeSelectionController, nodes: List<SafeProxyConfig.NodeSummary>, resource: Resource?,
     hasCapability: Boolean, accountBusy: Boolean, authenticated: Boolean = false,
     connectionControl: ConnectionControlState = ConnectionControlState(),
+    /** State of the signed-in account's own subscription load, and the user's retry for it. */
+    accountLoad: AccountLoadState = AccountLoadState.Idle, onRetryAccount: () -> Unit = {},
     onSelected: () -> Unit = {}, latency: NodeLatencyController? = null,
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     onImport: () -> Unit, onReplace: (ConfigurationHandle) -> Unit, openAccount: () -> Unit) {
@@ -49,19 +56,47 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
     // A signed-in account whose nodes are not loaded yet loads itself once per visit, but only while that
     // cannot discard anything: no tunnel, and no node the user already chose in another source.
-    var autoLoadTried by remember(authenticated) { mutableStateOf(false) }
+    // The visit starts over whenever the active source appears or goes away (for example after the last saved
+    // configuration was deleted), so the account can still load itself then.
+    val anyActive = library.snapshot.items.any { it.active }
+    var autoLoadTried by remember(authenticated, anyActive) { mutableStateOf(false) }
     LaunchedEffect(authenticated, library.snapshot, library.busy, accountBusy, tunnelActive, state.snapshot.selected) {
         val account = accountToAutoLoad(authenticated && !autoLoadTried && !busy && !tunnelActive, library.snapshot.items,
             state.snapshot.selected != null) ?: return@LaunchedEffect
-        autoLoadTried = true
-        library.activate(account.handle)
+        // Only a request that actually started counts: a refused one (something else busy) is tried again.
+        autoLoadTried = library.activate(account.handle)
+    }
+    // The account is the active source but nothing was ever fetched for it (nothing else loads it then): fetch once per visit.
+    val activeAccountEmpty = authenticated && library.snapshot.items.any { it.waitsForAccountLoad() && it.status == LocalSubscriptionStatus.MISSING }
+    var activeLoadTried by remember(authenticated, activeAccountEmpty) { mutableStateOf(false) }
+    LaunchedEffect(activeAccountEmpty, activeLoadTried, accountLoad, busy, tunnelActive) {
+        if (!activeAccountEmpty || activeLoadTried || accountLoad != AccountLoadState.Idle || busy || tunnelActive) return@LaunchedEffect
+        activeLoadTried = true
+        onRetryAccount()
     }
     val active = library.snapshot.items.any { it.active }
-    val canMeasure = active && !busy && !state.busy && latency != null && !latency.busy &&
-        latency.foreground && state.snapshot.status == LocalSubscriptionStatus.READY && state.snapshot.choices.isNotEmpty()
+    val activeMeasurable = active && state.snapshot.status == LocalSubscriptionStatus.READY && state.snapshot.choices.isNotEmpty()
+    // Nodes of the other saved sources are tested together with the active source's, so they count too.
+    val othersMeasurable = library.snapshot.items.any { item -> !item.active && item.status == LocalSubscriptionStatus.READY &&
+        item.nodes.any { node -> !node.info && node.supported } }
+    val canMeasure = !busy && !state.busy && latency != null && !latency.busy && latency.foreground &&
+        (activeMeasurable || othersMeasurable)
+    val contentKeys = library.snapshot.items.map { it.contentKey }
+    // A changed source (import, replace, refresh) must be captured again; stale readings are dropped by content key.
+    LaunchedEffect(latency, contentKeys) { latency?.libraryChanged() }
+    // With no active source the page below never starts a batch itself; the other sources' nodes still need one.
+    LaunchedEffect(latency, contentKeys, active, busy, state.busy, tunnelActive, latency?.foreground) {
+        if (latency == null || active || busy || state.busy || tunnelActive || !othersMeasurable) return@LaunchedEffect
+        withFrameNanos { }
+        delay(NodeLatencyEntryDelayMillis)
+        while (true) { latency.ensureMeasured(); delay(1000) }
+    }
     ConfigurationLibraryContent(library.snapshot, busy, library.error, canMeasure,
         measuring = latency?.busy == true,
-        onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
+        latencyFor = { item, position -> latency?.libraryReading(item.handle.entryId ?: AccountSourceId, position, item.contentKey) },
+        onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = { library.activate(it) },
+        countText = { count -> NodesCountText(count, latency) },
+        accountLoad = accountLoad, onRetryAccount = onRetryAccount,
         onChooseNode = library::activateAndChoose,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
         onRenameNode = library::renameNode, onDeleteNode = library::deleteNode, onRestoreNode = library::restoreNode,
@@ -70,7 +105,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         activeContent = { item, list ->
             NodeSelectionPanel(state, nodes, resource, hasCapability, busy, authenticated, connectionControl,
                 onSelected = onSelected, latency = latency, groupTitle = UnifiedListTitle,
-                showTools = false, showAccountAction = false,
+                showTools = false, showAccountAction = false, headerActions = list.headerAction, sortByLatencyOverride = list.sortByLatency,
                 sourceLabel = list.sourceLabel, rowTrailing = list.rowTrailing, extraCount = list.extraCount,
                 showSourceRows = list.showSourceRows, extraRows = list.extraRows, openAccount = openAccount)
         })
@@ -96,6 +131,8 @@ private enum class LibraryDialog { Details, Rename, Remove, Name }
 @Composable
 internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot, busy: Boolean, error: String?,
     canMeasure: Boolean, measuring: Boolean = false, onMeasure: () -> Unit, onImport: () -> Unit,
+    /** Latency shown on a row of a non-active source; null while unmeasured. Display-only. */
+    latencyFor: (ConfigurationItem, Int) -> NodeLatencyObservation? = { _, _ -> null },
     onActivate: (ConfigurationHandle) -> Unit, onRename: (ConfigurationHandle, String) -> Unit,
     onRemove: (ConfigurationHandle) -> Unit, onReplace: (ConfigurationHandle) -> Unit,
     onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit = { _, _ -> },
@@ -104,17 +141,23 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     onRestoreNode: (ConfigurationItem, Int) -> Unit = { _, _ -> },
     /** While a tunnel is up or changing, nodes of another source cannot be chosen (that would switch the source). */
     tunnelActive: Boolean = false,
+    /** The 「N 条」 text of the heading row; the page adds the last latency-test time to it. */
+    countText: @Composable (Int) -> Unit = { count ->
+        Text("$count 条", fontSize = 10.sp, color = Brand.Muted, modifier = Modifier.testTag("nodes-count")) },
+    accountLoad: AccountLoadState = AccountLoadState.Idle, onRetryAccount: () -> Unit = {},
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     activeContent: @Composable (ConfigurationItem, UnifiedList) -> Unit) {
     val actionsBlocked = busy || snapshot.storageError
     val activeIndex = snapshot.items.indexOfFirst { it.active }
-    val canMeasureActive = canMeasure && activeIndex >= 0
+    val canMeasureActive = canMeasure && snapshot.items.isNotEmpty()
     var dialogHandle by remember { mutableStateOf<ConfigurationHandle?>(null) }
     var dialog by remember { mutableStateOf<LibraryDialog?>(null) }
     var name by remember { mutableStateOf("") }
     var nodeEdit by remember { mutableStateOf<NodeEdit?>(null) }
     var nodeName by remember { mutableStateOf("") }
     var filterKey by remember { mutableStateOf<Any?>(null) }
+    // One sort order for every source's rows (the funnel menu on the heading row).
+    var sortByLatency by rememberSaveable { mutableStateOf(false) }
     // The post-import naming dialog follows its saved entry id, because the import's own settle
     // refresh replaces every handle right after the dialog opens.
     val target = snapshot.items.firstOrNull { it.handle === dialogHandle } ?: if (dialog == LibraryDialog.Name)
@@ -129,34 +172,6 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
         dialogHandle = created.handle; name = created.name; dialog = LibraryDialog.Name
     }
     Column(Modifier.fillMaxWidth().testTag("configuration-library"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Opaque library chrome: keeps title/actions readable over the city backdrop (same idea as WalletTopBar).
-        Row(
-            Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Brand.SurfaceRaised.copy(alpha = .92f))
-                .border(1.dp, Brand.GlassBorder.copy(alpha = .18f), RoundedCornerShape(16.dp))
-                .padding(start = 14.dp, end = 4.dp)
-                .testTag("configuration-library-header"),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val total = snapshot.items.sumOf { item -> item.nodes.count { !it.info } }
-            val headerLabel = if (snapshot.items.isEmpty()) "配置" else "全部节点（${total}个节点）"
-            Text(
-                headerLabel,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = Brand.Text,
-                modifier = Modifier.weight(1f).testTag("configuration-library-title"),
-            )
-            NodesLatencyRefreshButton(
-                enabled = !actionsBlocked && canMeasureActive,
-                busy = measuring,
-                onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() },
-            )
-            NodesImportButton(onClick = { if (!actionsBlocked) onImport() }, enabled = !actionsBlocked)
-        }
         // Controller errors are fixed captions. Never interpolate an exception or source material.
         if (snapshot.storageError) Text("配置暂不可用", color = Brand.Muted,
             modifier = Modifier.testTag("configuration-storage-status"))
@@ -174,7 +189,14 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             modifier = Modifier.testTag("configuration-unselected"))
         // Source filter: only worth a row once there is more than one source.
         if (filterKey != null && snapshot.items.none { it.displayKey == filterKey }) filterKey = null
-        if (snapshot.items.size >= 2) SourceFilterChips(snapshot.items, filterKey) { filterKey = it }
+        // The add-configuration "+" is always the far-right control of this row; the segmented switcher fills the rest once
+        // there is more than one source. (There is no page title above it any more.)
+        SourceSwitcherRow(snapshot.items, filterKey, enabled = !actionsBlocked, onImport = onImport) { filterKey = it }
+        // The signed-in account's subscription is being fetched or could not be: say so, with a retry. Only while that
+        // source is the active one and still empty, so an old failure never hides behind loaded nodes.
+        val loadingAccount = snapshot.items.firstOrNull { it.active && it.kind == ManualSourceKind.LegacyRemote &&
+            it.status != LocalSubscriptionStatus.READY }
+        if (loadingAccount != null && accountLoad != AccountLoadState.Idle) AccountLoadNotice(accountLoad, onRetryAccount)
         // One list for every source. Nodes of the active source keep latency and selection; nodes of the
         // other sources sit in the same list and one tap makes their source active and selects exactly that node.
         val others = snapshot.items.withIndex().filter { (index, item) ->
@@ -191,8 +213,14 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             },
             extraCount = others.sumOf { it.value.nodes.count { node -> !node.info } },
             showSourceRows = filterKey == null || snapshot.items.getOrNull(activeIndex)?.displayKey == filterKey,
+            sortByLatency = sortByLatency,
+            headerAction = {
+                NodesLatencyTestAction(enabled = !actionsBlocked && canMeasureActive, busy = measuring,
+                    onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() })
+                if (snapshot.items.sumOf { item -> item.nodes.count { !it.info } } > 1) NodesSortAction(sortByLatency, { sortByLatency = it })
+            },
             extraRows = {
-                OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode) { item, position, delete ->
+                OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode, latencyFor, measuring, sortByLatency) { item, position, delete ->
                     nodeEdit = NodeEdit(item.handle.entryId, position, delete); nodeName = item.nodes[position].name
                 }
             })
@@ -201,7 +229,19 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             activeContent(snapshot.items[activeIndex], unified)
         } else if (others.isNotEmpty()) {
             GlassSurface(Modifier.fillMaxWidth().testTag("nodes-configuration-group"), shape = RoundedCornerShape(20.dp)) {
-                Column { unified.extraRows(this) }
+                Column {
+                    // No active source: the same heading row (节点列表 left, 延迟测试 right) above the saved sources' nodes.
+                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp).heightIn(min = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
+                            Text(UnifiedListTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("nodes-group-title"))
+                            countText(unified.extraCount)
+                        }
+                        unified.headerAction(this)
+                    }
+                    unified.extraRows(this)
+                }
             }
         }
         // Locally deleted nodes: collapsed at the bottom of the list, only when there are any. They can only be restored.
@@ -209,7 +249,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             .flatMap { (index, item) -> item.nodeDeleted.sorted().map { position -> Triple(index, item, position) } }
         if (deleted.isNotEmpty()) DeletedNodesSection(deleted, actionsBlocked, onRestoreNode)
         // Where every node comes from; also the place for source-level actions (rename / replace / delete).
-        if (snapshot.items.isNotEmpty()) SourceList(snapshot.items) { item, index ->
+        if (snapshot.items.isNotEmpty()) SourceList(snapshot.items, accountLoad, onRetryAccount) { item, index ->
             ConfigurationItemMenu(item, index, actionsBlocked, onDetails = {
                 dialogHandle = item.handle; dialog = LibraryDialog.Details
             }, onRename = {
@@ -341,40 +381,62 @@ internal const val UnifiedListTitle = "节点列表"
 
 /** Slots the unified list hands to the active source's card. */
 internal class UnifiedList(val sourceLabel: String?, val rowTrailing: (@Composable (Int) -> Unit)?,
-    val extraCount: Int, val showSourceRows: Boolean, val extraRows: @Composable ColumnScope.() -> Unit)
+    val extraCount: Int, val showSourceRows: Boolean, val extraRows: @Composable ColumnScope.() -> Unit,
+    /** The page-wide sort order, applied to the other sources' rows here and to the active source's rows by the card. */
+    val sortByLatency: Boolean = false,
+    /** 延迟测试 for the whole library, right-aligned on the 节点列表 heading row. */
+    val headerAction: @Composable RowScope.() -> Unit = {})
 
 private data class NodeEdit(val entryId: String?, val position: Int, val delete: Boolean)
 
-/** "来源" caption of one node: the saved source's name and kind; the account subscription says it is read-only. */
+/** "来源" caption of one node: the saved source's name (the 来源 card carries its kind); the account subscription says it is read-only. */
 internal fun nodeSourceLabel(item: ConfigurationItem): String =
-    if (item.kind == ManualSourceKind.LegacyRemote) "账户订阅 · 只读" else "${item.name} · ${configurationKindLabel(item.kind)}"
+    if (item.kind == ManualSourceKind.LegacyRemote) "$OFFICIAL_SOURCE_NAME · 只读" else item.name
 
+/**
+ * The segmented switcher (the plans page's [SlidingTabRow]): 全部 plus one tab per source, then the 添加配置 "+" at the far
+ * right. Fewer than two sources have nothing to switch between, so only the label and the "+" show.
+ */
 @Composable
-private fun SourceFilterChips(items: List<ConfigurationItem>, selected: Any?, onSelect: (Any?) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("unified-filter"),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected == null, { onSelect(null) }, label = { Text("全部") },
-            modifier = Modifier.heightIn(min = 48.dp).testTag("unified-filter-all"))
-        items.forEachIndexed { index, item ->
-            FilterChip(selected == item.displayKey, { onSelect(if (selected == item.displayKey) null else item.displayKey) },
-                label = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                modifier = Modifier.heightIn(min = 48.dp).testTag("unified-filter-$index"))
-        }
+private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, enabled: Boolean, onImport: () -> Unit,
+    onSelect: (Any?) -> Unit) {
+    Row(Modifier.fillMaxWidth().testTag("unified-filter"), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (items.size >= 2) {
+            val tabs = listOf(SlidingTab("全部", "unified-filter-all")) +
+                items.mapIndexed { index, item -> SlidingTab(item.name, "unified-filter-$index") }
+            val selectedIndex = items.indexOfFirst { it.displayKey == selected }.let { if (it < 0) 0 else it + 1 }
+            SlidingTabRow(tabs, selectedIndex, enabled = true, modifier = Modifier.weight(1f).testTag("unified-filter-bar"),
+                containerBrush = SlidingTabGradient, selectedColor = SlidingTabGradientSelected,
+                selectedEdge = SlidingTabGradientSelectedEdge, onSelect = { index ->
+                onSelect(if (index == 0) null else items[index - 1].displayKey.takeIf { it != selected })
+            })
+        } else Text("添加配置", fontSize = 13.sp, color = Brand.Muted,
+            modifier = Modifier.weight(1f).padding(start = 8.dp).testTag("unified-add-label"))
+        NodesImportButton(onClick = { if (enabled) onImport() }, enabled = enabled)
     }
 }
 
 @Composable
 private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationItem>>, busy: Boolean, tunnelActive: Boolean,
     onActivate: (ConfigurationHandle) -> Unit, onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit,
+    latencyFor: (ConfigurationItem, Int) -> NodeLatencyObservation?, measuring: Boolean, sortByLatency: Boolean,
     onEdit: (ConfigurationItem, Int, Boolean) -> Unit) {
     if (others.isEmpty()) return
+    var pendingUnknown by remember { mutableStateOf<(() -> Unit)?>(null) }
+    pendingUnknown?.let { proceed ->
+        UnknownNodeDialog(onConfirm = { pendingUnknown = null; proceed() }, onDismiss = { pendingUnknown = null })
+    }
     if (tunnelActive && others.any { it.value.nodes.any { node -> !node.info } }) Text(
         "已连接时只能选用当前来源的节点；要用其他来源的节点，请先断开连接。",
         fontSize = 11.sp, color = Brand.Amber, modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
             .testTag("unified-connected-hint"))
     others.forEach { (index, item) ->
         val label = nodeSourceLabel(item)
-        val visible = item.nodes.withIndex().filterNot { it.value.info }
+        val unsorted = item.nodes.withIndex().filterNot { it.value.info }
+        // The same 排序 order the active source's rows follow.
+        val visible = if (sortByLatency) unsorted.sortedWith(compareBy<IndexedValue<SafeProxyConfig.NodeSummary>> {
+            nodeLatencySortKey(latencyFor(item, it.index)) }.thenBy { it.index }) else unsorted
         if (visible.isEmpty()) {
             HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
             val loadable = item.kind == ManualSourceKind.LegacyRemote && item.status == LocalSubscriptionStatus.MISSING
@@ -385,7 +447,7 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(item.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (loadable) "节点还没加载，点一下加载账户订阅的节点" else "没有可选节点 · ${configurationStatusLabel(item)}",
+                    Text(if (loadable) "节点还没加载，点一下加载官方节点" else "没有可选节点 · ${configurationStatusLabel(item)}",
                         fontSize = 11.sp, color = Brand.Muted)
                 }
             }
@@ -394,7 +456,10 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
             // One tap chooses this node as the egress: its source becomes active first (same fenced
             // activation as 选择配置) and the node is then selected if it is still present.
             val choosable = node.supported && !busy && !tunnelActive
+            val observation = latencyFor(item, position)
             NodeChoiceRow(node.name, node.protocol, node.supported, chosen = false,
+                observation = observation, measuring = measuring && observation == null && node.supported,
+                tunnelActive = tunnelActive,
                 regionTag = "configuration-region-$index-$position", latencyTag = "configuration-latency-$index-$position",
                 sourceLabel = label,
                 trailing = if (item.canEditNode(position)) ({
@@ -403,7 +468,9 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
                 }) else null,
                 modifier = Modifier.testTag("configuration-node-$index-$position")
                     .clickable(enabled = choosable, role = Role.Button, onClickLabel = "选择此节点") {
-                        onChooseNode(item.handle, NodeTarget(position, node.name, node.protocol))
+                        val choose = { onChooseNode(item.handle, NodeTarget(position, node.name, node.protocol)) }
+                        // These rows belong to a source that is not selected, so a tap always changes the selection.
+                        if (selectionNeedsUnknownWarning(item.kind, alreadySelected = false)) pendingUnknown = choose else choose()
                     })
         }
     }
@@ -483,24 +550,60 @@ private fun NodeRowMenu(tag: String, busy: Boolean, deleteBlocked: Boolean, onRe
 }
 
 @Composable
-private fun SourceList(items: List<ConfigurationItem>,
+private fun SourceList(items: List<ConfigurationItem>, accountLoad: AccountLoadState, onRetryAccount: () -> Unit,
     menu: @Composable (ConfigurationItem, Int) -> Unit) {
     GlassSurface(Modifier.fillMaxWidth().testTag("unified-sources"), shape = RoundedCornerShape(20.dp)) {
         Column {
             Text("来源", fontSize = 12.sp, color = Brand.Muted, modifier = Modifier.padding(start = 14.dp, top = 10.dp, end = 14.dp))
             items.forEachIndexed { index, item ->
                 key(item.displayKey) {
-                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp).testTag("configuration-group-$index"),
+                    val retry = accountLoad == AccountLoadState.Failed && item.waitsForAccountLoad()
+                    Row(Modifier.fillMaxWidth().then(if (retry) Modifier.clickable(role = Role.Button, onClickLabel = "重试加载官方节点",
+                        onClick = onRetryAccount) else Modifier).padding(start = 14.dp, end = 4.dp).testTag("configuration-group-$index"),
                         verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
                             Text(item.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("configuration-name-$index"))
-                            Text(groupCaption(item), fontSize = 10.sp, color = Brand.Muted,
+                            Text(accountCaption(item, accountLoad), fontSize = 10.sp, color = Brand.Muted,
                                 modifier = Modifier.testTag("configuration-status-$index"))
                         }
                         menu(item, index)
                     }
                 }
+            }
+        }
+    }
+}
+
+/** The active account row that has nothing loaded yet: the only row an account load can fill. */
+internal fun ConfigurationItem.waitsForAccountLoad(): Boolean =
+    kind == ManualSourceKind.LegacyRemote && active && status != LocalSubscriptionStatus.READY
+
+/** [groupCaption], with the account row saying so while its load is running or has failed. */
+internal fun accountCaption(item: ConfigurationItem, accountLoad: AccountLoadState): String = when {
+    !item.waitsForAccountLoad() -> groupCaption(item)
+    accountLoad == AccountLoadState.Loading -> "${item.nodes.count { !it.info }} 条 · 官方 · 加载中…"
+    accountLoad == AccountLoadState.Failed -> "${item.nodes.count { !it.info }} 条 · 官方 · 加载失败，点此重试"
+    else -> groupCaption(item)
+}
+
+internal const val AccountLoadingText = "正在加载官方节点…"
+internal const val AccountLoadFailedText = "官方节点加载失败"
+internal const val AccountLoadRetryText = "点此重试"
+
+/** Static (no motion): a loading line, or the failure with a ≥48 dp retry. Design tokens only. */
+@Composable
+private fun AccountLoadNotice(state: AccountLoadState, onRetry: () -> Unit) {
+    GlassSurface(Modifier.fillMaxWidth().testTag("account-load-notice"), shape = RoundedCornerShape(20.dp)) {
+        if (state == AccountLoadState.Loading) {
+            Text(AccountLoadingText, fontSize = 13.sp, color = Brand.Muted,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp).testTag("account-load-loading"))
+        } else {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "重试加载官方节点", onClick = onRetry)
+                .padding(horizontal = 14.dp, vertical = 8.dp).testTag("account-load-retry"),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(AccountLoadFailedText, fontSize = 13.sp, color = Brand.Text, modifier = Modifier.weight(1f).testTag("account-load-failed"))
+                Text(AccountLoadRetryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Brand.Cyan)
             }
         }
     }
@@ -515,7 +618,7 @@ internal fun groupCaption(item: ConfigurationItem): String =
     "${item.nodes.count { !it.info }} 条 · ${configurationKindLabel(item.kind)} · ${configurationStatusLabel(item)}"
 
 internal fun configurationKindLabel(kind: ManualSourceKind): String = when (kind) {
-    ManualSourceKind.LegacyRemote -> "账户订阅"
+    ManualSourceKind.LegacyRemote -> OFFICIAL_SOURCE_NAME
     ManualSourceKind.ImportedRemote -> "订阅配置"
     ManualSourceKind.ImportedLocal -> "本地文件"
     ManualSourceKind.ExternalRemote -> "第三方订阅"

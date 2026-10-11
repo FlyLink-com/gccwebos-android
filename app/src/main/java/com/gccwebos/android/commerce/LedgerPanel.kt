@@ -22,7 +22,14 @@ import com.gccwebos.android.portal.AccountController
 
 /** One opaque container; selecting a row reads no additional endpoint or transaction. */
 @Composable
-internal fun LedgerPanel(account: AccountController, state: CommerceController) {
+internal fun LedgerPanel(account: AccountController, state: CommerceController, paymentOpener: (String) -> Unit = {},
+                         now: java.time.Instant = java.time.Instant.now()) {
+    // An unpaid recharge order lives here and only here: 待付款 with 立即支付 straight to its payment entry, or 已失效 without a button.
+    val opener by rememberUpdatedState(paymentOpener)
+    val payFlow = remember(account.authSessionGeneration, state) { RechargeFlowController(account, state) { opener(it) } }
+    DisposableEffect(payFlow) { onDispose { payFlow.dispose() } }
+    UnpaidRechargeOrders(state, payFlow, now)
+    PaymentReviewDialog(payFlow, state, now)
     var selectedGroup by remember(state, account.authSessionGeneration) { mutableStateOf<LedgerDisplayGroup?>(null) }
     val rows = state.ledgerPage?.entries
     val groups = remember(rows) { rows?.let(LedgerPresentation::displayGroups) }
@@ -123,5 +130,29 @@ private fun LedgerDetailField(label: String, value: String, tag: String? = null)
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         SupportingText(label)
         Text(value, modifier = if (tag == null) Modifier else Modifier.testTag(tag))
+    }
+}
+
+/** Recharge orders that were created but not paid, newest first; hidden when there are none or the session is not current. */
+@Composable
+private fun UnpaidRechargeOrders(state: CommerceController, flow: RechargeFlowController, now: java.time.Instant) {
+    val unpaid = state.rechargeHistory.orEmpty().filter { it.status in setOf("created", "entry_ready", "pending") }
+        .sortedByDescending { it.createdAt }
+    if (unpaid.isEmpty() || !state.currentSession()) return
+    HistoryListCard(Modifier.testTag("unpaid-recharge-container")) {
+        Text("待付款充值", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = Brand.Text)
+        unpaid.forEachIndexed { index, order ->
+            if (index > 0) HorizontalDivider(color = Brand.RowDivider)
+            Column(Modifier.fillMaxWidth().testTag("unpaid-recharge-${order.orderRef}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("钱包充值", color = Brand.Text, fontWeight = FontWeight.SemiBold)
+                    Text(formatMoney(order.amountMinor, order.currency, order.currencyExponent), color = Brand.Text, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.testTag("unpaid-recharge-amount-${order.orderRef}"))
+                }
+                SupportingText("${OrderHistoryPresentation.rechargeListStatus(order, now)} · 预计 ${formatCoins(order.expectedPaidCoinUnits)}",
+                    Modifier.testTag("unpaid-recharge-status-${order.orderRef}"))
+                PayNowAction(order, state, flow, now)
+            }
+        }
     }
 }

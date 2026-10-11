@@ -30,6 +30,21 @@ class OrderHistoryPresentationTest {
         assertEquals("确认中", OrderHistoryPresentation.purchaseListStatus(order("unknown", "pending")))
     }
 
+    @Test fun unpaidRechargeShowsWaitingWhileOpenAndInvalidOnceItsWindowPassed() {
+        val base = CommerceJson.rechargeOrder(CommerceFixtures.rechargeOrder)
+        for (status in listOf("created", "entry_ready", "pending")) {
+            val unpaid = base.copy(status = status)
+            assertEquals("待付款", OrderHistoryPresentation.rechargeListStatus(unpaid, unpaid.expiresAt.minusSeconds(1)))
+            assertEquals("已失效", OrderHistoryPresentation.rechargeListStatus(unpaid, unpaid.expiresAt))
+            assertEquals("已失效", OrderHistoryPresentation.rechargeListStatus(unpaid, unpaid.expiresAt.plusSeconds(3600)))
+        }
+        // Settled or in-doubt states are never turned into "invalid" or "waiting" by the clock.
+        val late = base.expiresAt.plusSeconds(3600)
+        assertEquals("已到账", OrderHistoryPresentation.rechargeListStatus(base.copy(status = "credited"), late))
+        assertEquals("确认中", OrderHistoryPresentation.rechargeListStatus(base.copy(status = "payment_verified"), late))
+        assertEquals("确认中", OrderHistoryPresentation.rechargeListStatus(base.copy(status = "reconciliation_required"), late))
+    }
+
     @Test fun deferredAndRechargeKeepPaidPendingHonest() {
         assertEquals("已生效", OrderHistoryPresentation.deferredListStatus("settled"))
         assertEquals("处理中", OrderHistoryPresentation.deferredListStatus("processing"))

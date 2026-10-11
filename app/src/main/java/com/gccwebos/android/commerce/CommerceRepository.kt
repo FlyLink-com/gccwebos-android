@@ -90,8 +90,15 @@ class CommerceRepository(private val request: suspend (String, String?, String?)
         recovery.save(binding, record)
         submitPurchase(record)
     }
+    /**
+     * Starting a recharge never waits for an earlier unpaid one: the server allows any number of orders per account (only
+     * the idempotency key must be unique) and each unpaid order simply expires after its own short window, so the durable
+     * pointer is replaced by the new order. An earlier order stays in the server's 充值记录 and is credited by the server
+     * if it is paid anyway; nothing local is needed for that.
+     */
     suspend fun recharge(offer: RechargeOffer): RechargeOrder = mutex.withLock {
-        require(pending("recharge") == null && "alipay" in offer.paymentMethods)
+        require("alipay" in offer.paymentMethods)
+        pending("recharge") // An unreadable recovery store still blocks: the new key could not be kept durably.
         val record = PendingCommerce("recharge", null, offer.offerRef, newKey())
         recovery.save(binding, record)
         submitRecharge(record)
@@ -155,6 +162,16 @@ class CommerceRepository(private val request: suspend (String, String?, String?)
             is PurchaseResult.Deferred -> result.state in setOf("settled", "cancelled")
         })
         recovery.clear(binding, "purchase")
+    }
+    /**
+     * Forgets the local pointer to an unpaid order that can no longer be paid. The server has no cancel for it: it expires
+     * on its own and is never charged unless paid. A credited or otherwise settled order is left to [finishRecharge].
+     */
+    suspend fun abandonRecharge(now: Instant): Unit = mutex.withLock {
+        val record = pending("recharge") ?: return
+        val order = record.resultRef?.let { readRecharge(record) }
+        require(order == null || order.status in setOf("created", "entry_ready", "pending", "expired", "failed_no_charge") && !order.payableAt(now))
+        recovery.clear(binding, "recharge")
     }
     suspend fun finishRecharge(): Unit = mutex.withLock {
         val record = requireNotNull(pending("recharge")); require(record.resultRef != null)

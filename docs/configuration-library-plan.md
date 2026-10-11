@@ -22,6 +22,7 @@
   节点行：不再显示空心圆（选中项靠高亮框、左侧青色竖条和无障碍「已选择」状态表示，也没有对勾）；所有行外边距一致，选中行不再右移；只读行（账户订阅）为菜单位预留同样宽度，延迟列上下对齐；每行的来源标注只写来源名（「配置 1」「账户订阅 · 只读」），来源类型在「来源」卡片里。
   不再显示「未选择 / 请点选下方一个节点」提示行，也不再显示「原来选的节点已不在配置里」琥珀色提示；失效的已选节点仍照常清除（`selectionLost` 状态保留，连接页自有文案不变）。
 - 账户订阅的加载：登录时若已选中别的来源，不会拉取账户订阅（避免静默替换），所以账户行一直是「待加载」。删除最后一个配置后，选中项变为「无」，原先激活账户行只切换了来源、没有任何请求去取账户订阅地址。现在激活账户行且尚无订阅时，会发起账户自己的交付请求（页面加载，不是连接步骤）；失败时节点页和「来源」卡片显示「账户订阅加载失败 / 点此重试」，并自动重试最多 3 次（间隔 4、12、30 秒），之后只能手动重试；退出登录或登录到期会停止重试。该状态为静态文字，无动画。
+- 自动加载是页面加载，不是连接（Ethan 已确认）：已登录、没有任何来源处于选中状态时，打开节点页会自动拉取账户订阅，包含订阅地址请求（`/setup`）及其确认（`/setup/ack`）两个 POST；这一步不会发起连接（无电源动作、不出现「已连接」）、也不会替用户选节点。androidTest 对应：`AutomaticSubscriptionUiTest.nodeNavigationLoadsTheAccountSubscriptionWithoutConnectingOrSelectingANode`、`AccountSourceRecoveryUiTest.autoLoadedAccountNeedsNoRecoveryAndABusyAccountReadDisablesTheImportMenu`；只展示不带投递端点的离线夹具（`BrandUiTest`）用 `AccountController.accountLoadEnabled = false` 关闭自动加载。
 - 库摘要读取与解析、导入入口的版本捕获及提交前校验在 IO dispatcher 执行；平台选择器与结果展示仍回到主线程。页面保存当前内存展示，展开不重新读取；未实现跨进程摘要缓存或按 revision 的解析缓存。
 
 套餐加载和其他本地展示优化见 [B 档实施记录](node-manager-and-local-loading.md)。套餐目录仍从服务端核验，缓存不作为购买授权。

@@ -207,7 +207,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() },
         accountSignedIn = { authenticated },
         nodesChanged = { nodeLatency.cancel(); nodeSelection.expireIfNeeded() },
-        accountNeedsLoad = { accountLoad.request() },
+        accountNeedsLoad = { if (accountLoadEnabled) accountLoad.request() },
         chooseNode = { target ->
             nodeSelection.expireIfNeeded()
             val match = matchNodeTarget(nodeSelection.snapshot.choices, target)
@@ -239,7 +239,9 @@ internal class AccountController(private val repository: PortalRepository, priva
         return true
     }
     /** The user's own retry after a failed account load. */
-    fun retryAccountLoad() { if (authenticated) accountLoad.request(manual = true) }
+    fun retryAccountLoad() { if (authenticated && accountLoadEnabled) accountLoad.request(manual = true) }
+    /** Test seam for display-only fixtures that own no delivery endpoint: false keeps the account from requesting its subscription (always true in the app). */
+    internal var accountLoadEnabled = true
     fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
     fun cancelAccountUsageUpdate() = accountUsage.cancel()
     private fun clearAccountUsage() {

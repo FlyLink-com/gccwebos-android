@@ -131,4 +131,13 @@ class RememberedAccountTest {
         state.logout(); runCurrent()
         assertNull(store.read()); assertEquals("", state.account)
     }
+
+    // The production AppShell call passes a repository, which AppShell treats as a test override; the Keystore-backed store
+    // therefore has to be handed over explicitly (device finding: nothing was ever written to no_backup/remembered-account.bin).
+    @Test fun theProductionAppShellKeepsTheAccountInTheEncryptedStoreNotInMemory() {
+        val source = java.io.File("src/main/java/com/gccwebos/android/MainActivity.kt").readText()
+        val production = source.substringAfter("AppShell(repositoryOverride = current.repository").substringBefore("onConnectionPowerAction")
+        assertTrue(production.contains("rememberedAccountStore = remember(applicationContext) { EncryptedRememberedAccountStore(applicationContext) }"))
+        assertTrue(source.contains("rememberedAccounts = rememberedAccountStore ?: if (repositoryOverride == null)"))
+    }
 }

@@ -59,7 +59,7 @@ class AccountLoadNoticeUiTest {
         launch()
         compose.onNodeWithTag("account-load-failed", useUnmergedTree = true).assertIsDisplayed().assertTextEquals("账户订阅加载失败")
         compose.onNodeWithText("点此重试").assertIsDisplayed()
-        compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 账户订阅 · 加载失败，点此重试")
+        compose.onNodeWithTag("configuration-status-0", useUnmergedTree = true).assertTextEquals("0 条 · 账户订阅 · 加载失败，点此重试")
         compose.onNodeWithTag("account-load-retry").assertHeightIsAtLeast(48.dp).assertHasClickAction().performClick()
         assertEquals(1, retries)
         compose.onNodeWithTag("configuration-group-0").assertHasClickAction().performClick()

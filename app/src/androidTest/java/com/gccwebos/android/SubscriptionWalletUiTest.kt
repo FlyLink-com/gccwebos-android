@@ -764,16 +764,15 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithText("取消此套餐订单").performScrollTo().assertIsDisplayed()
     }
 
-    @Test fun rechargeDialogCancelsWithoutCreatingAnOrderAtLargeFont() {
+    @Test fun rechargeCheckoutBarIsTheOnlyConfirmationAtLargeFont() {
         val fixture = rechargeOffer()
         launchCommerce(CommerceMode.Wallet, fontScale = 2f) { rechargeOffers = listOf(fixture) }
         compose.onNodeWithTag("recharge-select-${fixture.offerRef}").performScrollTo().performClick()
-        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
-        compose.onNodeWithTag("recharge-confirm").assertIsDisplayed().assertIsEnabled()
-        compose.onNodeWithTag("recharge-cancel").assertIsDisplayed()
-        capture("recharge-confirm-font-200")
-        compose.onNodeWithTag("recharge-cancel").performClick()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("recharge-payable-amount").assertIsDisplayed()
+        capture("recharge-checkout-font-200")
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
+        compose.onNodeWithText("确认充值金额").assertDoesNotExist()
         compose.runOnIdle { assertNull(commerce.recharge); assertFalse(commerce.pendingRecharge) }
     }
 

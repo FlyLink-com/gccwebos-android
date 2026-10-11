@@ -97,10 +97,9 @@ class WalletResumeUiTest {
     private fun createPending() {
         compose.onNodeWithTag("recharge-select-resume_ui_offer").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
-        compose.onNodeWithTag("recharge-confirm").performClick()
         compose.waitUntil(5000) { posts == 1 }
-        // The new order goes straight to its payment entry (figures match the confirmed offer); there is no
-        // 上一笔充值 card or second pay step on the recharge screen.
+        // One tap: the order is created and goes straight to its payment entry (figures match the selected offer);
+        // there is no confirmation dialog, 上一笔充值 card or second pay step on the recharge screen.
         compose.waitUntil(5000) { opens == 1 }
         compose.onNodeWithTag("recharge-order").assertDoesNotExist()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()

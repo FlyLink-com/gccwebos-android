@@ -57,7 +57,9 @@ import androidx.compose.ui.unit.sp
 import com.gccwebos.android.design.AccountUsagePresentation
 import com.gccwebos.android.design.AccountUsageState
 import com.gccwebos.android.design.Brand
-import com.gccwebos.android.design.GccBottomSheet
+import com.gccwebos.android.design.dialog.GccDialogAction
+import com.gccwebos.android.design.dialog.GccSecondaryButton
+import com.gccwebos.android.design.dialog.GccSheet
 import com.gccwebos.android.design.UiHaptic
 import com.gccwebos.android.design.pressFeedback
 import com.gccwebos.android.design.rememberPressFeedback
@@ -315,10 +317,11 @@ private fun ConnectionUsageDates(presentation: AccountUsagePresentation, planTex
         }
     }
     // Read-only details: a swipe-dismissable sheet instead of a centred dialog; same texts and 知道了 action.
-    if (showDetails) GccBottomSheet(onDismissRequest = { showDetails = false }, title = "套餐时间") { close ->
+    if (showDetails) GccSheet(onDismissRequest = { showDetails = false }, title = "套餐时间",
+        actions = { close -> GccSecondaryButton(GccDialogAction("知道了", close, testTag = "account-usage-time-details-close"),
+            modifier = Modifier.fillMaxWidth()) }) {
         presentation.cycleText?.let { Text("统计周期\n$it") }
         presentation.expiresAtText?.let { Text("套餐到期\n$it") }
-        TextButton(close, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)) { Text("知道了") }
     }
 }
 

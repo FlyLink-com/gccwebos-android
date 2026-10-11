@@ -24,30 +24,23 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -348,33 +341,6 @@ internal fun SkeletonCards(count: Int, cardHeight: Dp, modifier: Modifier = Modi
                     }
                 }
             }
-        }
-    }
-}
-
-// ---- 3. Bottom sheet --------------------------------------------------------------------------------------
-
-/**
- * Half-height sheet for light, read-only or navigation-only flows. Swipe down, scrim tap and back all
- * dismiss. [content] receives `close`, which animates the sheet away before [onDismissRequest].
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun GccBottomSheet(onDismissRequest: () -> Unit, modifier: Modifier = Modifier, title: String? = null,
-                            content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    val dismiss by rememberUpdatedState(onDismissRequest)
-    val close: () -> Unit = remember(sheetState, scope) {
-        { scope.launch { sheetState.hide() }.invokeOnCompletion { dismiss() } }
-    }
-    ModalBottomSheet(onDismissRequest = onDismissRequest, sheetState = sheetState, modifier = modifier,
-        containerColor = Brand.SurfaceRaised, contentColor = Brand.Text,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            title?.let { Text(it, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
-            content(close)
         }
     }
 }

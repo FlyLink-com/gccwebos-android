@@ -24,6 +24,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Alarms are cleared by a reboot; this re-arms the single daily renewal alarm. No other use. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- In-app update: lets the user allow this app to hand its own verified, signature-matching APK
+         to Android's installer. Nothing is installed silently. See docs/in-app-update.md. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:allowBackup="false"
         android:label="${connectionAppLabel}"
@@ -35,6 +38,12 @@
         <activity android:name=".manualimport.ManualQrScannerActivity" android:exported="false"
             android:excludeFromRecents="true" />
         <activity android:name="com.journeyapps.barcodescanner.CaptureActivity" tools:node="remove" />
+        <!-- Shares only cache/update/ (the verified official APK) with the system installer, per-URI, read-only. -->
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updatefiles"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" />
+        </provider>
         <service android:name=".vpn.ConnectionOwnerService" android:exported="false" />
         <receiver android:name=".renewal.RenewalReminderReceiver" android:exported="false">
             <intent-filter>

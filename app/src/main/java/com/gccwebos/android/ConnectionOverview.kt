@@ -167,7 +167,7 @@ internal fun showsConnectionCommand(presentation: ConnectionOverviewPresentation
         control.commandPending || presentation.action != ConnectionPowerAction.None
 
 /** Account preparation is a separate explicit action, never a VPN command or local readiness. */
-internal enum class ConnectionSetupAction { None, AccountChoice, Plans, SyncSubscription }
+internal enum class ConnectionSetupAction { None, AccountChoice, Plans, SyncSubscription, ChooseNode }
 internal data class ConnectionSetupGuidance(
     val action: ConnectionSetupAction,
     val label: String,
@@ -184,7 +184,10 @@ internal fun connectionSetupGuidance(
     operable: Boolean,
     busy: Boolean = false,
     refreshFailed: Boolean = false,
+    chooseNode: Boolean = false,
 ): ConnectionSetupGuidance {
+    // Signed out with an imported/third-party source and no node chosen: the next step is the node list, not buying.
+    if (!authenticated && chooseNode) return ConnectionSetupGuidance(ConnectionSetupAction.ChooseNode, "选择节点", operable && !busy)
     if (!authenticated) return ConnectionSetupGuidance(ConnectionSetupAction.AccountChoice, "开通飞连vpn", operable && !busy)
     if (busy) return ConnectionSetupGuidance(ConnectionSetupAction.None, "准备中", false)
     if (!verifiedUsage || refreshFailed) return ConnectionSetupGuidance(ConnectionSetupAction.None, "重试", false)
@@ -198,18 +201,26 @@ internal fun connectionSetupGuidance(
     return ConnectionSetupGuidance(ConnectionSetupAction.None, "一键连接", false)
 }
 
+/** A manual (imported/third-party) source is active, the user is signed out and no node is selected yet. */
+internal fun connectionChoosesNodeFirst(authenticated: Boolean, sourceKind: com.gccwebos.android.portal.ManualSourceKind,
+    hasSelectedNode: Boolean): Boolean = !authenticated && !hasSelectedNode && sourceKind in setOf(
+    com.gccwebos.android.portal.ManualSourceKind.ImportedLocal, com.gccwebos.android.portal.ManualSourceKind.ImportedRemote,
+    com.gccwebos.android.portal.ManualSourceKind.ExternalRemote)
+
 /** One explicit intent. Re-evaluate the current authenticated/busy context before calling this. */
 internal fun dispatchConnectionSetup(
     guidance: ConnectionSetupGuidance,
     onAccountChoice: () -> Unit,
     onPlans: () -> Unit,
     onSync: () -> Unit,
+    onChooseNode: () -> Unit = {},
 ): Boolean {
     if (!guidance.enabled) return false
     when (guidance.action) {
         ConnectionSetupAction.AccountChoice -> onAccountChoice()
         ConnectionSetupAction.Plans -> onPlans()
         ConnectionSetupAction.SyncSubscription -> onSync()
+        ConnectionSetupAction.ChooseNode -> onChooseNode()
         ConnectionSetupAction.None -> return false
     }
     return true
@@ -327,7 +338,8 @@ internal fun ConnectionOverview(
     val verifiedUsage = account.authenticated && usage.authenticated && !usage.verifying
     val display = accountUsagePresentation(if (verifiedUsage) usage.resource else null, usageNow, usage.notUpdated)
     val setup = connectionSetupGuidance(account.authenticated, verifiedUsage, usage.resource, snapshot, usageNow,
-        operable, account.busy, refreshFailed = usage.error != null)
+        operable, account.busy, refreshFailed = usage.error != null,
+        chooseNode = connectionChoosesNodeFirst(account.authenticated, snapshot.sourceKind, selectedNode != null || displayedNode != null))
     var showGuestChoice by remember(account.authSessionGeneration) { mutableStateOf(false) }
     var acceptedCommand by remember(control, account) { mutableStateOf(false) }
     // Keep service control authoritative without interpreting an idle preparation capability as local readiness.
@@ -366,7 +378,9 @@ internal fun ConnectionOverview(
         if (!acceptedCommand && !showsConnectionCommand(currentLocal, latestControl))
             dispatchConnectionSetup(connectionSetupGuidance(account.authenticated, currentVerified,
                 currentUsage.resource, account.localSubscription, currentTime, currentOperable, account.busy,
-                refreshFailed = currentUsage.error != null),
+                refreshFailed = currentUsage.error != null,
+                chooseNode = connectionChoosesNodeFirst(account.authenticated, account.localSubscription.sourceKind,
+                    account.nodeSelection.snapshot.selected != null)),
                 { showGuestChoice = true }, openPlans, {
                     preparationHint = null
                     preparationRequest = account.prepareForConnection {
@@ -396,7 +410,7 @@ internal fun ConnectionOverview(
                             } else preparationHint = completedLocal.title.ifBlank { "连接暂不可用" }
                         }
                     }
-                })
+                }, openNodes)
     }
     val connected = control.phase == ConnectionPhase.Connected
     // C1: a loaded list with nothing selected (first run, or the remembered node is gone). "一键连接" keeps its

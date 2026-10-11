@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.core.content.FileProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.gccwebos.android.design.GccTheme
+import com.gccwebos.android.update.updateDirectory
 import com.gccwebos.android.update.*
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -332,5 +333,35 @@ class InAppUpdateDeviceEvidenceTest {
         compose.waitForIdle()
         assertTrue(dir.listFiles().orEmpty().isEmpty())
     }
+    /**
+     * The one hop the stubbed tests skip: the real FileProvider URI + ACTION_VIEW reaching the real system installer.
+     * The file is this test build's own APK (same package and signer, never the official app), and the installer is
+     * left with Back, so nothing is installed or replaced.
+     */
+    @Test fun theRealHandOffReachesTheSystemInstallerWhichIsThenCancelled() {
+        dir.mkdirs()
+        val file = File(updateDirectory(context).also { it.mkdirs() }, "handoff-evidence.apk")
+        File(context.applicationInfo.sourceDir).copyTo(file, overwrite = true)
+        try {
+            note("07-handoff-appop.txt", shell("appops set ${context.packageName} REQUEST_INSTALL_PACKAGES allow").trim() +
+                " canRequestInstall=${real.canRequestInstall()}")
+            assertTrue("launchInstaller must resolve the update URI and start an installer", real.launchInstaller(file))
+            var focus = ""
+            waitFor(20_000, "the system installer to take focus") {
+                focus = shell("dumpsys window").lineSequence().firstOrNull { "mCurrentFocus" in it }.orEmpty()
+                Regex("installer|appdetail|InstallGrant|InstallStart", RegexOption.IGNORE_CASE).containsMatchIn(focus)
+            }
+            Thread.sleep(1500)
+            note("07-handoff-focus.txt", focus.replace(context.packageName, "<pkg>"))
+            screenshot("07-handoff-installer")
+            shell("input keyevent KEYCODE_BACK"); Thread.sleep(800)
+            shell("input keyevent KEYCODE_BACK"); Thread.sleep(800)
+            val installed = shell("pm path ${context.packageName}").trim()
+            assertTrue("the test package itself must be untouched", installed.startsWith("package:"))
+        } finally {
+            file.delete(); shell("appops set ${context.packageName} REQUEST_INSTALL_PACKAGES default")
+        }
+    }
+
     private fun shellMetered(c: InAppUpdateController) = false
 }

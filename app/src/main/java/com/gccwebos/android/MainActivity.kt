@@ -521,6 +521,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                     ConfigurationLibraryPanel(account.configurationLibrary, account.nodeSelection, account.nodes, account.resource,
                         account.localSubscription.hasCapability, account.busy || account.restoring || account.foregroundCheckPending || account.manualImport.busy,
                         authenticated = account.authenticated, connectionControl = connectionControlState,
+                        accountLoad = account.accountLoad.state, onRetryAccount = account::retryAccountLoad,
                         onSelected = openConnect, openAccount = openAccount, latency = account.nodeLatency,
                         namingEntryId = account.manualImport.namingEntryId, onNamingDone = account.manualImport::namingHandled,
                         onImport = account.manualImport::open, onReplace = account.manualImport::openForReplacement)

@@ -54,7 +54,13 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
     /** Called after a node-targeted activation settled; it may select the matching node (never a different one). */
     private val chooseNode: (NodeTarget) -> Boolean = { false },
     /** Called after a local alias / deletion changed the active registry, so the node list re-reads it. */
-    private val nodesChanged: () -> Unit = {}) {
+    private val nodesChanged: () -> Unit = {},
+    /**
+     * Called after the signed-in account's own subscription became the active source but nothing is loaded yet:
+     * its address is only fetched by the account's own delivery request (login skips it while another source is
+     * selected), so activation alone would leave it at 待加载 for good.
+     */
+    private val accountNeedsLoad: () -> Unit = {}) {
     var snapshot by mutableStateOf(ConfigurationLibrarySnapshot()); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
@@ -62,8 +68,13 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
     private var task: Job? = null
 
     fun refresh() = run { null to manager.configurationLibrarySnapshot(accountSignedIn()) }
-    fun activate(handle: ConfigurationHandle) = mutate {
-        manager.activateConfiguration(handle, guardedFence())
+    fun activate(handle: ConfigurationHandle): Boolean {
+        var needsLoad = false
+        return mutate(afterSuccess = { if (needsLoad) accountNeedsLoad() }) {
+            manager.activateConfiguration(handle, guardedFence()).also {
+                needsLoad = handle.entryId == null && it.status == LocalSubscriptionStatus.MISSING && !it.hasCapability
+            }
+        }
     }
     /**
      * Choosing a node in any saved source is one step for the user: the source becomes the active egress
@@ -109,13 +120,13 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
         if (!allowed()) throw CancellationException("Configuration operation unavailable")
         action()
     } }
-    private fun mutate(afterSuccess: (() -> Unit)? = null, action: suspend () -> LocalSubscriptionSnapshot) = run(afterSuccess) {
+    private fun mutate(afterSuccess: (() -> Unit)? = null, action: suspend () -> LocalSubscriptionSnapshot): Boolean = run(afterSuccess) {
         val value = action()
         value to manager.configurationLibrarySnapshot(accountSignedIn())
     }
     private fun run(afterSuccess: (() -> Unit)? = null,
-        action: suspend () -> Pair<LocalSubscriptionSnapshot?, ConfigurationLibrarySnapshot>) {
-        if (busy || !allowed()) return
+        action: suspend () -> Pair<LocalSubscriptionSnapshot?, ConfigurationLibrarySnapshot>): Boolean {
+        if (busy || !allowed()) return false
         val request = ++generation
         val clearVersion = manager.captureClearVersion()
         busy = true; error = null
@@ -143,6 +154,7 @@ internal class ConfigurationLibraryController(private val manager: LocalSubscrip
             // After busy is released, so the node-selection controller accepts the choice.
             if (settled && request == generation) afterSuccess?.invoke()
         }
+        return true
     }
 }
 

@@ -45,6 +45,8 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     state: NodeSelectionController, nodes: List<SafeProxyConfig.NodeSummary>, resource: Resource?,
     hasCapability: Boolean, accountBusy: Boolean, authenticated: Boolean = false,
     connectionControl: ConnectionControlState = ConnectionControlState(),
+    /** State of the signed-in account's own subscription load, and the user's retry for it. */
+    accountLoad: AccountLoadState = AccountLoadState.Idle, onRetryAccount: () -> Unit = {},
     onSelected: () -> Unit = {}, latency: NodeLatencyController? = null,
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     onImport: () -> Unit, onReplace: (ConfigurationHandle) -> Unit, openAccount: () -> Unit) {
@@ -54,12 +56,23 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         ConnectionPhase.Connecting, ConnectionPhase.Connected, ConnectionPhase.Disconnecting)
     // A signed-in account whose nodes are not loaded yet loads itself once per visit, but only while that
     // cannot discard anything: no tunnel, and no node the user already chose in another source.
-    var autoLoadTried by remember(authenticated) { mutableStateOf(false) }
+    // The visit starts over whenever the active source appears or goes away (for example after the last saved
+    // configuration was deleted), so the account can still load itself then.
+    val anyActive = library.snapshot.items.any { it.active }
+    var autoLoadTried by remember(authenticated, anyActive) { mutableStateOf(false) }
     LaunchedEffect(authenticated, library.snapshot, library.busy, accountBusy, tunnelActive, state.snapshot.selected) {
         val account = accountToAutoLoad(authenticated && !autoLoadTried && !busy && !tunnelActive, library.snapshot.items,
             state.snapshot.selected != null) ?: return@LaunchedEffect
-        autoLoadTried = true
-        library.activate(account.handle)
+        // Only a request that actually started counts: a refused one (something else busy) is tried again.
+        autoLoadTried = library.activate(account.handle)
+    }
+    // The account is the active source but nothing was ever fetched for it (nothing else loads it then): fetch once per visit.
+    val activeAccountEmpty = authenticated && library.snapshot.items.any { it.waitsForAccountLoad() && it.status == LocalSubscriptionStatus.MISSING }
+    var activeLoadTried by remember(authenticated, activeAccountEmpty) { mutableStateOf(false) }
+    LaunchedEffect(activeAccountEmpty, activeLoadTried, accountLoad, busy, tunnelActive) {
+        if (!activeAccountEmpty || activeLoadTried || accountLoad != AccountLoadState.Idle || busy || tunnelActive) return@LaunchedEffect
+        activeLoadTried = true
+        onRetryAccount()
     }
     val active = library.snapshot.items.any { it.active }
     val activeMeasurable = active && state.snapshot.status == LocalSubscriptionStatus.READY && state.snapshot.choices.isNotEmpty()
@@ -81,8 +94,9 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
     ConfigurationLibraryContent(library.snapshot, busy, library.error, canMeasure,
         measuring = latency?.busy == true,
         latencyFor = { item, position -> latency?.libraryReading(item.handle.entryId ?: AccountSourceId, position, item.contentKey) },
-        onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
+        onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = { library.activate(it) },
         countText = { count -> NodesCountText(count, latency) },
+        accountLoad = accountLoad, onRetryAccount = onRetryAccount,
         onChooseNode = library::activateAndChoose,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
         onRenameNode = library::renameNode, onDeleteNode = library::deleteNode, onRestoreNode = library::restoreNode,
@@ -130,6 +144,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     /** The 「N 条」 text of the heading row; the page adds the last latency-test time to it. */
     countText: @Composable (Int) -> Unit = { count ->
         Text("$count 条", fontSize = 10.sp, color = Brand.Muted, modifier = Modifier.testTag("nodes-count")) },
+    accountLoad: AccountLoadState = AccountLoadState.Idle, onRetryAccount: () -> Unit = {},
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     activeContent: @Composable (ConfigurationItem, UnifiedList) -> Unit) {
     val actionsBlocked = busy || snapshot.storageError
@@ -177,6 +192,11 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
         // The add-configuration "+" is always the far-right control of this row; the segmented switcher fills the rest once
         // there is more than one source. (There is no page title above it any more.)
         SourceSwitcherRow(snapshot.items, filterKey, enabled = !actionsBlocked, onImport = onImport) { filterKey = it }
+        // The signed-in account's subscription is being fetched or could not be: say so, with a retry. Only while that
+        // source is the active one and still empty, so an old failure never hides behind loaded nodes.
+        val loadingAccount = snapshot.items.firstOrNull { it.active && it.kind == ManualSourceKind.LegacyRemote &&
+            it.status != LocalSubscriptionStatus.READY }
+        if (loadingAccount != null && accountLoad != AccountLoadState.Idle) AccountLoadNotice(accountLoad, onRetryAccount)
         // One list for every source. Nodes of the active source keep latency and selection; nodes of the
         // other sources sit in the same list and one tap makes their source active and selects exactly that node.
         val others = snapshot.items.withIndex().filter { (index, item) ->
@@ -229,7 +249,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             .flatMap { (index, item) -> item.nodeDeleted.sorted().map { position -> Triple(index, item, position) } }
         if (deleted.isNotEmpty()) DeletedNodesSection(deleted, actionsBlocked, onRestoreNode)
         // Where every node comes from; also the place for source-level actions (rename / replace / delete).
-        if (snapshot.items.isNotEmpty()) SourceList(snapshot.items) { item, index ->
+        if (snapshot.items.isNotEmpty()) SourceList(snapshot.items, accountLoad, onRetryAccount) { item, index ->
             ConfigurationItemMenu(item, index, actionsBlocked, onDetails = {
                 dialogHandle = item.handle; dialog = LibraryDialog.Details
             }, onRename = {
@@ -530,24 +550,60 @@ private fun NodeRowMenu(tag: String, busy: Boolean, deleteBlocked: Boolean, onRe
 }
 
 @Composable
-private fun SourceList(items: List<ConfigurationItem>,
+private fun SourceList(items: List<ConfigurationItem>, accountLoad: AccountLoadState, onRetryAccount: () -> Unit,
     menu: @Composable (ConfigurationItem, Int) -> Unit) {
     GlassSurface(Modifier.fillMaxWidth().testTag("unified-sources"), shape = RoundedCornerShape(20.dp)) {
         Column {
             Text("来源", fontSize = 12.sp, color = Brand.Muted, modifier = Modifier.padding(start = 14.dp, top = 10.dp, end = 14.dp))
             items.forEachIndexed { index, item ->
                 key(item.displayKey) {
-                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp).testTag("configuration-group-$index"),
+                    val retry = accountLoad == AccountLoadState.Failed && item.waitsForAccountLoad()
+                    Row(Modifier.fillMaxWidth().then(if (retry) Modifier.clickable(role = Role.Button, onClickLabel = "重试加载官方节点",
+                        onClick = onRetryAccount) else Modifier).padding(start = 14.dp, end = 4.dp).testTag("configuration-group-$index"),
                         verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
                             Text(item.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("configuration-name-$index"))
-                            Text(groupCaption(item), fontSize = 10.sp, color = Brand.Muted,
+                            Text(accountCaption(item, accountLoad), fontSize = 10.sp, color = Brand.Muted,
                                 modifier = Modifier.testTag("configuration-status-$index"))
                         }
                         menu(item, index)
                     }
                 }
+            }
+        }
+    }
+}
+
+/** The active account row that has nothing loaded yet: the only row an account load can fill. */
+internal fun ConfigurationItem.waitsForAccountLoad(): Boolean =
+    kind == ManualSourceKind.LegacyRemote && active && status != LocalSubscriptionStatus.READY
+
+/** [groupCaption], with the account row saying so while its load is running or has failed. */
+internal fun accountCaption(item: ConfigurationItem, accountLoad: AccountLoadState): String = when {
+    !item.waitsForAccountLoad() -> groupCaption(item)
+    accountLoad == AccountLoadState.Loading -> "${item.nodes.count { !it.info }} 条 · 官方 · 加载中…"
+    accountLoad == AccountLoadState.Failed -> "${item.nodes.count { !it.info }} 条 · 官方 · 加载失败，点此重试"
+    else -> groupCaption(item)
+}
+
+internal const val AccountLoadingText = "正在加载官方节点…"
+internal const val AccountLoadFailedText = "官方节点加载失败"
+internal const val AccountLoadRetryText = "点此重试"
+
+/** Static (no motion): a loading line, or the failure with a ≥48 dp retry. Design tokens only. */
+@Composable
+private fun AccountLoadNotice(state: AccountLoadState, onRetry: () -> Unit) {
+    GlassSurface(Modifier.fillMaxWidth().testTag("account-load-notice"), shape = RoundedCornerShape(20.dp)) {
+        if (state == AccountLoadState.Loading) {
+            Text(AccountLoadingText, fontSize = 13.sp, color = Brand.Muted,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp).testTag("account-load-loading"))
+        } else {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "重试加载官方节点", onClick = onRetry)
+                .padding(horizontal = 14.dp, vertical = 8.dp).testTag("account-load-retry"),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(AccountLoadFailedText, fontSize = 13.sp, color = Brand.Text, modifier = Modifier.weight(1f).testTag("account-load-failed"))
+                Text(AccountLoadRetryText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Brand.Cyan)
             }
         }
     }

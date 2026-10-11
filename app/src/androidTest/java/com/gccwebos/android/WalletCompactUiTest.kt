@@ -200,10 +200,10 @@ class WalletCompactUiTest {
         closeDetails()
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
-        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsDisplayed().performClick()
-        compose.onNodeWithText("CNY 23.45 → 73 Coins").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("recharge-cancel").assertIsDisplayed().performClick()
-        compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
+        // The checkout bar itself is the confirmation: amount and 立即充值 are on screen, and there is no dialog step.
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("recharge-payable-amount").assertTextEquals("应付金额：￥23.45")
+        compose.onNodeWithText("确认充值金额").assertDoesNotExist()
         compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
         assertNoSideEffects()
     }
@@ -246,8 +246,7 @@ class WalletCompactUiTest {
         compose.onNodeWithTag("recharge-selected-pay").assertIsNotEnabled()
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").assertIsNotEnabled()
         compose.runOnIdle { state.busy = false }
-        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
-        compose.onNodeWithText("CNY 25.67 → 73 Coins").assertExists()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsEnabled()
         compose.runOnIdle { owner.authSessionGeneration++ }
         compose.runOnIdle { assertFalse(state.currentSession()); assertEquals(listOf(changed), state.rechargeOffers) }
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").assertDoesNotExist()

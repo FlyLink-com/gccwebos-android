@@ -173,13 +173,19 @@ class PaymentNavigationPolicyTest {
         assertFalse(Regex("Text\\(\"[^\"]*portal\\.gccwebos\\.com").containsMatchIn(source))
     }
 
-    @Test fun walletDialogsNoLongerShowTheHostConfirmation() {
+    @Test fun walletAndOrderDetailsHaveNoPaymentDialogsAndShowNoHost() {
         val source = listOf("src/main/java/com/gccwebos/android/commerce/WalletPanel.kt").map { File(it) }.single { it.exists() }.readText()
         assertFalse(source.contains("将打开"))
         assertFalse(source.contains("portal.gccwebos.com"))
         assertFalse(source.contains("URI(it.url).host"))
-        // The pinning check stays: opening is still gated by the validated redirect.
-        assertTrue(source.contains("state.canOpenPayment(order, now)"))
+        // 立即充值 / 立即支付 go straight through: no create-order confirmation and no payment review dialog.
+        assertFalse(source.contains("确认充值金额"))
+        assertFalse(source.contains("确认金额并创建订单"))
+        assertFalse(source.contains("核对服务器付款信息"))
+        assertFalse(source.contains("PaymentReviewDialog"))
+        // The pinning check stays: opening is still gated by the validated redirect (RechargeFlowController.openNow).
+        val flow = File("src/main/java/com/gccwebos/android/commerce/RechargeFlowController.kt").readText()
+        assertTrue(flow.contains("commerce.canOpenPayment(order, now)"))
     }
 
     @Test fun noHostIsShownAndTheChainNeverSharesAnythingWithTheApp() {

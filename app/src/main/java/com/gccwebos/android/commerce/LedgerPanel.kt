@@ -29,7 +29,6 @@ internal fun LedgerPanel(account: AccountController, state: CommerceController, 
     val payFlow = remember(account.authSessionGeneration, state) { RechargeFlowController(account, state) { opener(it) } }
     DisposableEffect(payFlow) { onDispose { payFlow.dispose() } }
     UnpaidRechargeOrders(state, payFlow, now)
-    PaymentReviewDialog(payFlow, state, now)
     var selectedGroup by remember(state, account.authSessionGeneration) { mutableStateOf<LedgerDisplayGroup?>(null) }
     val rows = state.ledgerPage?.entries
     val groups = remember(rows) { rows?.let(LedgerPresentation::displayGroups) }

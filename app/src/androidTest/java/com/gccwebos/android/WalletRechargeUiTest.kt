@@ -75,21 +75,16 @@ class WalletRechargeUiTest {
         compose.onNodeWithTag("recharge-offers-empty").assertExists()
         compose.runOnIdle { assertTrue(calls.isEmpty()); assertTrue(opened.isEmpty()) }
     }
-    @Test fun realOfferAmountAndLargeFontCancelStayLocalThenChangedSnapshotRejectsCreate() {
+    @Test fun aChangedOfferSnapshotRejectsTheTapWithOneInlineMessageAndNoDialog() {
         launch(fontScale = 2f) { rechargeOffers = listOf(offer); rechargeOffersLoaded = true }
         compose.onNodeWithText("73 Coins").performScrollTo().assertIsDisplayed()
-        repeat(2) {
-            compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
-            compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
-            compose.onNodeWithTag("recharge-confirm").assertIsDisplayed()
-            compose.onNodeWithTag("recharge-cancel").performClick()
-            compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
-        }
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
-        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
+        // The directory changes after the user selected (price moved): the tap must neither create nor open anything.
         compose.runOnIdle { state.rechargeOffers = listOf(offer.copy(quoteVersion = 10, amountMinor = 2567)) }
-        compose.onNodeWithTag("recharge-confirm").performClick()
-        compose.onNodeWithTag("recharge-flow-error").performScrollTo().assertExists()
+        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
+        compose.onNodeWithText("确认充值金额").assertDoesNotExist()
+        compose.onNodeWithText("核对服务器付款信息").assertDoesNotExist()
         compose.runOnIdle { assertTrue(calls.isEmpty()); assertNull(state.recharge); assertTrue(opened.isEmpty()) }
     }
     @Test fun anUnpaidOrderIsNeverShownOnTheRechargeScreenItLivesInOrderDetails() {

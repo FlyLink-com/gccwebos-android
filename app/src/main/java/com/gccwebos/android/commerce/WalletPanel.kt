@@ -143,20 +143,10 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
             state.rechargeOffersLoaded && offersFailure == null && state.rechargeOffers.any { it == selected } &&
                 rechargeOfferPayable(selected, method) && "alipay" in selected.paymentMethods && state.canOperate()
         }
-        // Same guarded handler as before: selection -> local confirmation dialog -> idempotent order creation.
+        // One tap: guarded offer check -> idempotent order creation -> in-app payment page (no dialog in between).
         RechargeCheckoutBar(payable = payableSelection?.let(::rechargePriceText),
-            enabled = !state.busy && payableSelection != null, onSubmit = { payableSelection?.let(flow::select) })
+            enabled = !state.busy && payableSelection != null, onSubmit = { payableSelection?.let(flow::rechargeNow) })
     }
-    flow.selectedOffer?.let { offer ->
-        AlertDialog(onDismissRequest = flow::cancelSelection, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("确认充值金额") },
-            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)} → ${formatCoins(offer.paidCoinUnits)}")
-                Text("本次选项尚未锁价。创建后按服务器返回金额再次核对，再主动打开支付宝。")
-            } }, confirmButton = { TextButton(onClick = flow::confirmSelection, enabled = !state.busy,
-                modifier = Modifier.testTag("recharge-confirm")) { Text("确认金额并创建订单") } },
-            dismissButton = { TextButton(onClick = flow::cancelSelection, modifier = Modifier.testTag("recharge-cancel")) { Text("取消") } })
-    }
-    PaymentReviewDialog(flow, state, now)
     // Read-only breakdown: a swipe-dismissable bottom sheet over the top-up page (same tags and fields).
     if (balanceDetails && mode == CommerceMode.Wallet) GccSheet(onDismissRequest = { balanceDetails = false },
         modifier = Modifier.testTag("wallet-balance-details-dialog"), title = "余额明细",
@@ -227,22 +217,5 @@ private fun WalletBalanceMetrics(wallet: Wallet?) {
                 }
             }
         }
-    }
-}
-
-/** The server-figures review before the payment page opens; shared by the wallet's 上一笔充值 card and 订单明细. */
-@Composable
-internal fun PaymentReviewDialog(flow: RechargeFlowController, state: CommerceController, now: Instant) {
-    flow.paymentReview?.let { order ->
-        AlertDialog(onDismissRequest = flow::dismissPayment, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("核对服务器付款信息") },
-            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("实际应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
-                Text("到账目标：${formatCoins(order.expectedPaidCoinUnits)}")
-                Text("付款方式：支付宝")
-                Text("请核对实际金额；选项价格变化时，以此订单为准。点击后会在应用内打开付款页面，暂不付款会保留订单。")
-                if (!state.canOpenPayment(order, now)) Text("订单已更新或入口已失效，请关闭并查询。")
-            } }, confirmButton = { AlipayButton("支付宝支付", { flow.openPayment(Instant.now()) },
-                enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },
-            dismissButton = { TextButton(onClick = flow::dismissPayment, modifier = Modifier.testTag("payment-open-cancel")) { Text("暂不付款") } })
     }
 }

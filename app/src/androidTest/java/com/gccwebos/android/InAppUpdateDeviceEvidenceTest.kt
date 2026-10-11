@@ -54,7 +54,8 @@ class InAppUpdateDeviceEvidenceTest {
     private val dir get() = File(context.cacheDir, "update-evidence")
     private val job = Job()
     private val scope = CoroutineScope(Dispatchers.Main + job)
-    private val real = AndroidUpdateEnvironment(context)
+    /** Built from the Activity like production, so the settings screen opens inside this task and Back returns here. */
+    private val real get() = AndroidUpdateEnvironment(compose.activity)
 
     @Before fun before() { dir.deleteRecursively() }
     @After fun after() { job.cancel(); dir.deleteRecursively() }
@@ -210,12 +211,19 @@ class InAppUpdateDeviceEvidenceTest {
         Thread.sleep(1200); screenshot("05-system-install-unknown-apps-settings")
         note("settings-focus.txt", shell("dumpsys window | grep -E 'mCurrentFocus'"))
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-        waitFor(what = "back in the app") { shell("dumpsys window | grep mCurrentFocus").contains(context.packageName) }
-        Thread.sleep(800); screenshot("06-back-from-settings-still-waiting")
+        // OPPO may interpose an "open com.gccwebos.android.debug.test?" confirmation (securitypermission) when the instrumented
+        // package returns to the front. That prompt belongs to the OEM and the test package, so this wait is best effort.
+        val end = System.currentTimeMillis() + 15_000
+        var back = false
+        while (System.currentTimeMillis() < end && !back) {
+            val focus = shell("dumpsys window | grep mCurrentFocus")
+            if (focus.contains("AppStartConfirmDialogActivity")) note("oem-app-start-dialog.txt", "OPPO AppStartConfirmDialogActivity appeared after Back\n")
+            back = focus.contains(context.packageName); if (!back) Thread.sleep(300)
+        }
+        if (back) { Thread.sleep(800); screenshot("06-back-from-settings-still-waiting") }
         assertTrue(c.state.value is InAppUpdateState.NeedsInstallPermission)
         assertTrue("the installer must never have been launched", env.launched.isEmpty())
-        compose.onNodeWithTag("in-app-update-cancel").performClick()
-        compose.waitForIdle()
+        compose.runOnUiThread { c.dismiss() }
         assertTrue("leaving deletes the verified file", dir.listFiles().orEmpty().isEmpty())
     }
 

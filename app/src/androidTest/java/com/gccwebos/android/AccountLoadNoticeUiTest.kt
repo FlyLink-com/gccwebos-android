@@ -57,7 +57,7 @@ class AccountLoadNoticeUiTest {
     @Test fun aFailedLoadSaysSoAndTheNoticeAndTheSourceRowBothRetry() {
         state = AccountLoadState.Failed
         launch()
-        compose.onNodeWithTag("account-load-failed").assertIsDisplayed().assertTextEquals("账户订阅加载失败")
+        compose.onNodeWithTag("account-load-failed", useUnmergedTree = true).assertIsDisplayed().assertTextEquals("账户订阅加载失败")
         compose.onNodeWithText("点此重试").assertIsDisplayed()
         compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 账户订阅 · 加载失败，点此重试")
         compose.onNodeWithTag("account-load-retry").assertHeightIsAtLeast(48.dp).assertHasClickAction().performClick()

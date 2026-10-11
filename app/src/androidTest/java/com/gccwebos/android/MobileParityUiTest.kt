@@ -290,7 +290,7 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
-        compose.runOnIdle { assertFalse(state.authenticated); assertTrue(calls.isEmpty()); state.logout() }
+        compose.runOnIdle { assertFalse(state.authenticated); assertTrue(calls.isEmpty()); state.cancelAuthentication() }
         compose.waitUntil(10_000) { !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("nav-Plans").performClick()
@@ -424,7 +424,7 @@ class MobileParityUiTest {
             assertEquals("", state.password); assertEquals("", state.answer)
             assertNull(state.resource)
             assertEquals("Synthetic account A local node", state.localSubscription.nodes.single().name)
-            assertNull(delivery.value); state.logout()
+            assertNull(delivery.value); state.cancelAuthentication()
         }
         compose.waitUntil(10_000) { !state.authenticated && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()

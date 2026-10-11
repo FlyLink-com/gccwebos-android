@@ -16,6 +16,8 @@ internal fun offlineUiAccount(scope: CoroutineScope): AccountController {
         override suspend fun request(path: String, body: String?, session: Secret?): WireResponse = error("Offline UI fixture cannot request")
     }
     return AccountController(PortalRepository(wire, store, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), {0}), scope).apply {
+        // Display-only fixture with no delivery endpoint: the account must not try to load itself (#65).
+        accountLoadEnabled = false
         authenticated = true; account = "fixture@example.invalid"
         resource = Resource.Available("resource_" + "a".repeat(64), "synthetic", Instant.now().plusSeconds(47 * 86400), false,
             Usage(100L * 1024 * 1024 * 1024, 20L * 1024 * 1024 * 1024, 80L * 1024 * 1024 * 1024, "measured", Instant.now()), 365, 100.0)

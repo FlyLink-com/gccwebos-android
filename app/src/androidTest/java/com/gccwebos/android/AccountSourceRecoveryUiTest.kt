@@ -94,12 +94,13 @@ class AccountSourceRecoveryUiTest {
 
     private fun awaitIdle() { compose.waitUntil(10_000) { idle() } }
 
-    private fun launch(f: Fixture) {
+    /** [autoLoad] false: the account does not fetch its own subscription (#65), to exercise the explicit recovery paths. */
+    private fun launch(f: Fixture, autoLoad: Boolean = true) {
         compose.setContent {
             val scope = rememberCoroutineScope()
             account = remember { AccountController(f.repository, scope, sourceCommitFence = { action ->
                 action(); f.commits.incrementAndGet()
-            }) }
+            }).apply { accountLoadEnabled = autoLoad } }
             LaunchedEffect(account) { account.restore() }
             AppShell(accountOverride = account, repositoryOverride = f.repository,
                 autoLoadCommerce = false, autoRefreshPages = false,
@@ -128,7 +129,8 @@ class AccountSourceRecoveryUiTest {
     }
 
     @Test fun emptySelectionRequiresExplicitAccountRecoveryBeforeOneClickCanImport() {
-        val f = Fixture(); launch(f)
+        // The account's automatic load (#65) is off here: this is the path taken when it has not happened (or failed).
+        val f = Fixture(); launch(f, autoLoad = false)
         compose.runOnIdle {
             assertTrue(account.configurationLibrary.snapshot.items.isEmpty())
             assertEquals(2, f.overviewReads.get())
@@ -181,7 +183,8 @@ class AccountSourceRecoveryUiTest {
     }
 
     @Test fun selectedLocalAndRemoteSourcesNeverExposeAnAccountSwitch() {
-        val f = Fixture(); launch(f)
+        // Automatic account load (#65) is off: this test is about manual sources never reading the account's setup.
+        val f = Fixture(); launch(f, autoLoad = false)
         for (kind in listOf(ManualImportInputKind.Document, ManualImportInputKind.Link)) {
             openMenu()
             compose.runOnIdle {

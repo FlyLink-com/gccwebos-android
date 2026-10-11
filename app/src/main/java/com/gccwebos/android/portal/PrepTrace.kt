@@ -9,6 +9,9 @@ internal object PrepTrace {
     @Volatile var sink: ((String) -> Unit)? = null
     fun mark(phase: String) { sink?.invoke(phase) }
 
+    /** Builds the text only when a sink is installed, so release builds never format it. */
+    inline fun markLazy(text: () -> String) { sink?.invoke(text()) }
+
     /** Runs [block]; with a sink installed it also records "<phase>-begin" and "<phase>-end +N ms". */
     inline fun <T> span(phase: String, block: () -> T): T {
         val out = sink ?: return block()

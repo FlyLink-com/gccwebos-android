@@ -118,7 +118,7 @@ private object PublicSubscriptionAddress {
  * not begin with the address (and address family) the first attempt is already stuck on.
  */
 internal class PublicSubscriptionDns(private val resolver: Dns = Dns.SYSTEM,
-    private val otherFamilyFirst: Boolean = false) : Dns {
+    private val otherFamilyFirst: Boolean = false, private val interleave: Boolean = false) : Dns {
     override fun lookup(hostname: String): List<InetAddress> {
         val answers = try {
             val found = resolver.lookup(hostname).toList()
@@ -126,10 +126,27 @@ internal class PublicSubscriptionDns(private val resolver: Dns = Dns.SYSTEM,
                 throw UnknownHostException()
             found
         } catch (_: Exception) { throw UnknownHostException("Subscription DNS unavailable") }
-        return if (otherFamilyFirst) alternateOrder(answers) else answers
+        val ordered = if (otherFamilyFirst) alternateOrder(answers) else answers
+        return if (interleave) interleaveFamilies(ordered) else ordered
     }
 
     internal companion object {
+        /**
+         * Alternates address families starting with the first answer's family (v6, v4, v6, v4, ...), keeping each
+         * family's own order. With a short per-address connect timeout, a dead first family costs one attempt instead
+         * of all of its addresses before the other family is tried. Same addresses, only reordered.
+         */
+        fun interleaveFamilies(answers: List<InetAddress>): List<InetAddress> {
+            if (answers.size < 2) return answers
+            val firstIsV6 = answers[0] is Inet6Address
+            val same = answers.filter { (it is Inet6Address) == firstIsV6 }
+            val other = answers.filter { (it is Inet6Address) != firstIsV6 }
+            if (other.isEmpty()) return answers
+            return buildList(answers.size) {
+                for (index in 0 until maxOf(same.size, other.size)) { same.getOrNull(index)?.let(::add); other.getOrNull(index)?.let(::add) }
+            }
+        }
+
         /** Other address family first when the answers mix families; otherwise rotated by one. */
         fun alternateOrder(answers: List<InetAddress>): List<InetAddress> {
             if (answers.size < 2) return answers
@@ -147,7 +164,27 @@ internal fun manualSubscriptionClient(resolver: Dns = Dns.SYSTEM): OkHttpClient 
     .authenticator(Authenticator.NONE).proxyAuthenticator(Authenticator.NONE)
     .cache(null).followRedirects(false).followSslRedirects(false)
     .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS)
+    .eventListenerFactory(ReadTimingListener.factory)
     .retryOnConnectionFailure(false).build()
+
+/**
+ * The client for an import the user is watching. Everything isolating the connect client stays (no proxy, cookies,
+ * cache, redirects, credentials; public-address DNS) and the budget is longer: 60 s overall, 55 s of server silence.
+ *
+ * Two deliberate differences, both import-only:
+ *  - [retryOnConnectionFailure] is on. OkHttp only moves on to the next resolved address when it is, and with it off
+ *    (the connect client) a dead first address fails the whole attempt; the second hedged request is then the only
+ *    fallback. It also retries a stale pooled connection. A read timeout after the request was sent is never retried.
+ *  - connect timeout is 6 s per address (instead of 15 s) and the addresses are interleaved v6/v4, so a black-holed
+ *    address or family costs 6 s, not 15 s, before the next one is tried.
+ */
+internal fun manualSubscriptionImportClient(resolver: Dns = Dns.SYSTEM, otherFamilyFirst: Boolean = false): OkHttpClient =
+    manualSubscriptionClient(resolver).newBuilder()
+        .dns(PublicSubscriptionDns(resolver, otherFamilyFirst = otherFamilyFirst, interleave = true))
+        .retryOnConnectionFailure(true)
+        .connectTimeout(ManualSubscriptionTransport.IMPORT_CONNECT_MILLIS, TimeUnit.MILLISECONDS)
+        .readTimeout(ManualSubscriptionTransport.IMPORT_OVERALL_MILLIS - 5_000L, TimeUnit.MILLISECONDS)
+        .callTimeout(ManualSubscriptionTransport.IMPORT_OVERALL_MILLIS, TimeUnit.MILLISECONDS).build()
 
 /**
  * A new, credential-free transport only for explicitly selected manual remote subscriptions.
@@ -161,34 +198,48 @@ internal fun manualSubscriptionClient(resolver: Dns = Dns.SYSTEM): OkHttpClient 
  */
 class ManualSubscriptionTransport internal constructor(private val calls: Call.Factory,
     private val hedgeCalls: Call.Factory = calls,
-    private val hedgeAfterMillis: Long = HEDGE_AFTER_MILLIS) : SubscriptionSource {
+    private val hedgeAfterMillis: Long = HEDGE_AFTER_MILLIS,
+    private val importCalls: Call.Factory = calls,
+    private val importHedgeCalls: Call.Factory = hedgeCalls,
+    private val importHedgeAfterMillis: Long = IMPORT_HEDGE_AFTER_MILLIS,
+    private val importOverallMillis: Long = IMPORT_OVERALL_MILLIS) : SubscriptionSource {
     constructor() : this(manualSubscriptionClient().let { primary ->
-        Pair(primary, primary.newBuilder().dns(PublicSubscriptionDns(otherFamilyFirst = true)).build())
+        listOf(primary, primary.newBuilder().dns(PublicSubscriptionDns(otherFamilyFirst = true)).build(),
+            manualSubscriptionImportClient(), manualSubscriptionImportClient(otherFamilyFirst = true))
     })
-    private constructor(clients: Pair<OkHttpClient, OkHttpClient>) : this(clients.first, clients.second)
+    private constructor(clients: List<OkHttpClient>) : this(clients[0], clients[1], HEDGE_AFTER_MILLIS, clients[2], clients[3])
 
     internal companion object {
+        /** Connect (one-click connect, refresh): unchanged since #58. */
         const val HEDGE_AFTER_MILLIS = 5_000L
         const val OVERALL_MILLIS = 30_000L
+        /** Import: the user watches a progress bar and can cancel, so the read may take longer; hedge later. */
+        const val IMPORT_OVERALL_MILLIS = 60_000L
+        const val IMPORT_HEDGE_AFTER_MILLIS = 15_000L
+        const val IMPORT_CONNECT_MILLIS = 6_000L
     }
 
     private sealed interface Attempt {
         class Done(val read: SubscriptionRead) : Attempt
         class Failed(val failure: Exception) : Attempt
     }
-    private suspend fun attempt(url: Secret, factory: Call.Factory): Attempt = try {
-        Attempt.Done(readOnce(url, factory))
+    private suspend fun attempt(url: Secret, factory: Call.Factory, label: ReadLabel): Attempt = try {
+        Attempt.Done(readOnce(url, factory, label))
     } catch (cancel: CancellationException) { throw cancel }
     catch (failure: Exception) { Attempt.Failed(failure) }
     private fun retryable(failure: Exception) = failure is PortalFailure && failure.reason == PortalFailure.Reason.NETWORK
     private fun discard(attempt: Attempt?) { (attempt as? Attempt.Done)?.read?.bytes?.fill(0) }
 
-    private suspend fun hedgedRead(url: Secret): SubscriptionRead = coroutineScope {
-        val first = async { attempt(url, calls) }
-        val early = withTimeoutOrNull(hedgeAfterMillis) { first.await() }
-        if (early is Attempt.Done) return@coroutineScope early.read
+    private suspend fun hedgedRead(url: Secret, kind: String, firstCalls: Call.Factory, secondCalls: Call.Factory,
+        hedgeAfter: Long): SubscriptionRead = coroutineScope {
+        val began = System.nanoTime()
+        fun elapsed() = (System.nanoTime() - began) / 1_000_000
+        val first = async { attempt(url, firstCalls, ReadLabel(kind, "primary")) }
+        val early = withTimeoutOrNull(hedgeAfter) { first.await() }
+        if (early is Attempt.Done) { PrepTrace.markLazy { "read-result $kind winner=primary total=${elapsed()}ms" }; return@coroutineScope early.read }
         if (early is Attempt.Failed && !retryable(early.failure)) throw early.failure
-        val second = async { attempt(url, hedgeCalls) }
+        PrepTrace.markLazy { "read-hedge-start $kind after=${elapsed()}ms reason=${if (early == null) "slow" else "network-error"}" }
+        val second = async { attempt(url, secondCalls, ReadLabel(kind, "hedge")) }
         var firstOutcome: Attempt? = early
         var secondOutcome: Attempt? = null
         while (true) {
@@ -203,6 +254,7 @@ class ManualSubscriptionTransport internal constructor(private val calls: Call.F
                 val loser = if (settled.first) second else first
                 loser.cancel()
                 if (loser.isCompleted && !loser.isCancelled) discard(loser.getCompleted())
+                PrepTrace.markLazy { "read-result $kind winner=${if (settled.first) "primary" else "hedge"} total=${elapsed()}ms" }
                 return@coroutineScope outcome.read
             }
             outcome as Attempt.Failed
@@ -212,7 +264,10 @@ class ManualSubscriptionTransport internal constructor(private val calls: Call.F
                 if (second.isCompleted && !second.isCancelled) discard(second.getCompleted())
                 throw outcome.failure
             }
-            if (firstOutcome != null && secondOutcome != null) throw PortalFailure(PortalFailure.Reason.NETWORK)
+            if (firstOutcome != null && secondOutcome != null) {
+                PrepTrace.markLazy { "read-result $kind winner=none (both attempts failed) total=${elapsed()}ms" }
+                throw PortalFailure(PortalFailure.Reason.NETWORK)
+            }
         }
         @Suppress("UNREACHABLE_CODE")
         error("Both attempts settle before the loop exits")
@@ -220,11 +275,19 @@ class ManualSubscriptionTransport internal constructor(private val calls: Call.F
 
     override suspend fun download(url: Secret): ByteArray = read(url).bytes
 
-    override suspend fun read(url: Secret): SubscriptionRead {
+    override suspend fun read(url: Secret): SubscriptionRead =
+        readWithin(url, "connect", OVERALL_MILLIS, calls, hedgeCalls, hedgeAfterMillis)
+
+    /** Import budget: [importOverallMillis] overall, hedge after [importHedgeAfterMillis] or on a network error. */
+    override suspend fun readForImport(url: Secret): SubscriptionRead =
+        readWithin(url, "import", importOverallMillis, importCalls, importHedgeCalls, importHedgeAfterMillis)
+
+    private suspend fun readWithin(url: Secret, kind: String, overall: Long, firstCalls: Call.Factory, secondCalls: Call.Factory,
+        hedgeAfter: Long): SubscriptionRead {
         var owned: SubscriptionRead? = null
         try {
             // Caller cancellation also bounds a blocking platform DNS lookup whose callback may arrive late.
-            val result = withTimeout(OVERALL_MILLIS) { hedgedRead(url).also { owned = it } }
+            val result = withTimeout(overall) { hedgedRead(url, kind, firstCalls, secondCalls, hedgeAfter).also { owned = it } }
             owned = null // No suspension between transfer and return.
             return result
         } catch (_: TimeoutCancellationException) {
@@ -233,9 +296,9 @@ class ManualSubscriptionTransport internal constructor(private val calls: Call.F
         } finally { owned?.bytes?.fill(0) }
     }
 
-    private suspend fun readOnce(url: Secret, calls: Call.Factory): SubscriptionRead {
+    private suspend fun readOnce(url: Secret, calls: Call.Factory, label: ReadLabel): SubscriptionRead {
         val accepted = ManualSubscriptionUrlPolicy.validate(url.value)
-        val request = Request.Builder().url(accepted)
+        val request = Request.Builder().url(accepted).tag(ReadLabel::class.java, label)
             .header("User-Agent", "FeilianVPN/0.4 (Mihomo-compatible)")
             .header("Accept", "application/yaml, application/x-yaml, text/yaml, text/plain")
             .header("Cache-Control", "no-store").get().build()

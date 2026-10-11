@@ -703,7 +703,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                 val reader = if (kind == ManualSourceKind.ImportedRemote) source else externalSource
                     ?: throw UnsupportedManualSubscriptionLink()
                 progress(ImportStage.Reading)
-                val result = PrepTrace.span("import-read") { reader.read(url) }
+                val result = PrepTrace.span("import-read") { reader.readForImport(url) }
                 try {
                     currentCoroutineContext().ensureActive()
                     val known = if (expirySource.kind == kind && expirySource.url?.value == url.value &&

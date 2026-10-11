@@ -229,11 +229,13 @@ internal class CommerceController(private val account: AccountController, privat
             ensureCurrentSession(); purchase = next
         } finally { if (currentOperation()) { pendingPurchase = requireNotNull(repo).pending("purchase") != null; wallet = null } }
     }
-    fun confirmRecharge(offer: RechargeOffer) = run {
+    /** [onCreated] runs right after the server's order is installed, still inside the operation (e.g. to open its payment entry). */
+    fun confirmRecharge(offer: RechargeOffer, onCreated: (RechargeOrder) -> Unit = {}) = run {
         try {
             val next = requireNotNull(repo).recharge(offer)
             ensureCurrentSession()
             recharge = next
+            onCreated(next)
         }
         finally {
             if (currentOperation())

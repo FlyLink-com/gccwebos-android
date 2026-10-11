@@ -29,11 +29,10 @@ import java.time.Instant
 internal fun OrderHistoryPanel(account: AccountController, state: CommerceController,
     detailOverride: OrderDetailController? = null, paymentOpener: (String) -> Unit = {}, now: Instant = Instant.now()) {
     val scope = rememberCoroutineScope()
-    // 待付款 orders are paid from here (not from the recharge screen): same review step and opener as the wallet.
+    // 待付款 orders are paid from here (not from the recharge screen): straight to the order's valid payment entry.
     val opener by rememberUpdatedState(paymentOpener)
     val payFlow = remember(account.authSessionGeneration, state) { RechargeFlowController(account, state) { opener(it) } }
     DisposableEffect(payFlow) { onDispose { payFlow.dispose() } }
-    PaymentReviewDialog(payFlow, state, now)
     val details = detailOverride ?: remember(account.authSessionGeneration, state) {
         OrderDetailController(account, scope, state::historyDetail)
     }
@@ -272,15 +271,17 @@ private fun HistorySummary(tag: String, title: String, amount: String, type: Str
 }
 
 /**
- * 立即支付 on a still-payable 待付款 recharge (server entry present, trusted, not expired). Opens the same server-figure
- * review as the wallet; an expired or entry-less order shows no button (its row says 已失效). Never creates an order.
+ * 立即支付 on a still-payable 待付款 recharge (server entry present, trusted, not expired): opens that entry directly, with
+ * no review step (the row already shows the server's amount). An expired or entry-less order shows no button (its row says
+ * 已失效). Never creates an order.
  */
 @Composable
 private fun PayNowAction(order: RechargeOrder, state: CommerceController, flow: RechargeFlowController, now: Instant) {
     if (state.canOpenPayment(order, now)) {
-        AlipayButton("立即支付", { flow.reviewPayment(order, now) }, enabled = !state.busy,
+        AlipayButton("立即支付", { flow.payNow(order, now) }, enabled = !state.busy,
             modifier = Modifier.fillMaxWidth().testTag("history-pay-${order.orderRef}"))
-        if (flow.requestedPaymentFor == order.orderRef) SupportingText("已请求打开付款页面；支付和到账仍需返回后刷新确认。",
+        flow.error?.takeIf { flow.requestedPaymentFor == null }?.let { SupportingText(it, Modifier.testTag("history-pay-error-${order.orderRef}")) }
+        if (flow.requestedPaymentFor == order.orderRef) SupportingText("已打开付款页面；付款结果返回后在此刷新确认。",
             Modifier.testTag("history-pay-requested-${order.orderRef}"))
     }
 }

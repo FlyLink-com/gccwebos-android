@@ -78,29 +78,23 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
     }
     if (mode != CommerceMode.Wallet) return
     flow.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recharge-flow-error")) }
-    if (state.pendingRecharge) BrandCard(Modifier.testTag("recharge-order")) {
-        val order = state.recharge
-        val unpayable = order != null && order.status in setOf("entry_ready", "pending") && !order.payableAt(now)
+    // An unpaid order is not shown here: it lives in 订单明细 (with 立即支付). The only local leftover this screen still
+    // mentions is a create whose result is unknown: there is no order to list yet, so it can be queried, recovered or cleared.
+    if (state.pendingRecharge && state.recharge == null) BrandCard(Modifier.testTag("recharge-order")) {
         Text("上一笔充值", style = MaterialTheme.typography.titleMedium)
-        Text(order?.let { if (unpayable) RECHARGE_EXPIRED_STATUS else rechargeStatus(it.status) } ?: "提交结果尚未确认，可直接重新充值，或点下方查询。",
-            modifier = Modifier.testTag("recharge-status"))
-        order?.let {
-            Text(formatMoney(it.amountMinor, it.currency, it.currencyExponent), style = MaterialTheme.typography.headlineSmall)
-            SupportingText("到账目标 ${formatCoins(it.expectedPaidCoinUnits)} · 订单 ${it.orderRef}")
-        }
+        Text("提交结果尚未确认，可直接重新充值，或点下方查询。", modifier = Modifier.testTag("recharge-status"))
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("recharge-error")) }
-        if (order != null && state.canOpenPayment(order, now)) AlipayButton("支付宝支付", { flow.reviewPayment(order, now) },
-            enabled = !state.busy, modifier = Modifier.testTag("recharge-pay"))
-        else if (unpayable) SupportingText("付款入口已过期，可直接在下方重新充值。未付款的订单会由服务器自动关闭，不会扣款。")
-        flow.requestedPaymentFor?.let { SupportingText("已请求打开付款页面；支付和到账仍需查询确认。") }
         BrandButton("查询到账状态", state::readRechargeStatus, enabled = !state.busy,
             modifier = Modifier.testTag("recharge-status-query"))
-        if (unpayable || order == null) TextButton(onClick = { state.abandonRecharge(now) }, enabled = !state.busy,
+        TextButton(onClick = { state.abandonRecharge(now) }, enabled = !state.busy,
             modifier = Modifier.heightIn(min = 48.dp).testTag("recharge-abandon")) { Text("清除此记录") }
-        if (order == null) TextButton(onClick = { recoveryConfirmation = true }, enabled = !state.busy,
+        TextButton(onClick = { recoveryConfirmation = true }, enabled = !state.busy,
             modifier = Modifier.heightIn(min = 48.dp).testTag("recharge-recover")) { Text("恢复原创建请求") }
-        if (order?.status in setOf("credited", "failed_no_charge", "expired")) TextButton(onClick = state::finishRecharge,
-            enabled = !state.busy, modifier = Modifier.heightIn(min = 48.dp).testTag("recharge-finish")) { Text("核对完成，返回充值") }
+    }
+    flow.requestedPaymentFor?.let {
+        SupportingText("已打开付款页面。付款结果请在「订单明细」查看。", Modifier.testTag("recharge-payment-requested"))
+        onRechargeRecords?.let { open -> TextButton(onClick = open, modifier = Modifier.heightIn(min = 48.dp)
+            .testTag("recharge-open-records")) { Text("查看订单明细") } }
     }
     run {
         val methods = availableRechargeMethods(displayOffers)

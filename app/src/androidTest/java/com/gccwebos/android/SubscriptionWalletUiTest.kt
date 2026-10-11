@@ -775,23 +775,20 @@ class SubscriptionWalletUiTest {
         compose.runOnIdle { assertNull(commerce.recharge); assertFalse(commerce.pendingRecharge) }
     }
 
-    @Test fun pendingAndVerifiedRechargeCannotCreateAnotherOrderOrRepeatPayment() {
-        // No safe redirect is present while the result is pending, so there is no Pay action.
+    @Test fun pendingAndVerifiedRechargeStayOffTheRechargeScreenAndOfferNoPaymentThere() {
+        // The unpaid order lives in 订单明细; the recharge screen has no 上一笔充值 card and no Pay action.
         launchCommerce(CommerceMode.Wallet) {
             rechargeOffers = listOf(rechargeOffer())
             pendingRecharge = true
             recharge = rechargeOrder("pending")
         }
-        compose.onNodeWithTag("recharge-order").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
-        compose.onNodeWithTag("recharge-offer-offline_recharge").assertDoesNotExist()
         compose.runOnIdle {
-            // Even an injected old redirect must not expose payment after verification.
             commerce.recharge = rechargeOrder("payment_verified", PaymentRedirect("https://example.invalid/do-not-open", future))
         }
-        compose.onNodeWithText("支付已核验，Coins 尚待到账").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
-        compose.onNodeWithTag("recharge-offer-offline_recharge").assertDoesNotExist()
         capture("payment-verified-awaiting-coins")
     }
 
@@ -827,27 +824,6 @@ class SubscriptionWalletUiTest {
             account.authSessionGeneration++
             assertFalse(commerce.canOpenPayment(fixture, now))
         }
-    }
-
-    @Test fun paymentReviewCanOpenAndCancelWithoutAnExternalPaymentIntent() {
-        val fixture = rechargeOrder("entry_ready",
-            PaymentRedirect("https://www.xsd8866.com/offline-ui-fixture", future))
-        launchCommerce(CommerceMode.Wallet, fontScale = 2f) { pendingRecharge = true; recharge = fixture }
-        repeat(2) {
-            compose.onNodeWithTag("recharge-pay").performScrollTo().performClick()
-            compose.onNodeWithText("核对服务器付款信息").assertIsDisplayed()
-            // This only asserts the action; the test deliberately never invokes the external Intent.
-            compose.onNodeWithTag("payment-open-confirm").assertIsDisplayed().assertIsEnabled()
-            compose.onNodeWithText("将打开：www.xsd8866.com").performScrollTo().assertIsDisplayed()
-            if (it == 0) capture("payment-review-font-200")
-            if (it == 1) {
-                compose.runOnIdle { commerce.recharge = fixture.copy(status = "payment_verified", nextAction = null) }
-                compose.onNodeWithTag("payment-open-confirm").assertIsNotEnabled()
-            }
-            compose.onNodeWithText("暂不付款").assertIsDisplayed().performClick()
-            compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
-        }
-        compose.runOnIdle { assertTrue(commerce.pendingRecharge); assertEquals("payment_verified", commerce.recharge?.status) }
     }
 
     @Test fun unconfirmedPurchaseHidesNewQuoteActions() {

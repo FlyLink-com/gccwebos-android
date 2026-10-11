@@ -92,33 +92,34 @@ class WalletRechargeUiTest {
         compose.onNodeWithTag("recharge-flow-error").performScrollTo().assertExists()
         compose.runOnIdle { assertTrue(calls.isEmpty()); assertNull(state.recharge); assertTrue(opened.isEmpty()) }
     }
-    @Test fun actualCreatedAmountNeedsSecondReviewAndFakeOpenDoesNotCreditOrClearPending() {
+    @Test fun anUnpaidOrderIsNeverShownOnTheRechargeScreenItLivesInOrderDetails() {
         launch { pendingRecharge = true; recharge = order }
-        compose.onNodeWithTag("recharge-pay").performScrollTo().performClick()
-        compose.onNodeWithText("实际应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("到账目标：79 Coins").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithTag("payment-open-cancel").performClick()
-        compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(state.pendingRecharge) }
-        compose.onNodeWithTag("recharge-pay").performScrollTo().performClick()
-        compose.onNodeWithTag("payment-open-confirm").performClick()
+        compose.onNodeWithTag("recharge-amount-card").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-status").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
         compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(1, opened.size); assertEquals("entry_ready", state.recharge!!.status); assertTrue(state.pendingRecharge); assertNull(state.wallet); assertTrue(calls.isEmpty()) }
+        compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(state.pendingRecharge); assertTrue(calls.isEmpty()) }
     }
-    @Test fun verifiedIsNotCreditedAndExpiredActionNeverExposesPayment() {
+    @Test fun verifiedOrExpiredOrdersAlsoStayOffTheRechargeScreen() {
         launch { pendingRecharge = true; recharge = order.copy(status = "payment_verified", nextAction = null) }
-        compose.onNodeWithTag("recharge-status").assertTextEquals("支付已核验，Coins 尚待到账")
-        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
-        compose.onNodeWithTag("recharge-finish").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
         compose.runOnIdle { state.recharge = order.copy(nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH)) }
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
-        compose.onNodeWithTag("recharge-status-query").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { assertTrue(calls.isEmpty()); assertTrue(opened.isEmpty()) }
     }
-    @Test fun anExpiredUnpaidOrderIsShownAsInvalidAndNeverBlocksStartingANewRecharge() {
-        launch { pendingRecharge = true; recharge = order.copy(nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH)) }
-        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("已失效（付款入口已过期）")
-        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+    @Test fun anUnknownCreateResultKeepsOnlyAMinimalRecoveryNotice() {
+        launch { pendingRecharge = true; recharge = null }
+        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("提交结果尚未确认，可直接重新充值，或点下方查询。")
         compose.onNodeWithTag("recharge-abandon").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-amount-card").performScrollTo().assertIsDisplayed()
+    }
+    @Test fun anExpiredUnpaidOrderNeverBlocksStartingANewRecharge() {
+        launch { pendingRecharge = true; recharge = order.copy(nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH)) }
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
         // The amount grid and the checkout bar stay available beside the old order.
         compose.onNodeWithTag("recharge-amount-card").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().assertIsEnabled().performClick()

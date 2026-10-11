@@ -30,6 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,8 +86,8 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     showAccountAction: Boolean = true,
     /** Right end of the heading row (unified list: the 延迟测试 action). */
     headerActions: @Composable RowScope.() -> Unit = {},
-    /** False when [headerActions] already carries the 延迟测试 action, so the toolbar below keeps only caption and sort. */
-    measureInToolbar: Boolean = true,
+    /** Unified list: the sort order is owned by the library page (it also orders the other sources); null keeps it local. */
+    sortByLatencyOverride: Boolean? = null,
     /** Unified list: where this source's nodes come from, shown on every row. */
     sourceLabel: String? = null,
     /** Unified list: per-node actions of this source (the rename/delete menu); null for a read-only source. */
@@ -120,7 +121,8 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     val proxyCount = proxyChoices.size + readOnlyNodes.count { !it.info }
     val selectedChoice = readyChoices.firstOrNull { it.selection === value.selected && !it.info }
     var expanded by rememberSaveable(groupTitle, value.sourceKind) { mutableStateOf(true) }
-    var sortByLatency by rememberSaveable { mutableStateOf(false) }
+    var localSortByLatency by rememberSaveable { mutableStateOf(false) }
+    val sortByLatency = sortByLatencyOverride ?: localSortByLatency
     val title = groupTitle ?: when (value.sourceKind) {
         ManualSourceKind.LegacyRemote -> "账户订阅"
         ManualSourceKind.ImportedRemote -> "订阅配置"
@@ -189,9 +191,12 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("nodes-group-title"))
                             // Count stays "N 条" for existing UI contracts; it excludes info notices.
-                            Text("${proxyCount + extraCount} 条", fontSize = 10.sp, color = Brand.Muted,
-                                modifier = Modifier.testTag("nodes-count"))
+                            // Only rows that are shown count (the active source's rows are hidden while another tab is picked).
+                            NodesCountText((if (showSourceRows) proxyCount else 0) + extraCount, latency)
                         }
+                    }
+                    if (showTools && latency != null && proxyChoices.isNotEmpty()) {
+                        NodesSortAction(sortByLatency, onChange = { localSortByLatency = it })
                     }
                     if (showTools && latency != null) {
                         NodesLatencyRefreshButton(
@@ -208,19 +213,11 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                 }
                 if (expanded) {
                     infoLine?.let { NodeInfoBanner(it) }
-                    if (latency != null && proxyChoices.isNotEmpty()) {
-                        NodeLatencyToolbar(
-                            latency = latency,
-                            tunnelActive = tunnelActive,
-                            canMeasure = canMeasure,
-                            measuring = latency.busy,
-                            sortByLatency = sortByLatency,
-                            onToggleSort = { sortByLatency = !sortByLatency },
-                            onMeasure = { if (canMeasure && !latency.busy) latency.refresh() },
-                            motionEnabled = motionEnabled,
-                            showMeasure = measureInToolbar,
-                        )
-                    }
+                    // While the tunnel is up nothing can be measured: one quiet line says why. (The last-test time lives on
+                    // the heading row next to the count.)
+                    if (latency != null && proxyChoices.isNotEmpty() && tunnelActive) Text(LatencySkippedNote, fontSize = 10.sp,
+                        color = Brand.Muted, modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)
+                            .testTag("nodes-latency-note"))
                     // N9: search sits directly under the toolbar, above everything that scrolls with the rows.
                     if (searchable) NodeSearchField(query) { query = it }
                     // N8: a chosen node is shown once, as the highlighted row below. There is no selection helper or
@@ -313,61 +310,10 @@ private fun NodeInfoBanner(line: String) {
     }
 }
 
-@Composable
-private fun NodeLatencyToolbar(
-    latency: NodeLatencyController,
-    tunnelActive: Boolean,
-    canMeasure: Boolean,
-    measuring: Boolean,
-    sortByLatency: Boolean,
-    onToggleSort: () -> Unit,
-    onMeasure: () -> Unit,
-    motionEnabled: Boolean,
-    showMeasure: Boolean = true,
-) {
-    // Only a real measurement (round trip or timeout) counts as "tested"; a batch that could not run
-    // while the tunnel is up must not read "刚刚" next to a list of unmeasured nodes.
-    // Read the map here so a new result recomposes the caption, not the whole node card.
-    val lastAgo = latency.lastResultAtElapsed()?.let { latency.latencyClockElapsed() - it }
-    val lastLabel = formatLastLatencyTestAgo(lastAgo) ?: if (tunnelActive) LatencySkippedNote else null
-    Row(
-        Modifier.fillMaxWidth().testTag("nodes-latency-toolbar")
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Text(
-            lastLabel ?: " ",
-            fontSize = 10.sp,
-            color = Brand.Muted.copy(alpha = if (lastLabel == null) 0f else .9f),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).testTag("nodes-latency-last"),
-        )
-        if (showMeasure) TextButton(
-            onClick = onMeasure,
-            enabled = canMeasure && !measuring,
-            contentPadding = PaddingValues(horizontal = 8.dp),
-            modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-latency-one-tap"),
-        ) {
-            // The heading's lightning is the only pulsing indicator. This control stays static.
-            NodesLightningIcon(busy = false, motionEnabled = motionEnabled, enabled = canMeasure && !measuring,
-                size = 16.dp)
-            Spacer(Modifier.width(4.dp))
-            Text("延迟测试", fontSize = 11.sp)
-        }
-        TextButton(
-            onClick = onToggleSort,
-            contentPadding = PaddingValues(horizontal = 8.dp),
-            modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-latency-sort")
-                .semantics { contentDescription = if (sortByLatency) "恢复默认排序" else "按延迟排序" },
-        ) {
-            Text(if (sortByLatency) "默认排序" else "按延迟排序", fontSize = 11.sp,
-                color = if (sortByLatency) Brand.Cyan else Brand.Muted)
-        }
-    }
-}
-
+/**
+ * 延迟测试: the lightning icon only (48 dp, spoken as 「延迟测试」). It pulses while a batch runs and stays static when the
+ * system asks to reduce motion ([rememberNodeListMotionEnabled]).
+ */
 @Composable
 internal fun NodesLatencyRefreshButton(
     enabled: Boolean,
@@ -378,26 +324,73 @@ internal fun NodesLatencyRefreshButton(
 ) {
     val motion = motionEnabled ?: rememberNodeListMotionEnabled()
     IconButton(onClick = onClick, enabled = enabled,
-        modifier = modifier.size(48.dp).testTag("nodes-latency-refresh")) {
+        modifier = modifier.size(48.dp).testTag("nodes-latency-refresh").semantics { contentDescription = "延迟测试" }) {
         NodesLightningIcon(busy = busy, motionEnabled = motion, enabled = enabled, size = 24.dp)
     }
 }
 
-/**
- * 延迟测试 on the node-list heading row (right-aligned): lightning plus label, 48 dp tall. The lightning pulses while a
- * batch runs and is static when the system asks to reduce motion ([rememberNodeListMotionEnabled]).
- */
+/** The library page's 延迟测试: same icon button, on the 节点列表 heading row. */
 @Composable
 internal fun NodesLatencyTestAction(enabled: Boolean, busy: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier,
-    motionEnabled: Boolean? = null) {
-    val motion = motionEnabled ?: rememberNodeListMotionEnabled()
-    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 10.dp),
-        modifier = modifier.heightIn(min = 48.dp).testTag("nodes-latency-refresh")) {
-        NodesLightningIcon(busy = busy, motionEnabled = motion, enabled = enabled, size = 18.dp)
-        Spacer(Modifier.width(4.dp))
-        Text("延迟测试", fontSize = 12.sp, maxLines = 1)
+    motionEnabled: Boolean? = null) = NodesLatencyRefreshButton(enabled, busy, onClick, modifier, motionEnabled)
+
+/** The two orders the node list supports. */
+internal enum class NodeSortOrder(val label: String) { Default("默认顺序"), Latency("按延迟") }
+
+/**
+ * 排序: a funnel outline icon (same 24 dp size and tint as the lightning) next to 延迟测试; a tap opens a small menu with
+ * 默认顺序 / 按延迟. Static: no animation. The icon turns cyan while a non-default order is active.
+ */
+@Composable
+internal fun NodesSortAction(sortByLatency: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier) {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(48.dp).testTag("nodes-sort")
+            .semantics { contentDescription = "排序" }) {
+            val tint = if (sortByLatency) Brand.Cyan else Brand.Muted
+            Canvas(Modifier.size(24.dp)) {
+                val stroke = 1.8.dp.toPx()
+                val w = size.width; val h = size.height
+                // Funnel outline: wide top edge, sides closing to a short stem, then the stem's foot.
+                val funnel = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(w * .12f, h * .18f); lineTo(w * .88f, h * .18f)
+                    lineTo(w * .60f, h * .52f); lineTo(w * .60f, h * .80f)
+                    lineTo(w * .40f, h * .70f); lineTo(w * .40f, h * .52f); close()
+                }
+                drawPath(funnel, tint, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke,
+                    cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            NodeSortOrder.values().forEach { order ->
+                val current = (order == NodeSortOrder.Latency) == sortByLatency
+                DropdownMenuItem(text = { Text(order.label, color = if (current) Brand.Cyan else Color.Unspecified) },
+                    onClick = { open = false; onChange(order == NodeSortOrder.Latency) },
+                    modifier = Modifier.testTag(if (order == NodeSortOrder.Latency) "nodes-sort-latency" else "nodes-sort-default")
+                        .semantics { selected = current })
+            }
+        }
     }
 }
+
+/**
+ * 「N 条 · 刚刚」: the node count with the time of the last latency test. Only this text reads the clock: it is recomputed
+ * once a minute and when the app resumes, never per frame. Nothing is appended before the first test.
+ */
+@Composable
+internal fun NodesCountText(count: Int, latency: NodeLatencyController?, modifier: Modifier = Modifier) {
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { delay(LastTestedRefreshMillis); tick++ } }
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    // Reading both makes this text (and only this text) recompute on a minute tick or when the page resumes.
+    val last = latency?.lastResultAtElapsed()
+    val ago = remember(tick, lifecycle, last) { if (latency == null || last == null) null else latency.latencyClockElapsed() - last }
+    val tested = formatLastTestedAgo(ago)
+    Text(if (tested == null) "$count 条" else "$count 条 · $tested", fontSize = 10.sp, color = Brand.Muted,
+        modifier = modifier.testTag("nodes-count"))
+}
+
+internal const val LastTestedRefreshMillis = 60_000L
 
 @Composable
 internal fun NodesImportButton(onClick: () -> Unit, enabled: Boolean = true, modifier: Modifier = Modifier) {
@@ -435,7 +428,7 @@ private fun NodesLightningIcon(busy: Boolean, motionEnabled: Boolean, enabled: B
     } else boltStaticAlpha(busy)
     Icon(
         painterResource(R.drawable.brand_lightning),
-        contentDescription = "测试节点延迟",
+        contentDescription = null,
         modifier = Modifier.size(size).graphicsLayer { this.alpha = alpha },
         tint = if (enabled || busy) Brand.Cyan else Brand.Muted,
     )
@@ -476,8 +469,11 @@ internal fun MeasuredProxyRow(
         regionTag = "node-region-$index",
         latencyTag = "node-latency-$index",
         tunnelActive = tunnelActive,
-        sourceLabel = sourceLabel, trailing = trailing,
-        modifier = Modifier.testTag("node-choice-$index").semantics { selected = chosen }
+        sourceLabel = sourceLabel, trailing = trailing, reserveTrailing = sourceLabel != null,
+        modifier = Modifier.testTag("node-choice-$index").semantics {
+            selected = chosen
+            if (chosen) stateDescription = "已选择"
+        }
             .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick),
     )
 }
@@ -497,18 +493,17 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
     /** Unified list: the source this node comes from, as a small caption under the name. */
     sourceLabel: String? = null,
     /** Unified list: per-node actions (rename / delete), placed after the selection mark. */
-    trailing: (@Composable () -> Unit)? = null) {
+    trailing: (@Composable () -> Unit)? = null,
+    /** Unified list: keep the menu's width free on a read-only row so every row's latency column lines up. */
+    reserveTrailing: Boolean = false) {
     val selected = chosen == true
+    // Every row has the same outer inset, so names, labels and latency line up whether a row is selected or not. The
+    // selection is the highlighted frame (fill + border + the cyan bar); there is no radio circle or check mark.
     Row(
         modifier.fillMaxWidth().heightIn(min = 56.dp)
-            .then(
-                if (selected) Modifier
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                    .clip(NodeRowShape)
-                    .background(NodeSelectedFill, NodeRowShape)
-                    .border(1.dp, NodeSelectedBorder, NodeRowShape)
-                else Modifier,
-            )
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .clip(NodeRowShape)
+            .then(if (selected) Modifier.background(NodeSelectedFill, NodeRowShape).border(1.dp, NodeSelectedBorder, NodeRowShape) else Modifier)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -551,19 +546,6 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
             tunnelActive = tunnelActive,
         )
         if (chosen == null) Text(readOnlyLabel, color = Brand.Muted, fontSize = 10.sp)
-        else Box(
-            Modifier.size(20.dp)
-                .border(1.5.dp, if (chosen) Brand.Cyan else Brand.Border, CircleShape)
-                .then(if (chosen) Modifier.background(Brand.Cyan, CircleShape) else Modifier),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (chosen) Canvas(Modifier.size(12.dp)) {
-                drawLine(Brand.Background, Offset(size.width * .15f, size.height * .5f),
-                    Offset(size.width * .4f, size.height * .75f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                drawLine(Brand.Background, Offset(size.width * .4f, size.height * .75f),
-                    Offset(size.width * .85f, size.height * .25f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-            }
-        }
-        trailing?.invoke()
+        if (trailing != null) trailing() else if (reserveTrailing) Spacer(Modifier.width(40.dp))
     }
 }

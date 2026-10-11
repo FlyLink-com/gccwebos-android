@@ -95,6 +95,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         measuring = latency?.busy == true,
         latencyFor = { item, position -> latency?.libraryReading(item.handle.entryId ?: AccountSourceId, position, item.contentKey) },
         onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = { library.activate(it) },
+        countText = { count -> NodesCountText(count, latency) },
         accountLoad = accountLoad, onRetryAccount = onRetryAccount,
         onChooseNode = library::activateAndChoose,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
@@ -104,7 +105,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         activeContent = { item, list ->
             NodeSelectionPanel(state, nodes, resource, hasCapability, busy, authenticated, connectionControl,
                 onSelected = onSelected, latency = latency, groupTitle = UnifiedListTitle,
-                showTools = false, showAccountAction = false, headerActions = list.headerAction, measureInToolbar = false,
+                showTools = false, showAccountAction = false, headerActions = list.headerAction, sortByLatencyOverride = list.sortByLatency,
                 sourceLabel = list.sourceLabel, rowTrailing = list.rowTrailing, extraCount = list.extraCount,
                 showSourceRows = list.showSourceRows, extraRows = list.extraRows, openAccount = openAccount)
         })
@@ -140,6 +141,9 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     onRestoreNode: (ConfigurationItem, Int) -> Unit = { _, _ -> },
     /** While a tunnel is up or changing, nodes of another source cannot be chosen (that would switch the source). */
     tunnelActive: Boolean = false,
+    /** The 「N 条」 text of the heading row; the page adds the last latency-test time to it. */
+    countText: @Composable (Int) -> Unit = { count ->
+        Text("$count 条", fontSize = 10.sp, color = Brand.Muted, modifier = Modifier.testTag("nodes-count")) },
     accountLoad: AccountLoadState = AccountLoadState.Idle, onRetryAccount: () -> Unit = {},
     namingEntryId: String? = null, onNamingDone: () -> Unit = {},
     activeContent: @Composable (ConfigurationItem, UnifiedList) -> Unit) {
@@ -152,6 +156,8 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     var nodeEdit by remember { mutableStateOf<NodeEdit?>(null) }
     var nodeName by remember { mutableStateOf("") }
     var filterKey by remember { mutableStateOf<Any?>(null) }
+    // One sort order for every source's rows (the funnel menu on the heading row).
+    var sortByLatency by rememberSaveable { mutableStateOf(false) }
     // The post-import naming dialog follows its saved entry id, because the import's own settle
     // refresh replaces every handle right after the dialog opens.
     val target = snapshot.items.firstOrNull { it.handle === dialogHandle } ?: if (dialog == LibraryDialog.Name)
@@ -207,10 +213,14 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             },
             extraCount = others.sumOf { it.value.nodes.count { node -> !node.info } },
             showSourceRows = filterKey == null || snapshot.items.getOrNull(activeIndex)?.displayKey == filterKey,
-            headerAction = { NodesLatencyTestAction(enabled = !actionsBlocked && canMeasureActive, busy = measuring,
-                onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() }) },
+            sortByLatency = sortByLatency,
+            headerAction = {
+                if (snapshot.items.sumOf { item -> item.nodes.count { !it.info } } > 1) NodesSortAction(sortByLatency, { sortByLatency = it })
+                NodesLatencyTestAction(enabled = !actionsBlocked && canMeasureActive, busy = measuring,
+                    onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() })
+            },
             extraRows = {
-                OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode, latencyFor, measuring) { item, position, delete ->
+                OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode, latencyFor, measuring, sortByLatency) { item, position, delete ->
                     nodeEdit = NodeEdit(item.handle.entryId, position, delete); nodeName = item.nodes[position].name
                 }
             })
@@ -226,7 +236,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                         Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
                             Text(UnifiedListTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("nodes-group-title"))
-                            Text("${unified.extraCount} 条", fontSize = 10.sp, color = Brand.Muted, modifier = Modifier.testTag("nodes-count"))
+                            countText(unified.extraCount)
                         }
                         unified.headerAction(this)
                     }
@@ -372,14 +382,16 @@ internal const val UnifiedListTitle = "节点列表"
 /** Slots the unified list hands to the active source's card. */
 internal class UnifiedList(val sourceLabel: String?, val rowTrailing: (@Composable (Int) -> Unit)?,
     val extraCount: Int, val showSourceRows: Boolean, val extraRows: @Composable ColumnScope.() -> Unit,
+    /** The page-wide sort order, applied to the other sources' rows here and to the active source's rows by the card. */
+    val sortByLatency: Boolean = false,
     /** 延迟测试 for the whole library, right-aligned on the 节点列表 heading row. */
     val headerAction: @Composable RowScope.() -> Unit = {})
 
 private data class NodeEdit(val entryId: String?, val position: Int, val delete: Boolean)
 
-/** "来源" caption of one node: the saved source's name and kind; the account subscription says it is read-only. */
+/** "来源" caption of one node: the saved source's name (the 来源 card carries its kind); the account subscription says it is read-only. */
 internal fun nodeSourceLabel(item: ConfigurationItem): String =
-    if (item.kind == ManualSourceKind.LegacyRemote) "账户订阅 · 只读" else "${item.name} · ${configurationKindLabel(item.kind)}"
+    if (item.kind == ManualSourceKind.LegacyRemote) "账户订阅 · 只读" else item.name
 
 /**
  * The segmented switcher (the plans page's [SlidingTabRow]): 全部 plus one tab per source, then the 添加配置 "+" at the far
@@ -408,7 +420,7 @@ private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, en
 @Composable
 private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationItem>>, busy: Boolean, tunnelActive: Boolean,
     onActivate: (ConfigurationHandle) -> Unit, onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit,
-    latencyFor: (ConfigurationItem, Int) -> NodeLatencyObservation?, measuring: Boolean,
+    latencyFor: (ConfigurationItem, Int) -> NodeLatencyObservation?, measuring: Boolean, sortByLatency: Boolean,
     onEdit: (ConfigurationItem, Int, Boolean) -> Unit) {
     if (others.isEmpty()) return
     if (tunnelActive && others.any { it.value.nodes.any { node -> !node.info } }) Text(
@@ -417,7 +429,10 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
             .testTag("unified-connected-hint"))
     others.forEach { (index, item) ->
         val label = nodeSourceLabel(item)
-        val visible = item.nodes.withIndex().filterNot { it.value.info }
+        val unsorted = item.nodes.withIndex().filterNot { it.value.info }
+        // The same 排序 order the active source's rows follow.
+        val visible = if (sortByLatency) unsorted.sortedWith(compareBy<IndexedValue<SafeProxyConfig.NodeSummary>> {
+            nodeLatencySortKey(latencyFor(item, it.index)) }.thenBy { it.index }) else unsorted
         if (visible.isEmpty()) {
             HorizontalDivider(color = Brand.RowDivider.copy(alpha = .12f))
             val loadable = item.kind == ManualSourceKind.LegacyRemote && item.status == LocalSubscriptionStatus.MISSING

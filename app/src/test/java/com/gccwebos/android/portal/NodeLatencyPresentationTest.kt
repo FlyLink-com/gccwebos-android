@@ -83,13 +83,31 @@ class NodeLatencyPresentationTest {
         assertFalse(p.measuring)
     }
 
-    @Test fun lastTestAgoOmitsNullAndStale() {
-        assertNull(formatLastLatencyTestAgo(null))
-        assertNull(formatLastLatencyTestAgo(-1))
-        assertEquals("上次延迟测试：刚刚", formatLastLatencyTestAgo(3_000))
-        assertEquals("上次延迟测试：10分钟前", formatLastLatencyTestAgo(10 * 60_000L))
-        assertEquals("上次延迟测试：2小时前", formatLastLatencyTestAgo(2 * 3_600_000L))
-        assertNull(formatLastLatencyTestAgo(10 * 86_400_000L))
+    @Test fun lastTestedAgoShowsNothingBeforeAnyTestOrWhenTheClockWentBackwards() {
+        assertNull(formatLastTestedAgo(null))
+        assertNull(formatLastTestedAgo(-1))
+    }
+
+    @Test fun lastTestedAgoIsPlainChineseWithoutSeconds() {
+        assertEquals("刚刚", formatLastTestedAgo(0))
+        assertEquals("刚刚", formatLastTestedAgo(3_000))
+        assertEquals("刚刚", formatLastTestedAgo(59_999))
+        assertEquals("1 分钟前", formatLastTestedAgo(60_000))
+        assertEquals("5 分钟前", formatLastTestedAgo(5 * 60_000L + 59_000L))
+        assertEquals("59 分钟前", formatLastTestedAgo(59 * 60_000L + 59_999L))
+        assertEquals("1 小时前", formatLastTestedAgo(60 * 60_000L))
+        assertEquals("3 小时前", formatLastTestedAgo(3 * 3_600_000L + 1_000L))
+        assertEquals("23 小时前", formatLastTestedAgo(24 * 3_600_000L - 1))
+        assertEquals("1 天前", formatLastTestedAgo(24 * 3_600_000L))
+        assertEquals("2 天前", formatLastTestedAgo(2 * 86_400_000L + 5_000L))
+        assertEquals("30 天前", formatLastTestedAgo(30 * 86_400_000L))
+    }
+
+    @Test fun lastTestedAgoNeverMentionsSecondsOrTheOldCaption() {
+        for (ago in listOf(0L, 1_000L, 90_000L, 7_200_000L, 200_000_000L)) {
+            val text = formatLastTestedAgo(ago)!!
+            assertFalse(text, text.contains("秒") || text.contains("上次延迟测试"))
+        }
     }
 
     @Test fun infoBarExtractsTrafficExpiryWebsiteWithoutInventing() {

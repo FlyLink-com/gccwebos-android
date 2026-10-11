@@ -208,8 +208,12 @@ class UnifiedNodesTest {
         val f = Fixture(); f.seedAccount(); f.remote(); f.local("Local Beta")
         val labels = f.items(true).associate { it.kind to nodeSourceLabel(it) }
         assertEquals("账户订阅 · 只读", labels[ManualSourceKind.LegacyRemote])
-        assertTrue(labels.getValue(ManualSourceKind.ExternalRemote).endsWith("第三方订阅"))
-        assertTrue(labels.getValue(ManualSourceKind.ImportedLocal).endsWith("本地文件"))
+        // A row names its source (short enough never to be cut off); the kind lives on the 来源 card.
+        val items = f.items(true)
+        for (kind in listOf(ManualSourceKind.ExternalRemote, ManualSourceKind.ImportedLocal)) {
+            val item = items.first { it.kind == kind }
+            assertEquals(item.name, labels.getValue(kind)); assertTrue(groupCaption(item).contains(configurationKindLabel(kind)))
+        }
     }
 
     @Test fun renamingAndDeletingThroughTheControllerRefreshesTheListAndTheNodeSelection() = runTest {

@@ -119,7 +119,9 @@ class ConfigurationLibraryUiTest {
         launch()
         compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertIsDisplayed()
         compose.onAllNodesWithText("账户订阅 · 只读", useUnmergedTree = true).assertCountEquals(1)
-        compose.onAllNodesWithText("合成配置 · 第三方订阅", useUnmergedTree = true).assertCountEquals(1)
+        // Imported rows carry the source name only (the kind sits on the 来源 card), so the label is never cut off.
+        compose.onAllNodesWithText("合成配置", useUnmergedTree = true).assertCountEquals(1)
+        compose.onAllNodesWithText("合成配置 · 第三方订阅", useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test fun accountNodesAreReadOnlyAndImportedNodesCanBeEdited() {
@@ -251,16 +253,43 @@ class ConfigurationLibraryUiTest {
         val action = compose.onNodeWithTag("nodes-latency-refresh").fetchSemanticsNode().boundsInRoot
         val group = compose.onNodeWithTag("nodes-configuration-group").fetchSemanticsNode().boundsInRoot
         compose.onNodeWithTag("nodes-group-title").assertTextEquals("节点列表")
-        compose.onNodeWithTag("nodes-latency-refresh").assertTextContains("延迟测试")
-            .assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("nodes-latency-refresh").assertContentDescriptionEquals("延迟测试")
+            .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
         compose.runOnIdle {
             assertTrue("same row", action.top < title.bottom && action.bottom > title.top)
             assertTrue("action is right of the heading", action.left >= title.right - 1f)
             assertTrue("action is right-aligned in the card", action.right >= group.right - 24f)
         }
-        // The toolbar below keeps only the caption and the sort control: one 延迟测试 on the page.
+        // Icon only: no 延迟测试 text anywhere, no toolbar, no last-test caption, no old sort text.
         compose.onNodeWithTag("nodes-latency-one-tap").assertDoesNotExist()
-        compose.onAllNodesWithText("延迟测试").assertCountEquals(1)
+        compose.onNodeWithTag("nodes-latency-toolbar").assertDoesNotExist()
+        compose.onAllNodesWithText("延迟测试").assertCountEquals(0)
+        compose.onAllNodesWithText("上次延迟测试", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("按延迟排序").assertCountEquals(0)
+    }
+
+    @Test fun sortIsAFunnelIconNextToTheLightningWithADefaultAndLatencyMenu() {
+        latencies = mapOf(null to 400L, "synthetic-second" to 100L)
+        launch()
+        val sort = compose.onNodeWithTag("nodes-sort").assertContentDescriptionEquals("排序")
+            .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
+        val bolt = compose.onNodeWithTag("nodes-latency-refresh").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            assertTrue("same row", sort.top < bolt.bottom && sort.bottom > bolt.top)
+            assertTrue("directly left of the lightning", sort.right <= bolt.left + 1f && bolt.left - sort.right < 24f)
+        }
+        // Default order: the account's row sits above 配置 2's row.
+        val accountTop = compose.onNodeWithTag("configuration-node-0-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
+        val secondTop = compose.onNodeWithTag("configuration-node-2-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
+        assertTrue(accountTop < secondTop)
+        compose.onNodeWithTag("nodes-sort").performScrollTo().performClick()
+        compose.onNodeWithTag("nodes-sort-default").assertIsDisplayed()
+        compose.onNodeWithText("默认顺序").assertIsDisplayed()
+        compose.onNodeWithText("按延迟").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("nodes-sort-default").assertDoesNotExist()
+        val account = compose.onNodeWithTag("configuration-node-0-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
+        val second = compose.onNodeWithTag("configuration-node-2-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
+        assertTrue("sorted by latency: 配置 2 (100 ms) above the account (400 ms)", second < account)
     }
 
     @Test fun nodesOfOtherSourcesShowTheirOwnLatency() {
@@ -323,7 +352,7 @@ class ConfigurationLibraryUiTest {
         compose.onAllNodesWithTag("nodes-latency-refresh").assertCountEquals(1)
         compose.onNodeWithTag("nodes-import").assertContentDescriptionEquals("新增配置")
             .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
-        compose.onNodeWithTag("nodes-latency-refresh").assertTextContains("延迟测试").performClick()
+        compose.onNodeWithTag("nodes-latency-refresh").assertContentDescriptionEquals("延迟测试").performClick()
         compose.onNodeWithText("测试节点延迟").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, imports); assertEquals(1, measurements) }
         assertNoSourceMutation()

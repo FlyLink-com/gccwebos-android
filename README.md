@@ -1,8 +1,23 @@
+# 飞连 VPN · Android
+
+原生 Android 客户端，包含连接、节点、套餐、我的四入口。正式包名 `com.gccwebos.android`，最低 Android 8.0（API 26）；真实连接还受系统版本、内核打包与连接准入条件约束。
+
+## 当前进度（2026-10-11 UTC）
+
+- **已公开发布**：[v0.4.2](https://github.com/gccwebos-com/feilian-vpn-releases/releases/tag/v0.4.2)，versionCode `9`，发布源码 `0b94a8cee2517624eb6d5a3ac61366ea4d96d361`。完整对应源码请使用 Release 中的专用 `corresponding-source.zip` 附件。
+- **主干已继续开发**：本次核对 `main@724fb7f04c24573a15e50c64b843b39d0012a0e3`，#60、#61、#64–#69 已合并，但不在上述已发布 APK 中；源码仍标 `0.4.2` / `9`，版本字段相同不能证明产物相同。
+- **仍在 Draft**：#26 会话自动续期、#48 LAN DIRECT 路由、#59 应用内更新下载、#62 统一弹窗、#63 应用内支付页。当前正式版会话到期仍需重新登录，更新仍通过浏览器下载。
+- **验收边界**：公开 Release、本地测试记录、托管 CI、实机与线上部署分别记录。本次文档对齐没有重跑 Android 构建或操作设备；最新主干没有对应的托管 Actions 运行，不能沿用旧 SHA 的绿色结果。
+
+进度与证据以 [PROJECT_STATUS](docs/PROJECT_STATUS.md) 为入口；接下来要做的工作见 [TASKS](TASKS.md)，发布事实见 [0.4.2 发布记录](docs/release-0.4.2.md)，构建证据索引见 [BUILD_STATUS](docs/BUILD_STATUS.md)。历史切片保留在下方，其“未接入／未发布”等措辞仅描述各自当时的范围。
+
+## 历史连接候选记录
+
 > One-click VPN candidate: the service-owned local subscription path now reaches Android consent, a one-shot native TUN process and a VPN-bound traffic probe. Engine libraries must be verified and packaged; connection is enabled on API 30+ where the VPN Network owner can be verified. [Implementation and validation](docs/one-click-vpn-connection.md) · [Windows toolchain](docs/android-development-toolchain.md).
 
 ## 先前版本记录
 
-以下内容保留各历史切片的状态；当前连接实现、版本与验收结果以上方候选文档为准。
+以下内容保留各历史切片的状态；当前进度、版本与验收边界见 [PROJECT_STATUS](docs/PROJECT_STATUS.md)。
 
 > 0.4.0 mobile parity baseline: encrypted local-subscription shell with account-only login gates, server-validated native-session restore, actual subscription-node metadata, server-driven wallet/catalog/orders and approved robot/飞连vpn launcher artwork. [Scope and limits](docs/mobile-login-account-parity.md). Production VPN was disabled at this baseline.
 
@@ -36,7 +51,7 @@
 
 M0 构建收口在 [PR #3](https://github.com/gccwebos-com/gccwebos-android/pull/3)；精确源码、CI、APK SHA-256 和设备结果见 PR 的最新验证回执及 [构建记录](docs/BUILD_STATUS.md)。`main` 合并状态与 PR 构建通过是不同事项，不自动发布或上架。
 
-## 当前代码
+## M0 阶段代码（历史）
 
 | 范围 | 实现 |
 | --- | --- |
@@ -75,7 +90,7 @@ chmod +x gradlew build.sh scripts/*.sh
 
 安装包路径：`app/build/outputs/apk/debug/app-debug.apk`。测试包路径：`app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk`。
 
-Debug ID 为 `com.gccwebos.android.debug`，版本 `0.1.1-m0-debug`。Debug 签名由构建环境生成；无正式签名私钥入库。不同环境的 Debug 签名可能不同，不能视为正式升级签名。
+默认 Debug ID 为 `com.gccwebos.android.debug`；本次核对主干版本为 `0.4.2-debug` / versionCode `9`。M0 历史包版本为 `0.1.1-m0-debug`；构建变体以 `app/build.gradle.kts` 为准。Debug 签名由构建环境生成；无正式签名私钥入库。不同环境的 Debug 签名可能不同，不能视为正式升级签名。
 
 ## Wrapper
 
@@ -102,7 +117,7 @@ JAR 来自 Gradle 官方仓库 `v9.4.1`，与 [Gradle 官方校验表](https://g
 
 compileSdk 37 在初次 CI 的 SDK 安装阶段不可获取，因此本轮统一使用 36；targetSdk 和 minSdk 没有改变。构建依赖与平台更新提示不自动触发升级，Lint 错误仍会阻断。
 
-## 安装启动与证据
+## M0 安装启动与证据（历史）
 
 CI 在 API 36 x86_64 临时模拟器安装同一个已编译 APK，执行显式 Activity 启动、进程检查和两项 instrumentation 用例，保存实际截图、UI XML、签名输出与安装包哈希。`scripts/m0-emulator-smoke.sh` 只适用于托管 Linux 测试机，需要 SDK 和 KVM；不是用户手机上的安装脚本。
 
@@ -110,10 +125,11 @@ CI 在 API 36 x86_64 临时模拟器安装同一个已编译 APK，执行显式 
 
 `evidence/` 与根目录 `file-inventory.json` 保留初始导入包的历史诊断和清单，不是当前 APK 的清单；历史构建记录位于 [原始记录](evidence/initial-build-status.md)。
 
-## 后续阶段
+## M0 当时的后续阶段（历史）
 
 没有真实 `VpnService`、协议内核、邮箱登录 API、真实套餐／支付／订单／推荐归因接入。原生后台合同、真实 VPN 实验、产品接入、商业与推荐、签名测试版按 [TASKS.md](TASKS.md) 顺序进行；无后台、节点、生产或付款操作。
 
 - [连接协调器合同](docs/connection-coordinator.md)
 - [后台合同边界](docs/backend-contracts.md)
 - [里程碑](docs/roadmap.md)
+

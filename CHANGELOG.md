@@ -1,3 +1,32 @@
+# 变更记录
+
+## 已合并，未进入公开 v0.4.2 APK · 2026-10-11
+
+核对主干 `724fb7f04c24573a15e50c64b843b39d0012a0e3`；源码仍使用 `0.4.2` / versionCode `9`。以下改动晚于已发布 APK 的源码 `0b94a8c`，下一版身份与验收另行确定。
+
+- #60：导入阶段进度、跨来源延迟测试、节点页来源页签与命名、未知节点选择提示
+- #61、#66：第三方导入及页面加载采用 60 秒预算／15 秒对冲；连接步骤仍保留原有 30 秒读取预算
+- #64、#65：相册二维码导入；空账户来源的加载状态、重试与删除最后一份配置后的恢复
+- #67、#68：套餐卡片更不透明；连接页流量卡片移到连接／节点卡片上方
+- #69：记住账号（不保存密码）、系统自动填充提示与登录入场调整
+
+PR 合并、本地验证、实机验证与公开发布分别记账，详见 [当前进度](docs/PROJECT_STATUS.md)。#26、#48、#59、#62、#63 仍为 Draft，不列入已合并功能。
+
+## 0.4.2 · 2026-10-11
+
+[公开 Release](https://github.com/gccwebos-com/feilian-vpn-releases/releases/tag/v0.4.2)，versionCode `9`；发布源码 `0b94a8cee2517624eb6d5a3ac61366ea4d96d361`。
+
+- 订阅提供的流量、节点选择持久化、统一节点来源及配置管理改进
+- 连接／套餐／我的／钱包／订单／邀请页与全局动效调整
+- 到期与低流量提醒；冷启动订阅读取重试与准备预算改进
+- 修复 YAML 表情解析；正式包与对应源码已公开。已记录的冷启动偶发读取失败、会话到期仍需登录等限制见 [发布记录](docs/release-0.4.2.md)
+
+## 0.4.1 · 2026-10-06
+
+[公开 Release](https://github.com/gccwebos-com/feilian-vpn-releases/releases/tag/v0.4.1)，versionCode `8`；发布源码 `5e9014d168b39e34ee069fff6ffbc360d57d661a`。包含多配置管理、第三方导入、账户来源恢复、有效期内会话恢复与官网更新检查。历史实机及协议限制见 [账户来源恢复记录](docs/account-source-recovery-release.md)。
+
+## 更早版本（历史原文）
+
 ## 0.2.1-ui · 2026-09-30
 
 - 使用 gccwebos-mobile@091ee6e8 实际tokens、字标与场景进行原生Compose适配
@@ -40,3 +69,4 @@
 - 两项 Android UI 测试、Gradle/JUnit/Lint、APK 签名和真机测试未运行。
 - 实际 Android 构建在 Wrapper 下载阶段失败：`curl: (6) Could not resolve host: raw.githubusercontent.com`。
 - M0 仍为**实现已推进、Android 构建与接口合同门槛未完成**。
+

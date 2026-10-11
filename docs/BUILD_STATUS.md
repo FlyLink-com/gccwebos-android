@@ -1,4 +1,13 @@
-# M0 构建收口记录
+# 构建与验收证据索引
+
+## 当前入口（2026-10-11 UTC）
+
+- [PROJECT_STATUS](PROJECT_STATUS.md) 按源码、合并、本地测试、托管 CI、实机与公开发布分别记录当前进度。
+- [v0.4.2 公开 Release](https://github.com/gccwebos-com/feilian-vpn-releases/releases/tag/v0.4.2) 对应 `0b94a8cee2517624eb6d5a3ac61366ea4d96d361`；其中记录了 1,386 项本地 JVM 测试、签名与 OPPO 升级结果，不是托管 CI 结果。本次未复跑这些验证。
+- 最新核对主干 `724fb7f04c24573a15e50c64b843b39d0012a0e3` 已包含发布后的改动；该 SHA 未查到 Actions 运行，不能继承发布源码或旧 PR 的测试结论。
+- 下文完整保留 M0 的精确 SHA、哈希和失败历史。其“未接入 VPN／后台／未发布”只描述当时的 M0 验收范围；历史 artifact 链接的当前有效性未在本轮重验。
+
+# M0 构建收口记录（历史）
 
 范围：Android 工程、Debug 构建、JUnit、Lint、测试包编译、签名与安装启动；不接入真实 VPN 或后台。起始基线为 PR #1 的 `dbd4b86700b4ca88eaa0b9bb64caf6201ee6d753`。PR #2 合入 `main@abb7b7c717a5911b88f1883d17cb99e28f3aaaea` 的修复已保留，M0 收口集中在 [PR #3](https://github.com/gccwebos-com/gccwebos-android/pull/3)。本记录不自动合并 main 或发布。
 
@@ -72,3 +81,4 @@ UI 用例为 `allFourDestinationsRemainAccessible` 和 `realVpnIsExplicitlyUnava
 保留 9 项 Lint 警告及日志中的 Kotlin annotation target、Compose 测试 API 弃用提示；没有通过关闭 Lint 隐藏它们。物理真机、真实 VPN／TUN、后台、节点、支付、推荐归因、正式签名和商店发布均未验收。本轮不自动合并或发布。
 
 [初始 ZIP 的离线诊断与构建阻塞历史](../evidence/initial-build-status.md) 原文保留；其中“未取得 Wrapper／未运行 CI”等属于导入当时的历史，不代表本次已验证基线。
+

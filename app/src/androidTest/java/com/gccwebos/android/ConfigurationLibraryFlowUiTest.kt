@@ -109,6 +109,8 @@ class ConfigurationLibraryFlowUiTest {
 
     private fun openReplacement(index: Int) {
         awaitIdle()
+        if (compose.onAllNodesWithTag("configuration-menu-$index").fetchSemanticsNodes().isEmpty())
+            compose.onNodeWithTag("unified-filter-$index").performClick()
         compose.onNodeWithTag("configuration-menu-$index").performScrollTo().performClick()
         compose.onNodeWithTag("configuration-replace-$index").performClick()
         compose.onNodeWithTag("manual-import-host").assertExists()
@@ -143,7 +145,7 @@ class ConfigurationLibraryFlowUiTest {
             assertEquals(2, commits.get())
         }
         compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("节点列表")
-        compose.onNodeWithTag("configuration-name-0", useUnmergedTree = true).assertTextEquals("未知1")
+        compose.onNodeWithTag("unified-filter-0", useUnmergedTree = true).assertTextEquals("未知1")
         // Both saved configurations are rows of the one list; the inactive one is chosen with a single tap.
         compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasClickAction()
         // A background library refresh replaces every opaque handle; the rows must stay.
@@ -157,7 +159,8 @@ class ConfigurationLibraryFlowUiTest {
         compose.onNodeWithTag("nodes-import").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("nodes-latency-refresh").assertIsDisplayed()
         compose.onNodeWithTag("nodes-configuration-group").assertIsDisplayed()
-        compose.onNodeWithTag("configuration-group-0").assertIsDisplayed()
+        compose.onNodeWithTag("unified-filter-0").assertIsDisplayed()
+        compose.onNodeWithTag("unified-sources").assertDoesNotExist()
         compose.waitForIdle()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = File(requireNotNull(context.getExternalFilesDir(null)), "ui-evidence/configuration-library")
@@ -194,7 +197,7 @@ class ConfigurationLibraryFlowUiTest {
         }
         awaitIdle()
         compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertExists()
-        compose.onNodeWithTag("configuration-group-0").assertExists()
+        compose.onNodeWithTag("unified-filter-0").assertExists()
         assertNoExternalEffects()
     }
 }

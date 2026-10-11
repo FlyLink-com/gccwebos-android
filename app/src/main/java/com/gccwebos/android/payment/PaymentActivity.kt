@@ -98,8 +98,15 @@ open class PaymentActivity : ComponentActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                 when (val decision = policy?.decide(request.url.toString(), mainFrame = request.isForMainFrame,
                     redirect = request.isRedirect, userGesture = request.hasGesture()) ?: PaymentNavigation.Block(BlockReason.MalformedUrl)) {
-                    PaymentNavigation.Allow -> false
-                    is PaymentNavigation.Alipay -> { handOff(decision.uri); true }
+                    PaymentNavigation.Allow -> {
+                        debugLog("allow main=${request.isForMainFrame} redirect=${request.isRedirect} gesture=${request.hasGesture()} " +
+                            "scheme=${request.url.scheme} host=${request.url.host} hops=${policy?.hops}")
+                        false
+                    }
+                    is PaymentNavigation.Alipay -> {
+                        debugLog("alipay-handoff gesture=${request.hasGesture()} scheme=${request.url.scheme} fromHost=${view.url?.let { Uri.parse(it).host }}")
+                        handOff(decision.uri); true
+                    }
                     is PaymentNavigation.Block -> {
                         debugLog("blocked main=${request.isForMainFrame} redirect=${request.isRedirect} reason=${decision.reason} " +
                             "scheme=${request.url.scheme} host=${request.url.host}")
@@ -111,12 +118,13 @@ open class PaymentActivity : ComponentActivity() {
                 }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                debugLog("started host=${url?.let { Uri.parse(it).host }}")
                 state.failure = null
                 state.blockedOrigin = false
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                debugLog("finished host=${url?.let { Uri.parse(it).host }}")
+                debugLog("finished host=${url?.let { Uri.parse(it).host }} failure=${state.failure} shown=${state.pageShown}")
                 if (state.failure == null) state.pageShown = true
             }
 

@@ -60,6 +60,21 @@ assert scanner.get(android + 'exported') == 'false'
 assert scanner.get(android + 'excludeFromRecents') == 'true'
 assert activities['com.journeyapps.barcodescanner.CaptureActivity'].get(
     '{http://schemas.android.com/tools}node') == 'remove'
+# The in-app payment page is private, and package visibility is limited to the Alipay app and its two link schemes.
+payment = activities['.payment.PaymentActivity']
+assert payment.get(android + 'exported') == 'false' and payment.find('intent-filter') is None
+queries = manifest.find('queries')
+assert queries is not None and [p.get(android + 'name') for p in queries.findall('package')] == ['com.eg.android.AlipayGphone']
+assert sorted(i.find('data').get(android + 'scheme') for i in queries.findall('intent')) == ['alipay', 'alipays']
+assert len(list(queries)) == 3, 'Only the Alipay package and its two schemes may be queried'
+assert 'android.permission.QUERY_ALL_PACKAGES' not in {p.get(android + 'name') for p in manifest.findall('uses-permission')}
+assert not any('payment.PaymentTestActivity' in n or 'FakeAlipayActivity' in n for n in activities), 'Debug payment test seam leaked into the main manifest'
+payment_source = (ROOT / 'app/src/main/java/com/gccwebos/android/payment/PaymentActivity.kt').read_text()
+for required in ('FLAG_SECURE', 'handler.cancel()', 'MIXED_CONTENT_NEVER_ALLOW', 'safeBrowsingEnabled = true',
+                 'allowFileAccess = false', 'allowContentAccess = false'):
+    assert required in payment_source, f'Payment page must keep: {required}'
+for forbidden in ('addJavascriptInterface', 'handler.proceed', 'setWebContentsDebuggingEnabled', 'domStorageEnabled = true'):
+    assert forbidden not in payment_source, f'Payment page must not use: {forbidden}'
 services = {s.get(android + 'name'): s for s in manifest.findall('.//service')}
 assert set(services) == {'.vpn.ConnectionOwnerService', '.vpn.ProductionVpnService'}
 assert all(s.get(android + 'exported') == 'false' for s in services.values())

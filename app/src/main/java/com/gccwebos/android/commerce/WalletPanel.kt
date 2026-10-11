@@ -152,7 +152,6 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${formatMoney(offer.amountMinor, offer.currency, offer.currencyExponent)} → ${formatCoins(offer.paidCoinUnits)}")
                 Text("本次选项尚未锁价。创建后按服务器返回金额再次核对，再主动打开支付宝。")
-                Text("服务平台：飞连vpn · portal.gccwebos.com")
             } }, confirmButton = { TextButton(onClick = flow::confirmSelection, enabled = !state.busy,
                 modifier = Modifier.testTag("recharge-confirm")) { Text("确认金额并创建订单") } },
             dismissButton = { TextButton(onClick = flow::cancelSelection, modifier = Modifier.testTag("recharge-cancel")) { Text("取消") } })

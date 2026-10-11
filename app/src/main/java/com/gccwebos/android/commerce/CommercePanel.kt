@@ -533,7 +533,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
     }
     if (walletMode) {
-        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger, embeddedWallet,
+        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> com.gccwebos.android.payment.PaymentPage.open(context, url) }, onRecharge, onLedger, embeddedWallet,
             onBack = onWalletBack, onRechargeRecords = onRechargeRecords)
         return // Wallet never inherits a retained purchase confirmation from another destination.
     } else if (mode == CommerceMode.Plans) {
@@ -600,11 +600,11 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     if (mode == CommerceMode.Orders) {
-        OrderHistoryPanel(account, state, paymentOpener = paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, now = now)
+        OrderHistoryPanel(account, state, paymentOpener = paymentOpener ?: { url -> com.gccwebos.android.payment.PaymentPage.open(context, url) }, now = now)
         return // History has only read/local-return actions, even if a shared fixture retains a quote.
     }
     if (mode == CommerceMode.Ledger) {
-        LedgerPanel(account, state, paymentOpener = paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, now = now)
+        LedgerPanel(account, state, paymentOpener = paymentOpener ?: { url -> com.gccwebos.android.payment.PaymentPage.open(context, url) }, now = now)
         return // Read-only history must not inherit a retained purchase confirmation.
     }
     state.quote?.takeIf { visitReady }?.let { quote ->

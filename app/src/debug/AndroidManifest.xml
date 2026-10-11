@@ -18,5 +18,17 @@
                 android:value="Opt-in isolated engineering VPN tunnel test; app-only routes; no production service" />
             <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />
         </service>
+        <!-- Debug-only payment-page test seam (local HTML under the pinned origin) and a stand-in for the Alipay app. -->
+        <activity android:name=".payment.PaymentTestActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|uiMode|density" />
+        <activity android:name=".payment.FakeAlipayActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="alipays" />
+                <data android:scheme="alipay" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

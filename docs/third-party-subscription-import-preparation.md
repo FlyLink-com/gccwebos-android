@@ -97,6 +97,13 @@ URL 全体按秘密处理；异常、日志、截图、UI 和测试回执不含 
 调试构建（`.debug`）会在 logcat 标签 `GCCPrep` 输出每个 HTTP 调用一行分阶段耗时，例如
 `read-timing import/primary dns=40ms(2 addr v4=1,v6=1) connect=[#1 v6 6000ms fail(SocketTimeoutException), #2 v4 280ms (incl tls) ok] tls=200ms wait=10000ms body=50ms total=16390ms result=ok`，
 以及 `read-hedge-start` / `read-result`。只含时长、地址数量与族（v4/v6）、失败异常类名；不含 URL、主机名、地址、头或正文。发布构建不安装 sink，不产生任何记录。
+
+调试构建另有一行响应摘要与一行解析拒绝原因（同样只写 GCCPrep，发布构建不产生）：
+`read-summary import/primary http=200 type=text/plain bytes=1234 gzip=no first=yaml-like`，
+`import-reject class=UnsafeProxyConfiguration reason=Protocol`。
+摘要只含 HTTP 状态、媒体类型/子类型（不含参数）、解码后字节数、服务器是否使用 gzip，以及前几个非空白字节的粗分类
+（json-object / json-array / xml/html / uri-list / yaml-like / base64-like / other / empty）；拒绝原因只写异常类名与拒绝枚举名，
+从不写异常消息。不含 URL、主机、头、令牌或任何正文片段。
 成功响应读取流按解压后大小限流；错误响应正文不读取。拒绝或取消时先取消 call 再关闭响应，避免为复用连接而继续排空恶意正文；不能先完整读入再判定大小。
 取消必须关闭当前请求/响应，擦除持有的可变字节。网络失败不重试为其他源、不使用缓存冒充新下载。
 

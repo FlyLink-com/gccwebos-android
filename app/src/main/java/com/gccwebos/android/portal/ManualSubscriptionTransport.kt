@@ -332,7 +332,12 @@ class ManualSubscriptionTransport internal constructor(private val calls: Call.F
                                     owned = boundedManualSubscriptionBody(it.body ?: throw PortalFailure(PortalFailure.Reason.PROTOCOL)) {
                                         continuation.isActive && !call.isCanceled()
                                     }
-                                    val result = SubscriptionRead(requireNotNull(owned), metadata.expiry, metadata.usage)
+                                    val bytes = requireNotNull(owned)
+                                    PrepTrace.markLazy {
+                                        ReadSummary.line(label, it.code, it.body?.contentType(), bytes,
+                                            (it.networkResponse ?: it).header("Content-Encoding")?.contains("gzip", ignoreCase = true) == true)
+                                    }
+                                    val result = SubscriptionRead(bytes, metadata.expiry, metadata.usage)
                                     // Ownership transfers to the continuation; prompt cancellation wipes undelivered bytes.
                                     continuation.resume(result) { _, rejected, _ -> rejected.bytes.fill(0) }
                                     owned = null

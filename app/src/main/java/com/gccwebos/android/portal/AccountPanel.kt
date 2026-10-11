@@ -166,12 +166,18 @@ internal class AccountController(private val repository: PortalRepository, priva
     val nodeLatency: NodeLatencyController = NodeLatencyController(repository.localSubscriptions, scope, nodeLatencyProbe,
         authGeneration = { authSessionGeneration },
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !configurationLibrary.busy })
+    /**
+     * The signed-in account's own subscription load: its state is shown on the nodes page (loading / failed with a retry),
+     * and a failed request is retried a few times with growing pauses. A page load, not the connect step.
+     */
+    internal val accountLoad: AccountLoadCoordinator = AccountLoadCoordinator(scope, start = { report -> startAccountLoad(report) })
     val configurationLibrary: ConfigurationLibraryController = ConfigurationLibraryController(repository.localSubscriptions, scope,
         allowed = { !busy && !restoring && !foregroundCheckPending && !clearing && !manualImport.busy && !nodeSelection.busy },
         commitFence = sourceCommitFence,
         onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() },
         accountSignedIn = { authenticated },
         nodesChanged = { nodeLatency.cancel(); nodeSelection.expireIfNeeded() },
+        accountNeedsLoad = { accountLoad.request() },
         chooseNode = { target ->
             nodeSelection.expireIfNeeded()
             val match = matchNodeTarget(nodeSelection.snapshot.choices, target)
@@ -188,6 +194,22 @@ internal class AccountController(private val repository: PortalRepository, priva
             configurationLibrary.refresh()
             if (foregroundCheckPending && authenticated && !busy && !manualImport.busy && !clearing) revalidateAccount()
         } })
+    /** One attempt of the account's own delivery request; false when something else is busy right now. */
+    private fun startAccountLoad(report: (AccountLoadOutcome) -> Unit): Boolean {
+        if (!authenticated || busy || manualImport.busy || restoring || foregroundCheckPending || clearing) return false
+        run {
+            try {
+                loadResource()
+                report(if (localSubscription.status == LocalSubscriptionStatus.READY && localSubscription.nodes.isNotEmpty())
+                    AccountLoadOutcome.Loaded else AccountLoadOutcome.NotLoaded)
+            } catch (cancel: CancellationException) { report(AccountLoadOutcome.Cancelled); throw cancel }
+            catch (failure: Exception) { report(AccountLoadOutcome.Failed); throw failure }
+            finally { scope.launch { configurationLibrary.refresh() } }
+        }
+        return true
+    }
+    /** The user's own retry after a failed account load. */
+    fun retryAccountLoad() { if (authenticated) accountLoad.request(manual = true) }
     fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
     fun cancelAccountUsageUpdate() = accountUsage.cancel()
     private fun clearAccountUsage() {
@@ -476,7 +498,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     suspend fun commerceSessionBinding() = repository.commerceSessionBinding()
     suspend fun commerceAccountBinding() = repository.commerceAccountBinding()
     internal suspend fun referral(path: String, body: String? = null, expectedSession: String? = null) = repository.referral(path, body, expectedSession)
-    fun commerceSessionExpired() { clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
+    fun commerceSessionExpired() { accountLoad.cancel(); clearAccountUsage(); nodeSelection.invalidate(); expiryTask?.cancel(); account = displayEmail.orEmpty(); commerceSessionIdentity = null; authenticated = false; security = null; referralGenerationGuard = ReferralGenerationGuard(); emailHint = null; secondFactorEmail = null; resource = null; nodes = localSubscription.nodes; importStatus = null; importRejection = null; deliveryReceived = false; error = "登录已到期，请重新登录" }
 
     private suspend fun loadResource(onAcceptedOverview: (BoundAccountOverview) -> Unit = {}) {
         val expectedUsage = usageAuthentication
@@ -518,6 +540,7 @@ internal class AccountController(private val repository: PortalRepository, priva
     /** Abandon an in-progress sign-in; keeps whatever local subscription exists. */
     fun cancelAuthentication() = reset(clearAccountSubscription = false)
     private fun reset(clearAccountSubscription: Boolean) {
+        accountLoad.cancel()
         manualImport.cancel()
         configurationLibrary.clearDisplay()
         nodeLatency.cancel()

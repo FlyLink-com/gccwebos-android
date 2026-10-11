@@ -38,6 +38,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.gccwebos.android.ResourceCard
 import com.gccwebos.android.design.*
+import com.gccwebos.android.design.dialog.GccDialog
+import com.gccwebos.android.design.dialog.GccDialogAction
+import com.gccwebos.android.design.dialog.GccDialogIcon
+import com.gccwebos.android.design.dialog.GccDialogTone
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -678,20 +682,17 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
 
 /** The one logout action: plain words, this device only, server account untouched. */
 internal const val LOGOUT_LABEL = "退出登录"
-internal const val LOGOUT_TITLE = "是否退出登录并清除当前设备订阅配置？"
-internal const val LOGOUT_BODY = "将退出登录，并清除这台设备上保存的账户订阅配置。只影响当前设备，不会删除或更改服务器上的账户；" +
-    "你自己导入的配置会保留。账户订阅清除后，重新登录即可再次获取。"
+internal const val LOGOUT_TITLE = "退出登录？"
+internal const val LOGOUT_BODY = "只清除这台设备上保存的账户订阅配置，不会删除或更改服务器上的账户；" +
+    "你自己导入的配置会保留，重新登录即可再次获取。"
 internal const val LOGOUT_CONFIRM = "退出登录"
 
 @Composable
 internal fun LogoutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text(LOGOUT_TITLE, modifier = Modifier.testTag("logout-title")) },
-        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            Text(LOGOUT_BODY, modifier = Modifier.testTag("logout-body"))
-        } },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("logout-confirm")) { Text(LOGOUT_CONFIRM) } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("logout-cancel")) { Text("取消") } })
+    GccDialog(onDismissRequest = onDismiss, title = LOGOUT_TITLE, body = LOGOUT_BODY,
+        icon = GccDialogIcon.Warning, tone = GccDialogTone.Danger, testTag = "logout",
+        primary = GccDialogAction(LOGOUT_CONFIRM, onConfirm, testTag = "logout-confirm"),
+        secondary = GccDialogAction("取消", onDismiss, testTag = "logout-cancel"))
 }
 
 internal const val OFFICIAL_REGISTRATION_URL = "https://portal.gccwebos.com/portal/register/"

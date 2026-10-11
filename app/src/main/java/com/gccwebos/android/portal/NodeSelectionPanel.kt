@@ -223,11 +223,9 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                     }
                     // N9: search sits directly under the toolbar, above everything that scrolls with the rows.
                     if (searchable) NodeSearchField(query) { query = it }
-                    // N8: a chosen node is shown once, as the highlighted row below. There is no "未选择 / 请选择" helper
-                    // row any more. Only a lost selection (the chosen node vanished from the configuration) is still said.
-                    if (selectedChoice == null && value.selectionLost && proxyChoices.isNotEmpty()) Text(
-                        "原来选的节点已不在配置里，请重新选择节点", fontSize = 11.sp, color = Brand.Amber, maxLines = 2,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp).testTag("nodes-select-lost"))
+                    // N8: a chosen node is shown once, as the highlighted row below. There is no selection helper or
+                    // "selection lost" text on this page; the stale selection is still cleared (selectionLost state is kept
+                    // for the connect page's own wording).
                     if (needle != null && shownProxy.isEmpty()) Text("没有匹配的节点", color = Brand.Muted, fontSize = 12.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp)
                             .testTag("nodes-search-empty"))

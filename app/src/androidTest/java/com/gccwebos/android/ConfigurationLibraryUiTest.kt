@@ -240,6 +240,8 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("nodes-selection-summary").assertDoesNotExist()
         compose.onNodeWithTag("nodes-select-prompt").assertDoesNotExist()
         compose.onAllNodesWithText("请点选下方一个节点", substring = true).assertCountEquals(0)
+        compose.onNodeWithTag("nodes-select-lost").assertDoesNotExist()
+        compose.onAllNodesWithText("已不在配置里", substring = true).assertCountEquals(0)
         compose.onAllNodesWithText("未选择", substring = false).assertCountEquals(0)
     }
 

@@ -391,7 +391,7 @@ private data class NodeEdit(val entryId: String?, val position: Int, val delete:
 
 /** "来源" caption of one node: the saved source's name (the 来源 card carries its kind); the account subscription says it is read-only. */
 internal fun nodeSourceLabel(item: ConfigurationItem): String =
-    if (item.kind == ManualSourceKind.LegacyRemote) "账户订阅 · 只读" else item.name
+    if (item.kind == ManualSourceKind.LegacyRemote) "$OFFICIAL_SOURCE_NAME · 只读" else item.name
 
 /**
  * The segmented switcher (the plans page's [SlidingTabRow]): 全部 plus one tab per source, then the 添加配置 "+" at the far
@@ -423,6 +423,10 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
     latencyFor: (ConfigurationItem, Int) -> NodeLatencyObservation?, measuring: Boolean, sortByLatency: Boolean,
     onEdit: (ConfigurationItem, Int, Boolean) -> Unit) {
     if (others.isEmpty()) return
+    var pendingUnknown by remember { mutableStateOf<(() -> Unit)?>(null) }
+    pendingUnknown?.let { proceed ->
+        UnknownNodeDialog(onConfirm = { pendingUnknown = null; proceed() }, onDismiss = { pendingUnknown = null })
+    }
     if (tunnelActive && others.any { it.value.nodes.any { node -> !node.info } }) Text(
         "已连接时只能选用当前来源的节点；要用其他来源的节点，请先断开连接。",
         fontSize = 11.sp, color = Brand.Amber, modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)
@@ -443,7 +447,7 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text(item.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (loadable) "节点还没加载，点一下加载账户订阅的节点" else "没有可选节点 · ${configurationStatusLabel(item)}",
+                    Text(if (loadable) "节点还没加载，点一下加载官方节点" else "没有可选节点 · ${configurationStatusLabel(item)}",
                         fontSize = 11.sp, color = Brand.Muted)
                 }
             }
@@ -464,7 +468,9 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
                 }) else null,
                 modifier = Modifier.testTag("configuration-node-$index-$position")
                     .clickable(enabled = choosable, role = Role.Button, onClickLabel = "选择此节点") {
-                        onChooseNode(item.handle, NodeTarget(position, node.name, node.protocol))
+                        val choose = { onChooseNode(item.handle, NodeTarget(position, node.name, node.protocol)) }
+                        // These rows belong to a source that is not selected, so a tap always changes the selection.
+                        if (selectionNeedsUnknownWarning(item.kind, alreadySelected = false)) pendingUnknown = choose else choose()
                     })
         }
     }
@@ -612,7 +618,7 @@ internal fun groupCaption(item: ConfigurationItem): String =
     "${item.nodes.count { !it.info }} 条 · ${configurationKindLabel(item.kind)} · ${configurationStatusLabel(item)}"
 
 internal fun configurationKindLabel(kind: ManualSourceKind): String = when (kind) {
-    ManualSourceKind.LegacyRemote -> "账户订阅"
+    ManualSourceKind.LegacyRemote -> OFFICIAL_SOURCE_NAME
     ManualSourceKind.ImportedRemote -> "订阅配置"
     ManualSourceKind.ImportedLocal -> "本地文件"
     ManualSourceKind.ExternalRemote -> "第三方订阅"

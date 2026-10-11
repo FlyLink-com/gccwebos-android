@@ -27,7 +27,7 @@ class ConfigurationNameDuplicateTest {
         assertFalse(ConfigurationName.conflicts("配置 4", others))
         // The default for the next import continues after the highest number and never collides.
         val next = nextConfigurationName(listOf("配置 2", "配置 2", "配置 3"))
-        assertEquals("配置 4", next)
+        assertEquals("未知4", next)
         assertFalse(ConfigurationName.conflicts(next, listOf("配置 2", "配置 2", "配置 3")))
     }
 

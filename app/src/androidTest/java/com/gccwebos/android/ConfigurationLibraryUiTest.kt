@@ -29,7 +29,7 @@ class ConfigurationLibraryUiTest {
     private val second = ConfigurationHandle(owner, "synthetic-revision", "synthetic-second", 0)
     private val nodes = listOf(SafeProxyConfig.NodeSummary(0, "Synthetic Japan", "vless", true))
     private var snapshot by mutableStateOf(ConfigurationLibrarySnapshot(listOf(
-        ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
+        ConfigurationItem(account, "官方", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
         ConfigurationItem(first, "合成配置", ManualSourceKind.ImportedLocal, nodes, LocalSubscriptionStatus.READY, true,
             nodeKeys = listOf("k1")),
         ConfigurationItem(second, "合成配置", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, false,
@@ -114,6 +114,7 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("configuration-activate-2").assertDoesNotExist()
         compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction().performClick()
+        compose.onNodeWithTag("unknown-node-continue").performClick()
         compose.runOnIdle {
             assertEquals(1, chosen.size); assertSame(second, chosen.single().first)
             assertEquals(NodeTarget(0, "Synthetic Japan", "vless"), chosen.single().second)
@@ -125,7 +126,7 @@ class ConfigurationLibraryUiTest {
     @Test fun everyNodeRowSaysWhereItComesFrom() {
         launch()
         compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertIsDisplayed()
-        compose.onAllNodesWithText("账户订阅 · 只读", useUnmergedTree = true).assertCountEquals(1)
+        compose.onAllNodesWithText("官方 · 只读", useUnmergedTree = true).assertCountEquals(1)
         // Imported rows carry the source name only (the kind sits on the 来源 card), so the label is never cut off.
         compose.onNode(hasTestTag("node-source-label") and hasAnyAncestor(hasTestTag("configuration-node-2-0")), useUnmergedTree = true)
             .assertTextEquals("合成配置")
@@ -429,7 +430,27 @@ class ConfigurationLibraryUiTest {
             snapshot = snapshot.copy(items = snapshot.items.map { if (it.handle === second) it.copy(handle = replacement) else it })
         }
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction().performClick()
+        compose.onNodeWithTag("unknown-node-continue").performClick()
         compose.runOnIdle { assertSame(replacement, chosen.single().first); assertTrue(activations.isEmpty()) }
+    }
+
+    @Test fun choosingAnUnknownNodeAsksFirstAndTheOfficialSourceNeverDoes() {
+        launch()
+        // 取消: nothing is chosen, the dialog closes.
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().performClick()
+        compose.onNodeWithTag("unknown-node-dialog").assertIsDisplayed()
+        compose.onNodeWithTag("unknown-node-body", useUnmergedTree = true).assertTextEquals("未知节点存在数据泄露风险，请谨慎选择")
+        compose.onNodeWithTag("unknown-node-cancel").assertHeightIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("unknown-node-dialog").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(chosen.isEmpty()) }
+        // 继续选择: the same tap path now selects exactly that node.
+        compose.onNodeWithTag("configuration-node-2-0").performScrollTo().performClick()
+        compose.onNodeWithTag("unknown-node-continue").assertHeightIsAtLeast(48.dp).performClick()
+        compose.runOnIdle { assertSame(second, chosen.single().first) }
+        // 官方 (account) nodes are chosen without any warning.
+        compose.onNodeWithTag("configuration-node-0-0").performScrollTo().performClick()
+        compose.onNodeWithTag("unknown-node-dialog").assertDoesNotExist()
+        compose.runOnIdle { assertSame(account, chosen.last().first) }
     }
 
     @Test fun doubledFontOtherSourceRowsStayInsideTheViewport() {
@@ -439,6 +460,7 @@ class ConfigurationLibraryUiTest {
         val bounds = row.fetchSemanticsNode().boundsInRoot
         assertTrue(bounds.left >= host.left); assertTrue(bounds.right <= host.right)
         row.assertHeightIsAtLeast(48.dp).performClick()
+        compose.onNodeWithTag("unknown-node-continue").performClick()
         compose.runOnIdle { assertSame(second, chosen.single().first) }
     }
 
@@ -448,7 +470,7 @@ class ConfigurationLibraryUiTest {
         menu(2, "rename")
         compose.onNodeWithTag("configuration-name-duplicate").assertTextEquals("已有同名订阅，请重新命名你的订阅")
         compose.onNodeWithTag("configuration-dialog-confirm").assertIsNotEnabled()
-        compose.onNodeWithTag("configuration-name-input").performTextReplacement("  账户订阅 ")
+        compose.onNodeWithTag("configuration-name-input").performTextReplacement("  官方 ")
         compose.onNodeWithTag("configuration-dialog-confirm").assertIsNotEnabled()
         compose.onNodeWithTag("configuration-name-input").performTextReplacement("唯一名称")
         compose.onNodeWithTag("configuration-name-duplicate").assertDoesNotExist()
@@ -458,13 +480,13 @@ class ConfigurationLibraryUiTest {
 
     @Test fun aNewlyImportedEntryAsksForANameThatSurvivesARefreshAndRejectsDuplicates() {
         snapshot = ConfigurationLibrarySnapshot(listOf(
-            ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
+            ConfigurationItem(account, "官方", ManualSourceKind.LegacyRemote, nodes, LocalSubscriptionStatus.READY, false),
             ConfigurationItem(first, "Kitty", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, false),
-            ConfigurationItem(second, "配置 3", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, true)))
+            ConfigurationItem(second, "未知3", ManualSourceKind.ExternalRemote, nodes, LocalSubscriptionStatus.READY, true)))
         namingEntryId = "synthetic-second"
         launch()
         compose.onNodeWithText("为订阅命名").assertExists()
-        compose.onNodeWithTag("configuration-name-input").assertTextContains("配置 3")
+        compose.onNodeWithTag("configuration-name-input").assertTextContains("未知3")
         compose.runOnIdle { assertEquals(1, namingDone); assertNull(namingEntryId) }
         // The import's settle refresh replaces handles; the dialog stays on the same saved entry.
         val refreshed = ConfigurationHandle(owner, "synthetic-revision-2", "synthetic-second", 0)

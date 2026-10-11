@@ -286,7 +286,7 @@ class ManualImportControllerTest {
         runCurrent()
         val library = f.manager.configurationLibrarySnapshot().items
         val created = library.single { it.active }
-        assertTrue(created.name.startsWith("配置 ")) // single-slot test store: one synthesized entry
+        assertTrue(created.name.startsWith("未知")) // single-slot test store: one synthesized entry
         assertEquals(created.handle.entryId, f.controller.namingEntryId)
         f.controller.namingHandled()
         assertNull(f.controller.namingEntryId)

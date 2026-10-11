@@ -129,7 +129,8 @@ class ConfigurationLibraryEvidenceTest {
         compose.onNodeWithTag("unified-filter-all").performClick()
         // One tap on a node of another (inactive) source: that source becomes active and exactly this node is selected.
         compose.onNodeWithTag("configuration-node-1-1").performScrollTo().assertHasClickAction().performClick()
-        compose.waitUntil(10_000) { idle() && account.configurationLibrary.snapshot.items.any { it.active && it.name == "配置 1" } }
+        compose.onNodeWithTag("unknown-node-continue").performClick()
+        compose.waitUntil(10_000) { idle() && account.configurationLibrary.snapshot.items.any { it.active && it.name == "未知1" } }
         compose.runOnIdle {
             assertNull(account.configurationLibrary.error)
             assertNotNull("the tapped node must be the selected one", account.nodeSelection.snapshot.selected)

@@ -147,6 +147,33 @@ class RechargeFlowControllerTest {
         assertEquals(order.orderRef, fixture.commerce.recharge?.orderRef)
     }
 
+    @Test fun aPayableUnpaidOrderListedInOrderDetailsCanBePaidFromThereWithTheSameReview() = runTest {
+        val fixture = Fixture(this)
+        // Not the current local order (that pointer was replaced by a newer recharge); it only lives in 订单明细.
+        fixture.commerce.rechargeHistory = listOf(order)
+        assertNull(fixture.commerce.recharge)
+        assertTrue(fixture.commerce.canOpenPayment(order, now))
+        fixture.flow.reviewPayment(order, now)
+        assertEquals(order, fixture.flow.paymentReview)
+        fixture.flow.openPayment(now)
+        assertEquals(listOf(requireNotNull(order.nextAction).url), fixture.opened)
+        assertEquals(order.orderRef, fixture.flow.requestedPaymentFor)
+        assertTrue("paying never creates or posts anything", fixture.calls.isEmpty())
+    }
+
+    @Test fun anOrderThatIsNotListedExpiredOrWithoutAnEntryIsNeverPayable() = runTest {
+        val fixture = Fixture(this)
+        fixture.commerce.rechargeHistory = listOf(order)
+        assertFalse("unknown order", fixture.commerce.canOpenPayment(order.copy(orderRef = "recharge_other"), now))
+        assertFalse("past the order expiry", fixture.commerce.canOpenPayment(order, order.expiresAt))
+        fixture.commerce.rechargeHistory = listOf(order.copy(nextAction = null))
+        assertFalse("no payment entry", fixture.commerce.canOpenPayment(order.copy(nextAction = null), now))
+        fixture.commerce.rechargeHistory = listOf(order.copy(status = "credited"))
+        assertFalse("already paid", fixture.commerce.canOpenPayment(order.copy(status = "credited"), now))
+        fixture.flow.reviewPayment(order.copy(orderRef = "recharge_other"), now)
+        assertNull(fixture.flow.paymentReview); assertNotNull(fixture.flow.error)
+    }
+
     @Test fun unreadOrUnreadySessionCannotSelectOrConfirm() = runTest {
         for (gate in listOf("unread", "auth", "restoring", "foreground", "busy", "method")) {
             val fixture = Fixture(this)

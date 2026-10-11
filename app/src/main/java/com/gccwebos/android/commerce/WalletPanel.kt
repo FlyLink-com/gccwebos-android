@@ -163,19 +163,7 @@ internal fun WalletPanel(account: AccountController, state: CommerceController, 
                 modifier = Modifier.testTag("recharge-confirm")) { Text("确认金额并创建订单") } },
             dismissButton = { TextButton(onClick = flow::cancelSelection, modifier = Modifier.testTag("recharge-cancel")) { Text("取消") } })
     }
-    flow.paymentReview?.let { order ->
-        AlertDialog(onDismissRequest = flow::dismissPayment, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("核对服务器付款信息") },
-            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("实际应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
-                Text("到账目标：${formatCoins(order.expectedPaidCoinUnits)}")
-                Text("支付宝 · 飞连vpn · portal.gccwebos.com")
-                Text("将打开：${order.nextAction?.let { java.net.URI(it.url).host } ?: "入口不可用"}")
-                Text("请核对实际金额；选项价格变化时，以此订单为准。暂不付款会保留订单。")
-                if (!state.canOpenPayment(order, now)) Text("订单已更新或入口已失效，请关闭并查询。")
-            } }, confirmButton = { AlipayButton("支付宝支付", { flow.openPayment(Instant.now()) },
-                enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },
-            dismissButton = { TextButton(onClick = flow::dismissPayment, modifier = Modifier.testTag("payment-open-cancel")) { Text("暂不付款") } })
-    }
+    PaymentReviewDialog(flow, state, now)
     // Read-only breakdown: a swipe-dismissable bottom sheet over the top-up page (same tags and fields).
     if (balanceDetails && mode == CommerceMode.Wallet) GccSheet(onDismissRequest = { balanceDetails = false },
         modifier = Modifier.testTag("wallet-balance-details-dialog"), title = "余额明细",
@@ -246,5 +234,23 @@ private fun WalletBalanceMetrics(wallet: Wallet?) {
                 }
             }
         }
+    }
+}
+
+/** The server-figures review before the payment page opens; shared by the wallet's 上一笔充值 card and 订单明细. */
+@Composable
+internal fun PaymentReviewDialog(flow: RechargeFlowController, state: CommerceController, now: Instant) {
+    flow.paymentReview?.let { order ->
+        AlertDialog(onDismissRequest = flow::dismissPayment, containerColor = Brand.SurfaceRaised, shape = Brand.Shape, title = { Text("核对服务器付款信息") },
+            text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("实际应付：${formatMoney(order.amountMinor, order.currency, order.currencyExponent)}")
+                Text("到账目标：${formatCoins(order.expectedPaidCoinUnits)}")
+                Text("支付宝 · 飞连vpn · portal.gccwebos.com")
+                Text("将打开：${order.nextAction?.let { java.net.URI(it.url).host } ?: "入口不可用"}")
+                Text("请核对实际金额；选项价格变化时，以此订单为准。暂不付款会保留订单。")
+                if (!state.canOpenPayment(order, now)) Text("订单已更新或入口已失效，请关闭并查询。")
+            } }, confirmButton = { AlipayButton("支付宝支付", { flow.openPayment(Instant.now()) },
+                enabled = !state.busy && state.canOpenPayment(order, now), modifier = Modifier.testTag("payment-open-confirm")) },
+            dismissButton = { TextButton(onClick = flow::dismissPayment, modifier = Modifier.testTag("payment-open-cancel")) { Text("暂不付款") } })
     }
 }

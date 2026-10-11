@@ -309,7 +309,8 @@ internal class CommerceController(private val account: AccountController, privat
     fun finishRecharge() = run { requireNotNull(repo).finishRecharge(); ensureCurrentSession(); pendingRecharge = false; recharge = null; wallet = null; walletLoaded = false; quote = null }
     fun currentSession() = account.authenticated && if (identity == null) account.authSessionGeneration == epoch
         else account.commerceSessionIdentity === identity
-    fun canOpenPayment(order: RechargeOrder, now: Instant) = canOperate() && recharge == order &&
+    /** The current order, or a still-payable unpaid order from 订单明细 (the server list carries the same trusted entry). */
+    fun canOpenPayment(order: RechargeOrder, now: Instant) = canOperate() && (recharge == order || rechargeHistory?.contains(order) == true) &&
         order.paymentMethod == "alipay" && order.adapterKey == "xsd_v1" && order.payableAt(now) &&
         order.nextAction?.let { CommerceJson.trustedPaymentRedirect(it.url, order.adapterKey) } == true
     fun cannotOpenPayment() { error = "无法打开付款页面，请保留当前订单并稍后查询，不要重复创建充值。" }
@@ -590,7 +591,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     if (mode == CommerceMode.Orders) {
-        OrderHistoryPanel(account, state)
+        OrderHistoryPanel(account, state, paymentOpener = paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, now = now)
         return // History has only read/local-return actions, even if a shared fixture retains a quote.
     }
     if (mode == CommerceMode.Ledger) {

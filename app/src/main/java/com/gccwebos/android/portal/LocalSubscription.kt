@@ -209,13 +209,13 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                         try {
                             val parsed = describeForLibrary(raw, cached.validUntil, cached.observedStatus)
                             // The account subscription is read-only: no alias, no deletion, so no node keys.
-                            items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
+                            items += ConfigurationItem(handle(null), OFFICIAL_SOURCE_NAME, ManualSourceKind.LegacyRemote,
                                 parsed.nodes, parsed.status, accountActive, contentKey = contentKey(raw))
                         } finally { raw.fill(0) }
                     } else if (accountActive || accountSignedIn || delivery.read()?.let { !it.pendingAck } == true) {
                         // A signed-in account always has a selectable (possibly not yet loaded) subscription row,
                         // so a previously imported configuration can never hide it. Activating it downloads.
-                        items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
+                        items += ConfigurationItem(handle(null), OFFICIAL_SOURCE_NAME, ManualSourceKind.LegacyRemote,
                             if (accountActive) state.nodes else emptyList(),
                             if (accountActive) state.status else LocalSubscriptionStatus.MISSING, accountActive)
                     }
@@ -226,7 +226,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     try {
                         val parsed = describeForLibrary(raw, source.validUntil, source.observedStatus)
                         val keys = libraryParse(raw).keys
-                        items += ConfigurationItem(handle(entry.id), entry.name, source.kind,
+                        items += ConfigurationItem(handle(entry.id), configurationDisplayName(entry.name), source.kind,
                             displayNodes(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()),
                             parsed.status, library.selector == ConfigurationSelector.Entry && library.selectedEntryId == entry.id,
                             nodeKeys = keys.orEmpty(), nodeAliased = aliasedPositions(keys, overrides["entry:${entry.id}"].orEmpty()),
@@ -1797,9 +1797,19 @@ class LocalSubscriptionConfigGateway(private val manager: LocalSubscriptionManag
     override fun observeClear(onClear: () -> Unit): Closeable = manager.observeClear(onClear)
 }
 
-/** Default names continue after the highest existing "配置 N"; existing names are never changed. */
+/**
+ * Default names are 「未知N」 (third-party sources), continuing after the highest existing default. Older builds named them
+ * 「配置 N」; those are counted too so numbering never repeats. Stored names are never rewritten.
+ */
 internal fun nextConfigurationName(existing: List<String>): String {
-    val pattern = Regex("配置 ([1-9][0-9]{0,8})")
+    val pattern = Regex("(?:配置 |未知)([1-9][0-9]{0,8})")
     val highest = existing.mapNotNull { pattern.matchEntire(it)?.groupValues?.get(1)?.toIntOrNull() }.maxOrNull()
-    return "配置 ${(highest ?: existing.size).toLong() + 1}"
+    return "未知${(highest ?: existing.size).toLong() + 1}"
 }
+
+/** Our own (account) source is always called 「官方」 on the nodes page. */
+internal const val OFFICIAL_SOURCE_NAME = "官方"
+
+/** Display only: a legacy default name 「配置 N」 is shown as 「未知N」; any other (user-chosen) name is shown as saved. */
+internal fun configurationDisplayName(stored: String): String =
+    Regex("配置 ([1-9][0-9]{0,8})").matchEntire(stored)?.let { "未知${it.groupValues[1]}" } ?: stored

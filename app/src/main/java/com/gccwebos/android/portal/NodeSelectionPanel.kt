@@ -121,10 +121,15 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     val proxyCount = proxyChoices.size + readOnlyNodes.count { !it.info }
     val selectedChoice = readyChoices.firstOrNull { it.selection === value.selected && !it.info }
     var expanded by rememberSaveable(groupTitle, value.sourceKind) { mutableStateOf(true) }
+    // Choosing a node of an unknown (third-party) source asks first; re-tapping the selected node does not.
+    var pendingUnknown by remember { mutableStateOf<(() -> Unit)?>(null) }
+    pendingUnknown?.let { proceed ->
+        UnknownNodeDialog(onConfirm = { pendingUnknown = null; proceed() }, onDismiss = { pendingUnknown = null })
+    }
     var localSortByLatency by rememberSaveable { mutableStateOf(false) }
     val sortByLatency = sortByLatencyOverride ?: localSortByLatency
     val title = groupTitle ?: when (value.sourceKind) {
-        ManualSourceKind.LegacyRemote -> "账户订阅"
+        ManualSourceKind.LegacyRemote -> OFFICIAL_SOURCE_NAME
         ManualSourceKind.ImportedRemote -> "订阅配置"
         ManualSourceKind.ImportedLocal -> "本地配置"
         ManualSourceKind.ExternalRemote -> "第三方订阅"
@@ -239,7 +244,11 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             enabled = !state.busy && !accountBusy,
                             sourceLabel = sourceLabel,
                             trailing = rowTrailing?.let { menu -> { menu(indexed.index) } },
-                            onClick = { if (state.select(choice.selection)) onSelected() },
+                            onClick = {
+                                val choose = { if (state.select(choice.selection)) onSelected() }
+                                if (selectionNeedsUnknownWarning(value.sourceKind, value.selected === choice.selection)) pendingUnknown = choose
+                                else choose()
+                            },
                         )
                     }
                     val connectionActive = connectionControl.phase in setOf(
@@ -548,4 +557,21 @@ internal fun NodeChoiceRow(name: String, protocol: String, supported: Boolean, c
         if (chosen == null) Text(readOnlyLabel, color = Brand.Muted, fontSize = 10.sp)
         if (trailing != null) trailing() else if (reserveTrailing) Spacer(Modifier.width(40.dp))
     }
+}
+
+internal const val UNKNOWN_NODE_WARNING = "未知节点存在数据泄露风险，请谨慎选择"
+
+/** Only nodes of third-party sources warn (官方 never does), and only when the tap would change the selection. */
+internal fun selectionNeedsUnknownWarning(kind: ManualSourceKind, alreadySelected: Boolean): Boolean =
+    !alreadySelected && kind in setOf(ManualSourceKind.ImportedRemote, ManualSourceKind.ImportedLocal, ManualSourceKind.ExternalRemote)
+
+/** Plain alert (the shared dialog system of #62 is not on this branch). 取消 is the safe default. */
+@Composable
+internal fun UnknownNodeDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("unknown-node-dialog"),
+        title = { Text("选择未知节点", modifier = Modifier.testTag("unknown-node-title")) },
+        text = { Text(UNKNOWN_NODE_WARNING, modifier = Modifier.testTag("unknown-node-body")) },
+        dismissButton = { TextButton(onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("unknown-node-cancel")) { Text("取消") } },
+        confirmButton = { TextButton(onConfirm, modifier = Modifier.heightIn(min = 48.dp).testTag("unknown-node-continue")) { Text("继续选择") } })
 }

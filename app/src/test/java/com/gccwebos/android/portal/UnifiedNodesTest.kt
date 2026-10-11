@@ -97,7 +97,7 @@ class UnifiedNodesTest {
         assertFalse(account.active); assertTrue(account.nodes.isEmpty())
         assertEquals(LocalSubscriptionStatus.MISSING, account.status)
         assertEquals("待加载", configurationStatusLabel(account))
-        assertEquals("0 条 · 账户订阅 · 待加载", groupCaption(account))
+        assertEquals("0 条 · 官方 · 待加载", groupCaption(account))
         // The imported configuration stays active and untouched.
         assertEquals("Local Alpha", f.items(true).single { it.active }.nodes.single().name)
     }
@@ -107,7 +107,7 @@ class UnifiedNodesTest {
         val accounts = f.items(true).filter { it.kind == ManualSourceKind.LegacyRemote }
         assertEquals(1, accounts.size)
         assertEquals(listOf("Account fixture"), accounts.single().nodes.map { it.name })
-        assertEquals("1 条 · 账户订阅 · 可用", groupCaption(accounts.single()))
+        assertEquals("1 条 · 官方 · 可用", groupCaption(accounts.single()))
     }
 
     @Test fun usingTheAccountSourceKeepsEveryImportedEntry() = runTest {
@@ -207,7 +207,7 @@ class UnifiedNodesTest {
     @Test fun everySourceHasAReadableLabelAndTheAccountIsMarkedReadOnly() = runTest {
         val f = Fixture(); f.seedAccount(); f.remote(); f.local("Local Beta")
         val labels = f.items(true).associate { it.kind to nodeSourceLabel(it) }
-        assertEquals("账户订阅 · 只读", labels[ManualSourceKind.LegacyRemote])
+        assertEquals("官方 · 只读", labels[ManualSourceKind.LegacyRemote])
         // A row names its source (short enough never to be cut off); the kind lives on the 来源 card.
         val items = f.items(true)
         for (kind in listOf(ManualSourceKind.ExternalRemote, ManualSourceKind.ImportedLocal)) {
@@ -255,5 +255,21 @@ class UnifiedNodesTest {
         c.renameNode(account, 0, "x"); c.deleteNode(account, 0); advanceUntilIdle()
         assertEquals(0, changed); assertNull(c.error)
         assertEquals(listOf("Account fixture"), c.snapshot.items.single { it.kind == ManualSourceKind.LegacyRemote }.nodes.map { it.name })
+    }
+}
+
+/** 「未知节点存在数据泄露风险」: only third-party nodes, only when the tap would change the selection. */
+class UnknownNodeWarningTest {
+    @Test fun thirdPartySourcesWarnOnAChangeOnly() {
+        for (kind in listOf(ManualSourceKind.ImportedRemote, ManualSourceKind.ImportedLocal, ManualSourceKind.ExternalRemote)) {
+            assertTrue(selectionNeedsUnknownWarning(kind, alreadySelected = false))
+            assertFalse(selectionNeedsUnknownWarning(kind, alreadySelected = true))
+        }
+    }
+    @Test fun theOfficialSourceNeverWarns() {
+        assertFalse(selectionNeedsUnknownWarning(ManualSourceKind.LegacyRemote, alreadySelected = false))
+        assertFalse(selectionNeedsUnknownWarning(ManualSourceKind.None, alreadySelected = false))
+        assertEquals("官方", OFFICIAL_SOURCE_NAME)
+        assertEquals("未知节点存在数据泄露风险，请谨慎选择", UNKNOWN_NODE_WARNING)
     }
 }

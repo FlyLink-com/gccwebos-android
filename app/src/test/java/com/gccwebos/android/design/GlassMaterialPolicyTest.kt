@@ -126,6 +126,20 @@ class GlassMaterialPolicyTest {
         assertTrue(contrast(0xFFFFFFFFL, GlassMaterialPolicy.PaymentArgb) >= 4.5)
     }
 
+    @Test fun offerCardTextStaysReadableEvenOverAWhiteBackdrop() {
+        // Worst case: the card colour at the offer-card alpha composited over pure white.
+        fun over(argb: Long, alpha: Float): Long {
+            fun ch(shift: Int) = (((argb ushr shift) and 255) * alpha + 255 * (1 - alpha)).toLong().coerceIn(0, 255)
+            return 0xFF000000L or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+        }
+        val start = over(GlassMaterialPolicy.CardStartArgb, GlassMaterialPolicy.OfferCardStartAlpha)
+        val end = over(GlassMaterialPolicy.CardEndArgb, GlassMaterialPolicy.OfferCardEndAlpha)
+        for (surface in listOf(start, end)) {
+            assertTrue(contrast(0xFFD7E5F7L, surface) >= 4.5) // Brand.Muted
+            assertTrue(contrast(0xFFF5F9FFL, surface) >= 4.5) // Brand.Text
+        }
+    }
+
     private fun contrast(a: Long, b: Long): Double {
         fun luminance(color: Long): Double {
             fun linear(shift: Int): Double {

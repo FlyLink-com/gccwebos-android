@@ -7,6 +7,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.gccwebos.android.commerce.MineStyle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GccTokensTest {
@@ -76,5 +77,13 @@ class GccTokensTest {
     @Test fun glassCardAlphasStayAtTheRaisedPolicyValues() {
         assertEquals(.84f, GlassMaterialPolicy.CardStartAlpha)
         assertEquals(.88f, GlassMaterialPolicy.CardEndAlpha)
+    }
+
+    @Test fun planOfferCardsAreMoreOpaqueThanOrdinaryCardsButNeverFullySolid() {
+        assertEquals(.95f, GlassMaterialPolicy.OfferCardStartAlpha)
+        assertEquals(.97f, GlassMaterialPolicy.OfferCardEndAlpha)
+        assertTrue(GlassMaterialPolicy.OfferCardStartAlpha > GlassMaterialPolicy.CardStartAlpha)
+        assertTrue(GlassMaterialPolicy.OfferCardEndAlpha > GlassMaterialPolicy.CardEndAlpha)
+        assertTrue(GlassMaterialPolicy.OfferCardEndAlpha < 1f)
     }
 }

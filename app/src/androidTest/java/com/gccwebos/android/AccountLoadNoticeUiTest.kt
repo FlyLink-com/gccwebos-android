@@ -43,7 +43,7 @@ class AccountLoadNoticeUiTest {
     @Test fun nothingIsShownWhileTheLoadIsIdle() {
         launch()
         compose.onNodeWithTag("account-load-notice").assertDoesNotExist()
-        compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 官方 · 待加载")
+        compose.onNodeWithTag("unified-sources").assertDoesNotExist()
     }
 
     @Test fun loadingIsAPlainLineWithNoRetry() {
@@ -51,19 +51,15 @@ class AccountLoadNoticeUiTest {
         launch()
         compose.onNodeWithTag("account-load-loading").assertIsDisplayed().assertTextEquals("正在加载官方节点…")
         compose.onNodeWithTag("account-load-retry").assertDoesNotExist()
-        compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 官方 · 加载中…")
     }
 
-    @Test fun aFailedLoadSaysSoAndTheNoticeAndTheSourceRowBothRetry() {
+    @Test fun aFailedLoadSaysSoAndTheNoticeRetries() {
         state = AccountLoadState.Failed
         launch()
         compose.onNodeWithTag("account-load-failed", useUnmergedTree = true).assertIsDisplayed().assertTextEquals("官方节点加载失败")
         compose.onNodeWithText("点此重试").assertIsDisplayed()
-        compose.onNodeWithTag("configuration-status-0", useUnmergedTree = true).assertTextEquals("0 条 · 官方 · 加载失败，点此重试")
         compose.onNodeWithTag("account-load-retry").assertHeightIsAtLeast(48.dp).assertHasClickAction().performClick()
         assertEquals(1, retries)
-        compose.onNodeWithTag("configuration-group-0").assertHasClickAction().performClick()
-        assertEquals(2, retries)
     }
 
     @Test fun theNoticeDisappearsOnceTheAccountHasItsNodes() {

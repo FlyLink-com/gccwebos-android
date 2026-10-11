@@ -191,7 +191,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
         if (filterKey != null && snapshot.items.none { it.displayKey == filterKey }) filterKey = null
         // The add-configuration "+" is always the far-right control of this row; the segmented switcher fills the rest once
         // there is more than one source. (There is no page title above it any more.)
-        SourceSwitcherRow(snapshot.items, filterKey, enabled = !actionsBlocked, onImport = onImport) { filterKey = it }
+        SourceSwitcherRow(snapshot.items, filterKey, enabled = !actionsBlocked, onImport = onImport, sourceMenu = itemMenu) { filterKey = it }
         // The signed-in account's subscription is being fetched or could not be: say so, with a retry. Only while that
         // source is the active one and still empty, so an old failure never hides behind loaded nodes.
         val loadingAccount = snapshot.items.firstOrNull { it.active && it.kind == ManualSourceKind.LegacyRemote &&
@@ -248,16 +248,6 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
         val deleted = snapshot.items.withIndex().filter { (_, item) -> filterKey == null || item.displayKey == filterKey }
             .flatMap { (index, item) -> item.nodeDeleted.sorted().map { position -> Triple(index, item, position) } }
         if (deleted.isNotEmpty()) DeletedNodesSection(deleted, actionsBlocked, onRestoreNode)
-        // Where every node comes from; also the place for source-level actions (rename / replace / delete).
-        if (snapshot.items.isNotEmpty()) SourceList(snapshot.items, accountLoad, onRetryAccount) { item, index ->
-            ConfigurationItemMenu(item, index, actionsBlocked, onDetails = {
-                dialogHandle = item.handle; dialog = LibraryDialog.Details
-            }, onRename = {
-                dialogHandle = item.handle; name = item.name; dialog = LibraryDialog.Rename
-            }, onReplace = { onReplace(item.handle) }, onRemove = {
-                dialogHandle = item.handle; dialog = LibraryDialog.Remove
-            })
-        }
     }
     nodeEdit?.let { edit ->
         val item = snapshot.items.firstOrNull { it.handle.entryId == edit.entryId }
@@ -389,7 +379,7 @@ internal class UnifiedList(val sourceLabel: String?, val rowTrailing: (@Composab
 
 private data class NodeEdit(val entryId: String?, val position: Int, val delete: Boolean)
 
-/** "来源" caption of one node: the saved source's name (the 来源 card carries its kind); the account subscription says it is read-only. */
+/** "来源" caption of one node: the saved source's name (its kind is in 查看); the account subscription says it is read-only. */
 internal fun nodeSourceLabel(item: ConfigurationItem): String =
     if (item.kind == ManualSourceKind.LegacyRemote) "$OFFICIAL_SOURCE_NAME · 只读" else item.name
 
@@ -399,7 +389,7 @@ internal fun nodeSourceLabel(item: ConfigurationItem): String =
  */
 @Composable
 private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, enabled: Boolean, onImport: () -> Unit,
-    onSelect: (Any?) -> Unit) {
+    sourceMenu: @Composable (ConfigurationItem, Int) -> Unit, onSelect: (Any?) -> Unit) {
     Row(Modifier.fillMaxWidth().testTag("unified-filter"), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (items.size >= 2) {
@@ -413,8 +403,18 @@ private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, en
             })
         } else Text("添加配置", fontSize = 13.sp, color = Brand.Muted,
             modifier = Modifier.weight(1f).padding(start = 8.dp).testTag("unified-add-label"))
+        // The 来源 card is gone; its source-level actions (查看 / 重命名 / 替换 / 删除) live here, for the one source the row is
+        // pointing at: the only source, or the selected tab. 全部 has no single source, so no menu.
+        sourceMenuTarget(items, selected)?.let { index -> sourceMenu(items[index], index) }
         NodesImportButton(onClick = { if (enabled) onImport() }, enabled = enabled)
     }
+}
+
+/** Index of the source whose actions the switcher row offers: the sole source, or the selected tab's; null for 全部. */
+internal fun sourceMenuTarget(items: List<ConfigurationItem>, selected: Any?): Int? = when {
+    items.size == 1 -> 0
+    selected == null -> null
+    else -> items.indexOfFirst { it.displayKey == selected }.takeIf { it >= 0 }
 }
 
 @Composable
@@ -549,32 +549,6 @@ private fun NodeRowMenu(tag: String, busy: Boolean, deleteBlocked: Boolean, onRe
     }
 }
 
-@Composable
-private fun SourceList(items: List<ConfigurationItem>, accountLoad: AccountLoadState, onRetryAccount: () -> Unit,
-    menu: @Composable (ConfigurationItem, Int) -> Unit) {
-    GlassSurface(Modifier.fillMaxWidth().testTag("unified-sources"), shape = RoundedCornerShape(20.dp)) {
-        Column {
-            Text("来源", fontSize = 12.sp, color = Brand.Muted, modifier = Modifier.padding(start = 14.dp, top = 10.dp, end = 14.dp))
-            items.forEachIndexed { index, item ->
-                key(item.displayKey) {
-                    val retry = accountLoad == AccountLoadState.Failed && item.waitsForAccountLoad()
-                    Row(Modifier.fillMaxWidth().then(if (retry) Modifier.clickable(role = Role.Button, onClickLabel = "重试加载官方节点",
-                        onClick = onRetryAccount) else Modifier).padding(start = 14.dp, end = 4.dp).testTag("configuration-group-$index"),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
-                            Text(item.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-                                overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("configuration-name-$index"))
-                            Text(accountCaption(item, accountLoad), fontSize = 10.sp, color = Brand.Muted,
-                                modifier = Modifier.testTag("configuration-status-$index"))
-                        }
-                        menu(item, index)
-                    }
-                }
-            }
-        }
-    }
-}
-
 /** The active account row that has nothing loaded yet: the only row an account load can fill. */
 internal fun ConfigurationItem.waitsForAccountLoad(): Boolean =
     kind == ManualSourceKind.LegacyRemote && active && status != LocalSubscriptionStatus.READY
@@ -611,7 +585,7 @@ private fun AccountLoadNotice(state: AccountLoadState, onRetry: () -> Unit) {
 
 /** The account subscription has no entry id; saved entries keep their id across refreshes. */
 private object AccountConfigurationKey
-private val ConfigurationItem.displayKey: Any get() = handle.entryId ?: AccountConfigurationKey
+internal val ConfigurationItem.displayKey: Any get() = handle.entryId ?: AccountConfigurationKey
 
 /** Source label shown next to the node count, so every group says where its nodes come from. */
 internal fun groupCaption(item: ConfigurationItem): String =

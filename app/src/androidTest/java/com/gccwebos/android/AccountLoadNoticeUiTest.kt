@@ -23,7 +23,7 @@ class AccountLoadNoticeUiTest {
     private val owner = Any()
     private val account = ConfigurationHandle(owner, "synthetic-revision", null, 0)
     private var state by mutableStateOf(AccountLoadState.Idle)
-    private var accountItem by mutableStateOf(ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, emptyList(),
+    private var accountItem by mutableStateOf(ConfigurationItem(account, "官方", ManualSourceKind.LegacyRemote, emptyList(),
         LocalSubscriptionStatus.MISSING, active = true))
     private var retries = 0
 
@@ -43,23 +43,23 @@ class AccountLoadNoticeUiTest {
     @Test fun nothingIsShownWhileTheLoadIsIdle() {
         launch()
         compose.onNodeWithTag("account-load-notice").assertDoesNotExist()
-        compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 账户订阅 · 待加载")
+        compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 官方 · 待加载")
     }
 
     @Test fun loadingIsAPlainLineWithNoRetry() {
         state = AccountLoadState.Loading
         launch()
-        compose.onNodeWithTag("account-load-loading").assertIsDisplayed().assertTextEquals("正在加载账户订阅…")
+        compose.onNodeWithTag("account-load-loading").assertIsDisplayed().assertTextEquals("正在加载官方节点…")
         compose.onNodeWithTag("account-load-retry").assertDoesNotExist()
-        compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 账户订阅 · 加载中…")
+        compose.onNodeWithTag("configuration-status-0").assertTextEquals("0 条 · 官方 · 加载中…")
     }
 
     @Test fun aFailedLoadSaysSoAndTheNoticeAndTheSourceRowBothRetry() {
         state = AccountLoadState.Failed
         launch()
-        compose.onNodeWithTag("account-load-failed", useUnmergedTree = true).assertIsDisplayed().assertTextEquals("账户订阅加载失败")
+        compose.onNodeWithTag("account-load-failed", useUnmergedTree = true).assertIsDisplayed().assertTextEquals("官方节点加载失败")
         compose.onNodeWithText("点此重试").assertIsDisplayed()
-        compose.onNodeWithTag("configuration-status-0", useUnmergedTree = true).assertTextEquals("0 条 · 账户订阅 · 加载失败，点此重试")
+        compose.onNodeWithTag("configuration-status-0", useUnmergedTree = true).assertTextEquals("0 条 · 官方 · 加载失败，点此重试")
         compose.onNodeWithTag("account-load-retry").assertHeightIsAtLeast(48.dp).assertHasClickAction().performClick()
         assertEquals(1, retries)
         compose.onNodeWithTag("configuration-group-0").assertHasClickAction().performClick()
@@ -71,7 +71,7 @@ class AccountLoadNoticeUiTest {
         launch()
         compose.onNodeWithTag("account-load-notice").assertExists()
         compose.runOnIdle {
-            accountItem = ConfigurationItem(account, "账户订阅", ManualSourceKind.LegacyRemote, emptyList(), LocalSubscriptionStatus.READY, active = true)
+            accountItem = ConfigurationItem(account, "官方", ManualSourceKind.LegacyRemote, emptyList(), LocalSubscriptionStatus.READY, active = true)
         }
         compose.onNodeWithTag("account-load-notice").assertDoesNotExist()
     }

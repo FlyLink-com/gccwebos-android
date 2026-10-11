@@ -186,14 +186,14 @@ class AccountSourceLoadTest {
         val c = controller(f) {}
         c.refresh(); advanceUntilIdle()
         val inactive = c.snapshot.items.single { it.kind == ManualSourceKind.LegacyRemote }
-        assertEquals("0 条 · 账户订阅 · 待加载", accountCaption(inactive, AccountLoadState.Failed))
+        assertEquals("0 条 · 官方 · 待加载", accountCaption(inactive, AccountLoadState.Failed))
         c.activate(inactive.handle); advanceUntilIdle()
         val active = c.snapshot.items.single { it.kind == ManualSourceKind.LegacyRemote }
         assertTrue(active.waitsForAccountLoad())
-        assertEquals("0 条 · 账户订阅 · 加载中…", accountCaption(active, AccountLoadState.Loading))
-        assertEquals("0 条 · 账户订阅 · 加载失败，点此重试", accountCaption(active, AccountLoadState.Failed))
-        assertEquals("0 条 · 账户订阅 · 待加载", accountCaption(active, AccountLoadState.Idle))
-        assertEquals("账户订阅加载失败", AccountLoadFailedText); assertEquals("点此重试", AccountLoadRetryText)
+        assertEquals("0 条 · 官方 · 加载中…", accountCaption(active, AccountLoadState.Loading))
+        assertEquals("0 条 · 官方 · 加载失败，点此重试", accountCaption(active, AccountLoadState.Failed))
+        assertEquals("0 条 · 官方 · 待加载", accountCaption(active, AccountLoadState.Idle))
+        assertEquals("官方节点加载失败", AccountLoadFailedText); assertEquals("点此重试", AccountLoadRetryText)
         assertFalse(c.snapshot.items.single { it.kind == ManualSourceKind.ImportedLocal }.waitsForAccountLoad())
     }
 }

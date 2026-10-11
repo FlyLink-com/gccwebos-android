@@ -558,7 +558,7 @@ private fun SourceList(items: List<ConfigurationItem>, accountLoad: AccountLoadS
             items.forEachIndexed { index, item ->
                 key(item.displayKey) {
                     val retry = accountLoad == AccountLoadState.Failed && item.waitsForAccountLoad()
-                    Row(Modifier.fillMaxWidth().then(if (retry) Modifier.clickable(role = Role.Button, onClickLabel = "重试加载账户订阅",
+                    Row(Modifier.fillMaxWidth().then(if (retry) Modifier.clickable(role = Role.Button, onClickLabel = "重试加载官方节点",
                         onClick = onRetryAccount) else Modifier).padding(start = 14.dp, end = 4.dp).testTag("configuration-group-$index"),
                         verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
@@ -582,13 +582,13 @@ internal fun ConfigurationItem.waitsForAccountLoad(): Boolean =
 /** [groupCaption], with the account row saying so while its load is running or has failed. */
 internal fun accountCaption(item: ConfigurationItem, accountLoad: AccountLoadState): String = when {
     !item.waitsForAccountLoad() -> groupCaption(item)
-    accountLoad == AccountLoadState.Loading -> "${item.nodes.count { !it.info }} 条 · 账户订阅 · 加载中…"
-    accountLoad == AccountLoadState.Failed -> "${item.nodes.count { !it.info }} 条 · 账户订阅 · 加载失败，点此重试"
+    accountLoad == AccountLoadState.Loading -> "${item.nodes.count { !it.info }} 条 · 官方 · 加载中…"
+    accountLoad == AccountLoadState.Failed -> "${item.nodes.count { !it.info }} 条 · 官方 · 加载失败，点此重试"
     else -> groupCaption(item)
 }
 
-internal const val AccountLoadingText = "正在加载账户订阅…"
-internal const val AccountLoadFailedText = "账户订阅加载失败"
+internal const val AccountLoadingText = "正在加载官方节点…"
+internal const val AccountLoadFailedText = "官方节点加载失败"
 internal const val AccountLoadRetryText = "点此重试"
 
 /** Static (no motion): a loading line, or the failure with a ≥48 dp retry. Design tokens only. */
@@ -599,7 +599,7 @@ private fun AccountLoadNotice(state: AccountLoadState, onRetry: () -> Unit) {
             Text(AccountLoadingText, fontSize = 13.sp, color = Brand.Muted,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp).testTag("account-load-loading"))
         } else {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "重试加载账户订阅", onClick = onRetry)
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "重试加载官方节点", onClick = onRetry)
                 .padding(horizontal = 14.dp, vertical = 8.dp).testTag("account-load-retry"),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(AccountLoadFailedText, fontSize = 13.sp, color = Brand.Text, modifier = Modifier.weight(1f).testTag("account-load-failed"))

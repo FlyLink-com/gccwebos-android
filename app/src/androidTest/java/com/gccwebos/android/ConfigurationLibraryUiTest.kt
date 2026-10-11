@@ -51,6 +51,8 @@ class ConfigurationLibraryUiTest {
     private var measurements = 0
     private var activeDisposals = 0
     private var latencies by mutableStateOf<Map<String?, Long>>(emptyMap())
+    /** Added to a source's latency per node position (negative: later nodes are faster), to exercise sorting inside a source. */
+    private var latencyStepPerPosition = 0L
 
     private fun launch(fontScale: Float = 1f) {
         compose.setContent {
@@ -61,7 +63,7 @@ class ConfigurationLibraryUiTest {
                         .verticalScroll(rememberScrollState())) {
                         ConfigurationLibraryContent(snapshot, busy, null, canMeasure = true,
                             onMeasure = { measurements++ }, onImport = { imports++ },
-                            latencyFor = { item, _ -> latencies[item.handle.entryId]?.let { NodeLatencyObservation.Success(it, 7) } },
+                            latencyFor = { item, position -> latencies[item.handle.entryId]?.let { NodeLatencyObservation.Success(it + position * latencyStepPerPosition, 7) } },
                             onActivate = { activations += it }, onRename = { handle, name -> renames += handle to name },
                             onRemove = { removals += it }, onReplace = { replacements += it },
                             onChooseNode = { handle, target -> chosen += handle to target },
@@ -278,7 +280,10 @@ class ConfigurationLibraryUiTest {
     }
 
     @Test fun sortIsAFunnelIconRightOfTheLightningWithADefaultAndLatencyMenu() {
-        latencies = mapOf(null to 400L, "synthetic-second" to 100L)
+        // 配置 2 has two nodes; the second one is faster. Default order keeps the delivered order; 按延迟 puts the fast one first.
+        val two = nodes + SafeProxyConfig.NodeSummary(1, "Synthetic Singapore", "hysteria2", true)
+        snapshot = snapshot.copy(items = snapshot.items.map { if (it.handle === second) it.copy(nodes = two, nodeKeys = listOf("k2", "k3")) else it })
+        latencies = mapOf(null to 400L, "synthetic-second" to 300L); latencyStepPerPosition = -100L
         launch()
         val sort = compose.onNodeWithTag("nodes-sort").assertContentDescriptionEquals("排序")
             .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
@@ -289,24 +294,25 @@ class ConfigurationLibraryUiTest {
             assertTrue("directly right of the lightning, at the far right", sort.left >= bolt.right - 1f && sort.left - bolt.right < 24f)
             assertTrue("sort icon ends the row", sort.right >= group.right - 24f)
         }
-        // Default order: the account's row sits above 配置 2's row.
-        val accountTop = compose.onNodeWithTag("configuration-node-0-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
-        val secondTop = compose.onNodeWithTag("configuration-node-2-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
-        assertTrue(accountTop < secondTop)
+        fun top(tag: String) = compose.onNodeWithTag(tag).performScrollTo().fetchSemanticsNode().boundsInRoot.top
+        assertTrue("default order", top("configuration-node-2-0") < top("configuration-node-2-1"))
         compose.onNodeWithTag("nodes-sort").performScrollTo().performClick()
         compose.onNodeWithTag("nodes-sort-default").assertIsDisplayed()
         compose.onNodeWithText("默认顺序").assertIsDisplayed()
         compose.onNodeWithText("按延迟").assertIsDisplayed().performClick()
         compose.onNodeWithTag("nodes-sort-default").assertDoesNotExist()
-        val account = compose.onNodeWithTag("configuration-node-0-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
-        val second = compose.onNodeWithTag("configuration-node-2-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
-        assertTrue("sorted by latency: 配置 2 (100 ms) above the account (400 ms)", second < account)
+        assertTrue("sorted by latency: the 200 ms node above the 300 ms node", top("configuration-node-2-1") < top("configuration-node-2-0"))
+        // And back to the default order.
+        compose.onNodeWithTag("nodes-sort").performScrollTo().performClick()
+        compose.onNodeWithText("默认顺序").performClick()
+        assertTrue("default again", top("configuration-node-2-0") < top("configuration-node-2-1"))
     }
 
     @Test fun nodesOfOtherSourcesShowTheirOwnLatency() {
         latencies = mapOf("synthetic-second" to 187L)
         launch()
-        compose.onNodeWithTag("configuration-latency-2-0", useUnmergedTree = true).performScrollTo().assertTextContains("187", substring = true)
+        compose.onNodeWithTag("configuration-latency-2-0", useUnmergedTree = true).performScrollTo()
+            .assertContentDescriptionEquals("节点延迟 187 毫秒")
     }
 
     @Test fun filterChipsNarrowTheListToOneSource() {

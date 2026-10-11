@@ -83,7 +83,10 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
     groupTitle: String? = null,
     showTools: Boolean = true,
     showAccountAction: Boolean = true,
+    /** Right end of the heading row (unified list: the 延迟测试 action). */
     headerActions: @Composable RowScope.() -> Unit = {},
+    /** False when [headerActions] already carries the 延迟测试 action, so the toolbar below keeps only caption and sort. */
+    measureInToolbar: Boolean = true,
     /** Unified list: where this source's nodes come from, shown on every row. */
     sourceLabel: String? = null,
     /** Unified list: per-node actions of this source (the rename/delete menu); null for a read-only source. */
@@ -215,34 +218,16 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             onToggleSort = { sortByLatency = !sortByLatency },
                             onMeasure = { if (canMeasure && !latency.busy) latency.refresh() },
                             motionEnabled = motionEnabled,
+                            showMeasure = measureInToolbar,
                         )
                     }
                     // N9: search sits directly under the toolbar, above everything that scrolls with the rows.
                     if (searchable) NodeSearchField(query) { query = it }
-                    // N8: with a node chosen it is shown once, as the highlighted row below. This summary is the
-                    // "nothing selected yet" prompt only.
-                    if (selectedChoice == null) {
-                    Row(Modifier.fillMaxWidth().testTag("nodes-selection-summary")
-                        .background(Brand.Cyan.copy(alpha = .035f)).padding(horizontal = 12.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        NodeRegionIcon(selectedChoice?.name, Modifier.testTag("nodes-selected-region"), size = 24.dp)
-                        if (selectedChoice != null) Text(nodeDisplayName(selectedChoice.name), fontSize = 12.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f).testTag("nodes-selected-name"))
-                        else Column(Modifier.weight(1f)) {
-                            Text("未选择", fontSize = 12.sp, maxLines = 1, modifier = Modifier.testTag("nodes-selected-name"))
-                            if (proxyChoices.isNotEmpty()) Text(
-                                if (value.selectionLost) "原来选的节点已不在配置里，请重新选择节点" else "请点选下方一个节点，连接时将使用它",
-                                fontSize = 11.sp, color = Brand.Amber, maxLines = 2,
-                                modifier = Modifier.testTag("nodes-select-prompt"))
-                        }
-                        if (selectedChoice != null) NodeLatencyBadge(latency?.reading(selectedChoice.selection),
-                            Modifier.testTag("nodes-selected-latency"),
-                            measuring = latency?.busy == true && latency.reading(selectedChoice.selection) == null,
-                            tunnelActive = tunnelActive)
-                    }
-                    }
+                    // N8: a chosen node is shown once, as the highlighted row below. There is no "未选择 / 请选择" helper
+                    // row any more. Only a lost selection (the chosen node vanished from the configuration) is still said.
+                    if (selectedChoice == null && value.selectionLost && proxyChoices.isNotEmpty()) Text(
+                        "原来选的节点已不在配置里，请重新选择节点", fontSize = 11.sp, color = Brand.Amber, maxLines = 2,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp).testTag("nodes-select-lost"))
                     if (needle != null && shownProxy.isEmpty()) Text("没有匹配的节点", color = Brand.Muted, fontSize = 12.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp)
                             .testTag("nodes-search-empty"))
@@ -340,6 +325,7 @@ private fun NodeLatencyToolbar(
     onToggleSort: () -> Unit,
     onMeasure: () -> Unit,
     motionEnabled: Boolean,
+    showMeasure: Boolean = true,
 ) {
     // Only a real measurement (round trip or timeout) counts as "tested"; a batch that could not run
     // while the tunnel is up must not read "刚刚" next to a list of unmeasured nodes.
@@ -360,13 +346,13 @@ private fun NodeLatencyToolbar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).testTag("nodes-latency-last"),
         )
-        TextButton(
+        if (showMeasure) TextButton(
             onClick = onMeasure,
             enabled = canMeasure && !measuring,
             contentPadding = PaddingValues(horizontal = 8.dp),
             modifier = Modifier.heightIn(min = 48.dp).testTag("nodes-latency-one-tap"),
         ) {
-            // The title lightning is the only pulsing indicator. This control stays static.
+            // The heading's lightning is the only pulsing indicator. This control stays static.
             NodesLightningIcon(busy = false, motionEnabled = motionEnabled, enabled = canMeasure && !measuring,
                 size = 16.dp)
             Spacer(Modifier.width(4.dp))
@@ -396,6 +382,22 @@ internal fun NodesLatencyRefreshButton(
     IconButton(onClick = onClick, enabled = enabled,
         modifier = modifier.size(48.dp).testTag("nodes-latency-refresh")) {
         NodesLightningIcon(busy = busy, motionEnabled = motion, enabled = enabled, size = 24.dp)
+    }
+}
+
+/**
+ * 延迟测试 on the node-list heading row (right-aligned): lightning plus label, 48 dp tall. The lightning pulses while a
+ * batch runs and is static when the system asks to reduce motion ([rememberNodeListMotionEnabled]).
+ */
+@Composable
+internal fun NodesLatencyTestAction(enabled: Boolean, busy: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier,
+    motionEnabled: Boolean? = null) {
+    val motion = motionEnabled ?: rememberNodeListMotionEnabled()
+    TextButton(onClick = onClick, enabled = enabled, contentPadding = PaddingValues(horizontal = 10.dp),
+        modifier = modifier.heightIn(min = 48.dp).testTag("nodes-latency-refresh")) {
+        NodesLightningIcon(busy = busy, motionEnabled = motion, enabled = enabled, size = 18.dp)
+        Spacer(Modifier.width(4.dp))
+        Text("延迟测试", fontSize = 12.sp, maxLines = 1)
     }
 }
 

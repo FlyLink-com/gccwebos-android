@@ -212,20 +212,50 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("unified-deleted").performScrollTo().assertExists()
     }
 
-    @Test fun addButtonLeadsTheSwitcherRowAndTheHeaderNoLongerHasOne() {
+    @Test fun addButtonEndsTheSwitcherRowAtTheFarRight() {
         launch()
-        val header = compose.onNodeWithTag("configuration-library-header").fetchSemanticsNode().boundsInRoot
         val plus = compose.onNodeWithTag("nodes-import").fetchSemanticsNode().boundsInRoot
+        val last = compose.onNodeWithTag("unified-filter-2").fetchSemanticsNode().boundsInRoot
         val all = compose.onNodeWithTag("unified-filter-all").fetchSemanticsNode().boundsInRoot
         val row = compose.onNodeWithTag("unified-filter").fetchSemanticsNode().boundsInRoot
         compose.runOnIdle {
-            assertTrue("+ sits below the header, not in it", plus.top >= header.bottom - 1f)
-            assertTrue("+ is the leftmost control of the switcher row", plus.left <= row.left + 1f && plus.right <= all.left + 1f)
+            assertTrue("+ is the rightmost control of the switcher row", plus.right >= row.right - 1f)
+            assertTrue("+ comes after every tab", plus.left >= last.right - 1f && plus.left > all.right)
+            assertTrue("+ shares the row vertically with the tabs", plus.top < row.bottom && plus.bottom > row.top)
         }
         compose.onNodeWithTag("unified-filter-all").assertIsSelected()
         compose.onNodeWithTag("unified-filter-0").assertExists()
         compose.onNodeWithTag("unified-filter-1").assertExists()
         compose.onNodeWithTag("unified-filter-2").assertExists()
+    }
+
+    @Test fun thereIsNoPageTitleAboveTheSwitcherAndNoSelectionHelperCopy() {
+        launch()
+        compose.onNodeWithTag("configuration-library-header").assertDoesNotExist()
+        compose.onNodeWithTag("configuration-library-title").assertDoesNotExist()
+        compose.onAllNodesWithText("全部节点", substring = true).assertCountEquals(0)
+        compose.onNodeWithTag("nodes-selection-summary").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-select-prompt").assertDoesNotExist()
+        compose.onAllNodesWithText("请点选下方一个节点", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("未选择", substring = false).assertCountEquals(0)
+    }
+
+    @Test fun nodeListHeadingAndLatencyTestShareOneRowWithTheActionAtTheRight() {
+        launch()
+        val title = compose.onNodeWithTag("nodes-group-title").fetchSemanticsNode().boundsInRoot
+        val action = compose.onNodeWithTag("nodes-latency-refresh").fetchSemanticsNode().boundsInRoot
+        val group = compose.onNodeWithTag("nodes-configuration-group").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithTag("nodes-group-title").assertTextEquals("节点列表")
+        compose.onNodeWithTag("nodes-latency-refresh").assertTextContains("延迟测试")
+            .assertHeightIsAtLeast(48.dp)
+        compose.runOnIdle {
+            assertTrue("same row", action.top < title.bottom && action.bottom > title.top)
+            assertTrue("action is right of the heading", action.left >= title.right - 1f)
+            assertTrue("action is right-aligned in the card", action.right >= group.right - 24f)
+        }
+        // The toolbar below keeps only the caption and the sort control: one 延迟测试 on the page.
+        compose.onNodeWithTag("nodes-latency-one-tap").assertDoesNotExist()
+        compose.onAllNodesWithText("延迟测试").assertCountEquals(1)
     }
 
     @Test fun nodesOfOtherSourcesShowTheirOwnLatency() {
@@ -288,7 +318,7 @@ class ConfigurationLibraryUiTest {
         compose.onAllNodesWithTag("nodes-latency-refresh").assertCountEquals(1)
         compose.onNodeWithTag("nodes-import").assertContentDescriptionEquals("新增配置")
             .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).performClick()
-        compose.onNodeWithTag("nodes-latency-refresh").assertContentDescriptionEquals("测试节点延迟").performClick()
+        compose.onNodeWithTag("nodes-latency-refresh").assertTextContains("延迟测试").performClick()
         compose.onNodeWithText("测试节点延迟").assertDoesNotExist()
         compose.runOnIdle { assertEquals(1, imports); assertEquals(1, measurements) }
         assertNoSourceMutation()

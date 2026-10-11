@@ -87,7 +87,7 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         activeContent = { item, list ->
             NodeSelectionPanel(state, nodes, resource, hasCapability, busy, authenticated, connectionControl,
                 onSelected = onSelected, latency = latency, groupTitle = UnifiedListTitle,
-                showTools = false, showAccountAction = false,
+                showTools = false, showAccountAction = false, headerActions = list.headerAction, measureInToolbar = false,
                 sourceLabel = list.sourceLabel, rowTrailing = list.rowTrailing, extraCount = list.extraCount,
                 showSourceRows = list.showSourceRows, extraRows = list.extraRows, openAccount = openAccount)
         })
@@ -148,33 +148,6 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
         dialogHandle = created.handle; name = created.name; dialog = LibraryDialog.Name
     }
     Column(Modifier.fillMaxWidth().testTag("configuration-library"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Opaque library chrome: keeps title/actions readable over the city backdrop (same idea as WalletTopBar).
-        Row(
-            Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Brand.SurfaceRaised.copy(alpha = .92f))
-                .border(1.dp, Brand.GlassBorder.copy(alpha = .18f), RoundedCornerShape(16.dp))
-                .padding(start = 14.dp, end = 4.dp)
-                .testTag("configuration-library-header"),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val total = snapshot.items.sumOf { item -> item.nodes.count { !it.info } }
-            val headerLabel = if (snapshot.items.isEmpty()) "配置" else "全部节点（${total}个节点）"
-            Text(
-                headerLabel,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                color = Brand.Text,
-                modifier = Modifier.weight(1f).testTag("configuration-library-title"),
-            )
-            NodesLatencyRefreshButton(
-                enabled = !actionsBlocked && canMeasureActive,
-                busy = measuring,
-                onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() },
-            )
-        }
         // Controller errors are fixed captions. Never interpolate an exception or source material.
         if (snapshot.storageError) Text("配置暂不可用", color = Brand.Muted,
             modifier = Modifier.testTag("configuration-storage-status"))
@@ -192,7 +165,8 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             modifier = Modifier.testTag("configuration-unselected"))
         // Source filter: only worth a row once there is more than one source.
         if (filterKey != null && snapshot.items.none { it.displayKey == filterKey }) filterKey = null
-        // The add-configuration "+" always leads this row; the segmented switcher joins it once there is more than one source.
+        // The add-configuration "+" is always the far-right control of this row; the segmented switcher fills the rest once
+        // there is more than one source. (There is no page title above it any more.)
         SourceSwitcherRow(snapshot.items, filterKey, enabled = !actionsBlocked, onImport = onImport) { filterKey = it }
         // One list for every source. Nodes of the active source keep latency and selection; nodes of the
         // other sources sit in the same list and one tap makes their source active and selects exactly that node.
@@ -210,6 +184,8 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             },
             extraCount = others.sumOf { it.value.nodes.count { node -> !node.info } },
             showSourceRows = filterKey == null || snapshot.items.getOrNull(activeIndex)?.displayKey == filterKey,
+            headerAction = { NodesLatencyTestAction(enabled = !actionsBlocked && canMeasureActive, busy = measuring,
+                onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() }) },
             extraRows = {
                 OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode, latencyFor, measuring) { item, position, delete ->
                     nodeEdit = NodeEdit(item.handle.entryId, position, delete); nodeName = item.nodes[position].name
@@ -220,7 +196,19 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             activeContent(snapshot.items[activeIndex], unified)
         } else if (others.isNotEmpty()) {
             GlassSurface(Modifier.fillMaxWidth().testTag("nodes-configuration-group"), shape = RoundedCornerShape(20.dp)) {
-                Column { unified.extraRows(this) }
+                Column {
+                    // No active source: the same heading row (节点列表 left, 延迟测试 right) above the saved sources' nodes.
+                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp).heightIn(min = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(vertical = 5.dp)) {
+                            Text(UnifiedListTitle, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                                overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("nodes-group-title"))
+                            Text("${unified.extraCount} 条", fontSize = 10.sp, color = Brand.Muted, modifier = Modifier.testTag("nodes-count"))
+                        }
+                        unified.headerAction(this)
+                    }
+                    unified.extraRows(this)
+                }
             }
         }
         // Locally deleted nodes: collapsed at the bottom of the list, only when there are any. They can only be restored.
@@ -360,7 +348,9 @@ internal const val UnifiedListTitle = "节点列表"
 
 /** Slots the unified list hands to the active source's card. */
 internal class UnifiedList(val sourceLabel: String?, val rowTrailing: (@Composable (Int) -> Unit)?,
-    val extraCount: Int, val showSourceRows: Boolean, val extraRows: @Composable ColumnScope.() -> Unit)
+    val extraCount: Int, val showSourceRows: Boolean, val extraRows: @Composable ColumnScope.() -> Unit,
+    /** 延迟测试 for the whole library, right-aligned on the 节点列表 heading row. */
+    val headerAction: @Composable RowScope.() -> Unit = {})
 
 private data class NodeEdit(val entryId: String?, val position: Int, val delete: Boolean)
 
@@ -369,15 +359,14 @@ internal fun nodeSourceLabel(item: ConfigurationItem): String =
     if (item.kind == ManualSourceKind.LegacyRemote) "账户订阅 · 只读" else "${item.name} · ${configurationKindLabel(item.kind)}"
 
 /**
- * The 添加配置 "+" at the far left, then the segmented switcher (the plans page's [SlidingTabRow]): 全部 plus one tab
- * per source. Fewer than two sources have nothing to switch between, so only the "+" with its label shows.
+ * The segmented switcher (the plans page's [SlidingTabRow]): 全部 plus one tab per source, then the 添加配置 "+" at the far
+ * right. Fewer than two sources have nothing to switch between, so only the label and the "+" show.
  */
 @Composable
 private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, enabled: Boolean, onImport: () -> Unit,
     onSelect: (Any?) -> Unit) {
     Row(Modifier.fillMaxWidth().testTag("unified-filter"), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        NodesImportButton(onClick = { if (enabled) onImport() }, enabled = enabled)
         if (items.size >= 2) {
             val tabs = listOf(SlidingTab("全部", "unified-filter-all")) +
                 items.mapIndexed { index, item -> SlidingTab(item.name, "unified-filter-$index") }
@@ -385,7 +374,9 @@ private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, en
             SlidingTabRow(tabs, selectedIndex, enabled = true, modifier = Modifier.weight(1f), onSelect = { index ->
                 onSelect(if (index == 0) null else items[index - 1].displayKey.takeIf { it != selected })
             })
-        } else Text("添加配置", fontSize = 13.sp, color = Brand.Muted, modifier = Modifier.testTag("unified-add-label"))
+        } else Text("添加配置", fontSize = 13.sp, color = Brand.Muted,
+            modifier = Modifier.weight(1f).padding(start = 8.dp).testTag("unified-add-label"))
+        NodesImportButton(onClick = { if (enabled) onImport() }, enabled = enabled)
     }
 }
 

@@ -90,7 +90,7 @@ class QuietNavigationUiTest {
         compose.onNodeWithTag("node-region-0", useUnmergedTree = true)
             .assertContentDescriptionEquals("节点标注地区：日本")
         compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
-            .assertContentDescriptionEquals("测试节点延迟")
+            .assertTextContains("延迟测试")
         compose.onNodeWithText("测试节点延迟").assertDoesNotExist()
         compose.onNodeWithTag("nodes-latency-hint").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, reads.get()); assertEquals(0, commands.get()) }

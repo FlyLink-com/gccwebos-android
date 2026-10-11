@@ -425,7 +425,10 @@ internal fun ConnectionOverview(
         // on this card; "暂未获取" next to the node page's info-row text read as a contradiction. Info-row text is
         // third-party display text and is never promoted to a usage figure here.
         if (!usageHidden) {
-        HomeCard(Modifier.testTag("connection-account-surface")) {
+        // Rim: calm cyan glow while connected (loops only while shown and resumed), static dim rim otherwise.
+        UsageRimFrame(connected) {
+        HomeCard(Modifier.testTag("connection-account-surface"),
+            edge = Brand.Cyan.copy(alpha = UsageRimAlphaIdle)) {
             ConnectionUsageCard(display, authenticated = account.authenticated,
                 subscriptionUsage = subscriptionUsage,
                 // Display-only motion inputs: tunnel phase for the glow, the same clocks the card text uses.
@@ -443,6 +446,7 @@ internal fun ConnectionOverview(
                 activePlan = verifiedUsage && connectionPlanIsActive(display),
                 onRenew = openPlans.takeIf { subscriptionUsage == null &&
                     connectionRenewVisible(account.authenticated && verifiedUsage, manualSource, display.state) })
+        }
         }
         }
         HomeCard(Modifier.testTag("connection-hero"),

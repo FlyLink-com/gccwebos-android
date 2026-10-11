@@ -27,8 +27,12 @@ import java.time.Instant
 /** Details are an explicit read. The list composition, cursor, filter, and scroll survive return. */
 @Composable
 internal fun OrderHistoryPanel(account: AccountController, state: CommerceController,
-    detailOverride: OrderDetailController? = null) {
+    detailOverride: OrderDetailController? = null, paymentOpener: (String) -> Unit = {}, now: Instant = Instant.now()) {
     val scope = rememberCoroutineScope()
+    // 待付款 orders are paid from here (not from the recharge screen): straight to the order's valid payment entry.
+    val opener by rememberUpdatedState(paymentOpener)
+    val payFlow = remember(account.authSessionGeneration, state) { RechargeFlowController(account, state) { opener(it) } }
+    DisposableEffect(payFlow) { onDispose { payFlow.dispose() } }
     val details = detailOverride ?: remember(account.authSessionGeneration, state) {
         OrderDetailController(account, scope, state::historyDetail)
     }
@@ -113,12 +117,13 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                     val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
                     HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
                         formatMoney(order.amountMinor, order.currency, order.currencyExponent), "支付充值",
-                        listOf(OrderHistoryPresentation.rechargeListStatus(order.status)),
+                        listOf(OrderHistoryPresentation.rechargeListStatus(order, now)),
                         "预计 ${formatCoins(order.expectedPaidCoinUnits)}", order.orderRef, order.createdAt,
                         com.gccwebos.android.R.drawable.brand_wallet,
                         details.selected == selection, !state.busy && !details.busy) {
                         details.open(selection)
                     }
+                    PayNowAction(order, state, payFlow, now)
                 }
             }
             "all" -> {
@@ -165,10 +170,11 @@ internal fun OrderHistoryPanel(account: AccountController, state: CommerceContro
                             val selection = HistorySelection(HistoryKind.Recharge, order.orderRef)
                             HistorySummary("history-recharge-${order.orderRef}", "钱包充值",
                                 formatMoney(order.amountMinor, order.currency, order.currencyExponent), "支付充值",
-                                listOf(OrderHistoryPresentation.rechargeListStatus(order.status)),
+                                listOf(OrderHistoryPresentation.rechargeListStatus(order, now)),
                                 "预计 ${formatCoins(order.expectedPaidCoinUnits)}", order.orderRef, order.createdAt,
                                 com.gccwebos.android.R.drawable.brand_wallet,
                                 details.selected == selection, !state.busy && !details.busy) { details.open(selection) }
+                            PayNowAction(order, state, payFlow, now)
                         }
                     }
                 }
@@ -261,6 +267,22 @@ private fun HistorySummary(tag: String, title: String, amount: String, type: Str
                     modifier = Modifier.size(16.dp))
             }
         }
+    }
+}
+
+/**
+ * 立即支付 on a still-payable 待付款 recharge (server entry present, trusted, not expired): opens that entry directly, with
+ * no review step (the row already shows the server's amount). An expired or entry-less order shows no button (its row says
+ * 已失效). Never creates an order.
+ */
+@Composable
+internal fun PayNowAction(order: RechargeOrder, state: CommerceController, flow: RechargeFlowController, now: Instant) {
+    if (state.canOpenPayment(order, now)) {
+        AlipayButton("立即支付", { flow.payNow(order, now) }, enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth().testTag("history-pay-${order.orderRef}"))
+        flow.error?.takeIf { flow.requestedPaymentFor == null }?.let { SupportingText(it, Modifier.testTag("history-pay-error-${order.orderRef}")) }
+        if (flow.requestedPaymentFor == order.orderRef) SupportingText("已打开付款页面；付款结果返回后在此刷新确认。",
+            Modifier.testTag("history-pay-requested-${order.orderRef}"))
     }
 }
 

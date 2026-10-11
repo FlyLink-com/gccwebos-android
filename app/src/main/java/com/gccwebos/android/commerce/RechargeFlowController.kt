@@ -10,6 +10,7 @@ import java.time.Instant
 internal class RechargeFlowController(
     private val account: AccountController,
     private val commerce: CommerceController,
+    private val clock: () -> Instant = { Instant.now() },
     private val opener: (String) -> Unit,
 ) {
     var selectedOffer by mutableStateOf<RechargeOffer?>(null)
@@ -49,7 +50,7 @@ internal class RechargeFlowController(
             return
         }
         error = null
-        commerce.confirmRecharge(offer)
+        commerce.confirmRecharge(offer) { created -> afterCreated(offer, created) }
     }
 
     fun reviewPayment(order: RechargeOrder, now: Instant) {
@@ -61,6 +62,41 @@ internal class RechargeFlowController(
         }
         paymentReview = order; selectedOffer = null; error = null; requestedPaymentFor = null
     }
+
+    /**
+     * A new order goes straight to its payment entry when the server's figures are exactly what the user confirmed; any
+     * difference (price or coins moved, other method) falls back to the one-step review so nobody pays an unseen amount.
+     */
+    private fun afterCreated(offer: RechargeOffer, order: RechargeOrder) {
+        if (!currentSession()) return
+        if (createdMatches(offer, order)) openNow(order, clock()) else paymentReview = order
+    }
+
+    /** 立即支付 on an existing order (订单明细): its figures are the ones on screen, so the valid entry opens directly. */
+    fun payNow(order: RechargeOrder, now: Instant) {
+        if (!ready()) return
+        paymentReview = null; selectedOffer = null; error = null; requestedPaymentFor = null
+        openNow(order, now)
+    }
+
+    private fun openNow(order: RechargeOrder, now: Instant) {
+        if (!commerce.canOpenPayment(order, now)) {
+            error = "付款入口已失效或订单已更新，请到订单明细查看。"
+            return
+        }
+        try {
+            opener(requireNotNull(order.nextAction).url)
+            requestedPaymentFor = order.orderRef
+        } catch (_: Exception) {
+            error = "无法打开付款页面，请保留当前订单并稍后查询，不要重复创建充值。"
+        }
+    }
+
+    private fun createdMatches(offer: RechargeOffer, order: RechargeOrder) =
+        order.offerRef == offer.offerRef && order.quoteVersion == offer.quoteVersion &&
+        order.amountMinor == offer.amountMinor && order.currency == offer.currency &&
+        order.currencyExponent == offer.currencyExponent && order.expectedPaidCoinUnits == offer.paidCoinUnits &&
+        order.paymentMethod in offer.paymentMethods
 
     fun dismissPayment() {
         paymentReview = null
@@ -95,6 +131,6 @@ internal class RechargeFlowController(
         !account.foregroundCheckPending && !commerce.busy
 
     private fun currentOffer(offer: RechargeOffer) = commerce.rechargeOffersLoaded &&
-        !commerce.pendingRecharge && "alipay" in offer.paymentMethods &&
+        "alipay" in offer.paymentMethods &&
         commerce.rechargeOffers.any { it == offer }
 }

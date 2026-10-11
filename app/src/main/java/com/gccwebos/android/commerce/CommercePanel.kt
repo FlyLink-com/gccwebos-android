@@ -542,7 +542,10 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         val planTabIndex = if (catalogCategory == "data_pack") planTerms.size
             else if (catalogCategory == "plan") planTerms.indexOf(period) else -1
         // One sliding capsule highlight; the click handlers are the former chip handlers, unchanged.
-        SlidingTabRow(planTabs, planTabIndex, enabled = !state.busy, onSelect = { index ->
+        // Opaque blue-purple capsule (the nodes switcher's gradient); 年卡 and 流量包 breathe while unselected.
+        val glowTabs = setOfNotNull(planTerms.indexOf(CatalogPeriod.Yearly).takeIf { it >= 0 }, planTerms.size)
+        SlidingTabRow(planTabs, planTabIndex, enabled = !state.busy, containerBrush = SlidingTabGradient,
+            selectedColor = SlidingTabGradientSelected, selectedEdge = SlidingTabGradientSelectedEdge, glowTabs = glowTabs, onSelect = { index ->
             initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null
             if (index < planTerms.size) { catalogCategory = "plan"; requestedPeriod = planTerms[index] }
             else catalogCategory = "data_pack"

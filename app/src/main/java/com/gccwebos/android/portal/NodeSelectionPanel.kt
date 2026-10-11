@@ -195,9 +195,6 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             NodesCountText((if (showSourceRows) proxyCount else 0) + extraCount, latency)
                         }
                     }
-                    if (showTools && latency != null && proxyChoices.isNotEmpty()) {
-                        NodesSortAction(sortByLatency, onChange = { localSortByLatency = it })
-                    }
                     if (showTools && latency != null) {
                         NodesLatencyRefreshButton(
                             enabled = canMeasure && !latency.busy,
@@ -205,6 +202,9 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                             onClick = { latency.refresh() },
                             motionEnabled = motionEnabled,
                         )
+                    }
+                    if (showTools && latency != null && proxyChoices.isNotEmpty()) {
+                        NodesSortAction(sortByLatency, onChange = { localSortByLatency = it })
                     }
                     onImport?.takeIf { showTools }?.let { action ->
                         NodesImportButton(onClick = action)
@@ -338,7 +338,7 @@ internal fun NodesLatencyTestAction(enabled: Boolean, busy: Boolean, onClick: ()
 internal enum class NodeSortOrder(val label: String) { Default("默认顺序"), Latency("按延迟") }
 
 /**
- * 排序: a funnel outline icon (same 24 dp size and tint as the lightning) next to 延迟测试; a tap opens a small menu with
+ * 排序: a funnel outline icon (same 24 dp size and tint as the lightning) at the far right, after 延迟测试; a tap opens a small menu with
  * 默认顺序 / 按延迟. Static: no animation. The icon turns cyan while a non-default order is active.
  */
 @Composable

@@ -72,13 +72,18 @@ class ConfigurationLibraryUiTest {
                             namingEntryId = namingEntryId, onNamingDone = { namingDone++; namingEntryId = null },
                             activeContent = { item, list ->
                                 DisposableEffect(Unit) { onDispose { activeDisposals++ } }
-                                Column(Modifier.testTag("library-active-fixture")) {
+                                Box(Modifier.testTag("nodes-configuration-group")) { Column(Modifier.testTag("library-active-fixture")) {
+                                    // Like the real card: 节点列表 on the left, the page's sort + 延迟测试 icons at the right.
+                                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                        Text("节点列表", Modifier.weight(1f).testTag("nodes-group-title"))
+                                        list.headerAction(this)
+                                    }
                                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                                         Text(item.name, Modifier.weight(1f).testTag("library-active-name"))
                                         list.rowTrailing?.invoke(0)
                                     }
                                     list.extraRows(this)
-                                }
+                                } }
                             })
                     }
                 }
@@ -120,7 +125,8 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertIsDisplayed()
         compose.onAllNodesWithText("账户订阅 · 只读", useUnmergedTree = true).assertCountEquals(1)
         // Imported rows carry the source name only (the kind sits on the 来源 card), so the label is never cut off.
-        compose.onAllNodesWithText("合成配置", useUnmergedTree = true).assertCountEquals(1)
+        compose.onNode(hasTestTag("node-source-label") and hasAnyAncestor(hasTestTag("configuration-node-2-0")), useUnmergedTree = true)
+            .assertTextEquals("合成配置")
         compose.onAllNodesWithText("合成配置 · 第三方订阅", useUnmergedTree = true).assertCountEquals(0)
     }
 
@@ -247,6 +253,8 @@ class ConfigurationLibraryUiTest {
         compose.onAllNodesWithText("未选择", substring = false).assertCountEquals(0)
     }
 
+    private fun density() = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+
     @Test fun nodeListHeadingAndLatencyTestShareOneRowWithTheActionAtTheRight() {
         launch()
         val title = compose.onNodeWithTag("nodes-group-title").fetchSemanticsNode().boundsInRoot
@@ -258,7 +266,8 @@ class ConfigurationLibraryUiTest {
         compose.runOnIdle {
             assertTrue("same row", action.top < title.bottom && action.bottom > title.top)
             assertTrue("action is right of the heading", action.left >= title.right - 1f)
-            assertTrue("action is right-aligned in the card", action.right >= group.right - 24f)
+            // Order on the row: 节点列表 ... ⚡ then the sort funnel at the far right.
+            assertTrue("lightning sits just left of the sort icon at the card's right edge", action.right >= group.right - 24f - 48f * density())
         }
         // Icon only: no 延迟测试 text anywhere, no toolbar, no last-test caption, no old sort text.
         compose.onNodeWithTag("nodes-latency-one-tap").assertDoesNotExist()
@@ -268,15 +277,17 @@ class ConfigurationLibraryUiTest {
         compose.onAllNodesWithText("按延迟排序").assertCountEquals(0)
     }
 
-    @Test fun sortIsAFunnelIconNextToTheLightningWithADefaultAndLatencyMenu() {
+    @Test fun sortIsAFunnelIconRightOfTheLightningWithADefaultAndLatencyMenu() {
         latencies = mapOf(null to 400L, "synthetic-second" to 100L)
         launch()
         val sort = compose.onNodeWithTag("nodes-sort").assertContentDescriptionEquals("排序")
             .assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).fetchSemanticsNode().boundsInRoot
         val bolt = compose.onNodeWithTag("nodes-latency-refresh").fetchSemanticsNode().boundsInRoot
+        val group = compose.onNodeWithTag("nodes-configuration-group").fetchSemanticsNode().boundsInRoot
         compose.runOnIdle {
             assertTrue("same row", sort.top < bolt.bottom && sort.bottom > bolt.top)
-            assertTrue("directly left of the lightning", sort.right <= bolt.left + 1f && bolt.left - sort.right < 24f)
+            assertTrue("directly right of the lightning, at the far right", sort.left >= bolt.right - 1f && sort.left - bolt.right < 24f)
+            assertTrue("sort icon ends the row", sort.right >= group.right - 24f)
         }
         // Default order: the account's row sits above 配置 2's row.
         val accountTop = compose.onNodeWithTag("configuration-node-0-0").performScrollTo().fetchSemanticsNode().boundsInRoot.top
@@ -295,7 +306,7 @@ class ConfigurationLibraryUiTest {
     @Test fun nodesOfOtherSourcesShowTheirOwnLatency() {
         latencies = mapOf("synthetic-second" to 187L)
         launch()
-        compose.onNodeWithTag("configuration-latency-2-0").performScrollTo().assertTextContains("187", substring = true)
+        compose.onNodeWithTag("configuration-latency-2-0", useUnmergedTree = true).performScrollTo().assertTextContains("187", substring = true)
     }
 
     @Test fun filterChipsNarrowTheListToOneSource() {
@@ -378,14 +389,16 @@ class ConfigurationLibraryUiTest {
         assertNoSourceMutation()
     }
 
-    @Test fun noActiveSourceRetainsAllSavedGroupsAndDisablesLatency() {
+    @Test fun noActiveSourceRetainsAllSavedGroupsAndStillMeasuresTheirNodes() {
         snapshot = snapshot.copy(items = snapshot.items.map { it.copy(active = false) })
         launch()
         compose.onNodeWithTag("configuration-unselected").assertTextEquals("未选择配置")
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction()
         (0..2).forEach { compose.onNodeWithTag("configuration-group-$it").assertExists() }
         compose.onNodeWithTag("library-active-fixture").assertDoesNotExist()
-        compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
+        // The heading row still carries 排序 and 延迟测试: the saved sources' own nodes can be measured without an active one.
+        compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
+        compose.onNodeWithTag("nodes-sort").assertExists()
         compose.onNodeWithTag("nodes-import").assertIsEnabled()
         assertNoSourceMutation()
     }

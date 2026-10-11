@@ -58,21 +58,21 @@ internal fun nodeLatencyPresentation(
 /** A quiet dash per cell; the toolbar note ([LatencySkippedNote]) and the spoken description carry the reason. */
 internal const val LatencySkippedLabel = "—"
 /** Shown in the toolbar instead of a "last tested" time while the tunnel is up and nothing could be measured. */
-internal const val LatencySkippedNote = "已连接时无法测速，断开后可测"
+internal const val LatencySkippedNote = "已连接时无法测延迟，断开后可测"
 
 /** Compact spoken description for accessibility; never invents a millisecond value. */
 internal fun nodeLatencyContentDescription(presentation: NodeLatencyPresentation): String = when {
     presentation.measuring -> "节点延迟：测试中"
     presentation.label == "---" -> "节点延迟：未测试"
     presentation.label == "超时" -> "节点延迟：超时"
-    presentation.label == LatencySkippedLabel -> "节点延迟：已连接时无法测速"
+    presentation.label == LatencySkippedLabel -> "节点延迟：已连接时无法测延迟"
     presentation.label.endsWith(" ms") ->
         "节点延迟 ${presentation.label.removeSuffix(" ms")} 毫秒"
     else -> "节点延迟：${presentation.label}"
 }
 
 /**
- * Relative "上次测速" caption from a monotonic elapsed-clock delta. Returns null when [agoMillis]
+ * Relative "上次延迟测试" caption from a monotonic elapsed-clock delta. Returns null when [agoMillis]
  * is null or negative so the toolbar can omit the line entirely.
  */
 internal fun formatLastLatencyTestAgo(agoMillis: Long?): String? {
@@ -88,7 +88,7 @@ internal fun formatLastLatencyTestAgo(agoMillis: Long?): String? {
         days < 7L -> "${days}天前"
         else -> return null // Stale enough that a relative label is not useful.
     }
-    return "上次测速：$body"
+    return "上次延迟测试：$body"
 }
 
 /** Parsed pieces of provider notice names (info=true rows). All fields stay null when absent. */

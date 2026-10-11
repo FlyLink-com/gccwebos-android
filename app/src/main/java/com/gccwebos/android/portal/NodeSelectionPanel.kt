@@ -66,7 +66,7 @@ internal fun nodeConnectionStatus(control: ConnectionControlState): String? = wh
 }
 
 /** Draw the nodes page before a non-forced latency pass. Not a VPN probe gate. */
-private const val NodeLatencyEntryDelayMillis = 300L
+internal const val NodeLatencyEntryDelayMillis = 300L
 
 private val NodeSelectedFill = Brand.Cyan.copy(alpha = .12f)
 private val NodeSelectedBorder = Brand.Cyan.copy(alpha = .85f)
@@ -370,7 +370,7 @@ private fun NodeLatencyToolbar(
             NodesLightningIcon(busy = false, motionEnabled = motionEnabled, enabled = canMeasure && !measuring,
                 size = 16.dp)
             Spacer(Modifier.width(4.dp))
-            Text("一键测速", fontSize = 11.sp)
+            Text("延迟测试", fontSize = 11.sp)
         }
         TextButton(
             onClick = onToggleSort,

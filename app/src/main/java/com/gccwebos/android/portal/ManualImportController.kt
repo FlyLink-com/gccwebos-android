@@ -3,6 +3,7 @@ package com.gccwebos.android.portal
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.gccwebos.android.manualimport.ImportStage
 import com.gccwebos.android.manualimport.ManualImportFailure
 import com.gccwebos.android.manualimport.ManualImportInputKind
 import kotlinx.coroutines.CancellationException
@@ -31,6 +32,8 @@ internal class ManualImportController(
     var visible by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null); private set
+    /** Phase of the running import (reading, parsing, saving); null when idle. Never carries content. */
+    var stage by mutableStateOf<ImportStage?>(null); private set
     /** Saved entry id of a configuration this controller just added; the library asks the user to name it. */
     var namingEntryId by mutableStateOf<String?>(null); private set
     private var ticket: Ticket? = null
@@ -76,7 +79,7 @@ internal class ManualImportController(
         val previous = task
         operation++
         ticket = null; task = null; replacement = null
-        busy = false; visible = false; error = null
+        busy = false; visible = false; error = null; stage = null
         previous?.cancel()
         if (previous != null) onSettled()
     }
@@ -93,13 +96,13 @@ internal class ManualImportController(
         var created: String? = null
         run(value, onComplete = { owned.fill(0) }, onSuccess = { namingEntryId = created }) {
             // All three surfaces pass through exactly the same bounded parser and authority.
-            if (value.replacement == null) manager.importManual(owned, value.source, guardedFence(value)).also {
+            if (value.replacement == null) manager.importManual(owned, value.source, progress(value), guardedFence(value)).also {
                 // A new import becomes the active saved entry; naming is optional, so a failed read only skips it.
                 created = try {
-                    manager.configurationLibrarySnapshot().items.firstOrNull { it.active && it.handle.entryId != null }?.handle?.entryId
+                    PrepTrace.span("import-naming-snapshot") { manager.configurationLibrarySnapshot() }.items.firstOrNull { it.active && it.handle.entryId != null }?.handle?.entryId
                 } catch (_: Exception) { null }
             }
-            else manager.replaceConfiguration(owned, value.replacement, value.source, guardedFence(value))
+            else manager.replaceConfiguration(owned, value.replacement, value.source, progress(value), guardedFence(value))
         }
     }
     fun useAccount() = changeSource { fence -> manager.useAccountSource(fence); manager.refresh() }
@@ -108,6 +111,7 @@ internal class ManualImportController(
         val value = begin() ?: return
         run(value) { action(guardedFence(value)) }
     }
+    private fun progress(value: Ticket): (ImportStage) -> Unit = { next -> if (ticket === value) stage = next }
     private fun checkCurrent(value: Ticket) {
         if (ticket !== value || !allowed() || !manager.isManualSourceVersionCurrent(value.source))
             throw CancellationException("Import owner changed")
@@ -118,7 +122,7 @@ internal class ManualImportController(
     }
     private fun run(value: Ticket, onComplete: () -> Unit = {}, onSuccess: () -> Unit = {}, action: suspend () -> LocalSubscriptionSnapshot) {
         val current = ++operation
-        busy = true; error = null
+        busy = true; error = null; stage = null
         // Assign ownership before execution, including an already-cancelled parent/immediate scope.
         val work = scope.launch(start = CoroutineStart.LAZY) {
             try {
@@ -139,7 +143,7 @@ internal class ManualImportController(
                 else if (failure is com.gccwebos.android.vpn.UnsafeProxyConfiguration) "配置格式或协议不受支持"
                 else when ((failure as? PortalFailure)?.reason) {
                     PortalFailure.Reason.STORAGE -> "本地配置暂不可用"
-                    PortalFailure.Reason.NETWORK -> "订阅下载失败"
+                    PortalFailure.Reason.NETWORK -> "订阅下载失败或超时，请检查网络后重试"
                     PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE -> "订阅不可用或未提供有效期"
                     PortalFailure.Reason.SUBSCRIPTION_EXPIRED -> "订阅已过期"
                     PortalFailure.Reason.SUBSCRIPTION_REVOKED -> "订阅链接不可访问"
@@ -152,7 +156,7 @@ internal class ManualImportController(
         work.invokeOnCompletion {
             onComplete()
             if (current == operation) {
-                task = null; busy = false
+                task = null; busy = false; stage = null
                 onSettled()
             }
         }

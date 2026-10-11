@@ -1,6 +1,7 @@
 package com.gccwebos.android.portal
 
 import com.gccwebos.android.core.AuthorizedConfig
+import com.gccwebos.android.manualimport.ImportStage
 import com.gccwebos.android.core.ConfigGateway
 import com.gccwebos.android.core.ConfigPreparation
 import com.gccwebos.android.core.ConnectionChoice
@@ -196,7 +197,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
 
     /** Summary reads never register choices or activate an inactive entry. */
     internal fun configurationLibrarySnapshot(accountSignedIn: Boolean = false): ConfigurationLibrarySnapshot = synchronized(lock) {
-        try {
+        PrepTrace.span("library-snapshot") { try {
             readLibrary().use { library ->
                 val items = mutableListOf<ConfigurationItem>()
                 fun handle(id: String?) = ConfigurationHandle(libraryOwner, library.revision, id, authority.clearVersion)
@@ -209,7 +210,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                             val parsed = describeForLibrary(raw, cached.validUntil, cached.observedStatus)
                             // The account subscription is read-only: no alias, no deletion, so no node keys.
                             items += ConfigurationItem(handle(null), "账户订阅", ManualSourceKind.LegacyRemote,
-                                parsed.nodes, parsed.status, accountActive)
+                                parsed.nodes, parsed.status, accountActive, contentKey = contentKey(raw))
                         } finally { raw.fill(0) }
                     } else if (accountActive || accountSignedIn || delivery.read()?.let { !it.pendingAck } == true) {
                         // A signed-in account always has a selectable (possibly not yet loaded) subscription row,
@@ -224,17 +225,18 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     val raw = source.copyBytes() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
                     try {
                         val parsed = describeForLibrary(raw, source.validUntil, source.observedStatus)
-                        val keys = persistedNodeKeys(raw, parsed.nodes.size)
+                        val keys = libraryParse(raw).keys
                         items += ConfigurationItem(handle(entry.id), entry.name, source.kind,
                             displayNodes(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()),
                             parsed.status, library.selector == ConfigurationSelector.Entry && library.selectedEntryId == entry.id,
                             nodeKeys = keys.orEmpty(), nodeAliased = aliasedPositions(keys, overrides["entry:${entry.id}"].orEmpty()),
-                            nodeDeleted = hiddenPositions(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()))
+                            nodeDeleted = hiddenPositions(parsed.nodes, keys, overrides["entry:${entry.id}"].orEmpty()),
+                            contentKey = contentKey(raw))
                     } finally { raw.fill(0) }
                 }
                 ConfigurationLibrarySnapshot(items)
             }
-        } catch (_: Exception) { ConfigurationLibrarySnapshot(storageError = true) }
+        } catch (_: Exception) { ConfigurationLibrarySnapshot(storageError = true) } }
     }
 
     /** One-way node keys (the same ones the remembered choice uses); a key shared by two nodes cannot address either. */
@@ -290,14 +292,46 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
 
     private fun describeForLibrary(raw: ByteArray, until: Instant?, status: LocalSubscriptionStatus?): LocalSubscriptionSnapshot {
-        val parsed = try { describe(raw, until) } catch (_: UnsafeProxyConfiguration) {
-            LocalSubscriptionSnapshot(LocalSubscriptionStatus.UNSUPPORTED, true, true,
-                try { SafeProxyConfig.inspect(raw) } catch (_: Exception) { emptyList() }, until)
-        }
+        val cached = libraryParse(raw)
+        val parsed = if (cached.unsupported) LocalSubscriptionSnapshot(LocalSubscriptionStatus.UNSUPPORTED, true, true, cached.nodes, until)
+        else LocalSubscriptionSnapshot(if (until != null && until <= now()) LocalSubscriptionStatus.EXPIRED else LocalSubscriptionStatus.READY,
+            true, true, cached.nodes, until)
         return if (until != null && until <= now()) parsed.copy(status = LocalSubscriptionStatus.EXPIRED)
             else status?.let { parsed.copy(status = it) } ?: parsed
     }
 
+    /** What a library listing needs from one stored configuration. Pure function of the bytes. */
+    private class LibraryParse(val unsupported: Boolean, val nodes: List<SafeProxyConfig.NodeSummary>, val keys: List<String?>?)
+    /**
+     * Parsed nodes and one-way node keys per configuration content (bounded, least recently used). A library
+     * listing used to parse and hash every saved configuration again on each call; the same bytes now parse once.
+     * Holds the same display-only metadata the active registry already keeps in memory; emptied on any clear.
+     */
+    private val libraryParses = object : LinkedHashMap<String, LibraryParse>(32, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LibraryParse>?) = size > 32
+    }
+    private var libraryParsesClearVersion = -1L
+    private fun libraryParse(raw: ByteArray): LibraryParse = synchronized(lock) {
+        if (libraryParsesClearVersion != authority.clearVersion) { libraryParses.clear(); libraryParsesClearVersion = authority.clearVersion }
+        val id = contentKey(raw)
+        libraryParses[id]?.let { return it }
+        val parsed = try { describe(raw, null).let { LibraryParse(false, it.nodes, null) } } catch (_: UnsafeProxyConfiguration) {
+            LibraryParse(true, try { SafeProxyConfig.inspect(raw) } catch (_: Exception) { emptyList() }, null)
+        }
+        val value = LibraryParse(parsed.unsupported, parsed.nodes, persistedNodeKeys(raw, parsed.nodes.size))
+        libraryParses[id] = value
+        value
+    }
+    /** One-way identity of a stored configuration's bytes; equal bytes, equal key. Not a capability. */
+    internal fun contentKey(raw: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(raw)
+        try { return digest.take(16).joinToString("") { "%02x".format(it) } } finally { digest.fill(0) }
+    }
+
+    private companion object {
+        const val MaxLibraryProbeNodesPerSource = 128
+        const val MaxLibraryProbeNodes = 128
+    }
     private fun requireLibraryHandle(handle: ConfigurationHandle, library: ConfigurationLibrary) {
         if (handle.owner !== libraryOwner || handle.clearVersion != authority.clearVersion ||
             handle.libraryRevision != library.revision || library.clearPending ||
@@ -630,15 +664,17 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** Explicit import stages all bytes before taking the connection-owner commit fence. Never starts a VPN. */
     suspend fun importManual(input: ByteArray, expectedSource: ManualSourceVersion? = null,
-        commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
-        importManualChange(input, expectedSource, null, commitFence)
+        progress: (ImportStage) -> Unit = {}, commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
+        importManualChange(input, expectedSource, null, commitFence, progress)
 
     internal suspend fun replaceConfiguration(input: ByteArray, handle: ConfigurationHandle,
-        expectedSource: ManualSourceVersion? = null, commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
-        importManualChange(input, expectedSource, handle, commitFence)
+        expectedSource: ManualSourceVersion? = null, progress: (ImportStage) -> Unit = {},
+        commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot =
+        importManualChange(input, expectedSource, handle, commitFence, progress)
 
     private suspend fun importManualChange(input: ByteArray, expectedSource: ManualSourceVersion?,
-        replacement: ConfigurationHandle?, commitFence: ((() -> Unit) -> Unit)): LocalSubscriptionSnapshot = mutex.withLock {
+        replacement: ConfigurationHandle?, commitFence: ((() -> Unit) -> Unit),
+        progress: (ImportStage) -> Unit): LocalSubscriptionSnapshot = mutex.withLock {
         val owned = input.copyOf()
         var old: ManualSourceRecord? = null
         var targetSource: ManualSourceRecord? = null
@@ -666,7 +702,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     catch (_: Exception) { throw UnsupportedManualSubscriptionLink() })
                 val reader = if (kind == ManualSourceKind.ImportedRemote) source else externalSource
                     ?: throw UnsupportedManualSubscriptionLink()
-                val result = reader.read(url)
+                progress(ImportStage.Reading)
+                val result = PrepTrace.span("import-read") { reader.read(url) }
                 try {
                     currentCoroutineContext().ensureActive()
                     val known = if (expirySource.kind == kind && expirySource.url?.value == url.value &&
@@ -685,11 +722,13 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     // Usage is never carried over from an older record or URL: only this download's own report.
                     staged = ManualSourceRecord(kind = kind, bytes = result.bytes, url = url,
                         validUntil = until, usage = result.usage?.let { SubscriptionUsage.observed(it, now()) })
-                    next = manualSnapshot(result.bytes, requireNotNull(staged))
+                    progress(ImportStage.Parsing)
+                    next = PrepTrace.span("import-parse") { manualSnapshot(result.bytes, requireNotNull(staged)) }
                 } finally { result.bytes.fill(0) }
             } else {
                 staged = ManualSourceRecord(kind = ManualSourceKind.ImportedLocal, bytes = owned)
-                next = manualSnapshot(owned, requireNotNull(staged))
+                progress(ImportStage.Parsing)
+                next = PrepTrace.span("import-parse") { manualSnapshot(owned, requireNotNull(staged)) }
             }
             currentCoroutineContext().ensureActive()
             val edit: (ConfigurationLibrary) -> ConfigurationLibrary = { library ->
@@ -709,8 +748,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
                     }
                 }
             }
+            progress(ImportStage.Saving)
             if (replacement == null || replacementActive) {
-                commitSource(requireNotNull(staged), next, ticket, commitFence, edit)
+                PrepTrace.span("import-commit") { commitSource(requireNotNull(staged), next, ticket, commitFence, edit) }
                 next
             } else {
                 val context = currentCoroutineContext()
@@ -919,6 +959,70 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             }
         } ?: emptyList()
     }
+    /**
+     * Probe targets of every saved source that is NOT the active one (the account's cached subscription and each
+     * imported configuration), so the unified node list can show latency for all its rows. One library read per
+     * batch; display-only. Hidden (locally deleted) nodes, provider notices and unusable sources yield no target.
+     */
+    internal fun captureLibraryProbeTargets(): List<LibraryProbeTarget> = synchronized(lock) {
+        PrepTrace.span("probe-library-capture") {
+            try {
+                if (authority.manualStorageBlocked || authority.incompleteClear) return@span emptyList()
+                readLibrary().use { library ->
+                    val overrides = try { nodeOverrides?.read() ?: emptyMap() } catch (_: Exception) { emptyMap() }
+                    val out = mutableListOf<LibraryProbeTarget>()
+                    fun add(sourceId: String, raw: ByteArray, hidden: Map<String, NodeOverride>) {
+                        try {
+                            val parse = libraryParse(raw)
+                            if (parse.unsupported || parse.nodes.size > MaxLibraryProbeNodesPerSource) return
+                            val endpoints = SafeProxyConfig.probeEndpoints(raw)
+                            if (endpoints.size != parse.nodes.size) return
+                            val key = contentKey(raw)
+                            val deleted = hiddenPositions(parse.nodes, parse.keys, hidden)
+                            parse.nodes.forEachIndexed { index, node ->
+                                if (node.info || index in deleted) return@forEachIndexed
+                                val endpoint = endpoints[index]
+                                if (endpoint.protocol != node.protocol) return@forEachIndexed
+                                out += LibraryProbeTarget(sourceId, index, key, endpoint.endpoint, endpoint.protocol,
+                                    endpoint.port, probeTransport(endpoint))
+                            }
+                        } catch (cancel: CancellationException) { throw cancel }
+                        catch (_: Exception) { } // An unusable source simply has no measurable nodes.
+                    }
+                    if (library.selector != ConfigurationSelector.Account) {
+                        val cached = profiles.read()
+                        try {
+                            if (cached != null && cached.validUntil?.let { it > now() } == true &&
+                                cached.observedStatus?.let { it == LocalSubscriptionStatus.READY } != false) {
+                                val raw = cached.copyBytes()
+                                try { add(AccountSourceId, raw, emptyMap()) } finally { raw.fill(0) }
+                            }
+                        } finally { cached?.close() }
+                    }
+                    for (entry in library.entries) {
+                        if (library.selector == ConfigurationSelector.Entry && library.selectedEntryId == entry.id) continue
+                        entry.copySource().use { source ->
+                            if (source.observedStatus?.let { it != LocalSubscriptionStatus.READY } == true ||
+                                !sourceTimeValid(source.kind, source.validUntil)) return@use
+                            val raw = source.copyBytes() ?: return@use
+                            try { add(entry.id, raw, overrides["entry:${entry.id}"].orEmpty()) } finally { raw.fill(0) }
+                        }
+                    }
+                    if (out.size > MaxLibraryProbeNodes) out.subList(MaxLibraryProbeNodes, out.size).clear()
+                    out.toList()
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { emptyList() }
+        }
+    }
+    /** The active saved entry's id, or null when the account or nothing is active. One library read, no parsing. */
+    internal fun activeConfigurationEntryId(): String? = synchronized(lock) {
+        try {
+            readLibrary().use { library ->
+                if (library.selector == ConfigurationSelector.Entry) library.selectedEntryId else null
+            }
+        } catch (_: Exception) { null }
+    }
     /** Recheck results before publication; a target never renews a removed or changed registry. */
     internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget): Boolean = synchronized(lock) {
         if (authority.choices.none { it.selection === target.selection && !it.info }) return@synchronized false
@@ -938,8 +1042,11 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     }
     /** Memory-only display masking. Never sufficient permission to probe: workers must also
      * call isCurrentNodeProbeTarget on IO before/after measuring, plus their auth/network/TTL guards. */
-    internal fun isNodeProbeTargetRegistryCurrent(target: NodeProbeTarget): Boolean = synchronized(lock) {
-        authority.selectionStatus == LocalSubscriptionStatus.READY && !authority.selectionRequiresRefresh &&
+    internal fun isNodeProbeTargetRegistryCurrent(target: NodeProbeTarget): Boolean = PrepTrace.lockWait("registry-current", lock) {
+        registryCurrentLocked(target)
+    }
+    private fun registryCurrentLocked(target: NodeProbeTarget): Boolean {
+        return authority.selectionStatus == LocalSubscriptionStatus.READY && !authority.selectionRequiresRefresh &&
             !authority.manualStorageBlocked && !authority.incompleteClear &&
             authority.selectionSchema == SafeProxyConfig.SCHEMA_VERSION &&
             authority.selectionClearVersion == authority.clearVersion && authority.selectionBinding != null &&
@@ -948,7 +1055,9 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             authority.choices.any { it.selection === target.selection && it.protocol == target.protocol }
     }
     /** Caller holds the authority lock. Unlike nodeSelectionSnapshot, rejection is read-only. */
-    private fun <T> withNodeProbeArtifact(read: (ByteArray, List<ConnectionChoice>) -> T): T? {
+    private fun <T> withNodeProbeArtifact(read: (ByteArray, List<ConnectionChoice>) -> T): T? =
+        PrepTrace.span("probe-artifact") { readNodeProbeArtifact(read) }
+    private fun <T> readNodeProbeArtifact(read: (ByteArray, List<ConnectionChoice>) -> T): T? {
         var cached: CachedSubscription? = null
         var raw: ByteArray? = null
         try {

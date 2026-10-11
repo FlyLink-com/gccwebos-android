@@ -231,7 +231,8 @@ internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: 
                         onSelect(index) // callers keep their former re-tap behaviour
                     })
                 .testTag(tab.tag).padding(horizontal = 6.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-                Text(tab.title, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelLarge,
+                Text(tab.title, textAlign = TextAlign.Center, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                     color = if (!enabled) Brand.Muted else Brand.Text)
             }

@@ -530,7 +530,7 @@ private fun Page(destination: Destination, padding: PaddingValues, account: Acco
                         visible = importer.visible,
                         busy = importer.busy || account.busy || account.restoring || account.foregroundCheckPending ||
                             account.clearing || account.nodeSelection.busy || importUsage.busy || importUsage.verifying,
-                        error = importer.error,
+                        error = importer.error, stage = importer.stage,
                         canUseAccount = canUseAccountSource(account.authenticated, account.localSubscription.sourceKind),
                         canRemove = false,
                         onDismiss = importer::cancel, onBegin = importer::beginAsync, onSubmit = importer::submit,

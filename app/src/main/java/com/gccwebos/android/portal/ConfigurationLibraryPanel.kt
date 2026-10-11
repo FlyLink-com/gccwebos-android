@@ -4,7 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.*
@@ -24,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import com.gccwebos.android.ConnectionControlState
@@ -31,6 +31,8 @@ import com.gccwebos.android.ConnectionPhase
 import com.gccwebos.android.design.Brand
 import com.gccwebos.android.design.GlassSurface
 import com.gccwebos.android.design.NodeRegionIcon
+import com.gccwebos.android.design.SlidingTab
+import com.gccwebos.android.design.SlidingTabRow
 import com.gccwebos.android.design.nodeDisplayName
 import com.gccwebos.android.vpn.SafeProxyConfig
 
@@ -57,10 +59,25 @@ internal fun ConfigurationLibraryPanel(library: ConfigurationLibraryController,
         library.activate(account.handle)
     }
     val active = library.snapshot.items.any { it.active }
-    val canMeasure = active && !busy && !state.busy && latency != null && !latency.busy &&
-        latency.foreground && state.snapshot.status == LocalSubscriptionStatus.READY && state.snapshot.choices.isNotEmpty()
+    val activeMeasurable = active && state.snapshot.status == LocalSubscriptionStatus.READY && state.snapshot.choices.isNotEmpty()
+    // Nodes of the other saved sources are tested together with the active source's, so they count too.
+    val othersMeasurable = library.snapshot.items.any { item -> !item.active && item.status == LocalSubscriptionStatus.READY &&
+        item.nodes.any { node -> !node.info && node.supported } }
+    val canMeasure = !busy && !state.busy && latency != null && !latency.busy && latency.foreground &&
+        (activeMeasurable || othersMeasurable)
+    val contentKeys = library.snapshot.items.map { it.contentKey }
+    // A changed source (import, replace, refresh) must be captured again; stale readings are dropped by content key.
+    LaunchedEffect(latency, contentKeys) { latency?.libraryChanged() }
+    // With no active source the page below never starts a batch itself; the other sources' nodes still need one.
+    LaunchedEffect(latency, contentKeys, active, busy, state.busy, tunnelActive, latency?.foreground) {
+        if (latency == null || active || busy || state.busy || tunnelActive || !othersMeasurable) return@LaunchedEffect
+        withFrameNanos { }
+        delay(NodeLatencyEntryDelayMillis)
+        while (true) { latency.ensureMeasured(); delay(1000) }
+    }
     ConfigurationLibraryContent(library.snapshot, busy, library.error, canMeasure,
         measuring = latency?.busy == true,
+        latencyFor = { item, position -> latency?.libraryReading(item.handle.entryId ?: AccountSourceId, position, item.contentKey) },
         onMeasure = { latency?.refresh() }, onImport = onImport, onActivate = library::activate,
         onChooseNode = library::activateAndChoose,
         onRename = library::rename, onRemove = library::remove, onReplace = onReplace,
@@ -96,6 +113,8 @@ private enum class LibraryDialog { Details, Rename, Remove, Name }
 @Composable
 internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot, busy: Boolean, error: String?,
     canMeasure: Boolean, measuring: Boolean = false, onMeasure: () -> Unit, onImport: () -> Unit,
+    /** Latency shown on a row of a non-active source; null while unmeasured. Display-only. */
+    latencyFor: (ConfigurationItem, Int) -> NodeLatencyObservation? = { _, _ -> null },
     onActivate: (ConfigurationHandle) -> Unit, onRename: (ConfigurationHandle, String) -> Unit,
     onRemove: (ConfigurationHandle) -> Unit, onReplace: (ConfigurationHandle) -> Unit,
     onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit = { _, _ -> },
@@ -108,7 +127,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
     activeContent: @Composable (ConfigurationItem, UnifiedList) -> Unit) {
     val actionsBlocked = busy || snapshot.storageError
     val activeIndex = snapshot.items.indexOfFirst { it.active }
-    val canMeasureActive = canMeasure && activeIndex >= 0
+    val canMeasureActive = canMeasure && snapshot.items.isNotEmpty()
     var dialogHandle by remember { mutableStateOf<ConfigurationHandle?>(null) }
     var dialog by remember { mutableStateOf<LibraryDialog?>(null) }
     var name by remember { mutableStateOf("") }
@@ -155,7 +174,6 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
                 busy = measuring,
                 onClick = { if (!actionsBlocked && canMeasureActive) onMeasure() },
             )
-            NodesImportButton(onClick = { if (!actionsBlocked) onImport() }, enabled = !actionsBlocked)
         }
         // Controller errors are fixed captions. Never interpolate an exception or source material.
         if (snapshot.storageError) Text("配置暂不可用", color = Brand.Muted,
@@ -174,7 +192,8 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             modifier = Modifier.testTag("configuration-unselected"))
         // Source filter: only worth a row once there is more than one source.
         if (filterKey != null && snapshot.items.none { it.displayKey == filterKey }) filterKey = null
-        if (snapshot.items.size >= 2) SourceFilterChips(snapshot.items, filterKey) { filterKey = it }
+        // The add-configuration "+" always leads this row; the segmented switcher joins it once there is more than one source.
+        SourceSwitcherRow(snapshot.items, filterKey, enabled = !actionsBlocked, onImport = onImport) { filterKey = it }
         // One list for every source. Nodes of the active source keep latency and selection; nodes of the
         // other sources sit in the same list and one tap makes their source active and selects exactly that node.
         val others = snapshot.items.withIndex().filter { (index, item) ->
@@ -192,7 +211,7 @@ internal fun ConfigurationLibraryContent(snapshot: ConfigurationLibrarySnapshot,
             extraCount = others.sumOf { it.value.nodes.count { node -> !node.info } },
             showSourceRows = filterKey == null || snapshot.items.getOrNull(activeIndex)?.displayKey == filterKey,
             extraRows = {
-                OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode) { item, position, delete ->
+                OtherSourceRows(others, actionsBlocked, tunnelActive, onActivate, onChooseNode, latencyFor, measuring) { item, position, delete ->
                     nodeEdit = NodeEdit(item.handle.entryId, position, delete); nodeName = item.nodes[position].name
                 }
             })
@@ -349,23 +368,31 @@ private data class NodeEdit(val entryId: String?, val position: Int, val delete:
 internal fun nodeSourceLabel(item: ConfigurationItem): String =
     if (item.kind == ManualSourceKind.LegacyRemote) "账户订阅 · 只读" else "${item.name} · ${configurationKindLabel(item.kind)}"
 
+/**
+ * The 添加配置 "+" at the far left, then the segmented switcher (the plans page's [SlidingTabRow]): 全部 plus one tab
+ * per source. Fewer than two sources have nothing to switch between, so only the "+" with its label shows.
+ */
 @Composable
-private fun SourceFilterChips(items: List<ConfigurationItem>, selected: Any?, onSelect: (Any?) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("unified-filter"),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected == null, { onSelect(null) }, label = { Text("全部") },
-            modifier = Modifier.heightIn(min = 48.dp).testTag("unified-filter-all"))
-        items.forEachIndexed { index, item ->
-            FilterChip(selected == item.displayKey, { onSelect(if (selected == item.displayKey) null else item.displayKey) },
-                label = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                modifier = Modifier.heightIn(min = 48.dp).testTag("unified-filter-$index"))
-        }
+private fun SourceSwitcherRow(items: List<ConfigurationItem>, selected: Any?, enabled: Boolean, onImport: () -> Unit,
+    onSelect: (Any?) -> Unit) {
+    Row(Modifier.fillMaxWidth().testTag("unified-filter"), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        NodesImportButton(onClick = { if (enabled) onImport() }, enabled = enabled)
+        if (items.size >= 2) {
+            val tabs = listOf(SlidingTab("全部", "unified-filter-all")) +
+                items.mapIndexed { index, item -> SlidingTab(item.name, "unified-filter-$index") }
+            val selectedIndex = items.indexOfFirst { it.displayKey == selected }.let { if (it < 0) 0 else it + 1 }
+            SlidingTabRow(tabs, selectedIndex, enabled = true, modifier = Modifier.weight(1f), onSelect = { index ->
+                onSelect(if (index == 0) null else items[index - 1].displayKey.takeIf { it != selected })
+            })
+        } else Text("添加配置", fontSize = 13.sp, color = Brand.Muted, modifier = Modifier.testTag("unified-add-label"))
     }
 }
 
 @Composable
 private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationItem>>, busy: Boolean, tunnelActive: Boolean,
     onActivate: (ConfigurationHandle) -> Unit, onChooseNode: (ConfigurationHandle, NodeTarget) -> Unit,
+    latencyFor: (ConfigurationItem, Int) -> NodeLatencyObservation?, measuring: Boolean,
     onEdit: (ConfigurationItem, Int, Boolean) -> Unit) {
     if (others.isEmpty()) return
     if (tunnelActive && others.any { it.value.nodes.any { node -> !node.info } }) Text(
@@ -394,7 +421,10 @@ private fun ColumnScope.OtherSourceRows(others: List<IndexedValue<ConfigurationI
             // One tap chooses this node as the egress: its source becomes active first (same fenced
             // activation as 选择配置) and the node is then selected if it is still present.
             val choosable = node.supported && !busy && !tunnelActive
+            val observation = latencyFor(item, position)
             NodeChoiceRow(node.name, node.protocol, node.supported, chosen = false,
+                observation = observation, measuring = measuring && observation == null && node.supported,
+                tunnelActive = tunnelActive,
                 regionTag = "configuration-region-$index-$position", latencyTag = "configuration-latency-$index-$position",
                 sourceLabel = label,
                 trailing = if (item.canEditNode(position)) ({

@@ -50,6 +50,7 @@ class ConfigurationLibraryUiTest {
     private var namingDone = 0
     private var measurements = 0
     private var activeDisposals = 0
+    private var latencies by mutableStateOf<Map<String?, Long>>(emptyMap())
 
     private fun launch(fontScale: Float = 1f) {
         compose.setContent {
@@ -60,6 +61,7 @@ class ConfigurationLibraryUiTest {
                         .verticalScroll(rememberScrollState())) {
                         ConfigurationLibraryContent(snapshot, busy, null, canMeasure = true,
                             onMeasure = { measurements++ }, onImport = { imports++ },
+                            latencyFor = { item, _ -> latencies[item.handle.entryId]?.let { NodeLatencyObservation.Success(it, 7) } },
                             onActivate = { activations += it }, onRename = { handle, name -> renames += handle to name },
                             onRemove = { removals += it }, onReplace = { replacements += it },
                             onChooseNode = { handle, target -> chosen += handle to target },
@@ -208,6 +210,28 @@ class ConfigurationLibraryUiTest {
         compose.onNodeWithTag("unified-deleted").assertDoesNotExist()
         compose.onNodeWithTag("unified-filter-2").performClick()
         compose.onNodeWithTag("unified-deleted").performScrollTo().assertExists()
+    }
+
+    @Test fun addButtonLeadsTheSwitcherRowAndTheHeaderNoLongerHasOne() {
+        launch()
+        val header = compose.onNodeWithTag("configuration-library-header").fetchSemanticsNode().boundsInRoot
+        val plus = compose.onNodeWithTag("nodes-import").fetchSemanticsNode().boundsInRoot
+        val all = compose.onNodeWithTag("unified-filter-all").fetchSemanticsNode().boundsInRoot
+        val row = compose.onNodeWithTag("unified-filter").fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            assertTrue("+ sits below the header, not in it", plus.top >= header.bottom - 1f)
+            assertTrue("+ is the leftmost control of the switcher row", plus.left <= row.left + 1f && plus.right <= all.left + 1f)
+        }
+        compose.onNodeWithTag("unified-filter-all").assertIsSelected()
+        compose.onNodeWithTag("unified-filter-0").assertExists()
+        compose.onNodeWithTag("unified-filter-1").assertExists()
+        compose.onNodeWithTag("unified-filter-2").assertExists()
+    }
+
+    @Test fun nodesOfOtherSourcesShowTheirOwnLatency() {
+        latencies = mapOf("synthetic-second" to 187L)
+        launch()
+        compose.onNodeWithTag("configuration-latency-2-0").performScrollTo().assertTextContains("187", substring = true)
     }
 
     @Test fun filterChipsNarrowTheListToOneSource() {

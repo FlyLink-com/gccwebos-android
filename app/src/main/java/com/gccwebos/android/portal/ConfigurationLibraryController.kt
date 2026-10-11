@@ -29,7 +29,9 @@ internal data class ConfigurationItem(val handle: ConfigurationHandle, val name:
     /** Positions whose name is a local alias. */
     val nodeAliased: Set<Int> = emptySet(),
     /** Positions the user deleted locally. They are not listed as nodes; they can only be restored. */
-    val nodeDeleted: Set<Int> = emptySet()) {
+    val nodeDeleted: Set<Int> = emptySet(),
+    /** One-way identity of the stored configuration bytes: ties a latency reading to exactly this content. */
+    val contentKey: String? = null) {
     /** Only a locally deleted imported node can be restored. */
     fun canRestoreNode(position: Int): Boolean = kind != ManualSourceKind.LegacyRemote && handle.entryId != null &&
         nodeKeys.getOrNull(position) != null && position in nodeDeleted

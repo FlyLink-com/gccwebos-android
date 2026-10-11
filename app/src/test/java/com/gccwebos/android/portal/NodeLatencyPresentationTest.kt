@@ -59,7 +59,7 @@ class NodeLatencyPresentationTest {
     @Test fun unavailableWhileTunnelUpIsSkippedNotBroken() {
         val p = nodeLatencyPresentation(NodeLatencyObservation.Unavailable, tunnelActive = true)
         assertEquals("—", p.label)
-        assertEquals("节点延迟：已连接时无法测速", nodeLatencyContentDescription(p))
+        assertEquals("节点延迟：已连接时无法测延迟", nodeLatencyContentDescription(p))
         // A real result is never rewritten. A running batch keeps the spoken testing state and a static dash.
         assertEquals("超时", nodeLatencyPresentation(NodeLatencyObservation.NoReply, tunnelActive = true).label)
         val measuringUnavailable = nodeLatencyPresentation(
@@ -86,9 +86,9 @@ class NodeLatencyPresentationTest {
     @Test fun lastTestAgoOmitsNullAndStale() {
         assertNull(formatLastLatencyTestAgo(null))
         assertNull(formatLastLatencyTestAgo(-1))
-        assertEquals("上次测速：刚刚", formatLastLatencyTestAgo(3_000))
-        assertEquals("上次测速：10分钟前", formatLastLatencyTestAgo(10 * 60_000L))
-        assertEquals("上次测速：2小时前", formatLastLatencyTestAgo(2 * 3_600_000L))
+        assertEquals("上次延迟测试：刚刚", formatLastLatencyTestAgo(3_000))
+        assertEquals("上次延迟测试：10分钟前", formatLastLatencyTestAgo(10 * 60_000L))
+        assertEquals("上次延迟测试：2小时前", formatLastLatencyTestAgo(2 * 3_600_000L))
         assertNull(formatLastLatencyTestAgo(10 * 86_400_000L))
     }
 

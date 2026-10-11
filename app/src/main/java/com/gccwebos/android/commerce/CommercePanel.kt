@@ -161,6 +161,13 @@ internal class CommerceController(private val account: AccountController, privat
         ensureCurrentSession()
         require(old == null || old.entries.none { entry -> next.entries.any { it.entryRef == entry.entryRef } })
         ledgerPage = if (old == null) next else WalletLedgerPage(old.entries + next.entries, next.nextCursor)
+        // 订单明细 also lists unpaid recharge orders (the recharge screen never does). An extra read: if it fails, the ledger
+        // itself still shows and an unpaid order simply isn't listed this time.
+        if (!more) {
+            val orders = try { repository().rechargeHistory() } catch (error: CancellationException) { throw error } catch (_: Exception) { null }
+            ensureCurrentSession()
+            if (orders != null) rechargeHistory = orders
+        }
     }
     fun moreOrders() = run {
         val current = orderPage ?: return@run
@@ -597,7 +604,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         return // History has only read/local-return actions, even if a shared fixture retains a quote.
     }
     if (mode == CommerceMode.Ledger) {
-        LedgerPanel(account, state)
+        LedgerPanel(account, state, paymentOpener = paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, now = now)
         return // Read-only history must not inherit a retained purchase confirmation.
     }
     state.quote?.takeIf { visitReady }?.let { quote ->

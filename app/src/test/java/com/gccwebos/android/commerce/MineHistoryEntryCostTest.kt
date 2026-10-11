@@ -50,7 +50,7 @@ class MineHistoryEntryCostTest {
             }
         }, recovery, "synthetic_account", { now }, { throw AssertionError("No mutation key") })
 
-    @Test fun flatLedgerEntryIsOneReadWhileTheOldDefaultTabWasTheFullCommerceLoad() = runTest {
+    @Test fun flatLedgerEntryIsTwoSmallReadsWhileTheOldDefaultTabWasTheFullCommerceLoad() = runTest {
         val before = mutableListOf<String>()
         CommerceController(account(this), this, recovery, includeHistory = true, initialRepository = repo(before)).load()
         runCurrent()
@@ -59,7 +59,8 @@ class MineHistoryEntryCostTest {
         flat.loadLedger(); runCurrent()
         println("MEASURE entry requests: old default tab=${before.size} flat ledger=${after.size}")
         assertTrue("old default tab read ${before.size}", before.size >= 6)
-        assertEquals(listOf("/api/portal/coins/wallet/ledger?limit=20"), after)
+        // The ledger itself plus the recharge-order list, so an unpaid order can be listed (and paid) in 订单明细.
+        assertEquals(listOf("/api/portal/coins/wallet/ledger?limit=20", "/api/portal/coins/recharge/orders"), after)
         assertEquals(1, flat.ledgerPage!!.entries.size)
     }
 
@@ -78,7 +79,7 @@ class MineHistoryEntryCostTest {
         assertSame("stale page stays on screen while the refresh is in flight", first, again.ledgerPage)
         gate2.complete(Unit); advanceUntilIdle()
         assertNull(again.error); assertFalse(again.busy)
-        assertEquals("the refresh did hit the server", 2, calls.size)
+        assertEquals("the refresh did hit the server (ledger + recharge orders, twice)", 4, calls.size)
         assertEquals(first, again.ledgerPage)
     }
 }

@@ -36,7 +36,7 @@ class WalletRechargeUiTest {
         OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0L },
         subscription = SubscriptionSource { throw AssertionError("No subscription requests") },
         sessions = MemorySessionStore(), profiles = MemoryLocalProfileStore()), scope).apply { authenticated = true }
-    private fun launch(fontScale: Float = 1f, setup: CommerceController.() -> Unit = {}) {
+    private fun launch(fontScale: Float = 1f, mode: CommerceMode = CommerceMode.Wallet, setup: CommerceController.() -> Unit = {}) {
         compose.setContent {
             val scope = rememberCoroutineScope(); val owner = remember { account(scope) }
             val controller = remember {
@@ -52,7 +52,7 @@ class WalletRechargeUiTest {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 GccTheme { Column(Modifier.width(320.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(12.dp)) {
-                    CommercePanel(owner, CommerceMode.Wallet, controller, autoLoad = false, paymentOpener = { opened += it })
+                    CommercePanel(owner, mode, controller, autoLoad = false, paymentOpener = { opened += it })
                 } }
             }
         }
@@ -100,6 +100,20 @@ class WalletRechargeUiTest {
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
         compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
         compose.runOnIdle { assertTrue(opened.isEmpty()); assertTrue(state.pendingRecharge); assertTrue(calls.isEmpty()) }
+    }
+    @Test fun orderDetailsListsAnUnpaidOrderWithPayNowAndAnExpiredOneWithoutAButton() {
+        val expired = order.copy(orderRef = "recharge_ui_expired", nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH),
+            expiresAt = Instant.EPOCH)
+        launch(mode = CommerceMode.Ledger) { rechargeHistory = listOf(order, expired) }
+        compose.onNodeWithTag("unpaid-recharge-container").assertIsDisplayed()
+        compose.onNodeWithTag("unpaid-recharge-status-${order.orderRef}").assertTextContains("待付款", substring = true)
+        compose.onNodeWithTag("history-pay-${order.orderRef}").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("unpaid-recharge-status-${expired.orderRef}").assertTextContains("已失效", substring = true)
+        compose.onNodeWithTag("history-pay-${expired.orderRef}").assertDoesNotExist()
+        // Straight to the payment entry: no review dialog, no request.
+        compose.onNodeWithTag("history-pay-${order.orderRef}").performClick()
+        compose.onNodeWithText("核对服务器付款信息").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf(order.nextAction!!.url), opened); assertTrue(calls.isEmpty()) }
     }
     @Test fun verifiedOrExpiredOrdersAlsoStayOffTheRechargeScreen() {
         launch { pendingRecharge = true; recharge = order.copy(status = "payment_verified", nextAction = null) }

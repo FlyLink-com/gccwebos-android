@@ -276,7 +276,7 @@ private fun HistorySummary(tag: String, title: String, amount: String, type: Str
  * 已失效). Never creates an order.
  */
 @Composable
-private fun PayNowAction(order: RechargeOrder, state: CommerceController, flow: RechargeFlowController, now: Instant) {
+internal fun PayNowAction(order: RechargeOrder, state: CommerceController, flow: RechargeFlowController, now: Instant) {
     if (state.canOpenPayment(order, now)) {
         AlipayButton("立即支付", { flow.payNow(order, now) }, enabled = !state.busy,
             modifier = Modifier.fillMaxWidth().testTag("history-pay-${order.orderRef}"))

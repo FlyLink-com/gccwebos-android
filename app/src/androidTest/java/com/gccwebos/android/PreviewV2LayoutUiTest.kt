@@ -242,6 +242,10 @@ class PreviewV2LayoutUiTest {
         compose.onNodeWithTag("connection-nodes").assert(hasAnyAncestor(hasTestTag("connection-hero")))
         compose.onNodeWithTag("vpn-connect").assert(hasAnyAncestor(hasTestTag("connection-hero")))
         compose.onNodeWithTag("account-usage-card").assert(hasAnyAncestor(hasTestTag("connection-account-surface")))
+        // The traffic card sits above the connect / node area.
+        val usageTop = compose.onNodeWithTag("connection-account-surface").fetchSemanticsNode().boundsInRoot.top
+        val heroTop = compose.onNodeWithTag("connection-hero").fetchSemanticsNode().boundsInRoot.top
+        org.junit.Assert.assertTrue("usage card above the hero card", usageTop < heroTop)
         compose.onNodeWithTag("resource-card").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-read-status").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-retry").assertDoesNotExist()

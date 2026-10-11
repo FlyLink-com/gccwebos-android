@@ -25,7 +25,7 @@ internal object PaymentPage {
 }
 
 /** Page state shown by the Compose chrome around the WebView. */
-internal enum class PaymentFailure { Network, Insecure, Interrupted, Unavailable }
+internal enum class PaymentFailure { Network, Insecure, Interrupted, Unavailable, Blocked }
 
 internal class PaymentPageState {
     var progress by androidx.compose.runtime.mutableIntStateOf(0)

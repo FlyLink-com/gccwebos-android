@@ -57,6 +57,7 @@ internal object PaymentCopy {
         PaymentFailure.Network -> "付款页面打开失败，请检查网络后重试。订单会保留，请不要重复创建充值。"
         PaymentFailure.Insecure -> "无法确认付款页面的安全性，已停止加载。请稍后重试，或返回应用查询订单。"
         PaymentFailure.Interrupted -> "付款页面意外中断。订单会保留，请重试或返回应用查询。"
+        PaymentFailure.Blocked -> "付款页面要跳转到其他网站，为保护支付安全已阻止，所以页面无法在应用内继续。订单会保留，请点右上角“浏览器打开”继续付款，付款后回到应用查询。"
         PaymentFailure.Unavailable -> "这台设备上无法使用内置付款页面。订单会保留，可点右上角“浏览器打开”继续付款。"
     }
 }
@@ -72,12 +73,13 @@ internal fun PaymentScreen(state: PaymentPageState, webView: WebView?, onClose: 
             else if (state.handedOff) Notice(PaymentCopy.HandedOff, "payment-handed-off", Brand.Green)
             if (state.blockedOrigin) Notice(PaymentCopy.BlockedOrigin, "payment-blocked", Brand.Muted)
         }
-        PaymentBody(state, webView, onClose, onRetry, Modifier.fillMaxWidth().weight(1f))
+        PaymentBody(state, webView, onClose, onRetry, onOpenInBrowser, Modifier.fillMaxWidth().weight(1f))
     }
 }
 
 @Composable
-private fun PaymentBody(state: PaymentPageState, webView: WebView?, onClose: () -> Unit, onRetry: () -> Unit, modifier: Modifier) {
+private fun PaymentBody(state: PaymentPageState, webView: WebView?, onClose: () -> Unit, onRetry: () -> Unit,
+                        onOpenInBrowser: () -> Unit, modifier: Modifier) {
     Box(modifier) {
             if (webView != null) AndroidView(factory = { webView }, modifier = Modifier.fillMaxSize().testTag("payment-web"))
             val motion = rememberUiMotionEnabled()
@@ -88,7 +90,7 @@ private fun PaymentBody(state: PaymentPageState, webView: WebView?, onClose: () 
             }
             AnimatedVisibility(visible = state.failure != null, enter = if (motion) fadeIn(tween(120)) else EnterTransition.None,
                 exit = ExitTransition.None) {
-                state.failure?.let { FailureOverlay(it, onRetry = onRetry, onClose = onClose) }
+                state.failure?.let { FailureOverlay(it, onRetry = onRetry, onOpenInBrowser = onOpenInBrowser, onClose = onClose) }
             }
     }
 }
@@ -136,13 +138,14 @@ private fun LoadingOverlay(progress: Int) {
 }
 
 @Composable
-private fun FailureOverlay(kind: PaymentFailure, onRetry: () -> Unit, onClose: () -> Unit) {
+private fun FailureOverlay(kind: PaymentFailure, onRetry: () -> Unit, onOpenInBrowser: () -> Unit, onClose: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Brand.Background).padding(GccSpacing.ExtraLarge).testTag("payment-error"),
         verticalArrangement = Arrangement.spacedBy(GccSpacing.Large, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Text("付款页面无法打开", color = Brand.Text, style = MaterialTheme.typography.titleMedium)
         SupportingText(PaymentCopy.failure(kind))
-        if (kind != PaymentFailure.Unavailable) BrandButton("重试", onRetry, Modifier.testTag("payment-retry"))
+        if (kind == PaymentFailure.Blocked) BrandButton("浏览器打开", onOpenInBrowser, Modifier.testTag("payment-error-browser"))
+        else if (kind != PaymentFailure.Unavailable) BrandButton("重试", onRetry, Modifier.testTag("payment-retry"))
         TextButton(onClick = onClose, modifier = Modifier.heightIn(min = 48.dp).testTag("payment-close")) {
             Text("返回应用", color = Brand.Cyan)
         }

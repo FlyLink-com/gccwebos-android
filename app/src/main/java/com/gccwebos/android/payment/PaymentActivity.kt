@@ -82,6 +82,11 @@ open class PaymentActivity : ComponentActivity() {
         view.setDownloadListener { _, _, _, _, _ -> /* Payment pages never download files. */ }
         view.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) { state.progress = newProgress }
+            override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+                // Debug builds only; level, line and source host, never the message text (it can carry order data).
+                debugLog("console ${message.messageLevel()} line=${message.lineNumber()} src=${message.sourceId()?.let { Uri.parse(it).host }}")
+                return true
+            }
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?) = false
             override fun onPermissionRequest(request: android.webkit.PermissionRequest) = request.deny()
             override fun onShowFileChooser(webView: WebView?, callback: android.webkit.ValueCallback<Array<Uri>>?,
@@ -93,7 +98,11 @@ open class PaymentActivity : ComponentActivity() {
                     PaymentNavigation.Allow -> false
                     is PaymentNavigation.Alipay -> { handOff(decision.uri); true }
                     is PaymentNavigation.Block -> {
-                        if (decision.reason == BlockReason.OtherOrigin && request.isForMainFrame) state.blockedOrigin = true
+                        debugLog("blocked main=${request.isForMainFrame} redirect=${request.isRedirect} reason=${decision.reason} " +
+                            "scheme=${request.url.scheme} host=${request.url.host}")
+                        // A blocked top-level navigation leaves the WebView blank: say so and offer the browser, never a white page.
+                        if (request.isForMainFrame) state.failure = PaymentFailure.Blocked
+                        else if (decision.reason == BlockReason.OtherOrigin) state.blockedOrigin = true
                         true
                     }
                 }
@@ -104,14 +113,17 @@ open class PaymentActivity : ComponentActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                debugLog("finished host=${url?.let { Uri.parse(it).host }}")
                 if (state.failure == null) state.pageShown = true
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                debugLog("error main=${request.isForMainFrame} code=${error.errorCode} host=${request.url.host}")
                 if (request.isForMainFrame) state.failure = PaymentFailure.Network
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                debugLog("http main=${request.isForMainFrame} status=${errorResponse.statusCode} host=${request.url.host}")
                 if (request.isForMainFrame && errorResponse.statusCode >= 400) state.failure = PaymentFailure.Network
             }
 
@@ -131,6 +143,9 @@ open class PaymentActivity : ComponentActivity() {
         }
         return view
     }
+
+    /** Debug builds only, tag GCCPay: event kinds, codes and hosts. Never a URL path/query, header, cookie or page text. */
+    private fun debugLog(line: String) { if (com.gccwebos.android.BuildConfig.DEBUG) android.util.Log.i("GCCPay", line) }
 
     private fun handOff(uri: String) {
         val now = SystemClock.elapsedRealtime()

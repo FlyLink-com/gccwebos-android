@@ -174,7 +174,12 @@ proxies:
             assertEquals(0, downloads); assertFalse(paths.any { it.contains("/setup") })
         }
     }
-    @Test fun nodeNavigationReadsNewlyAvailableResourceWithoutClaimingOrConnecting() {
+    /**
+     * Signed in with nothing selected, opening the nodes page loads the account's own subscription (#65): the overview read,
+     * then the setup request and its acknowledgement. That is a page load, not a connection: no power action, no
+     * "已连接", and no node is chosen for the user.
+     */
+    @Test fun nodeNavigationLoadsTheAccountSubscriptionWithoutConnectingOrSelectingANode() {
         launch(none = true, shell = true)
         compose.runOnIdle {
             assertTrue(account.authenticated)
@@ -189,20 +194,19 @@ proxies:
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.waitUntil(10_000) {
             account.accountUsage.state.value.resource is Resource.Available &&
-                !account.busy && !account.accountUsage.state.value.busy
+                !account.busy && !account.accountUsage.state.value.busy && account.deliveryReceived
         }
         compose.onNodeWithTag("page-Lines").assertIsDisplayed()
-        compose.onNodeWithTag("node-choice-0").assertDoesNotExist()
         compose.onNodeWithText("已连接", substring = false).assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(listOf("/api/portal/resources/current/overview"), paths)
-            assertTrue("A navigation read cannot issue setup or ack POSTs", writePaths.isEmpty())
-            assertEquals(0, downloads)
-            assertFalse(account.deliveryReceived)
-            assertFalse(account.localSubscription.hasCapability)
-            assertFalse(account.localSubscription.hasProfile)
-            assertTrue(account.nodeSelection.snapshot.choices.isEmpty())
-            assertNull(account.nodeSelection.snapshot.selected)
+            assertTrue("Opening the nodes page requests the account delivery", paths.any { it == "/api/portal/resources/current/setup" })
+            assertTrue("and acknowledges it", paths.any { it == "/api/portal/resources/current/setup/ack" })
+            assertTrue("Only the delivery request and its acknowledgement write",
+                writePaths.isNotEmpty() && writePaths.all { it.startsWith("/api/portal/resources/current/setup") })
+            assertEquals(1, downloads)
+            assertTrue(account.deliveryReceived)
+            assertTrue(account.localSubscription.hasProfile)
+            assertNull("The page load never picks a node for the user", account.nodeSelection.snapshot.selected)
             assertTrue(powerActions.isEmpty())
         }
     }

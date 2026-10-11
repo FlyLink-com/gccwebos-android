@@ -420,6 +420,35 @@ internal fun ConnectionOverview(
         .testTag("connection-overview"),
         verticalArrangement = if (usageHidden) Arrangement.spacedBy(HomeSpacing.CardGap, Alignment.CenterVertically)
             else Arrangement.spacedBy(HomeSpacing.CardGap)) {
+        // Zone order (Ethan): the traffic/usage card comes first, the connect + node area sits below it.
+        // C10: a local configuration that reports no verified usage (no Subscription-Userinfo) has nothing honest to put
+        // on this card; "暂未获取" next to the node page's info-row text read as a contradiction. Info-row text is
+        // third-party display text and is never promoted to a usage figure here.
+        if (!usageHidden) {
+        // Rim: calm cyan glow while connected (loops only while shown and resumed), static dim rim otherwise.
+        UsageRimFrame(connected) {
+        HomeCard(Modifier.testTag("connection-account-surface"),
+            edge = Brand.Cyan.copy(alpha = UsageRimAlphaIdle)) {
+            ConnectionUsageCard(display, authenticated = account.authenticated,
+                subscriptionUsage = subscriptionUsage,
+                // Display-only motion inputs: tunnel phase for the glow, the same clocks the card text uses.
+                connected = connected,
+                now = if (subscriptionUsage != null) now else usageNow,
+                onRefresh = account::refreshAccountUsage,
+                loading = loading,
+                error = usage.error, refreshEnabled = verifiedUsage && operable,
+                primaryLabel = setup.label,
+                primaryEnabled = setup.enabled || (localReadRecovery && operable),
+                primaryHint = null,
+                // The setup action lives in the Hero card now.
+                onPrimaryAction = onSetupAction, showPrimary = false,
+                planText = display.planText.takeIf { account.authenticated },
+                activePlan = verifiedUsage && connectionPlanIsActive(display),
+                onRenew = openPlans.takeIf { subscriptionUsage == null &&
+                    connectionRenewVisible(account.authenticated && verifiedUsage, manualSource, display.state) })
+        }
+        }
+        }
         HomeCard(Modifier.testTag("connection-hero"),
             // Static rim tint while connected; the only breathing glow stays on the usage bar (#36 rules).
             edge = if (connected) Brand.Green.copy(alpha = .38f) else HomeCardEdge) {
@@ -462,30 +491,6 @@ internal fun ConnectionOverview(
                     }
                     stateDescription = local.connectionText
                 })
-        }
-        // C10: a local configuration that reports no verified usage (no Subscription-Userinfo) has nothing honest to put
-        // on this card; "暂未获取" next to the node page's info-row text read as a contradiction. Info-row text is
-        // third-party display text and is never promoted to a usage figure here.
-        if (!usageHidden) {
-        HomeCard(Modifier.testTag("connection-account-surface")) {
-            ConnectionUsageCard(display, authenticated = account.authenticated,
-                subscriptionUsage = subscriptionUsage,
-                // Display-only motion inputs: tunnel phase for the glow, the same clocks the card text uses.
-                connected = connected,
-                now = if (subscriptionUsage != null) now else usageNow,
-                onRefresh = account::refreshAccountUsage,
-                loading = loading,
-                error = usage.error, refreshEnabled = verifiedUsage && operable,
-                primaryLabel = setup.label,
-                primaryEnabled = setup.enabled || (localReadRecovery && operable),
-                primaryHint = null,
-                // The setup action lives in the Hero card now.
-                onPrimaryAction = onSetupAction, showPrimary = false,
-                planText = display.planText.takeIf { account.authenticated },
-                activePlan = verifiedUsage && connectionPlanIsActive(display),
-                onRenew = openPlans.takeIf { subscriptionUsage == null &&
-                    connectionRenewVisible(account.authenticated && verifiedUsage, manualSource, display.state) })
-        }
         }
         // Local configuration evidence has no account/resource binding and is never the account usage.
         if (snapshot.status != LocalSubscriptionStatus.MISSING) {
@@ -678,6 +683,6 @@ internal fun connectionUsageCardHidden(
 /** C11: share of the screen height the connect page is padded out to while its usage card is hidden. */
 internal const val ConnectionBalancedPageFraction = 0.66f
 
-/** C12: "上次测速" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
+/** C12: "上次延迟测试" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
 internal fun connectionNodeLatencyLabel(observation: NodeLatencyObservation?): String =
-    if (observation is NodeLatencyObservation.Success) "上次测速" else "延迟"
+    if (observation is NodeLatencyObservation.Success) "上次延迟测试" else "延迟"

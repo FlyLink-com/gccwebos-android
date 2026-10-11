@@ -114,6 +114,8 @@ class BrandUiTest {
                 (if (signedIn) offlineUiAccount(scope) else challengeFixture.account(scope))
                     .apply {
                         authenticated = signedIn
+                        // Display-only fixture: it has no delivery endpoint, so the account must not try to load itself (#65).
+                        accountLoadEnabled = false
                         // This display-only fixture owns no admitted node choices. Repository
                         // recreation shares the process registry, so revoke earlier test handles.
                         nodeSelection.invalidate()

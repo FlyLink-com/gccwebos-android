@@ -218,7 +218,8 @@ class NodeSelectionUiTest {
         appendVlessNode()
         launch()
         val third = state.snapshot.choices[2].selection
-        compose.onNodeWithTag("nodes-selected-name").assertTextEquals("未选择")
+        compose.onNodeWithTag("nodes-selected-name").assertDoesNotExist()
+        compose.onNodeWithTag("nodes-selection-summary").assertDoesNotExist()
         compose.onNodeWithTag("nodes-search").assertDoesNotExist()
         compose.onNodeWithTag("nodes-filter-all").assertDoesNotExist()
         compose.onNodeWithTag("nodes-count", useUnmergedTree = true).assertTextEquals("3 条")

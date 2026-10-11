@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -203,14 +204,15 @@ internal data class SlidingTab(val title: String, val tag: String)
  */
 @Composable
 internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: Boolean, onSelect: (Int) -> Unit,
-                           modifier: Modifier = Modifier) {
+                           modifier: Modifier = Modifier, containerColor: Color = SlidingTabGlass, containerBrush: Brush? = null,
+                           selectedColor: Color = SlidingTabSelected, selectedEdge: Color = SlidingTabSelectedEdge) {
     val indicator = rememberSlidingIndicator(selectedIndex, tabs.size)
     val haptic = rememberTapHaptic()
     val shape = CircleShape
     Row(modifier.fillMaxWidth().heightIn(min = 52.dp).clip(shape)
-        .background(Color.White.copy(alpha = .06f))
-        .slidingIndicator(indicator, tabs.size, SlidingTabSelected, corner = 24.dp,
-            horizontalInset = 2.dp, verticalInset = 2.dp, edge = Brand.Cyan.copy(alpha = .85f))
+        .then(if (containerBrush != null) Modifier.background(containerBrush) else Modifier.background(containerColor))
+        .slidingIndicator(indicator, tabs.size, selectedColor, corner = 24.dp,
+            horizontalInset = 2.dp, verticalInset = 2.dp, edge = selectedEdge)
         .selectableGroup().padding(2.dp), verticalAlignment = Alignment.CenterVertically) {
         tabs.forEachIndexed { index, tab ->
             val selected = index == selectedIndex
@@ -224,7 +226,8 @@ internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: 
                         onSelect(index) // callers keep their former re-tap behaviour
                     })
                 .testTag(tab.tag).padding(horizontal = 6.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-                Text(tab.title, textAlign = TextAlign.Center, style = MaterialTheme.typography.labelLarge,
+                Text(tab.title, textAlign = TextAlign.Center, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                     color = if (!enabled) Brand.Muted else Brand.Text)
             }
@@ -232,7 +235,22 @@ internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: 
     }
 }
 
-private val SlidingTabSelected = Color(0xFF0B5368)
+/** Default capsule background (plans page): a faint glass veil over the backdrop. */
+internal val SlidingTabGlass = Color.White.copy(alpha = .06f)
+/**
+ * Capsule background for rows that must read over the busy city backdrop (the nodes page source switcher): the brand action
+ * gradient (blue → indigo → purple, [Brand.ActionStart]/[Brand.ActionMiddle]/[Brand.ActionEnd]) under a 30% [Brand.Background]
+ * scrim so it stays dark enough for [Brand.Text] and [Brand.Muted] at >= 4.5:1 on every stop. Opaque, static (no animation).
+ */
+internal val SlidingTabGradientColors = listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd)
+    .map { Brand.Background.copy(alpha = .30f).compositeOver(it) }
+internal val SlidingTabGradient: Brush get() = Brush.horizontalGradient(SlidingTabGradientColors)
+/** Selected-tab fill on the gradient: the dark navy token, so the pill separates from every gradient stop. */
+internal val SlidingTabGradientSelected = Brand.Background
+internal val SlidingTabGradientSelectedEdge = Brand.Cyan.copy(alpha = .85f)
+/** Selected-tab fill; with the cyan edge it stays clearly visible on both the glass and the dark surface. */
+internal val SlidingTabSelected = Color(0xFF0B5368)
+internal val SlidingTabSelectedEdge = Brand.Cyan.copy(alpha = .85f)
 
 /**
  * Sibling content: slides horizontally (direction from [indexOf]) and cross-fades; changes with no index

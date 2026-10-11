@@ -142,12 +142,21 @@ class StableNodeSelectionTest {
     }
 
     @Test fun defaultNamesContinueAfterHighestNumber() {
-        assertEquals("配置 1", nextConfigurationName(emptyList()))
-        assertEquals("配置 3", nextConfigurationName(listOf("配置 1", "配置 2")))
-        assertEquals("配置 6", nextConfigurationName(listOf("配置 2", "配置 5")))
-        assertEquals("配置 3", nextConfigurationName(listOf("配置 2")))
-        assertEquals("配置 3", nextConfigurationName(listOf("Kitty", "配置 2")))
-        assertEquals("配置 3", nextConfigurationName(listOf("Kitty", "家里")))
-        assertEquals("配置 2", nextConfigurationName(listOf("配置 1x", "配置 01", "配置 1")))
+        assertEquals("未知1", nextConfigurationName(emptyList()))
+        assertEquals("未知3", nextConfigurationName(listOf("配置 1", "配置 2")))
+        assertEquals("未知6", nextConfigurationName(listOf("配置 2", "配置 5")))
+        assertEquals("未知3", nextConfigurationName(listOf("配置 2")))
+        assertEquals("未知3", nextConfigurationName(listOf("Kitty", "配置 2")))
+        assertEquals("未知3", nextConfigurationName(listOf("Kitty", "家里")))
+        assertEquals("未知2", nextConfigurationName(listOf("配置 1x", "配置 01", "配置 1")))
+        // New 「未知N」 and legacy 「配置 N」 names share one counter, and 官方 never counts.
+        assertEquals("未知5", nextConfigurationName(listOf("配置 2", "未知4", "官方")))
+        assertEquals("未知3", nextConfigurationName(listOf("未知1", "未知2")))
+        assertEquals("未知1", configurationDisplayName("配置 1"))
+        assertEquals("未知12", configurationDisplayName("配置 12"))
+        assertEquals("配置 01", configurationDisplayName("配置 01"))
+        assertEquals("配置 1x", configurationDisplayName("配置 1x"))
+        assertEquals("Kitty", configurationDisplayName("Kitty"))
+        assertEquals("未知7", configurationDisplayName("未知7"))
     }
 }

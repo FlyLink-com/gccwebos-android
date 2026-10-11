@@ -4,6 +4,12 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -33,15 +39,34 @@ fun UpdatePanel(autoCheck: Boolean = true, refreshRequest: Int = 0) {
         UpdateController(scope, UpdateRepository(), BuildConfig.VERSION_CODE.toLong(), BuildConfig.APPLICATION_ID)
     }
     val context = LocalContext.current
-    UpdatePanelContent(controller, BuildConfig.APPLICATION_ID, autoCheck, refreshRequest) { url ->
+    val installer = rememberInAppUpdateController()
+    UpdatePanelContent(controller, BuildConfig.APPLICATION_ID, autoCheck, refreshRequest, installer) { url ->
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE))
+    }
+}
+
+/**
+ * The official build gets the in-app download flow; test packages (any other application id) keep the
+ * existing "no formal upgrade" behaviour. Leftover update files from older versions are removed on entry.
+ */
+@Composable
+internal fun rememberInAppUpdateController(): InAppUpdateController? {
+    if (BuildConfig.APPLICATION_ID != OfficialReleases.RELEASE_APPLICATION_ID) return null
+    val context = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    val downloader = remember(context) { ApkDownloader(updateDirectory(context)) }
+    LaunchedEffect(downloader) {
+        withContext(Dispatchers.IO) { downloader.cleanup(BuildConfig.VERSION_CODE.toLong(), System.currentTimeMillis()) }
+    }
+    return remember(scope, downloader) {
+        InAppUpdateController(scope, downloader, AndroidApkInspector(context), AndroidUpdateEnvironment(context))
     }
 }
 
 /** Reading the fixed manifest on entry never opens a URL or invokes the package installer. */
 @Composable
 internal fun UpdatePanelContent(controller: UpdateController, applicationId: String, autoCheck: Boolean = true,
-    refreshRequest: Int = 0, openWebsite: (String) -> Unit) {
+    refreshRequest: Int = 0, installer: InAppUpdateController? = null, openWebsite: (String) -> Unit) {
     val automatic = LocalAutomaticUpdateController.current
     DisposableEffect(automatic) {
         val suppression = automatic?.suppressForManualCheck()
@@ -73,16 +98,28 @@ internal fun UpdatePanelContent(controller: UpdateController, applicationId: Str
     if (result is UpdateResult.NewVersion && applicationId == OfficialReleases.RELEASE_APPLICATION_ID) {
         OfficialUpdateDialog(result, onDismiss = controller::dismiss, openWebsite = openWebsite,
             onShown = { automatic?.manualPromptShown(result.release.versionCode) },
-            onBrowserFailure = { browserError = true })
+            onBrowserFailure = { browserError = true }, installer = installer)
     }
 }
 
 /** Shared confirmation boundary for automatic and explicit checks. */
 @Composable
 internal fun OfficialUpdateDialog(result: UpdateResult.NewVersion, onDismiss: () -> Unit,
-    openWebsite: (String) -> Unit, onShown: () -> Unit = {}, onBrowserFailure: () -> Unit = {}) {
+    openWebsite: (String) -> Unit, onShown: () -> Unit = {}, onBrowserFailure: () -> Unit = {},
+    installer: InAppUpdateController? = null) {
     LaunchedEffect(result.release.versionCode) { onShown() }
-    AlertDialog(
+    fun openInBrowser() {
+        // Revalidate at the boundary: only the exact same-origin APK path is ever opened.
+        if (OfficialReleases.isDownloadPath(result.release.downloadPath)) {
+            try {
+                openWebsite(result.release.downloadUrl)
+            } catch (_: ActivityNotFoundException) { onBrowserFailure() }
+            catch (_: SecurityException) { onBrowserFailure() }
+        }
+        onDismiss()
+    }
+    if (installer == null) {
+        AlertDialog(
             onDismissRequest = onDismiss,
             modifier = Modifier.testTag("official-update-prompt"),
             title = { Text(if (result.belowMinimum) "当前版本已不受支持，请升级" else "发现新版本 ${result.release.versionName}") },
@@ -91,16 +128,32 @@ internal fun OfficialUpdateDialog(result: UpdateResult.NewVersion, onDismiss: ()
                 Text("将打开官网 APK 地址，由浏览器下载并由你确认系统安装。")
                 Text("官网 SHA-256：${result.release.sha256}\n此处展示清单值，未验证下载文件。")
             } },
-            confirmButton = { TextButton(onClick = {
-                // Revalidate at the boundary. Never request install permission or invoke a package installer.
-                if (OfficialReleases.isDownloadPath(result.release.downloadPath)) {
-                    try {
-                        openWebsite(result.release.downloadUrl)
-                    } catch (_: ActivityNotFoundException) { onBrowserFailure() }
-                    catch (_: SecurityException) { onBrowserFailure() }
-                }
-                onDismiss()
-            }) { Text("前往官网下载") } },
+            confirmButton = { TextButton(onClick = ::openInBrowser) { Text("前往官网下载") } },
             dismissButton = { TextButton(onClick = onDismiss) { Text("稍后") } },
         )
+        return
+    }
+    val state by installer.state.collectAsState()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(installer, lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) installer.onForeground() }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    val leave = { installer.dismiss(); onDismiss() }
+    AlertDialog(
+        onDismissRequest = { if (!installer.busy) leave() },
+        properties = DialogProperties(dismissOnBackPress = !installer.busy, dismissOnClickOutside = !installer.busy),
+        modifier = Modifier.testTag("official-update-prompt"),
+        title = { Text(if (result.belowMinimum) "当前版本已不受支持，请升级" else "发现新版本 ${result.release.versionName}") },
+        text = { Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+            if (state == InAppUpdateState.Idle) Text(result.release.notesZh.take(1200))
+            InAppUpdateBody(state)
+            if (state == InAppUpdateState.Idle || state is InAppUpdateState.Failed || state is InAppUpdateState.ConfirmMetered) {
+                TextButton(onClick = ::openInBrowser, modifier = Modifier.testTag("in-app-update-browser")) { Text("前往官网下载") }
+            }
+        } },
+        confirmButton = { InAppUpdateConfirm(state, installer, result.release) },
+        dismissButton = { TextButton(onClick = leave, modifier = Modifier.testTag("in-app-update-cancel")) { Text(state.cancelLabel()) } },
+    )
 }

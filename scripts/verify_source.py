@@ -39,7 +39,14 @@ assert {p.get(android + 'name') for p in manifest.findall('uses-permission')} ==
     'android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE',
     'android.permission.CAMERA',
     'android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED',
-    'android.permission.POST_NOTIFICATIONS', 'android.permission.RECEIVE_BOOT_COMPLETED'}
+    'android.permission.POST_NOTIFICATIONS', 'android.permission.RECEIVE_BOOT_COMPLETED',
+    # In-app update hands the verified official APK to Android's installer; see docs/in-app-update.md.
+    'android.permission.REQUEST_INSTALL_PACKAGES'}
+# The only provider is the non-exported update FileProvider limited to cache/update/ (release policy re-checks this).
+providers = manifest.findall('.//provider')
+assert len(providers) == 1 and providers[0].get(android + 'name') == 'androidx.core.content.FileProvider'
+assert providers[0].get(android + 'exported') == 'false' and providers[0].get(android + 'grantUriPermissions') == 'true'
+assert providers[0].get(android + 'authorities') == '${applicationId}.updatefiles'
 # The only receiver re-arms/handles the daily renewal alarm; it is never exported.
 receivers = {r.get(android + 'name'): r for r in manifest.findall('.//receiver')}
 assert set(receivers) == {'.renewal.RenewalReminderReceiver'}

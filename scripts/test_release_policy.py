@@ -158,5 +158,45 @@ class ReleasePolicyTests(unittest.TestCase):
             self.apk(b'OtherService')
 
 
+class UpdateBoundaryTests(unittest.TestCase):
+    manifest = (policy.ROOT / 'app/src/main/AndroidManifest.xml').read_text(encoding='utf-8')
+    paths = (policy.ROOT / 'app/src/main/res/xml/update_file_paths.xml').read_text(encoding='utf-8')
+
+    def test_current_manifest_passes(self):
+        policy.verify_update_boundary(self.manifest, self.paths)
+
+    def rejects(self, manifest=None, paths=None):
+        with self.assertRaises(AssertionError):
+            policy.verify_update_boundary(manifest or self.manifest, paths or self.paths)
+
+    def test_install_permission_is_required(self):
+        self.rejects(self.manifest.replace('android.permission.REQUEST_INSTALL_PACKAGES', 'android.permission.VIBRATE'))
+
+    def test_broad_storage_or_installer_permissions_are_refused(self):
+        for name in ('READ_EXTERNAL_STORAGE', 'WRITE_EXTERNAL_STORAGE', 'MANAGE_EXTERNAL_STORAGE', 'INSTALL_PACKAGES',
+                     'REQUEST_DELETE_PACKAGES', 'QUERY_ALL_PACKAGES'):
+            with self.subTest(name=name):
+                self.rejects(self.manifest.replace('<application', f'<uses-permission android:name="android.permission.{name}" />\n    <application', 1))
+
+    def test_file_provider_cannot_be_exported_or_lose_its_uri_grant_model(self):
+        self.rejects(self.manifest.replace('android:exported="false" android:grantUriPermissions="true"', 'android:exported="true" android:grantUriPermissions="true"'))
+        self.rejects(self.manifest.replace('android:grantUriPermissions="true"', 'android:grantUriPermissions="false"'))
+
+    def test_file_provider_authority_and_class_are_pinned(self):
+        self.rejects(self.manifest.replace('${applicationId}.updatefiles', 'com.gccwebos.android.files'))
+        self.rejects(self.manifest.replace('androidx.core.content.FileProvider', 'com.example.OtherProvider'))
+
+    def test_a_second_provider_is_refused(self):
+        self.rejects(self.manifest.replace('<service android:name=".vpn.ConnectionOwnerService"',
+                                          '<provider android:name="x.P" android:authorities="x" android:exported="true" />\n<service android:name=".vpn.ConnectionOwnerService"', 1))
+
+    def test_shared_paths_are_limited_to_the_update_cache_directory(self):
+        for bad in ('<root-path name="r" path="." />', '<files-path name="update" path="update/" />',
+                    '<cache-path name="update" path="." />', '<external-path name="update" path="update/" />',
+                    '<cache-path name="update" path="update/" /><cache-path name="more" path="other/" />'):
+            with self.subTest(bad=bad):
+                self.rejects(paths=f'<paths>{bad}</paths>')
+
+
 if __name__ == '__main__':
     unittest.main()

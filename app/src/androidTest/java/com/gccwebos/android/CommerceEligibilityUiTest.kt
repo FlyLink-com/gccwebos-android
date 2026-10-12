@@ -82,6 +82,8 @@ class CommerceEligibilityUiTest {
                     }
                     rechargeOffersPath, "/api/portal/catalog/offers" -> WireResponse(200, """{"offers":[]}""")
                     "/api/portal/commerce/model" -> WireResponse(200, """{"commerceModel":"legacy"}""")
+                    // The optional plan-change read; the feature is off here (the server answers its protected 401).
+                    "/api/portal/commerce/plan-switch/state" -> WireResponse(401, """{"error":"Unauthorized"}""")
                     else -> throw AssertionError("Unexpected commerce fixture path: $path")
                 }
             }
@@ -141,7 +143,8 @@ class CommerceEligibilityUiTest {
         CommerceMode.Mine -> listOf(walletPath)
         CommerceMode.Wallet -> listOf(walletPath, rechargeOffersPath)
         // Plans revalidate the catalog without loading wallet or recharge resources.
-        else -> listOf("/api/portal/commerce/model", "/api/portal/catalog/offers")
+        // A loaded catalog is followed by the optional, read-only plan-change state.
+        else -> listOf("/api/portal/commerce/model", "/api/portal/catalog/offers", "/api/portal/commerce/plan-switch/state")
     }
 
     private fun assertLoaded(mode: CommerceMode, units: Int = 20) {

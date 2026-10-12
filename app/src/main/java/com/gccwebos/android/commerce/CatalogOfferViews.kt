@@ -50,13 +50,14 @@ private val BadgeText = Color(0xFF2A1300)
  */
 @Composable
 internal fun CatalogOfferList(shown: List<Offer>, selected: Offer?, enabled: Boolean, category: String,
-                              onSelect: (Offer) -> Unit) {
+                              switchCards: Map<String, PlanSwitchCard> = emptyMap(), onSelect: (Offer) -> Unit) {
     val bestValue = catalogBestValueRef(shown)
     val needsTitle = catalogOffersNeedingTitle(shown)
     Column(Modifier.fillMaxWidth().testTag("plan-options"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         shown.forEach { offer ->
-            CatalogOfferCard(offer, selected == offer, enabled, badge = offer.offerRef == bestValue,
-                showTitle = offer.offerRef in needsTitle, onSelect = { onSelect(offer) })
+            val change = switchCards[offer.offerRef]
+            CatalogOfferCard(offer, selected == offer, enabled && change?.selectable != false, badge = offer.offerRef == bestValue,
+                showTitle = offer.offerRef in needsTitle, change = change, onSelect = { onSelect(offer) })
         }
         CatalogBenefits(selected, category)
     }
@@ -64,7 +65,7 @@ internal fun CatalogOfferList(shown: List<Offer>, selected: Offer?, enabled: Boo
 
 @Composable
 private fun CatalogOfferCard(offer: Offer, selected: Boolean, enabled: Boolean, badge: Boolean, showTitle: Boolean,
-                             onSelect: () -> Unit) {
+                             change: PlanSwitchCard? = null, onSelect: () -> Unit) {
     val text = catalogOfferText(offer)
     val glow by animateFloatAsState(if (selected) 1f else 0f, tween(220), label = "plan-glow")
     val edge by animateColorAsState(if (selected) Brand.Cyan else Color.Transparent, tween(220), label = "plan-edge")
@@ -115,6 +116,7 @@ private fun CatalogOfferCard(offer: Offer, selected: Boolean, enabled: Boolean, 
                                 }
                                 if (showTitle) Text(offer.title.zh, style = MaterialTheme.typography.bodySmall, color = Brand.Muted,
                                     maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                change?.let { PlanSwitchChip(offer.offerRef, it) }
                             }
                         }
                     }
@@ -197,5 +199,18 @@ private fun CatalogBenefits(offer: Offer?, category: String) {
             }
         }
         if (offer == null) SupportingText("选择商品后显示可用的支付余额")
+    }
+}
+
+/** One line naming the plan change of a card (升级 · 补差价 · 立即生效 / 降级 · 到期后生效) and, when useful, a muted explanation. */
+@Composable
+private fun PlanSwitchChip(offerRef: String, change: PlanSwitchCard) {
+    val color = if (change.selectable) Brand.Cyan else Brand.Muted
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(change.chip, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = color,
+            modifier = Modifier.testTag("plan-switch-chip-$offerRef"))
+        change.note?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = Brand.Muted, modifier = Modifier.testTag("plan-switch-note-$offerRef"))
+        }
     }
 }

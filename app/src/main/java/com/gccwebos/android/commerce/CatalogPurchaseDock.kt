@@ -16,7 +16,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.design.*
 
-internal data class CatalogPurchaseSummary(val title: String?, val price: String?, val enabled: Boolean, val busy: Boolean)
+internal data class CatalogPurchaseSummary(val title: String?, val price: String?, val enabled: Boolean, val busy: Boolean,
+    /** 立即购买 for an ordinary purchase; 立即升级 / 预约降级 / 立即续费 when the server prices a plan change. */
+    val actionLabel: String = "立即购买")
 
 /** The page owns the guarded action. This host retains presentation only while that page exists. */
 internal class CatalogDockState {
@@ -52,7 +54,7 @@ internal fun CatalogPurchaseDock(summary: CatalogPurchaseSummary, onContinue: ()
                     color = Brand.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             val action: @Composable (Modifier) -> Unit = { modifier ->
-                BrandButton("立即购买", onContinue,
+                BrandButton(summary.actionLabel, onContinue,
                     enabled = summary.enabled, haptic = UiHaptic.Primary, modifier = modifier.testTag("plan-continue"))
             }
             if (maxWidth < 260.dp || LocalDensity.current.fontScale > 1.3f) {

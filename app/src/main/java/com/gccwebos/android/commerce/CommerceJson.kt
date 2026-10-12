@@ -78,12 +78,18 @@ object CommerceJson {
 
     fun quote(body: String, model: CommerceModel, expectedOfferRef: String? = null): Quote {
         val fields = listOf("quoteRef", "offer", "amountUnits", "appliedDiscountBasisPoints", "purchaseAvailability", "shortfallUnits", "allocation", "balances", "expiresAt")
-        val value = obj(root(body, "quote")["quote"], *(fields + if (model == CommerceModel.WALLET_FIRST) listOf("transition") else emptyList()).toTypedArray())
+        // Only the legacy model may carry the optional planSwitch object; any other extra field still fails closed.
+        val raw = root(body, "quote")["quote"]
+        val withPlanSwitch = model == CommerceModel.LEGACY && objectValue(raw).containsKey("planSwitch")
+        val value = obj(raw, *(fields + (if (model == CommerceModel.WALLET_FIRST) listOf("transition") else emptyList()) +
+            (if (withPlanSwitch) listOf("planSwitch") else emptyList())).toTypedArray())
         val offer = plan(value["offer"])
         matchReference(offer.offerRef, expectedOfferRef)
+        val planSwitch = if (withPlanSwitch) planSwitch(value["planSwitch"], offer) else null
         val amount = value.units("amountUnits", positive = true)
         val discount = value.units("appliedDiscountBasisPoints").also { require(it <= 10_000) }
-        val numerator = BigInteger.valueOf(offer.baseCoinUnits) * BigInteger.valueOf(10_000 - discount)
+        // A plan change is priced from the server's change charge, not from the offer's list price.
+        val numerator = BigInteger.valueOf(planSwitch?.chargeUnits ?: offer.baseCoinUnits) * BigInteger.valueOf(10_000 - discount)
         // Compare exact integers directly: BigInteger.longValueExact requires Android API 31.
         require(BigInteger.valueOf(amount) == (numerator + BigInteger.valueOf(9_999)) / BigInteger.valueOf(10_000)) { "Invalid quote amount" }
         val availability = value.choice("purchaseAvailability", setOf("available", "insufficient_balance"))
@@ -111,7 +117,7 @@ object CommerceJson {
             QuoteTransition(projected.choice("flowKind", flowKinds), time(projected["scheduledFor"]))
         } else null
         return Quote(value.reference("quoteRef", commerceRef), offer, amount, discount, availability, shortfall,
-            allocation, QuoteBalances(before, after), time(value["expiresAt"]), transition)
+            allocation, QuoteBalances(before, after), time(value["expiresAt"]), transition, planSwitch)
     }
 
     fun purchaseResult(body: String, model: CommerceModel, expectedRef: String? = null): PurchaseResult {
@@ -217,9 +223,12 @@ object CommerceJson {
     private fun plan(raw: Any?): Offer = offerProjection(raw)
 
     private fun order(raw: Any?): PurchaseResult.Order {
-        val value = obj(raw, "orderRef", "offer", "amountUnits", "allocation", "paymentStatus", "cancelUntil", "fulfillment", "createdAt", "updatedAt")
+        val withPlanSwitch = objectValue(raw).containsKey("planSwitch")
+        val value = obj(raw, *(listOf("orderRef", "offer", "amountUnits", "allocation", "paymentStatus", "cancelUntil", "fulfillment", "createdAt", "updatedAt") +
+            (if (withPlanSwitch) listOf("planSwitch") else emptyList())).toTypedArray())
         val payment = value.choice("paymentStatus", paymentStatuses)
         val offer = plan(value["offer"])
+        val planSwitch = if (withPlanSwitch) planSwitch(value["planSwitch"], offer) else null
         val amount = value.units("amountUnits", positive = true).also { require(it <= offer.baseCoinUnits) }
         val created = time(value["createdAt"])
         val cancelUntil = time(value["cancelUntil"])
@@ -236,7 +245,48 @@ object CommerceJson {
             require(fulfillment["safeCode"] == null) { "Invalid fulfillment code" }; null
         }
         return PurchaseResult.Order(value.reference("orderRef", commerceRef), offer, amount,
-            allocation(value["allocation"], amount, offer.acceptedCoinTypes), payment, status, safeCode, cancelUntil, created, updated)
+            allocation(value["allocation"], amount, offer.acceptedCoinTypes), payment, status, safeCode, cancelUntil, created, updated, planSwitch)
+    }
+
+    private val planSwitchKinds = PlanSwitchKind.entries.associateBy { it.wire }
+    private val planSwitchActions = mapOf("current_renew" to PlanSwitchAction.CurrentRenew, "upgrade" to PlanSwitchAction.Upgrade,
+        "downgrade" to PlanSwitchAction.Downgrade, "unavailable" to PlanSwitchAction.Unavailable)
+
+    private fun planSwitch(raw: Any?, offer: Offer): PlanSwitch {
+        val value = obj(raw, "kind", "creditUnits", "chargeUnits", "effectiveAt", "cancelsPendingDowngrade")
+        val kind = planSwitchKinds[value.text("kind")] ?: invalid()
+        val charge = value.units("chargeUnits", positive = true).also { require(it <= offer.baseCoinUnits) { "Invalid plan change charge" } }
+        val effective = value["effectiveAt"]?.let(::time)
+        require((kind == PlanSwitchKind.DowngradeScheduled) == (effective != null)) { "Invalid plan change timing" }
+        return PlanSwitch(kind, value.units("creditUnits"), charge, effective, value["cancelsPendingDowngrade"] as? Boolean ?: invalid())
+    }
+
+    /**
+     * Strict projection of GET plan-switch/state. Reason codes are kept as plain strings (unknown ones are shown with a
+     * generic sentence); anything structurally off throws so the caller falls back to the ordinary catalog.
+     */
+    fun planSwitchState(body: String): PlanSwitchState {
+        val value = obj(StrictJson(body).parse(), "current", "pendingSwitch", "offers")
+        val current = value["current"]?.let {
+            val c = obj(it, "offerRef", "validUntil")
+            PlanSwitchCurrent(c.reference("offerRef", commerceRef), time(c["validUntil"]))
+        }
+        val pending = value["pendingSwitch"]?.let {
+            val p = obj(it, "toOfferRef", "effectiveAt")
+            PlanSwitchPending(p.reference("toOfferRef", commerceRef), time(p["effectiveAt"]))
+        }
+        val offers = array(value["offers"]).map { entry ->
+            val o = obj(entry, "offerRef", "action", "chargeUnits", "creditUnits", "effectiveAt", "reasonCode")
+            val action = planSwitchActions[o.text("action")] ?: invalid()
+            val charge = o["chargeUnits"]?.let { integer(it, 1) }
+            val credit = o["creditUnits"]?.let { integer(it) }
+            val effective = o["effectiveAt"]?.let(::time)
+            val reason = o["reasonCode"]?.let { code -> normalizedText(code).also { require(Regex("[a-z][a-z0-9_]{2,95}").matches(it)) } }
+            if (action == PlanSwitchAction.Upgrade || action == PlanSwitchAction.Downgrade) require(charge != null) { "Missing plan change charge" }
+            PlanSwitchOffer(o.reference("offerRef", commerceRef), action, charge, credit, effective, reason)
+        }
+        require(offers.map { it.offerRef }.toSet().size == offers.size) { "Duplicate plan change offers" }
+        return PlanSwitchState(current, pending, offers)
     }
 
     private fun deferred(raw: Any?): PurchaseResult.Deferred {

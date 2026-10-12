@@ -379,6 +379,21 @@ class PortalRepository(private val transport: PortalTransport, private val store
             response
         }
     }
+    /**
+     * A read of an OPTIONAL commerce route. A 401 or 404 is the server's way of saying the route does not exist for this
+     * deployment (a disabled feature falls through to the protected fallback), so unlike [commerce] it neither
+     * invalidates the session nor throws; every other status is returned for the caller to judge.
+     */
+    suspend fun commerceOptional(path: String, expectedSession: String? = null): WireResponse = mutex.withLock {
+        guarded {
+            require(path.startsWith("/api/portal/commerce/") && '?' !in path)
+            val epoch = generation.get(); val active = activeSession()
+            if (expectedSession != null && expectedSession != sessionBinding(active.token)) throw CancellationException("Commerce session changed")
+            val response = transport.commerce(path, null, active.token, null)
+            checkGeneration(epoch); activeSession()
+            response
+        }
+    }
     suspend fun remainingSessionMillis(): Long = mutex.withLock {
         val value = activeSession()
         minOf(value.lifetimeMillis - (elapsed() - value.receivedElapsed),

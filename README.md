@@ -1,6 +1,6 @@
 > One-click VPN candidate: the service-owned local subscription path now reaches Android consent, a one-shot native TUN process and a VPN-bound traffic probe. Engine libraries must be verified and packaged; connection is enabled on API 30+ where the VPN Network owner can be verified. [Implementation and validation](docs/one-click-vpn-connection.md) · [Windows toolchain](docs/android-development-toolchain.md).
 
-The English product name is FlinkVPN. Chinese UI text and the Chinese launcher name stay 飞连VPN. This repository remotes stay on gccwebos-com/gccwebos-android. The future open-source release repository will be FlyLink-com/flink-android; no git remote is changed here. No docs in this tree name a feilian-vpn-releases repository.
+The English product name is FlinkVPN. Chinese UI text stays 飞连VPN; the launcher/display name is FlinkVPN in every locale. This repository is FlyLink-com/gccwebos-android (org renamed from gccwebos-com). The future open-source release repository will be FlyLink-com/flink-android; no git remote is changed here. No docs in this tree name a feilian-vpn-releases repository.
 
 ## 先前版本记录
 

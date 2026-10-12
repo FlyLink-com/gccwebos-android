@@ -205,16 +205,25 @@ class CommerceRepositoryTest {
 
     @Test fun planChangeStateIsReadOnlyForTheLegacyModelAndNeverThrowsForADisabledFeature() = runTest {
         val wire = Wire(); val paths = mutableListOf<String>()
-        val answers = ArrayDeque(listOf(WireResponse(200, planState), WireResponse(404, "{}"), WireResponse(401, "{}"),
+        val answers = ArrayDeque(listOf(WireResponse(200, planState), WireResponse(404, "{}"), WireResponse(401, """{"error":"Unauthorized"}"""),
+            WireResponse(409, """{"error":{"code":"wallet_first_deferred_required","retryable":false}}"""),
             WireResponse(409, """{"error":{"code":"plan_switch_precheck_unavailable"}}"""), WireResponse(200, "not json"),
             WireResponse(503, "")))
         val repo = optionalRepository(wire, { path -> paths += path; answers.removeFirst() })
         assertNull(repo.planSwitchState()) // the model is not loaded yet
         load(repo, wire)
         assertEquals("offer_fixture_plan", repo.planSwitchState()!!.current!!.offerRef)
-        repeat(5) { assertNull(repo.planSwitchState()) } // 404, a protected 401, 409, garbage and 503 all mean "no plan change"
-        assertEquals(List(6) { "/api/portal/commerce/plan-switch/state" }, paths)
+        repeat(6) { assertNull(repo.planSwitchState()) } // 404, a string-error 401, both 409s, garbage and 503 all mean "no plan change"
+        assertEquals(List(7) { "/api/portal/commerce/plan-switch/state" }, paths)
         assertEquals(1, wire.calls.size) // only the model read went through the ordinary (session-ending) request path
+    }
+
+    @Test fun aPlainStringErrorBodyNeverCrashesAnOrdinaryCommerceCall() = runTest {
+        val wire = Wire(); val store = Store(); val repo = repository(wire, store); load(repo, wire)
+        wire.replies += WireResponse(409, """{"error":"Unauthorized"}""")
+        try { repo.purchase(quote); fail() } catch (failure: CommerceFailure) { assertEquals("unconfirmed", failure.code); assertEquals(409, failure.status) }
+        // An unreadable code is ambiguous, so the durable key stays for the user-triggered query.
+        assertNotNull(repo.pending("purchase"))
     }
 
     @Test fun theWalletFirstModelAndAHostWithoutTheOptionalReadNeverAskForPlanChanges() = runTest {

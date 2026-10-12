@@ -260,7 +260,8 @@ class PortalRepositoryTest {
         login(repo,wire)
         // A disabled feature falls through to the protected fallback (401) or an absent route (404).
         for (status in listOf(401, 404)) {
-            wire.replies += WireResponse(status, "{\"error\":{\"code\":\"not_available\"}}")
+            // #772 answers a disabled feature with a plain string error body.
+            wire.replies += WireResponse(status, "{\"error\":\"Unauthorized\"}")
             assertEquals(status, repo.commerceOptional("/api/portal/commerce/plan-switch/state").status)
         }
         // The session is still alive: the ordinary commerce read works and a real 401 there still expires it.

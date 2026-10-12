@@ -110,6 +110,20 @@ internal class CommerceController(private val account: AccountController, privat
         ensureCurrentSession()
         planSwitch = value
     }
+    /**
+     * Quiet re-read while a scheduled downgrade is being applied. Unlike [loadCatalog] it never raises [busy] (the list stays
+     * usable) and an unreadable answer keeps what is on screen instead of replacing it.
+     */
+    suspend fun pollPlanSwitch() {
+        if (busy || !canOperate() || !catalogLoaded || repo == null) return
+        withContext(ReadEpoch(account.authSessionGeneration)) {
+            try {
+                val value = requireNotNull(repo).planSwitchState()
+                ensureCurrentSession()
+                if (!busy && value != null) planSwitch = value
+            } catch (failure: CancellationException) { throw failure } catch (_: Exception) { }
+        }
+    }
     fun load() = run {
         orderPage = null; rechargeHistory = null; transitions = null; catalogLoaded = false; commerceModel = null
         purchaseHistoryError = null; rechargeHistoryError = null
@@ -373,7 +387,8 @@ internal class CommerceController(private val account: AccountController, privat
                     "quote_expired", "quote_stale" -> "报价已失效，请重新获取报价后再确认购买。"
                     "insufficient_coins" -> "钱包余额不足，请充值到账后重新获取报价。"
                     "wallet_not_active" -> "钱包暂不可用于购买，请核对钱包状态。"
-                    "offer_unavailable" -> "此套餐当前不可购买，请刷新套餐列表。"
+                    // While a card is active the server refuses every other ordinary offer with this same code.
+                    "offer_unavailable" -> if (planSwitch?.current != null) PLAN_ACTIVE_TEXT else "此套餐当前不可购买，请刷新套餐列表。"
                     "storage" -> "本机恢复记录不可用，已停止新建订单，请先核对已有订单。"
                     else -> planSwitchErrorText(failure.code)?.takeIf { failure.status == 409 }
                         ?: "订单尚未确认，请沿用原记录查询，不要重新付款。"
@@ -438,7 +453,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     val accountReady = state.canOperate()
     val period = requestedPeriod ?: selectedSnapshot?.offer?.let(::catalogPeriod) ?: initialCatalogPeriod(displayOffers)
     // Plan-change labels per card (empty when the server offers none): the card list, dock and dialog read the same map.
-    val switchCards = if (mode == CommerceMode.Plans && state.currentSession()) planSwitchCards(state.planSwitch, now) else emptyMap()
+    val switchCards = if (mode == CommerceMode.Plans && state.currentSession()) planSwitchCards(state.planSwitch, now, shownOfferRefs = displayOffers.map { it.offerRef }) else emptyMap()
     fun currentSelectedOffer(): Offer? = selectedSnapshot?.takeIf { selection ->
         switchCards[selection.offer.offerRef]?.selectable != false &&
         mode == CommerceMode.Plans && state.catalogLoaded && state.canOperate() && !state.pendingPurchase &&
@@ -518,6 +533,15 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     LaunchedEffect(Unit) { while(true) { now = Instant.now(); kotlinx.coroutines.delay(1000) } }
+    // A scheduled downgrade whose date has passed is still being applied: read the state every few seconds for about a
+    // minute (stopping as soon as the server clears it, or when this page goes away) so the cards unlock by themselves.
+    val applying = mode == CommerceMode.Plans && state.planSwitch?.applying(now) == true
+    LaunchedEffect(state, applying) {
+        if (applying) repeat(PLAN_APPLYING_POLLS) {
+            kotlinx.coroutines.delay(PLAN_APPLYING_POLL_MILLIS)
+            state.pollPlanSwitch()
+        }
+    }
     // A browser return is merely a reason to reread. It never confirms, creates or pays an order.
     val lifecycle = (LocalActivity.current as? ComponentActivity)?.lifecycle
     DisposableEffect(lifecycle, state, autoLoad, mode) {
@@ -710,6 +734,9 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         confirmButton = { TextButton(onClick = { cancelConfirmation = false; state.cancelPurchase() }) { Text("确认取消订单") } },
         dismissButton = { TextButton(onClick = { cancelConfirmation = false }) { Text("返回") } })
 }
+/** About a minute: 15 reads, four seconds apart. */
+internal const val PLAN_APPLYING_POLLS = 15
+internal const val PLAN_APPLYING_POLL_MILLIS = 4_000L
 internal const val RECHARGE_EXPIRED_STATUS = "已失效（付款入口已过期）"
 internal fun rechargeStatus(status: String) = when(status) {
     "created" -> "充值订单已创建，支付入口准备中"; "entry_ready", "pending" -> "等待付款或支付确认"

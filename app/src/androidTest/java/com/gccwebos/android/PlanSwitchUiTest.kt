@@ -120,15 +120,16 @@ class PlanSwitchUiTest {
     @Test fun anUpgradeCardShowsThePriceDifferenceAndTakesEffectNow() {
         launch(planState(offers = upgradeOffers))
         compose.onNodeWithTag("plan-switch-current").performScrollTo().assertTextContains("当前套餐：50 GB 月卡")
-        compose.onNodeWithTag("plan-switch-chip-plan_b").performScrollTo().assertTextEquals("升级 · 补差价 5 Coins · 立即生效")
+        compose.onNodeWithTag("plan-switch-chip-plan_b").performScrollTo().assertTextEquals("升级 · 补差价约 5 Coins · 立即生效")
         compose.onNodeWithTag("plan-switch-chip-plan_a").performScrollTo().assertTextEquals("续费")
         choose("plan_b")
-        compose.onNodeWithTag("plan-dock-summary").performScrollTo().assertTextContains("补差价 5 Coins · 立即生效")
+        compose.onNodeWithTag("plan-dock-summary").performScrollTo().assertTextContains("补差价约 5 Coins · 立即生效")
         compose.onNodeWithTag("plan-continue").performScrollTo().assertTextEquals("立即升级").performClick()
         compose.waitUntil(5_000) { commerce.quote != null && !commerce.busy }
         compose.onNodeWithTag("plan-switch-dialog-title").assertTextEquals("确认升级套餐")
-        compose.onNodeWithTag("plan-switch-line-1").assertTextEquals("本次补差价：5 Coins")
+        compose.onNodeWithTag("plan-switch-line-1").assertTextEquals("本次实扣：5 Coins")
         compose.onNodeWithTag("plan-switch-line-2").assertTextEquals("立即生效")
+        compose.onNodeWithTag("plan-switch-line-3").assertTextEquals("到期日不变，已用流量不清零")
         compose.onNodeWithTag("purchase-confirm").assertIsEnabled().assertTextEquals("确认升级")
         compose.onNodeWithTag("purchase-cancel").performClick()
         compose.onNodeWithTag("plan-switch-dialog").assertDoesNotExist()
@@ -153,7 +154,7 @@ class PlanSwitchUiTest {
     @Test fun aRefusedChangeCannotBeChosenAndSaysWhyInPlainChinese() {
         launch(planState(offers = upgradeOffers))
         compose.onNodeWithTag("plan-switch-chip-plan_c").performScrollTo().assertTextEquals("暂不可切换")
-        compose.onNodeWithTag("plan-switch-note-plan_c").assertTextContains("年度套餐")
+        compose.onNodeWithTag("plan-switch-note-plan_c").assertTextContains("年卡")
         compose.onNodeWithTag("plan-offer-plan_c").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
     }
@@ -178,13 +179,36 @@ class PlanSwitchUiTest {
         compose.onNodeWithTag("purchase-cancel").performClick()
     }
 
+    @Test fun aDowngradeBeingAppliedShowsProcessingAndLocksTheCards() {
+        // The date has passed (2000) but the server has not cleared the scheduled switch yet.
+        launch(PlanSwitchState(PlanSwitchCurrent("plan_a", Instant.parse("2000-01-01T00:00:00Z")),
+            PlanSwitchPending("plan_a", Instant.now().minusSeconds(20)), listOf(
+                PlanSwitchOffer("plan_a", PlanSwitchAction.Unavailable, null, null, null, "plan_switch_application_pending"),
+                PlanSwitchOffer("plan_b", PlanSwitchAction.Unavailable, null, null, null, "plan_switch_application_pending"))),
+            shown = listOf(current, bigger))
+        compose.onNodeWithTag("plan-switch-pending").performScrollTo().assertTextContains("处理中")
+        compose.onNodeWithTag("plan-switch-chip-plan_b").performScrollTo().assertTextEquals("处理中")
+        compose.onNodeWithTag("plan-switch-note-plan_b").assertTextEquals("正在应用已预约的降级，请稍后。")
+        compose.onNodeWithTag("plan-offer-plan_b").assertIsNotEnabled()
+        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test fun anOrdinaryOfferRefusedWhileACardIsActiveSaysSoInPlainChinese() {
+        launch(planState(offers = upgradeOffers))
+        previewReply = { WireResponse(409, """{"error":{"code":"offer_unavailable","retryable":false}}""") }
+        choose("plan_a")
+        compose.onNodeWithTag("plan-continue").performScrollTo().performClick()
+        compose.waitUntil(5_000) { commerce.error != null && !commerce.busy }
+        compose.onNodeWithTag("commerce-error").performScrollTo().assertTextEquals("当前套餐生效中，暂不能购买其他套餐。")
+    }
+
     @Test fun aServerRefusalOfTheUpgradeWindowReadsInPlainChinese() {
         launch(planState(offers = upgradeOffers))
         previewReply = { WireResponse(409, """{"error":{"code":"plan_switch_upgrade_window_closed","retryable":false}}""") }
         choose("plan_b")
         compose.onNodeWithTag("plan-continue").performScrollTo().performClick()
         compose.waitUntil(5_000) { commerce.error != null && !commerce.busy }
-        compose.onNodeWithTag("commerce-error").performScrollTo().assertTextContains("剩余有效期不足")
+        compose.onNodeWithTag("commerce-error").performScrollTo().assertTextContains("剩余有效期不足 60 分钟")
         assertNull(commerce.quote)
     }
 

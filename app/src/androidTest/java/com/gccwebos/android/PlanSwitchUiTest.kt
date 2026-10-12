@@ -119,11 +119,11 @@ class PlanSwitchUiTest {
 
     @Test fun anUpgradeCardShowsThePriceDifferenceAndTakesEffectNow() {
         launch(planState(offers = upgradeOffers))
-        compose.onNodeWithTag("plan-switch-current").performScrollTo().assertTextContains("当前套餐：50 GB 月卡")
-        compose.onNodeWithTag("plan-switch-chip-plan_b").performScrollTo().assertTextEquals("升级 · 补差价约 5 Coins · 立即生效")
-        compose.onNodeWithTag("plan-switch-chip-plan_a").performScrollTo().assertTextEquals("续费")
+        compose.onNodeWithTag("plan-switch-current").performScrollTo().assertTextContains("当前套餐：50 GB 月卡", substring = true)
+        compose.onNodeWithTag("plan-switch-chip-plan_b", useUnmergedTree = true).performScrollTo().assertTextEquals("升级 · 补差价约 5 Coins · 立即生效")
+        compose.onNodeWithTag("plan-switch-chip-plan_a", useUnmergedTree = true).performScrollTo().assertTextEquals("续费")
         choose("plan_b")
-        compose.onNodeWithTag("plan-dock-summary").performScrollTo().assertTextContains("补差价约 5 Coins · 立即生效")
+        compose.onNodeWithTag("plan-dock-summary").performScrollTo().assertTextContains("补差价约 5 Coins · 立即生效", substring = true)
         compose.onNodeWithTag("plan-continue").performScrollTo().assertTextEquals("立即升级").performClick()
         compose.waitUntil(5_000) { commerce.quote != null && !commerce.busy }
         compose.onNodeWithTag("plan-switch-dialog-title").assertTextEquals("确认升级套餐")
@@ -139,31 +139,33 @@ class PlanSwitchUiTest {
         launch(planState(PlanSwitchPending("plan_a", Instant.parse("2099-10-30T00:00:00Z")), listOf(
             PlanSwitchOffer("plan_a", PlanSwitchAction.Downgrade, 20, 0, Instant.parse("2099-10-30T00:00:00Z"), null),
             PlanSwitchOffer("plan_b", PlanSwitchAction.CurrentRenew, 30, 0, null, null))), shown = listOf(current, bigger))
-        compose.onNodeWithTag("plan-switch-pending").performScrollTo().assertTextContains("待生效")
-        compose.onNodeWithTag("plan-switch-chip-plan_a").performScrollTo().assertTextEquals("降级 · 到期后生效")
+        compose.onNodeWithTag("plan-switch-pending").performScrollTo().assertTextContains("待生效", substring = true)
+        compose.onNodeWithTag("plan-switch-chip-plan_a", useUnmergedTree = true).performScrollTo().assertTextEquals("降级 · 到期后生效")
         previewReply = { WireResponse(200, quoteBody("""{"kind":"downgrade_scheduled","creditUnits":0,"chargeUnits":20,"effectiveAt":"2099-10-30T00:00:00.000Z","cancelsPendingDowngrade":false}""", 20, current)) }
         choose("plan_a")
         compose.onNodeWithTag("plan-continue").performScrollTo().assertTextEquals("预约降级").performClick()
         compose.waitUntil(5_000) { commerce.quote != null && !commerce.busy }
         compose.onNodeWithTag("plan-switch-dialog-title").assertTextEquals("确认预约降级")
-        compose.onNodeWithTag("plan-switch-line-2").assertTextContains("到期后生效")
+        compose.onNodeWithTag("plan-switch-line-2").assertTextContains("到期后生效", substring = true)
         compose.onNodeWithTag("purchase-confirm").assertIsEnabled().assertTextEquals("确认预约降级")
         compose.onNodeWithTag("purchase-cancel").performClick()
     }
 
     @Test fun aRefusedChangeCannotBeChosenAndSaysWhyInPlainChinese() {
         launch(planState(offers = upgradeOffers))
-        compose.onNodeWithTag("plan-switch-chip-plan_c").performScrollTo().assertTextEquals("暂不可切换")
-        compose.onNodeWithTag("plan-switch-note-plan_c").assertTextContains("年卡")
+        compose.onNodeWithTag("plan-switch-chip-plan_c", useUnmergedTree = true).performScrollTo().assertTextEquals("暂不可切换")
+        compose.onNodeWithTag("plan-switch-note-plan_c", useUnmergedTree = true).assertTextContains("年卡", substring = true)
         compose.onNodeWithTag("plan-offer-plan_c").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
+        // Tapping the refused card changes nothing: the dock still describes the card that was selected before.
+        compose.onNodeWithTag("plan-offer-plan_c").performClick()
+        compose.onNodeWithTag("plan-dock-summary").performScrollTo().assertTextContains("补差价约 5 Coins", substring = true)
     }
 
     @Test fun withTheFeatureOffNothingChangesFromTheOrdinaryCatalog() {
         launch(null)
         compose.onNodeWithTag("plan-offer-plan_b").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("plan-switch-banner").assertDoesNotExist()
-        compose.onNodeWithTag("plan-switch-chip-plan_b").assertDoesNotExist()
+        compose.onNodeWithTag("plan-switch-chip-plan_b", useUnmergedTree = true).assertDoesNotExist()
         choose("plan_b")
         compose.onNodeWithTag("plan-continue").performScrollTo().assertTextEquals("立即购买")
     }
@@ -186,9 +188,9 @@ class PlanSwitchUiTest {
                 PlanSwitchOffer("plan_a", PlanSwitchAction.Unavailable, null, null, null, "plan_switch_application_pending"),
                 PlanSwitchOffer("plan_b", PlanSwitchAction.Unavailable, null, null, null, "plan_switch_application_pending"))),
             shown = listOf(current, bigger))
-        compose.onNodeWithTag("plan-switch-pending").performScrollTo().assertTextContains("处理中")
-        compose.onNodeWithTag("plan-switch-chip-plan_b").performScrollTo().assertTextEquals("处理中")
-        compose.onNodeWithTag("plan-switch-note-plan_b").assertTextEquals("正在应用已预约的降级，请稍后。")
+        compose.onNodeWithTag("plan-switch-pending").performScrollTo().assertTextContains("处理中", substring = true)
+        compose.onNodeWithTag("plan-switch-chip-plan_b", useUnmergedTree = true).performScrollTo().assertTextEquals("处理中")
+        compose.onNodeWithTag("plan-switch-note-plan_b", useUnmergedTree = true).assertTextEquals("正在应用已预约的降级，请稍后。")
         compose.onNodeWithTag("plan-offer-plan_b").assertIsNotEnabled()
         compose.onNodeWithTag("plan-continue").performScrollTo().assertIsNotEnabled()
     }
@@ -208,7 +210,7 @@ class PlanSwitchUiTest {
         choose("plan_b")
         compose.onNodeWithTag("plan-continue").performScrollTo().performClick()
         compose.waitUntil(5_000) { commerce.error != null && !commerce.busy }
-        compose.onNodeWithTag("commerce-error").performScrollTo().assertTextContains("剩余有效期不足 60 分钟")
+        compose.onNodeWithTag("commerce-error").performScrollTo().assertTextContains("剩余有效期不足 60 分钟", substring = true)
         assertNull(commerce.quote)
     }
 

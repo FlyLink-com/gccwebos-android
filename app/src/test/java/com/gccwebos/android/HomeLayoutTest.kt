@@ -57,7 +57,7 @@ class HomeLayoutTest {
     }
 
     @Test fun multiPlatformLinkKeepsTheSameTargetWithAnActionLabel() {
-        assertEquals("https://gccwebos.com", OfficialWebsiteUrl)
+        assertEquals("https://flinkvpn.com", OfficialWebsiteUrl)
         assertEquals("其他平台如何使用我们的订阅", OfficialWebsiteTitle)
         assertEquals("查看多端导入教程", OfficialWebsiteAction)
     }

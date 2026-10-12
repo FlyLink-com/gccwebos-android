@@ -80,7 +80,7 @@
 
 ## OPPO 覆盖安装
 
-- 包名：`com.gccwebos.android.candidate.acceptance.bbr20261004v2`，名称“飞连 VPN 测试”，versionCode `6`。
+- 包名：`com.gccwebos.android.candidate.acceptance.bbr20261004v2`，名称“飞连VPN 测试”，versionCode `6`。
 - APK SHA256：`378643bc575c182d17020854ced9dfa1f835597384c7449fc9598f0639a5e646`。
 - 签名 SHA256：`08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4`。
 - 安装前核对旧包为保留的 `46c16e322f2bdb8d681d76814e3384eef0baa8bfbac1d81755be25f5b711abc0`；使用同包同签名 `install -r` 覆盖，安装后字节哈希与新 APK 一致。

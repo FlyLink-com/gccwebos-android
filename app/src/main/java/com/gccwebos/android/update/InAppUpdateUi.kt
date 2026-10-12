@@ -31,7 +31,7 @@ internal fun failureText(failure: InAppFailure, httpCode: Int? = null, resumable
     InAppFailure.HASH_MISMATCH -> "文件校验未通过（SHA-256 与官网清单不一致），已删除，请重试。"
     InAppFailure.STORAGE -> "无法写入应用缓存目录，请检查存储空间后重试。"
     InAppFailure.UNREADABLE -> "无法读取安装包，已删除，请重试。"
-    InAppFailure.WRONG_PACKAGE -> "该文件不是飞连 VPN 官方安装包，已删除，不会安装。"
+    InAppFailure.WRONG_PACKAGE -> "该文件不是飞连VPN官方安装包，已删除，不会安装。"
     InAppFailure.NOT_NEWER -> "该安装包的版本不高于当前版本，已删除，不会安装。"
     InAppFailure.WRONG_VERSION -> "该安装包的版本与官网清单不一致，已删除，不会安装。"
     InAppFailure.SIGNER_MISMATCH -> "安装包的签名与当前应用不一致，已删除，不会安装。"
@@ -59,7 +59,7 @@ internal fun InAppUpdateBody(state: InAppUpdateState) {
         is InAppUpdateState.ReadyToInstall -> Text("已下载，并通过 SHA-256、版本和签名校验。点「安装」后由系统安装程序确认。",
             Modifier.testTag("in-app-update-status"))
         is InAppUpdateState.NeedsInstallPermission -> Text(
-            "已下载并通过校验。安装前需要允许飞连 VPN「安装未知应用」：点「去设置」开启后返回本页继续。",
+            "已下载并通过校验。安装前需要允许飞连VPN「安装未知应用」：点「去设置」开启后返回本页继续。",
             Modifier.testTag("in-app-update-status"))
         InAppUpdateState.InstallerLaunched -> Text("已打开系统安装程序，请按提示完成安装。", Modifier.testTag("in-app-update-status"))
         is InAppUpdateState.Failed -> Text(failureText(state.failure, state.httpCode, state.resumable), Modifier.testTag("in-app-update-status"))

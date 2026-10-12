@@ -38,4 +38,4 @@ VPN 候选先调用 `scripts/materialize-native-libraries.py` 核验原生源码
 
 Windows 基线的 484 个 JUnit 测试在修正 LF fixture checkout 后仍有 8 个失败，来自 NTFS 不支持 POSIX 初始文件权限；生产存储继续 fail closed，没有跳过测试或放宽 0600/atomic replacement。Android 的真实私有存储、TUN 与流量证据须另行取得。完整结果见本轮连接开发记录。
 
-OPPO 只记录型号 PFJM10、Android 13/API 33；不记录 serial、账号、订阅 URL、配置或凭据。普通飞连包与临时独立候选分开，禁止以卸载旧包或清除旧数据解决签名冲突。
+OPPO 只记录型号 PFJM10、Android 13/API 33；不记录 serial、账号、订阅 URL、配置或凭据。普通飞连VPN 包与临时独立候选分开，禁止以卸载旧包或清除旧数据解决签名冲突。

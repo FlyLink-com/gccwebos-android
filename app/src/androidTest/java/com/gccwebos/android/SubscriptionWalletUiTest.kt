@@ -257,10 +257,12 @@ class SubscriptionWalletUiTest {
         launchShell { authenticated = false }
         compose.onNodeWithTag("page-Connect").assertIsDisplayed()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
-        compose.onNodeWithTag("brand-name").assertTextEquals("飞连vpn")
+        compose.onNodeWithTag("brand-name").assertTextEquals("飞连VPN")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.gccwebos.android.debug", context.packageName)
-        assertEquals("飞连vpn", context.packageManager.getApplicationLabel(context.applicationInfo).toString())
+        val chinese = context.resources.configuration.locales[0].language == "zh"
+        assertEquals(if (chinese) "飞连VPN" else "FlinkVPN",
+            context.packageManager.getApplicationLabel(context.applicationInfo).toString())
         val icon = context.packageManager.getApplicationIcon(context.packageName)
         assertTrue(icon is AdaptiveIconDrawable)
         icon.setBounds(0, 0, 192, 192)
@@ -286,7 +288,7 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("nav-Connect").assertIsDisplayed()
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
         // An unowned legacy None must never become a confirmed no-plan result.
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.onNodeWithTag("account-usage-no-plan").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
@@ -302,7 +304,7 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.onNodeWithTag("account-usage-no-plan").assertDoesNotExist()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
     }
@@ -311,7 +313,7 @@ class SubscriptionWalletUiTest {
         launchVerifiedOverviewShell()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连VPN").assertIsEnabled()
         capture("none-inline-opening")
         repeat(2) {
             listOf("Lines", "Plans", "Profile", "Connect").forEach {
@@ -322,18 +324,18 @@ class SubscriptionWalletUiTest {
             compose.runOnIdle { account.refreshAccountUsage() }
             compose.waitUntil(5_000) { !account.accountUsage.state.value.busy }
             compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-            compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+            compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连VPN").assertIsEnabled()
         }
         // Real same-session revalidation must not automatically open business guidance.
         compose.runOnIdle { account.onForeground() }
         compose.waitUntil(5_000) { !account.busy && !account.foregroundCheckPending && account.authenticated }
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连VPN").assertIsEnabled()
     }
 
     @Test fun verifiedNoneInlineOpeningRoutesToPlansAndWalletStaysAnExplicitNavigation() {
         launchVerifiedOverviewShell()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连vpn").performClick()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertTextEquals("开通飞连VPN").performClick()
         compose.onNodeWithTag("page-Plans").assertIsDisplayed()
         compose.onNodeWithTag("nav-Connect").performClick()
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
@@ -363,7 +365,7 @@ class SubscriptionWalletUiTest {
         compose.onNodeWithTag("vpn-connect").performClick()
         compose.waitUntil(5_000) { !account.accountUsage.state.value.busy && account.accountUsage.state.value.error == null }
         compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn")
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN")
         compose.onNodeWithTag("page-Connect").assertExists()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.runOnIdle { assertEquals(4, verifiedOverviewReads.get()); assertTrue(powerActions.isEmpty()) }
@@ -436,7 +438,7 @@ class SubscriptionWalletUiTest {
         val powerActions = mutableListOf<ConnectionPowerAction>()
         launchVerifiedOverviewShell(fontScale = 2f, onPowerAction = { powerActions += it })
         compose.onNodeWithTag("no-resource-guidance").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsDisplayed().assertTextEquals("开通飞连VPN").assertIsEnabled()
         capture("none-inline-font-200")
         compose.onNodeWithTag("vpn-connect").performClick()
         compose.onNodeWithTag("page-Plans").assertIsDisplayed()
@@ -590,7 +592,7 @@ class SubscriptionWalletUiTest {
         repeat(2) {
             compose.onNodeWithTag("purchase-confirm").assertIsEnabled()
             compose.onNodeWithText("portal.gccwebos.com", substring = true).assertDoesNotExist()
-            compose.onNodeWithText("服务：飞连vpn").assertIsDisplayed()
+            compose.onNodeWithText("服务：飞连VPN").assertIsDisplayed()
             compose.onNodeWithTag("purchase-cancel").performClick()
             compose.onNodeWithTag("purchase-confirm").assertDoesNotExist()
             compose.runOnIdle { assertNull(commerce.quote); assertNull(commerce.purchase) }

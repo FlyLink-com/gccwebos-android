@@ -188,10 +188,10 @@ internal fun connectionSetupGuidance(
 ): ConnectionSetupGuidance {
     // Signed out with an imported/third-party source and no node chosen: the next step is the node list, not buying.
     if (!authenticated && chooseNode) return ConnectionSetupGuidance(ConnectionSetupAction.ChooseNode, "选择节点", operable && !busy)
-    if (!authenticated) return ConnectionSetupGuidance(ConnectionSetupAction.AccountChoice, "开通飞连vpn", operable && !busy)
+    if (!authenticated) return ConnectionSetupGuidance(ConnectionSetupAction.AccountChoice, "开通飞连VPN", operable && !busy)
     if (busy) return ConnectionSetupGuidance(ConnectionSetupAction.None, "准备中", false)
     if (!verifiedUsage || refreshFailed) return ConnectionSetupGuidance(ConnectionSetupAction.None, "重试", false)
-    if (resource == Resource.None) return ConnectionSetupGuidance(ConnectionSetupAction.Plans, "开通飞连vpn", operable)
+    if (resource == Resource.None) return ConnectionSetupGuidance(ConnectionSetupAction.Plans, "开通飞连VPN", operable)
     if (resource !is Resource.Available) return ConnectionSetupGuidance(ConnectionSetupAction.None, "重试", false)
     if (resource.validUntil <= now) return ConnectionSetupGuidance(ConnectionSetupAction.Plans, "查看套餐", operable, "订阅已到期")
     if (resource.usage.status in setOf("measured", "measured_zero") && resource.usage.remainingBytes == 0L)
@@ -520,7 +520,7 @@ internal fun ConnectionOverview(
     }
     if (showGuestChoice && !account.authenticated) AlertDialog(
         modifier = Modifier.testTag("usage-guest-guidance"), onDismissRequest = { showGuestChoice = false },
-        title = { Text("开通飞连vpn") }, text = { Text("登录或注册后查看套餐") },
+        title = { Text("开通飞连VPN") }, text = { Text("登录或注册后查看套餐") },
         confirmButton = { Column {
             TextButton({ showGuestChoice = false; openAccount() }, modifier = Modifier.heightIn(min = 48.dp)
                 .testTag("usage-guest-login")) { Text("登录") }

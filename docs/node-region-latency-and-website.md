@@ -18,7 +18,7 @@ B 档应用变更，承接四页紧凑 UI。不修改服务端、认证模型、
 
 映射不参与订阅解析、opaque 节点身份、选择、准入或 VPN 启动。本轮地区规则及精确映射的 18 项 JVM 用例通过，普通 QA2 公开 UI 已完整核对六条地区标签（JP 三条、SG 三条）。后续静默导航、真实 probe 接线和前台节点恢复的当前验证见 [静默导航与节点展示验收](quiet-navigation-and-node-display.md)；下方保持为先前版本的独立记录。
 
-连接页节点卡下增加官网玻璃卡片，显示本地机器人、`gccwebos.com` 和跨平台订阅使用入口文案，带轻量呼吸光效。只有点击才通过系统浏览器打开固定 `https://gccwebos.com`。系统关闭动画时保持静态；没有可用浏览器时提示暂时无法打开。
+连接页节点卡下增加官网玻璃卡片，显示本地机器人、`flinkvpn.com` 和跨平台订阅使用入口文案，带轻量呼吸光效。只有点击才通过系统浏览器打开固定 `https://flinkvpn.com`。系统关闭动画时保持静态；没有可用浏览器时提示暂时无法打开。
 
 ## 延迟口径和边界
 
@@ -40,7 +40,7 @@ B 档应用变更，承接四页紧凑 UI。不修改服务端、认证模型、
 - OPPO API 33 隔离包共 38 个不同用例取得最后通过结果。其中 5 项实际应用 ICMP/资源测试、8 项节点 UI、5 项官网 UI，以及 20 项既有页面/订单/返回导航回归。批次有重叠，不累加重复结果。
 - 首轮官网 240dp/200% 字号测试发现域名溢出；使用完整可用宽度后，保留原断言的官网与节点最终批次 13/13 通过。存留 22 张合成截图；独立组件截图用于几何/字体核验，完整应用配色以 AppShell 截图为准。
 - Debug、隔离 AndroidTest、未签名 Release、源码检查和 `git diff --check` 通过；最终 Lint 无错误，30 warning、4 hint。双 ABI 原生库严格复用 source-98 固定材料，ELF/16-KiB APK 对齐与 Release lab 排除检查通过。
-- 已覆盖安装并启动普通“飞连 VPN 测试”包 `com.gccwebos.android.candidate.acceptance.bbr20261004v2`。升级前后 15 个预定义私有路径的存在/类型元数据一致，没有读取内容、清除数据或卸载该包。隔离 UI 包及测试包已按确切身份清理。
+- 已覆盖安装并启动普通“飞连VPN 测试”包 `com.gccwebos.android.candidate.acceptance.bbr20261004v2`。升级前后 15 个预定义私有路径的存在/类型元数据一致，没有读取内容、清除数据或卸载该包。隔离 UI 包及测试包已按确切身份清理。
 
 正常 APK：`.build-output/node-region-site-oct4/logged-candidate-node-region.apk`，SHA-256 `3d9fdcc7bffc38839bd50e24fbbce3d002face0964f9438092dd58cd4905a98f`，versionCode 6，同原测试签名。合成/lab 开关关闭。可回退到保留的同包同签名 `.build-output/compact-ui-oct4/logged-candidate-compact.apk`，SHA-256 `378643bc575c182d17020854ced9dfa1f835597384c7449fc9598f0639a5e646`，仍通过覆盖安装保留数据。
 

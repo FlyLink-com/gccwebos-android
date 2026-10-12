@@ -142,7 +142,7 @@ class MainActivity : ComponentActivity() {
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             if (!bindingFailure) Image(painterResource(R.drawable.brand_robot_avatar), null,
                                 modifier = Modifier.size(52.dp))
-                            Text(if (bindingFailure) "连接服务暂不可用" else "飞连vpn",
+                            Text(if (bindingFailure) "连接服务暂不可用" else "飞连VPN",
                                 modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
@@ -585,7 +585,7 @@ private fun BrandHeader() {
         Image(painterResource(R.drawable.brand_robot_avatar), contentDescription = null,
             modifier = Modifier.size(34.dp), contentScale = ContentScale.Fit)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text("飞连vpn", style = MaterialTheme.typography.titleLarge, fontSize = 21.sp,
+            Text("飞连VPN", style = MaterialTheme.typography.titleLarge, fontSize = 21.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag("brand-name"))
             Box(Modifier.width(94.dp).height(2.dp).background(Brush.horizontalGradient(
                 listOf(androidx.compose.ui.graphics.Color(0xFFFF27DF), Brand.Blue, Brand.Cyan))))

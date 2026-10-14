@@ -1401,8 +1401,8 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     suspend fun clearAccountSubscription(ownerCleanup: suspend () -> Unit, commitFence: ((() -> Unit) -> Unit)) {
         if (manualSources !is LibraryManualSourceStore) return unlinkAndAwait(ownerCleanup, commitFence)
         var observer: (() -> Unit)? = null
-        val clearVersion: Long
-        val accountActive: Boolean
+        var clearVersion = 0L
+        var accountActive = false
         try {
             synchronized(lock) {
                 accountActive = readLibrary().use { it.selector == ConfigurationSelector.Account }
@@ -1419,7 +1419,13 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             }
         } catch (_: Exception) {
             synchronized(lock) { authority.manualStorageBlocked = true; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR) }
-            throw PortalFailure(PortalFailure.Reason.STORAGE)
+            // Admission is already revoked (STORAGE_ERROR + blocked); an active account owner must still be stopped.
+            // A manually imported active source (accountActive == false) is never stopped here.
+            val original = PortalFailure(PortalFailure.Reason.STORAGE)
+            try { observer?.invoke() } catch (e: Exception) { original.addSuppressed(e) }
+            observer = null
+            if (accountActive) try { ownerCleanup() } catch (e: Exception) { original.addSuppressed(e) }
+            throw original
         } finally { observer?.invoke() } // Never call the owner while holding the capability lock.
         if (!accountActive) return
         ownerCleanup() // Stops the tunnel / removes prepared material of the account source.

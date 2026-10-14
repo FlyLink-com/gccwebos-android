@@ -7,7 +7,8 @@ import com.gccwebos.android.BuildConfig
 internal object AndroidStorageDiagnostics {
     fun report(target: StoreTarget, operation: StoreOperation, failure: Exception) {
         if (BuildConfig.DEBUG) runCatching {
-            Log.w("GCCStorageDiagnostics", StorageDiagnostics.evidence(target, operation, failure).payload())
+            Log.w("GCCStorageDiagnostics", SensitiveLogRedaction.redact(
+                StorageDiagnostics.evidence(target, operation, failure).payload()))
         }
     }
 }

@@ -209,6 +209,8 @@ internal class ConnectionOwnerService : Service() {
                             else ConnectionControlState(revision = ++revision)
                         val keepForRecovery = applyRecovery(autoRecovery.onState(state, networkAvailable()), coordinator, available)
                         if (!autoRecovery.recovering) releaseNetworkCallback()
+                        if (controls.value.autoRecovering != autoRecovery.recovering)
+                            controls.value = controls.value.copy(autoRecovering = autoRecovery.recovering)
                         if (!keepForRecovery && !autoRecovery.recovering &&
                             (state == ConnectionState.Disconnected || state is ConnectionState.Failed || state is ConnectionState.Blocked)) {
                             preparedNode = null

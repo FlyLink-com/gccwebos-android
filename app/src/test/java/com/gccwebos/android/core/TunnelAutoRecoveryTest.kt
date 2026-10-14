@@ -70,3 +70,23 @@ class TunnelAutoRecoveryTest {
         assertEquals(TunnelAutoRecovery.Decision.None, recovery.onNetworkAvailable()) // flapping: no duplicate
     }
 }
+
+class AutoRecoveringPresentationTest {
+    private val clock = java.time.Instant.parse("2026-10-14T00:00:00Z")
+    private val ready = com.gccwebos.android.portal.LocalSubscriptionSnapshot(com.gccwebos.android.portal.LocalSubscriptionStatus.READY,
+        hasProfile = true, hasCapability = true, validUntil = clock.plusSeconds(3600))
+
+    @Test fun recoveringFailureShowsAutoReconnectInsteadOfAnError() {
+        val p = com.gccwebos.android.connectionOverviewPresentation(ready, clock, com.gccwebos.android.ConnectionControlState(
+            com.gccwebos.android.ConnectionPhase.Failed, com.gccwebos.android.ConnectionFailure.Other, canConnect = true, autoRecovering = true))
+        assertEquals("正在自动重连…", p.title)
+        assertEquals(com.gccwebos.android.ConnectionVisualTone.Connecting, p.tone)
+    }
+
+    @Test fun afterGivingUpTheNormalFailureReturns() {
+        val p = com.gccwebos.android.connectionOverviewPresentation(ready, clock, com.gccwebos.android.ConnectionControlState(
+            com.gccwebos.android.ConnectionPhase.Failed, com.gccwebos.android.ConnectionFailure.Other, canConnect = true))
+        assertEquals("连接异常", p.title)
+        assertEquals(com.gccwebos.android.ConnectionVisualTone.Error, p.tone)
+    }
+}

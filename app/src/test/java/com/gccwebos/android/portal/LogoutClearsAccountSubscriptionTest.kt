@@ -34,9 +34,16 @@ class LogoutClearsAccountSubscriptionTest {
         override fun clear() { clearCalls++; if (failuresLeft > 0) { failuresLeft--; throw PortalFailure(PortalFailure.Reason.STORAGE) }; backing.clear() }
     }
 
+    private class FlakyProfiles(val backing: MemoryLocalProfileStore = MemoryLocalProfileStore()) : LocalProfileStore {
+        var failClear = false
+        override fun read() = backing.read()
+        override fun save(value: CachedSubscription) = backing.save(value)
+        override fun clear() { if (failClear) throw PortalFailure(PortalFailure.Reason.STORAGE); backing.clear() }
+    }
+
     private inner class Fixture {
         val delivery = Delivery()
-        val profiles = MemoryLocalProfileStore()
+        val profiles = FlakyProfiles()
         val sessions = FlakySessions().apply { save(saved) }
         val sources = MemoryManualSourceStore()
         val choices = MemoryNodeChoiceStore()
@@ -177,5 +184,25 @@ class LogoutClearsAccountSubscriptionTest {
         job.cancel(); job.join()
         // Either the call never started (nothing changed) or NonCancellable cleanup finished the stop.
         if (f.profiles.read() == null) assertEquals(1, ownerStops)
+    }
+
+    @Test fun accountDataClearFailureStopsOwnerAndPersistsRevocationAcrossRestart() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.profiles.failClear = true
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals(1, ownerStops)
+        assertNotNull("fixture: cached account config could not be deleted", f.profiles.read())
+        val restarted = LocalSubscriptionManager(f.delivery, f.profiles, SubscriptionSource { error("No network") },
+            OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { now }, LocalSubscriptionAuthority(),
+            manualSources = f.sources)
+        restarted.restore()
+        assertNotEquals("pending-revoked account must not be re-admitted", ManualSourceKind.LegacyRemote, restarted.sourceKind())
+        assertNotEquals(LocalSubscriptionStatus.READY, restarted.snapshot().status)
+        // Retry once storage recovers completes the logout.
+        f.profiles.failClear = false
+        f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() })
+        assertNull(f.profiles.read()); assertNull(f.sessions.read())
+        assertEquals(setOf("Local Alpha"), f.imported().flatMap { it.nodes }.map { it.name }.toSet())
     }
 }

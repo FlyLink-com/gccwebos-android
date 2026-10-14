@@ -67,7 +67,7 @@ class AppShellTest {
         compose.onNodeWithTag("connection-hero").assertExists()
         compose.onNodeWithTag("account-usage-card").assertExists()
         compose.onNodeWithTag("subscription-waterdrop").assertDoesNotExist()
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         compose.onNodeWithTag("subscription-usage-unavailable").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
@@ -90,7 +90,7 @@ class AppShellTest {
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.onNodeWithTag("local-subscription-title").assertDoesNotExist()
         // A saved local profile cannot authenticate this account card or open a production engine.
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.onNodeWithText("已连接").assertDoesNotExist()
         // Signed-out + READY local config with no subscription usage hides the usage card (C10/C11).
         compose.onNodeWithTag("account-usage-remaining").assertDoesNotExist()
@@ -148,7 +148,7 @@ class AppShellTest {
         compose.onNodeWithTag("login-screen").assertDoesNotExist()
         compose.onNodeWithTag("connection-welcome").assertDoesNotExist()
         compose.onNodeWithTag("connection-hero").assertExists()
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.runOnIdle { assertEquals(emptyList<String>(), requests.toList()) }
     }
 
@@ -229,7 +229,7 @@ class AppShellTest {
         compose.onNodeWithTag("wallet-balance").assertDoesNotExist()
         compose.onNodeWithTag("page-Profile").assertDoesNotExist()
         compose.onNodeWithTag("nav-Connect").performClick()
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.runOnIdle { check(requests.all { it == "/api/portal/human-challenges" }) }
     }
 
@@ -295,7 +295,7 @@ class AppShellTest {
         assertNodeSelectionReturnedToConnection()
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("重复节点")
         compose.onNodeWithTag("connection-node-protocol", useUnmergedTree = true).assertTextEquals("SS")
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.onNodeWithTag("nav-Lines").performClick()
         compose.onNodeWithTag("node-choice-1").assertIsSelected()
         compose.onNodeWithTag("node-choice-0").assertIsNotSelected()

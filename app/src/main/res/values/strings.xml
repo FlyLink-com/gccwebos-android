@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">飞连vpn</string>
+    <string name="app_name">FlinkVPN</string>
+    <string name="connection_candidate_label">FlinkVPN 测试</string>
     <string name="tab_connect">连接</string>
     <string name="tab_lines">节点</string>
     <string name="tab_plans">套餐</string>

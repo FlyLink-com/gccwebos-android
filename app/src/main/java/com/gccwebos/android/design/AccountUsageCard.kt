@@ -58,7 +58,7 @@ internal fun AccountUsageCard(
         }
         if (!authenticated) {
             UsageRemaining("暂未获取")
-            if (showPrimary) UsagePrimaryAction(primaryLabel ?: "开通飞连vpn", primaryEnabled && !loading,
+            if (showPrimary) UsagePrimaryAction(primaryLabel ?: "开通飞连VPN", primaryEnabled && !loading,
                 primaryHint, primaryTestTag, onPrimaryAction)
             if (!embedded) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onLogin, modifier = Modifier.weight(1f).heightIn(min = 48.dp)
@@ -109,7 +109,7 @@ internal fun AccountUsageCard(
                     presentation.state == AccountUsageState.Reconciliation ->
                     UsagePrimaryAction("重试", refreshAllowed, null, primaryTestTag, onRefresh)
                 presentation.state == AccountUsageState.NoActivePlan ->
-                    UsagePrimaryAction(primaryLabel ?: "开通飞连vpn", primaryEnabled && !loading,
+                    UsagePrimaryAction(primaryLabel ?: "开通飞连VPN", primaryEnabled && !loading,
                         primaryHint, primaryTestTag, onPrimaryAction)
                 presentation.state == AccountUsageState.Available -> {
                     val label = primaryLabel ?: "一键连接"

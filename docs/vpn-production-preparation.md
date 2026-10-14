@@ -26,7 +26,7 @@ SDK/Gradle 缺失、未实现 adapter、未构建等旧准备状态已被当前�
 
 普通 `com.gccwebos.android.debug` code 6 / `0.4.0-mobile-parity-debug` 保留，未卸载、清数据或覆盖。其 APK 曾只读拉取：14,096,175 bytes，SHA-256 `b7766768c6d9471c986e26272af833dacb9786e619ba4b4e04e42aef1ab7a1f4`，signer `d4bc605f2cc806806a24f3b818e8bda2791bcbc3bd2e383ca225145701424424`。本地候选 signer 为 `08a952d8f10486ff79cb7b00e58ee8618425bf3286e778147da1a8b008a373d4`，已通过 apksigner 核验；不同签名不推导为可兼容升级/回装。
 
-synthetic app/test 包及数据在验证后已卸载；随后安装正常独立 `com.gccwebos.android.candidate`，显示“飞连 VPN 测试”。其 installed APK hash 与本地文件一致，synthetic flag=false、无 fixture/test class。回退此候选只需停止并卸载该候选包，不触碰普通 app/data；源码保留隔离分支，未 reset 原目录。没有宣称 ordinary APK 的回装验证通过。
+synthetic app/test 包及数据在验证后已卸载；随后安装正常独立 `com.gccwebos.android.candidate`，显示“飞连VPN 测试”。其 installed APK hash 与本地文件一致，synthetic flag=false、无 fixture/test class。回退此候选只需停止并卸载该候选包，不触碰普通 app/data；源码保留隔离分支，未 reset 原目录。没有宣称 ordinary APK 的回装验证通过。
 
 ## 未覆盖门禁
 

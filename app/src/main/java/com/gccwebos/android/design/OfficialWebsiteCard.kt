@@ -34,7 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.R
 
-internal const val OfficialWebsiteUrl = "https://gccwebos.com"
+internal const val OfficialWebsiteUrl = "https://flinkvpn.com"
 internal const val OfficialWebsiteTitle = "其他平台如何使用我们的订阅"
 internal const val OfficialWebsiteAction = "查看多端导入教程"
 
@@ -59,7 +59,7 @@ internal fun OfficialWebsiteCard(
             BreathingGlowOverlay(radius = 22.dp, shown = shown, tag = "official-website-glow")
         Column {
             BoxWithConstraints(Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                .clickable(role = Role.Button, onClickLabel = "访问官网 gccwebos.com") {
+                .clickable(role = Role.Button, onClickLabel = "访问官网 flinkvpn.com") {
                     unavailable = false
                     try {
                         if (opener != null) opener(OfficialWebsiteUrl)

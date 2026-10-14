@@ -1,4 +1,4 @@
-# 飞连 VPN 四页 UI 与 v2 预览对齐
+# 飞连VPN 四页 UI 与 v2 预览对齐
 
 ## 范围与依据
 
@@ -85,7 +85,7 @@ HTML 的卡片层级、布局、间距与字体用于原生适配；其中的账
 
 正常字号下连接与我的页保留纵向滚动；320dp 下部分内容及连接动作需要滚动。套餐确认栏位于导航上方，200% 字体时允许自身滚动以保持按钮可达。本轮是原生层级与布局适配，不声称不同尺寸下像素逐一相同；玻璃背景继续沿用原实现。
 
-普通候选包名：`com.gccwebos.android.candidate.acceptance.bbr20261004v2`，显示名“飞连 VPN 测试”，versionCode 6。安装 APK SHA-256：
+普通候选包名：`com.gccwebos.android.candidate.acceptance.bbr20261004v2`，显示名“飞连VPN 测试”，versionCode 6。安装 APK SHA-256：
 
 `46c16e322f2bdb8d681d76814e3384eef0baa8bfbac1d81755be25f5b711abc0`
 

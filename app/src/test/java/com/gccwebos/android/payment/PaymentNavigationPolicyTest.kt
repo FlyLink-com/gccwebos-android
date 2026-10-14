@@ -168,8 +168,8 @@ class PaymentNavigationPolicyTest {
     @Test fun theCoinPurchaseConfirmationShowsNoDomain() {
         val source = File("src/main/java/com/gccwebos/android/commerce/CommercePanel.kt").readText()
         assertFalse(source.contains("服务平台"))
-        assertFalse(source.contains("Text(\"服务：飞连vpn · "))
-        assertTrue(source.contains("Text(\"服务：飞连vpn\")"))
+        assertFalse(source.contains("Text(\"服务：飞连VPN · "))
+        assertTrue(source.contains("Text(\"服务：飞连VPN\")"))
         assertFalse(Regex("Text\\(\"[^\"]*portal\\.gccwebos\\.com").containsMatchIn(source))
     }
 

@@ -42,7 +42,7 @@ android {
                 else -> ".debug"
             }
             versionNameSuffix = if (candidate) "-connection-candidate" else "-debug"
-            if (candidate) manifestPlaceholders["connectionAppLabel"] = "飞连 VPN 测试"
+            if (candidate) manifestPlaceholders["connectionAppLabel"] = "@string/connection_candidate_label"
             val nativeLab = providers.gradleProperty("nativeVpnLab").orNull == "true"
             buildConfigField("boolean", "NATIVE_VPN_LAB", nativeLab.toString())
             val realTun = providers.gradleProperty("nativeTunAcceptance").orNull == "true"

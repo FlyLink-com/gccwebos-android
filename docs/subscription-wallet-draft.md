@@ -1,4 +1,4 @@
-# clash飞连vpn: subscription and wallet draft
+# FlinkVPN: subscription and wallet draft
 
 This is a **stacked draft** on PR #6's immutable `739647072c3fdc30b52ae519bbbf491f31b2575b` source snapshot. It does not change PR #6, merge, deploy, sign a production release, or enable production VPN. Application IDs remain `com.gccwebos.android` / debug suffix; versionCode 5 identifies this new app source rather than the prior APK.
 
@@ -13,7 +13,7 @@ The source catalog contains three plans: 30 days / 20 Coins, 30 days / 30 Coins,
 
 ## UI
 
-- Exact requested name `clash飞连vpn` in release/debug launcher labels and accessible header. Adaptive launcher icon references the existing authorized robot avatar pixels without repainting them.
+- English/default launcher label is `FlinkVPN`. The Chinese launcher label (`values-zh`) and the in-app header are `飞连VPN`. Adaptive launcher icon references the existing authorized robot avatar pixels without repainting them.
 - Connection state distinguishes signed out, waiting, loading, error, reconciliation and authoritative `Resource.None`. No-subscription guidance appears once per authenticated account/session on Connection; Back, dismissal, navigation and refresh do not create a modal loop.
 - Available resources show server duration only in headings, nonnegative live time remaining, local-zone expiration and factual total/used/remaining traffic. Unknown, pending, stale and expired are never converted to zero, unlimited or active entitlement.
 - My wallet has current-response Coins balance and held/pending buckets, recharge offers, order status and explicit payment review. Unknown/error is never zero.

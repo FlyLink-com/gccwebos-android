@@ -53,7 +53,7 @@ class ConnectionSetupGuidanceTest {
         assertFalse("busy account keeps it disabled", connectionSetupGuidance(false, false, null, missing, now, true, busy = true, chooseNode = true).enabled)
         assertFalse("not operable keeps it disabled", connectionSetupGuidance(false, false, null, missing, now, false, chooseNode = true).enabled)
         // Without the flag the signed-out guidance is unchanged.
-        assertEquals("开通飞连vpn", connectionSetupGuidance(false, false, null, missing, now, true).label)
+        assertEquals("开通飞连VPN", connectionSetupGuidance(false, false, null, missing, now, true).label)
         // A signed-in account never gets it, even when asked.
         assertEquals(ConnectionSetupAction.Plans, connectionSetupGuidance(true, true, Resource.None, missing, now, true, chooseNode = true).action)
     }

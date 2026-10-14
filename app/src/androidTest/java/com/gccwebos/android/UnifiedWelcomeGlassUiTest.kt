@@ -91,12 +91,12 @@ class UnifiedWelcomeGlassUiTest {
         compose.onNodeWithTag("account-usage-register").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-used").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-remaining").assertTextEquals("暂未获取")
-        compose.onNodeWithTag("unified-primary").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("unified-primary").assertTextEquals("开通飞连VPN").assertIsEnabled()
             .performScrollTo().performClick()
         assertEquals(1, primaryActions.get()); assertEquals(0, reads.get())
         compose.runOnIdle { fixture.authenticated = true; fixture.presentation = presentation(Resource.None) }
         compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
-        compose.onNodeWithTag("unified-primary").assertTextEquals("开通飞连vpn").performScrollTo().performClick()
+        compose.onNodeWithTag("unified-primary").assertTextEquals("开通飞连VPN").performScrollTo().performClick()
         assertEquals(2, primaryActions.get()); assertEquals(0, reads.get())
     }
 
@@ -186,7 +186,7 @@ class UnifiedWelcomeGlassUiTest {
         power.assertIsNotEnabled().performTouchInput { click() }
         assertEquals(1, commands.get())
         compose.runOnIdle { control = ConnectionControlState(phase = ConnectionPhase.Disconnected, canConnect = true, revision = 1) }
-        power.performScrollTo().assertTextEquals("开通飞连vpn").assertIsEnabled().performClick()
+        power.performScrollTo().assertTextEquals("开通飞连VPN").assertIsEnabled().performClick()
         compose.onNodeWithTag("usage-guest-guidance").assertIsDisplayed()
         compose.onNodeWithText("取消").performClick()
         assertEquals(1, commands.get()); assertEquals(0, requests.get())
@@ -202,7 +202,7 @@ class UnifiedWelcomeGlassUiTest {
             AppShell(account, autoLoadCommerce = false, connectionControlState = control,
                 onConnectionPowerAction = { commands.incrementAndGet() }, glassMode = GlassMode.Solid)
         }
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN").performScrollTo().assertIsEnabled().performClick()
         compose.onNodeWithTag("usage-guest-guidance").assertIsDisplayed()
         compose.onNodeWithText("取消").performClick()
         compose.runOnIdle {
@@ -211,7 +211,7 @@ class UnifiedWelcomeGlassUiTest {
         }
         compose.onNodeWithTag("connection-failure").assertTextEquals("无网络")
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
-        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连vpn").assertIsEnabled()
+        compose.onNodeWithTag("vpn-connect").assertTextEquals("开通飞连VPN").assertIsEnabled()
         assertEquals(0, commands.get()); assertEquals(0, requests.get())
     }
 

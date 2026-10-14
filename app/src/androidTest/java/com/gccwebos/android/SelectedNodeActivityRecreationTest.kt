@@ -251,7 +251,7 @@ class SelectedNodeActivityRecreationTest {
     private fun assertIdleConnectionControl() {
         // The actual package flag defines availability, never the fixture's valid cache.
         val connectable = BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30
-        val label = if (connectable) "一键连接" else "开通飞连vpn"
+        val label = if (connectable) "一键连接" else "开通飞连VPN"
         compose.waitUntil(5000) {
             compose.onAllNodesWithTag("vpn-connect").fetchSemanticsNodes().singleOrNull()?.let { node ->
                 SemanticsProperties.Disabled !in node.config &&

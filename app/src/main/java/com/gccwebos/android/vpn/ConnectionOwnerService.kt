@@ -54,6 +54,47 @@ internal class ConnectionOwnerService : Service() {
     private var materialClearFailed = false
     /** Display-only label of the last Ready preparation for the current command epoch. */
     private var preparedNode: com.gccwebos.android.core.PreparedNodeLabel? = null
+    /** Automatic restart after an unexpected engine death of an established tunnel (guarded by [publication]). */
+    private val autoRecovery = com.gccwebos.android.core.TunnelAutoRecovery({ android.os.SystemClock.elapsedRealtime() })
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    private fun networkAvailable(): Boolean = try {
+        getSystemService(android.net.ConnectivityManager::class.java)?.activeNetwork != null
+    } catch (_: Exception) { true }
+    /** Caller holds [publication]. Runs a recovery decision; returns true when the owner must stay alive. */
+    private fun applyRecovery(decision: com.gccwebos.android.core.TunnelAutoRecovery.Decision,
+        coordinator: ConnectionCoordinator, available: ConnectionOwnerAvailability.Ready): Boolean = when (decision) {
+        is com.gccwebos.android.core.TunnelAutoRecovery.Decision.Restart -> {
+            scope.launch {
+                delay(decision.delayMillis)
+                synchronized(publication) {
+                    if (destroyed || handoff.state.value != available || !autoRecovery.stillWanted(decision.token)) return@launch
+                    try { coordinator.restart() } catch (_: Exception) { autoRecovery.onUserCommand() }
+                }
+            }
+            true
+        }
+        com.gccwebos.android.core.TunnelAutoRecovery.Decision.WaitingForNetwork -> {
+            if (networkCallback == null) try {
+                val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        synchronized(publication) {
+                            if (destroyed || handoff.state.value != available) return
+                            applyRecovery(autoRecovery.onNetworkAvailable(), coordinator, available)
+                        }
+                    }
+                }
+                getSystemService(android.net.ConnectivityManager::class.java)?.registerDefaultNetworkCallback(callback)
+                networkCallback = callback
+            } catch (_: Exception) { autoRecovery.onUserCommand() }
+            true
+        }
+        else -> false
+    }
+    private fun releaseNetworkCallback() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        try { getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(callback) } catch (_: Exception) { }
+    }
     private var destroyed = false
     private val controls = MutableStateFlow(ConnectionControlState())
     private val binder = LocalBinder()
@@ -166,7 +207,10 @@ internal class ConnectionOwnerService : Service() {
                             connectionControls(if (materialClearFailed) ConnectionState.Failed(Failure.CLEANUP_FAILED) else state, ++revision,
                                 preparedNode)
                             else ConnectionControlState(revision = ++revision)
-                        if (state == ConnectionState.Disconnected || state is ConnectionState.Failed || state is ConnectionState.Blocked) {
+                        val keepForRecovery = applyRecovery(autoRecovery.onState(state, networkAvailable()), coordinator, available)
+                        if (!autoRecovery.recovering) releaseNetworkCallback()
+                        if (!keepForRecovery && !autoRecovery.recovering &&
+                            (state == ConnectionState.Disconnected || state is ConnectionState.Failed || state is ConnectionState.Blocked)) {
                             preparedNode = null
                             expiryTask?.cancel(); expiryTask = null
                             stopSelf()
@@ -187,6 +231,7 @@ internal class ConnectionOwnerService : Service() {
             when (action) {
                 ConnectionPowerAction.Connect -> {
                     if (!controls.value.canConnect) return
+                    autoRecovery.onUserCommand(); releaseNetworkCallback()
                     commandEpoch++; expiryTask?.cancel(); expiryTask = null; preparedNode = null
                     try {
                         startService(Intent(this, ConnectionOwnerService::class.java))
@@ -198,6 +243,7 @@ internal class ConnectionOwnerService : Service() {
                     }
                 }
                 ConnectionPowerAction.Cancel, ConnectionPowerAction.Disconnect -> {
+                    autoRecovery.onUserCommand(); releaseNetworkCallback()
                     commandEpoch++; expiryTask?.cancel(); expiryTask = null
                     coordinator.stop()
                 }
@@ -213,6 +259,7 @@ internal class ConnectionOwnerService : Service() {
             destroyed = true
             commandEpoch++
             expiryTask?.cancel(); expiryTask = null
+            releaseNetworkCallback(); autoRecovery.onUserCommand()
             controls.value = ConnectionControlState(revision = ++revision)
             handoff.retire() // Synchronously fences old commands; lease is retained through cleanup.
         }

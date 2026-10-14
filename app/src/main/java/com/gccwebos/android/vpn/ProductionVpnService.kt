@@ -21,8 +21,8 @@ import android.os.Looper
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.os.Process
-import android.util.Log
 import com.gccwebos.android.BuildConfig
+import com.gccwebos.android.portal.DebugLog
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Full IPv4 routing; all IPv6 is captured and rejected by the independently fixed native rules.
  */
 class ProductionVpnService : VpnService(), SocketProtector {
-    private fun trace(phase: String) { if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=$phase") }
+    private fun trace(phase: String) = DebugLog.i("GCCConnectionEngine", "phase=$phase")
     private val commands = Executors.newSingleThreadExecutor()
     private val watchdog = Executors.newScheduledThreadPool(2)
     private val main = Handler(Looper.getMainLooper())

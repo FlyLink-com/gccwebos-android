@@ -12,8 +12,8 @@ import android.os.Build
 import android.os.Parcel
 import android.os.Process
 import android.os.SystemClock
-import android.util.Log
 import com.gccwebos.android.BuildConfig
+import com.gccwebos.android.portal.DebugLog
 import com.gccwebos.android.core.AuthorizedConfig
 import com.gccwebos.android.core.ConnectionTransportLease
 import com.gccwebos.android.core.LifecycleTunnel
@@ -51,7 +51,7 @@ internal class AndroidVpnTunnel(private val context: Context, private val ownerI
     private val networkProbe: VpnNetworkProbe = HttpsVpnNetworkProbe(),
     private val clearPreparedMaterial: () -> Unit = {}) : LifecycleTunnel, TunnelPreparation, TrafficProbe {
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
-    private fun trace(phase: String) { if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=$phase") }
+    private fun trace(phase: String) = DebugLog.i("GCCConnectionEngine", "phase=$phase")
     private val lock = Any()
     private var endpoint: Endpoint? = null
     private var sequence = 0L

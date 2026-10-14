@@ -505,10 +505,7 @@ internal fun ConnectionOverview(
             }
             ConnectionNotice(account, account.authSessionGeneration, notice)
             if (notice?.second == "connection-failure" || (notice?.second == "connection-read-error" && localReadRecovery))
-                local.recoveryHint?.let { hint ->
-                    Text(hint, color = Brand.Muted, fontSize = 12.sp,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).testTag("connection-recovery-hint"))
-                }
+                local.recoveryHint?.let { ConnectionRecoveryHintLine(it) }
             if (preparationRequest?.let(account::isConnectionPreparationPending) == true) TextButton({
                 preparationRequest?.let(account::cancelConnectionPreparation)
                 preparationRequest = null
@@ -725,3 +722,10 @@ internal const val ConnectionBalancedPageFraction = 0.66f
 /** C12: "上次延迟测试" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
 internal fun connectionNodeLatencyLabel(observation: NodeLatencyObservation?): String =
     if (observation is NodeLatencyObservation.Success) "上次延迟测试" else "延迟"
+
+/** The single actionable line under a connection failure / local error notice. */
+@Composable
+internal fun ConnectionRecoveryHintLine(hint: String) {
+    Text(hint, color = Brand.Muted, fontSize = 12.sp,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).testTag("connection-recovery-hint"))
+}

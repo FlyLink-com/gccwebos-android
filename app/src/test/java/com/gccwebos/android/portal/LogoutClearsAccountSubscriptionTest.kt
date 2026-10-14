@@ -41,11 +41,20 @@ class LogoutClearsAccountSubscriptionTest {
         override fun clear() { if (failClear) throw PortalFailure(PortalFailure.Reason.STORAGE); backing.clear() }
     }
 
+    private class FlakyLibrary(val backing: MemoryManualSourceStore = MemoryManualSourceStore()) : LibraryManualSourceStore {
+        var failReads = false
+        private fun check() { if (failReads) throw PortalFailure(PortalFailure.Reason.STORAGE) }
+        override fun read(): ManualSourceRecord? { check(); return backing.read() }
+        override fun save(record: ManualSourceRecord) = backing.save(record)
+        override fun readLibrary(): ConfigurationLibrary? { check(); return backing.readLibrary() }
+        override fun saveLibrary(library: ConfigurationLibrary) = backing.saveLibrary(library)
+    }
+
     private inner class Fixture {
         val delivery = Delivery()
         val profiles = FlakyProfiles()
         val sessions = FlakySessions().apply { save(saved) }
-        val sources = MemoryManualSourceStore()
+        val sources = FlakyLibrary()
         val choices = MemoryNodeChoiceStore()
         val repo = PortalRepository(object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?) = error("No Portal requests")
@@ -204,5 +213,26 @@ class LogoutClearsAccountSubscriptionTest {
         f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() })
         assertNull(f.profiles.read()); assertNull(f.sessions.read())
         assertEquals(setOf("Local Alpha"), f.imported().flatMap { it.nodes }.map { it.name }.toSet())
+    }
+
+    @Test fun unreadableConfigListStillStopsTheConnectedAccountOwner() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.sources.failReads = true // the library cannot tell which source is active
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals("in-memory selection says account: owner must stop", 1, ownerStops)
+        assertNotEquals(LocalSubscriptionStatus.READY, f.manager.snapshot().status)
+        f.sources.failReads = false
+        f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() })
+        assertNull(f.sessions.read()); assertNull(f.profiles.read())
+        assertEquals(setOf("Local Alpha"), f.imported().flatMap { it.nodes }.map { it.name }.toSet())
+    }
+
+    @Test fun unreadableConfigListWithImportActiveDoesNotStopTheImport() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha")
+        f.sources.failReads = true
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals(0, ownerStops)
     }
 }

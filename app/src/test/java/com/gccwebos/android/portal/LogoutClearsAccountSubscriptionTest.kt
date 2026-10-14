@@ -43,11 +43,14 @@ class LogoutClearsAccountSubscriptionTest {
 
     private class FlakyLibrary(val backing: MemoryManualSourceStore = MemoryManualSourceStore()) : LibraryManualSourceStore {
         var failReads = false
+        var failLibraryWrites = false
         private fun check() { if (failReads) throw PortalFailure(PortalFailure.Reason.STORAGE) }
         override fun read(): ManualSourceRecord? { check(); return backing.read() }
         override fun save(record: ManualSourceRecord) = backing.save(record)
         override fun readLibrary(): ConfigurationLibrary? { check(); return backing.readLibrary() }
-        override fun saveLibrary(library: ConfigurationLibrary) = backing.saveLibrary(library)
+        override fun saveLibrary(library: ConfigurationLibrary) {
+            if (failLibraryWrites) throw PortalFailure(PortalFailure.Reason.STORAGE); backing.saveLibrary(library)
+        }
     }
 
     private inner class Fixture {
@@ -234,5 +237,18 @@ class LogoutClearsAccountSubscriptionTest {
         var ownerStops = 0
         assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
         assertEquals(0, ownerStops)
+    }
+
+    @Test fun doubleStorageFailureStillNeverReadmitsTheAccountAfterRestart() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.profiles.failClear = true; f.sources.failLibraryWrites = true
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals(1, ownerStops)
+        val restarted = LocalSubscriptionManager(f.delivery, f.profiles, SubscriptionSource { error("No network") },
+            OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { now }, LocalSubscriptionAuthority(),
+            manualSources = f.sources)
+        restarted.restore()
+        assertNotEquals(LocalSubscriptionStatus.READY, restarted.snapshot().status)
     }
 }

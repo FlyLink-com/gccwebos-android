@@ -359,4 +359,46 @@ class NodeLatencyControllerTest {
         assertEquals(0, oversized.probe.calls.size)
         assertFalse(oversized.controller.busy)
     }
+
+    @Test fun fullParseCountDoesNotGrowWithNodeCountAndEveryNodeIsProbedExactlyOnce() = runTest {
+        val reads = mutableMapOf<Int, Int>()
+        for (n in listOf(8, 32, 128)) {
+            val f = Fixture(this, count = n); f.import()
+            val readsBefore = f.profiles.reads
+            f.controller.ensureMeasured(); runCurrent(); advanceUntilIdle()
+            assertEquals("probe count exactly N", n, f.probe.calls.size)
+            assertEquals("one verified snapshot for the batch", 1, f.manager.probeSnapshotBuilds)
+            reads[n] = f.profiles.reads - readsBefore
+        }
+        // Storage reads stay ~2 per node (digest-only change detection); full validation/parse is the one build.
+        assertTrue(reads[128]!! <= 2 * 128 + 4)
+    }
+
+    @Test fun configChangeClearAndExpiryRebuildTheSnapshotAndRejectStaleTargets() = runTest {
+        val f = Fixture(this, count = 4); f.import()
+        val targets = f.manager.captureNodeProbeTargets()
+        assertTrue(targets.all { f.manager.isCurrentNodeProbeTarget(it) })
+        assertEquals(1, f.manager.probeSnapshotBuilds)
+        f.time = start.plusSeconds(3601) // expiry
+        assertTrue(targets.none { f.manager.isCurrentNodeProbeTarget(it) })
+        f.time = start
+        f.profiles.read()!!.use { old -> // external storage edit: endpoints moved
+            CachedSubscription(old.binding, artifact(4, prefix = "198.51.100"), old.validUntil, old.url).use(f.profiles::save)
+        }
+        assertTrue(targets.none { f.manager.isCurrentNodeProbeTarget(it) })
+        f.manager.invalidatePending() // version stamp move (clear / source switch) also drops the snapshot
+        val builds = f.manager.probeSnapshotBuilds
+        f.manager.isCurrentNodeProbeTarget(targets[0])
+        assertEquals(builds + 1, f.manager.probeSnapshotBuilds)
+    }
+
+    @Test fun cancelAndNetworkChangeStillRejectLateResults() = runTest {
+        val f = Fixture(this, count = 8); f.import()
+        val gate = CompletableDeferred<Unit>()
+        f.probe.response = { gate.await(); NodeLatencyObservation.Success(10, 7) }
+        f.controller.ensureMeasured(); runCurrent()
+        f.probe.network = 9
+        gate.complete(Unit); runCurrent(); advanceUntilIdle()
+        assertTrue(f.selections().none { f.controller.reading(it) != null })
+    }
 }

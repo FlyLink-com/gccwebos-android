@@ -1030,14 +1030,67 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     /** Recheck results before publication; a target never renews a removed or changed registry. */
     internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget): Boolean = synchronized(lock) {
         if (authority.choices.none { it.selection === target.selection && !it.info }) return@synchronized false
-        withNodeProbeArtifact { raw, choices ->
-            val index = choices.indexOfFirst { it.selection === target.selection }
-            if (index < 0 || choices[index].protocol != target.protocol) return@withNodeProbeArtifact false
-            val endpoint = SafeProxyConfig.probeEndpoints(raw).getOrNull(index) ?: return@withNodeProbeArtifact false
-            endpoint.endpoint == target.endpoint && endpoint.port == target.port && endpoint.protocol == target.protocol &&
-                probeTransport(endpoint) == target.transport
-        } == true
+        val snapshot = probeSnapshot?.takeIf { it.matchesLocked() && storedDigestMatchesLocked(it.digest) } ?: run {
+            probeSnapshot = null
+            probeSnapshotBuilds++
+            val endpoints = withNodeProbeArtifact { raw, _ -> SafeProxyConfig.probeEndpoints(raw) } ?: return@synchronized false
+            ProbeSnapshot(endpoints).also { probeSnapshot = it }
+        }
+        val index = snapshot.choices.indexOfFirst { it.selection === target.selection }
+        if (index < 0 || snapshot.choices[index].protocol != target.protocol) return@synchronized false
+        val endpoint = snapshot.endpoints.getOrNull(index) ?: return@synchronized false
+        endpoint.endpoint == target.endpoint && endpoint.port == target.port && endpoint.protocol == target.protocol &&
+            probeTransport(endpoint) == target.transport
     }
+    /**
+     * Immutable, display-only verified latency snapshot: the full read/decrypt/digest/parse runs once and every
+     * per-node recheck only compares the authority version stamps (epoch, clear version, content digest identity,
+     * source revision/binding/kind, schema, expiry and the exact choice list) plus a digest of the stored bytes, so
+     * external storage edits are still detected without re-validating/re-parsing the YAML. Any change, clear, source
+     * switch or expiry rebuilds it. Never a connection admission: preparation keeps its own fresh read.
+     */
+    private inner class ProbeSnapshot(val endpoints: List<SafeProxyConfig.ProbeEndpoint>) {
+        val epoch = authority.epoch
+        val clearVersion = authority.clearVersion
+        val digest = authority.selectionRevision
+        val sourceRevision = authority.selectionSourceRevision
+        val sourceKind = authority.selectionSourceKind
+        val binding = authority.selectionBinding
+        val until = authority.selectionUntil
+        val schema = authority.selectionSchema
+        val choices = authority.choices
+        fun matchesLocked(): Boolean {
+            val at = now()
+            return authority.epoch == epoch && authority.clearVersion == clearVersion &&
+                authority.selectionClearVersion == clearVersion && authority.selectionRevision === digest &&
+                authority.selectionSourceRevision == sourceRevision && authority.selectionSourceKind == sourceKind &&
+                authority.selectionBinding == binding && authority.selectionUntil == until &&
+                authority.selectionSchema == SafeProxyConfig.SCHEMA_VERSION && schema == SafeProxyConfig.SCHEMA_VERSION &&
+                authority.choices === choices && authority.selectionStatus == LocalSubscriptionStatus.READY &&
+                !authority.selectionRequiresRefresh && !authority.manualStorageBlocked && !authority.incompleteClear &&
+                endpoints.size == choices.size && sourceTimeValid(sourceKind, until) && (until == null || until > at)
+        }
+    }
+    /** Cheap storage recheck: read + SHA-256 only (no validation or YAML parse). Any failure invalidates. */
+    private fun storedDigestMatchesLocked(expected: ByteArray?): Boolean {
+        if (expected == null) return false
+        return try {
+            val bytes = readManualSource()?.use { record ->
+                if (record.kind != ManualSourceKind.LegacyRemote) {
+                    if (record.revision != authority.selectionSourceRevision) return false
+                    record.copyBytes() ?: return false
+                } else null
+            } ?: profiles.read()?.use { it.copyBytes() } ?: return false
+            try {
+                val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+                try { digest.contentEquals(expected) } finally { digest.fill(0) }
+            } finally { bytes.fill(0) }
+        } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { false }
+    }
+    private var probeSnapshot: ProbeSnapshot? = null
+    /** Test evidence: number of full verified artifact reads made by per-node rechecks. */
+    @Volatile internal var probeSnapshotBuilds = 0
+        private set
     private fun probeTransport(endpoint: SafeProxyConfig.ProbeEndpoint): NodeProbeTransport = when (endpoint.protocol) {
         "ss", "vless" -> NodeProbeTransport.Tcp
         "tuic" -> NodeProbeTransport.Quic

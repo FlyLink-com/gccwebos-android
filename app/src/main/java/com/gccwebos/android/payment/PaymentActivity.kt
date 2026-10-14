@@ -156,7 +156,7 @@ open class PaymentActivity : ComponentActivity() {
     }
 
     /** Debug builds only, tag GCCPay: event kinds, codes and hosts. Never a URL path/query, header, cookie or page text. */
-    private fun debugLog(line: String) { if (com.gccwebos.android.BuildConfig.DEBUG) android.util.Log.i("GCCPay", line) }
+    private fun debugLog(line: String) = com.gccwebos.android.portal.DebugLog.i("GCCPay", line)
 
     private fun handOff(uri: String) {
         val now = SystemClock.elapsedRealtime()

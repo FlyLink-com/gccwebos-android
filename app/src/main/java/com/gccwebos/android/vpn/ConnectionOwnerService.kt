@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import com.gccwebos.android.BuildConfig
 import com.gccwebos.android.ConnectionControlState
 import com.gccwebos.android.ConnectionFailure
@@ -24,6 +23,7 @@ import com.gccwebos.android.portal.AtomicPreparedConfigStore
 import com.gccwebos.android.portal.ManualSubscriptionTransport
 import com.gccwebos.android.portal.OneClickConfigGateway
 import com.gccwebos.android.portal.PrepTrace
+import com.gccwebos.android.portal.DebugLog
 import com.gccwebos.android.portal.LiteralConfigAddressPreparer
 import com.gccwebos.android.portal.PortalRepository
 import com.gccwebos.android.portal.PortalFailure
@@ -97,7 +97,7 @@ internal class ConnectionOwnerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        if (BuildConfig.DEBUG) PrepTrace.sink = { Log.i("GCCPrep", it) }
+        if (BuildConfig.DEBUG) PrepTrace.sink = { DebugLog.i("GCCPrep", it) }
         repository = connectionRepository(applicationContext)
         permission = ActivityVpnPermission(applicationContext)
         val directory = File(noBackupFilesDir, "connection-preparation")
@@ -157,11 +157,11 @@ internal class ConnectionOwnerService : Service() {
                     synchronized(publication) {
                         if (destroyed || scope.coroutineContext[Job]?.isActive != true ||
                             handoff.state.value != available || coordinator.state.value != state) return@collect
-                        if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=owner-" + when (state) {
+                        DebugLog.lazy("GCCConnectionEngine") { "phase=owner-" + when (state) {
                             is ConnectionState.Failed -> "failed-${state.reason}"
                             is ConnectionState.Working -> "working-${state.step}"
                             else -> state.javaClass.simpleName
-                        })
+                        } }
                         controls.value = if (BuildConfig.VPN_ENGINE_PACKAGED && Build.VERSION.SDK_INT >= 30)
                             connectionControls(if (materialClearFailed) ConnectionState.Failed(Failure.CLEANUP_FAILED) else state, ++revision,
                                 preparedNode)
@@ -220,7 +220,7 @@ internal class ConnectionOwnerService : Service() {
             try { retirement.await() }
             catch (_: Exception) {
                 // Already unavailable/closed. Never turn a cleanup exception into process death.
-                if (BuildConfig.DEBUG) Log.i("GCCConnectionEngine", "phase=owner-cleanup-unavailable")
+                DebugLog.i("GCCConnectionEngine", "phase=owner-cleanup-unavailable")
             }
             finally { scope.coroutineContext[Job]?.cancel() }
         }

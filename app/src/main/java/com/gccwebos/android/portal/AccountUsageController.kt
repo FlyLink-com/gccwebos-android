@@ -29,7 +29,13 @@ internal class AccountUsageController(
     private val scope: CoroutineScope,
     private val reader: suspend (AccountUsageOwner, Long) -> BoundAccountOverview,
     private val onSessionExpired: () -> Unit = {},
+    /** Upper bound for one overview read; a hung portal GET ends as a recoverable error instead of endless busy. */
+    private val readTimeoutMillis: Long = ReadTimeoutMillis,
 ) {
+    companion object {
+        const val ReadTimeoutMillis = 45_000L
+        const val ReadTimeoutMessage = "读取账户超时，请检查网络后重试"
+    }
     private val lock = Any()
     private val mutableState = MutableStateFlow(AccountUsageSnapshot())
     val state: StateFlow<AccountUsageSnapshot> = mutableState.asStateFlow()
@@ -131,7 +137,9 @@ internal class AccountUsageController(
         try {
             currentCoroutineContext().ensureActive()
             if (!synchronized(lock) { currentLocked(request) }) return
-            val result = reader(request.owner, request.repositoryEpoch)
+            val result = kotlinx.coroutines.withTimeout(readTimeoutMillis) {
+                reader(request.owner, request.repositoryEpoch)
+            }
             currentCoroutineContext().ensureActive()
             synchronized(lock) {
                 if (currentLocked(request) && acceptableLocked(result)) {
@@ -140,6 +148,19 @@ internal class AccountUsageController(
                     // Fence any publisher which captured the previous resource or period.
                     if (changedIdentity) publishEpoch++
                     busy = false
+                    emitLocked()
+                }
+            }
+        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            synchronized(lock) {
+                if (currentLocked(request)) {
+                    // Same recovery path as an ordinary failure: keep the prior sample when present.
+                    if (acceptedReadSequence == request.acceptedSequenceAtStart) {
+                        error = ReadTimeoutMessage
+                        notUpdated = resource != null
+                        busy = false
+                    }
                     emitLocked()
                 }
             }

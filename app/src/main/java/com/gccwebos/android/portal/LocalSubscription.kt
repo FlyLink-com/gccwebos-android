@@ -537,6 +537,35 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             throw PortalFailure(PortalFailure.Reason.STORAGE)
         }
     }
+    /**
+     * Display-only probe read without the authority lock. Never initializes, migrates or blocks storage: any unusual
+     * state (missing store record, pending clear, blocked storage, invalid link) is a plain failure (throws), and the
+     * caller re-checks every authority version under the lock before using the result.
+     */
+    private fun readManualSourceForProbe(): ManualSourceRecord? {
+        val store = manualSources ?: return null
+        if (authority.manualStorageBlocked || authority.incompleteClear) throw PortalFailure(PortalFailure.Reason.STORAGE)
+        // A never-initialized store needs the locked first-write path; that is rare and never per node.
+        if (!authority.manualSourceInitialized) return readManualSource()
+        var pendingClear = false
+        try {
+            val record = store.read() ?: throw PortalFailure(PortalFailure.Reason.STORAGE)
+            try {
+                if (record.clearPending) { pendingClear = true; throw PortalFailure(PortalFailure.Reason.STORAGE) }
+                if (record.kind == ManualSourceKind.ImportedRemote) validateCapability(requireNotNull(record.url))
+                if (record.kind == ManualSourceKind.ExternalRemote) ManualSubscriptionUrlPolicy.validate(requireNotNull(record.url).value)
+            } catch (failure: Exception) { record.close(); throw failure }
+            return record
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) {
+            // Same durable-failure bookkeeping as readManualSource, recorded under the lock only after the IO.
+            synchronized(lock) {
+                authority.manualSourceInitialized = true
+                if (pendingClear) authority.incompleteClear = true else authority.manualStorageBlocked = true
+            }
+            throw PortalFailure(PortalFailure.Reason.STORAGE)
+        }
+    }
     fun sourceKind(): ManualSourceKind = synchronized(lock) {
         readManualSource()?.use { it.kind } ?: ManualSourceKind.LegacyRemote
     }
@@ -951,17 +980,22 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         ++revision
     }
     /** One cache read per batch; no refresh, selection, epoch change or connection admission. */
-    internal fun captureNodeProbeTargets(): List<NodeProbeTarget> = synchronized(lock) {
-        withNodeProbeArtifact { raw, choices ->
-            val endpoints = SafeProxyConfig.probeEndpoints(raw)
+    internal fun captureNodeProbeTargets(): List<NodeProbeTarget> {
+        // One full verified read + parse per batch, outside the lock; the lock only maps the published snapshot.
+        val snapshot = currentProbeSnapshot(verifyStorage = true, forceRebuild = true) ?: return emptyList()
+        return synchronized(lock) {
+            if (!snapshot.matchesLocked()) return@synchronized emptyList()
+            val endpoints = snapshot.endpoints; val choices = snapshot.key.choices
             if (endpoints.size != choices.size || endpoints.indices.any { endpoints[it].protocol != choices[it].protocol })
-                return@withNodeProbeArtifact emptyList()
-            choices.mapIndexedNotNull { index, choice ->
-                if (choice.info) return@mapIndexedNotNull null // Provider notices are never measured or auto-picked.
-                val endpoint = endpoints[index]
-                NodeProbeTarget(choice.selection, endpoint.endpoint, endpoint.protocol, endpoint.port, probeTransport(endpoint))
-            }
-        } ?: emptyList()
+                return@synchronized emptyList()
+            try {
+                choices.mapIndexedNotNull { index, choice ->
+                    if (choice.info) return@mapIndexedNotNull null // Provider notices are never measured or auto-picked.
+                    val endpoint = endpoints[index]
+                    NodeProbeTarget(choice.selection, endpoint.endpoint, endpoint.protocol, endpoint.port, probeTransport(endpoint))
+                }
+            } catch (_: Exception) { emptyList() }
+        }
     }
     /**
      * Probe targets of every saved source that is NOT the active one (the account's cached subscription and each
@@ -1028,26 +1062,36 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         } catch (_: Exception) { null }
     }
     /** Recheck results before publication; a target never renews a removed or changed registry. */
-    internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget): Boolean {
-        // 1) Under the lock: only capture the version key (and a matching snapshot). No IO, no parse.
+    /**
+     * Returns a verified snapshot that is current right now. Under the lock only the version key is captured and the
+     * result published; storage read, digest and the (at most one) parse run outside it. [verifyStorage] = false
+     * skips the storage digest for a snapshot already verified for the same key (the post-probe check always
+     * verifies storage, so an external edit still rejects the result).
+     */
+    private fun currentProbeSnapshot(verifyStorage: Boolean, forceRebuild: Boolean = false): ProbeSnapshot? {
         var cached: ProbeSnapshot? = null
         val key = synchronized(lock) {
-            if (authority.choices.none { it.selection === target.selection && !it.info }) return false
             cached = probeSnapshot?.takeIf { it.matchesLocked() }
             ProbeKey()
         }
-        // 2) Off the lock: storage read + digest, or the one full verified read/parse when no snapshot matches.
-        val snapshot = cached?.takeIf { storedDigestMatches(it.digest) } ?: run {
+        val snapshot = cached?.takeIf { !forceRebuild && (!verifyStorage || storedDigestMatches(it)) } ?: run {
             probeSnapshotBuilds++
             val endpoints = PrepTrace.span("probe-artifact") {
                 readNodeProbeArtifact { raw, _ -> SafeProxyConfig.probeEndpoints(raw) }
-            } ?: return false
+            } ?: return null
             ProbeSnapshot(key, endpoints)
         }
-        // 3) Under the lock: consistency check against the captured key, then publish.
         return synchronized(lock) {
-            if (!snapshot.key.sameAs(key) || !snapshot.matchesLocked()) return@synchronized false
+            if (!snapshot.key.sameAs(key) || !snapshot.matchesLocked()) return@synchronized null
             if (probeSnapshot !== snapshot) probeSnapshot = snapshot
+            snapshot
+        }
+    }
+    internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget, verifyStorage: Boolean = true): Boolean {
+        if (synchronized(lock) { authority.choices.none { it.selection === target.selection && !it.info } }) return false
+        val snapshot = currentProbeSnapshot(verifyStorage) ?: return false
+        return synchronized(lock) {
+            if (!snapshot.matchesLocked()) return@synchronized false
             val index = snapshot.key.choices.indexOfFirst { it.selection === target.selection }
             if (index < 0 || snapshot.key.choices[index].protocol != target.protocol) return@synchronized false
             val endpoint = snapshot.endpoints.getOrNull(index) ?: return@synchronized false
@@ -1094,15 +1138,28 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     @Volatile internal var probeSnapshotBuilds = 0
         private set
     /** Cheap storage recheck: read + SHA-256 only (no validation or YAML parse). Any failure invalidates. */
-    private fun storedDigestMatches(expected: ByteArray?): Boolean {
-        if (expected == null) return false
+    private fun storedDigestMatches(snapshot: ProbeSnapshot): Boolean {
+        val expected = snapshot.digest ?: return false
+        val key = snapshot.key
         return try {
-            val bytes = readManualSource()?.use { record ->
+            val bytes = readManualSourceForProbe()?.use { record ->
                 if (record.kind != ManualSourceKind.LegacyRemote) {
-                    if (record.revision != authority.selectionSourceRevision) return false
+                    if (record.revision != key.sourceRevision || record.kind != key.sourceKind ||
+                        record.validUntil != key.until ||
+                        record.observedStatus?.let { it != LocalSubscriptionStatus.READY } == true) return false
                     record.copyBytes() ?: return false
                 } else null
-            } ?: profiles.read()?.use { it.copyBytes() } ?: return false
+            } ?: run {
+                // Same cheap metadata gates as the full read (no parse): binding, expiry, observation, capability.
+                if (delivery.readLegacyRecovery() != null) return false
+                profiles.read()?.use { profile ->
+                    if (profile.binding != key.binding || profile.validUntil != key.until ||
+                        profile.observedStatus?.let { it != LocalSubscriptionStatus.READY } == true) return false
+                    val url = profile.url ?: delivery.read()?.takeIf { !it.pendingAck }?.url ?: return false
+                    validateCapability(url, profile.binding)
+                    profile.copyBytes()
+                }
+            } ?: return false
             try {
                 val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
                 try { digest.contentEquals(expected) } finally { digest.fill(0) }
@@ -1130,8 +1187,6 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             authority.choices.any { it.selection === target.selection && it.protocol == target.protocol }
     }
     /** Caller holds the authority lock. Unlike nodeSelectionSnapshot, rejection is read-only. */
-    private fun <T> withNodeProbeArtifact(read: (ByteArray, List<ConnectionChoice>) -> T): T? =
-        PrepTrace.span("probe-artifact") { readNodeProbeArtifact(read) }
     private fun <T> readNodeProbeArtifact(read: (ByteArray, List<ConnectionChoice>) -> T): T? {
         var cached: CachedSubscription? = null
         var raw: ByteArray? = null
@@ -1139,7 +1194,7 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             if (authority.selectionStatus != LocalSubscriptionStatus.READY || authority.selectionRequiresRefresh ||
                 authority.selectionSchema != SafeProxyConfig.SCHEMA_VERSION ||
                 authority.selectionClearVersion != authority.clearVersion || authority.choices.isEmpty()) return null
-            val selectedSource = readManualSource()
+            val selectedSource = readManualSourceForProbe()
             if (selectedSource != null) try {
                 if (selectedSource.kind != ManualSourceKind.LegacyRemote)
                     return withManualNodeProbeArtifact(selectedSource, read)

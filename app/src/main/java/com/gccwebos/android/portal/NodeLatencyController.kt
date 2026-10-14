@@ -267,7 +267,7 @@ internal class NodeLatencyController(
     private suspend fun measureOne(target: NodeProbeTarget, request: Long, account: Long, network: Long?) {
         currentCoroutineContext().ensureActive()
         if (!current(request, account) || networkKey() != network) return
-        val before = PrepTrace.span("latency-recheck-before") { targetCurrent(target) }
+        val before = PrepTrace.span("latency-recheck-before") { targetCurrent(target, verifyStorage = false) }
         currentCoroutineContext().ensureActive()
         if (!current(request, account) || networkKey() != network) return
         if (!before) { readings.remove(target.selection); return }
@@ -392,8 +392,9 @@ internal class NodeLatencyController(
         }
     }
 
-    private suspend fun targetCurrent(target: NodeProbeTarget): Boolean = withContext(ioDispatcher) {
-        try { manager.isCurrentNodeProbeTarget(target) }
+    /** Before a probe the version-keyed snapshot suffices; after it storage is re-verified before publishing. */
+    private suspend fun targetCurrent(target: NodeProbeTarget, verifyStorage: Boolean = true): Boolean = withContext(ioDispatcher) {
+        try { manager.isCurrentNodeProbeTarget(target, verifyStorage) }
         catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) { false }
     }

@@ -372,8 +372,8 @@ class NodeLatencyControllerTest {
             assertEquals("one verified snapshot for the batch", 1, f.manager.probeSnapshotBuilds)
             reads[n] = f.profiles.reads - readsBefore
         }
-        // Storage reads stay ~2 per node (digest-only change detection); full validation/parse is the one build.
-        assertTrue(reads[128]!! <= 2 * 128 + 4)
+        // One storage digest per node (post-probe only); the pre-probe check reuses the version-keyed snapshot.
+        assertTrue("reads=${reads[128]}", reads[128]!! <= 128 + 4)
     }
 
     @Test fun configChangeClearAndExpiryRebuildTheSnapshotAndRejectStaleTargets() = runTest {

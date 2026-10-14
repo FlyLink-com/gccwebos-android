@@ -590,7 +590,7 @@ internal fun UnknownNodeDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 
 /** Loading skeleton / empty / error state of the node list with one recovery action. Rendering only. */
 @Composable
-private fun NodeListNoticeView(notice: NodeListNotice, onAction: (NodeListAction) -> Unit) {
+internal fun NodeListNoticeView(notice: NodeListNotice, onAction: (NodeListAction) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp).testTag("nodes-list-notice"),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (notice.loading) repeat(3) {

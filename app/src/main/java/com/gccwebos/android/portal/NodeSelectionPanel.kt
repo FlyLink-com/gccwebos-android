@@ -280,6 +280,17 @@ internal fun NodeSelectionPanel(state: NodeSelectionController, nodes: List<Safe
                                 modifier = Modifier.testTag("subscription-node-${node.index}"), inspectionIndex = node.index)
                         }
                     }
+                    val listNotice = nodeListNotice(value.status, state.busy,
+                        hasRows = (showSourceRows && proxyCount > 0) || extraCount > 0,
+                        hasCapability = hasCapability, authenticated = authenticated, canImport = onImport != null,
+                        detail = state.message)
+                    if (showSourceRows && listNotice != null && !(readOnlyNodes.isNotEmpty() && connectionActive))
+                        NodeListNoticeView(listNotice, onAction = { action -> when (action) {
+                            NodeListAction.Retry -> state.refresh()
+                            NodeListAction.Import -> onImport?.invoke()
+                            NodeListAction.Account -> openAccount()
+                            NodeListAction.None -> Unit
+                        } })
                     extraRows?.invoke(this)
                 }
             }
@@ -575,4 +586,21 @@ internal fun UnknownNodeDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         icon = GccDialogIcon.Warning, testTag = "unknown-node-dialog",
         primary = GccDialogAction("继续选择", onConfirm, testTag = "unknown-node-continue"),
         secondary = GccDialogAction("取消", onDismiss, testTag = "unknown-node-cancel"))
+}
+
+/** Loading skeleton / empty / error state of the node list with one recovery action. Rendering only. */
+@Composable
+private fun NodeListNoticeView(notice: NodeListNotice, onAction: (NodeListAction) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp).testTag("nodes-list-notice"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (notice.loading) repeat(3) {
+            Box(Modifier.fillMaxWidth().heightIn(min = 40.dp)
+                .background(Brand.RowDivider.copy(alpha = .10f), NodeRowShape).testTag("nodes-skeleton-row"))
+        }
+        Text(notice.message, color = Brand.Muted, fontSize = 12.sp, modifier = Modifier.testTag("nodes-list-notice-text"))
+        val label = notice.actionLabel
+        if (!notice.loading && notice.action != NodeListAction.None && label != null)
+            TextButton(onClick = { onAction(notice.action) }, modifier = Modifier.heightIn(min = 48.dp)
+                .testTag("nodes-list-notice-action")) { Text(label) }
+    }
 }

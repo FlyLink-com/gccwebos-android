@@ -25,7 +25,9 @@ class NodeLatencyControllerTest {
         var reads = 0
         var saves = 0
         var clears = 0
-        override fun read(): CachedSubscription? { reads++; return memory.read() }
+        @Volatile var gate: java.util.concurrent.CountDownLatch? = null
+        @Volatile var entered: java.util.concurrent.CountDownLatch? = null
+        override fun read(): CachedSubscription? { reads++; entered?.countDown(); gate?.await(); return memory.read() }
         override fun save(value: CachedSubscription) { saves++; memory.save(value) }
         override fun clear() { clears++; memory.clear() }
     }
@@ -400,5 +402,37 @@ class NodeLatencyControllerTest {
         f.probe.network = 9
         gate.complete(Unit); runCurrent(); advanceUntilIdle()
         assertTrue(f.selections().none { f.controller.reading(it) != null })
+    }
+
+    @Test fun stalledStorageDuringSnapshotBuildDoesNotBlockUiLockReaders() = runTest {
+        val f = Fixture(this, count = 8); f.import()
+        val targets = f.manager.captureNodeProbeTargets()
+        val gate = java.util.concurrent.CountDownLatch(1); val entered = java.util.concurrent.CountDownLatch(1)
+        f.profiles.entered = entered; f.profiles.gate = gate
+        val worker = Thread { f.manager.isCurrentNodeProbeTarget(targets[0]) }.apply { start() }
+        try {
+            assertTrue("worker reached storage", entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val started = System.nanoTime()
+            // UI-side reads (row masking, snapshot) take the shared lock; they must not wait for the stalled read.
+            val ui = Thread { f.manager.isNodeProbeTargetRegistryCurrent(targets[1]); f.manager.nodeSelectionSnapshot() }
+            f.profiles.gate = null // the UI snapshot read itself must not stall in this fixture
+            ui.start(); ui.join(2_000)
+            assertFalse("UI read waited on the storage stall", ui.isAlive)
+            assertTrue(System.nanoTime() - started < 2_000_000_000L)
+        } finally { gate.countDown(); worker.join(5_000) }
+    }
+
+    @Test fun accountSwitchAndSourceVersionMoveRejectSnapshotResults() = runTest {
+        val f = Fixture(this, count = 4); f.import()
+        val selection = f.selections()[0]
+        f.probe.response = { f.auth++; NodeLatencyObservation.Success(11, 7) } // account switch mid-probe
+        f.controller.ensureMeasured(selection); runCurrent(); advanceUntilIdle()
+        assertNull(f.controller.reading(selection))
+        f.probe.response = { // source switch mid-probe: a different source's bytes become current
+            f.profiles.read()!!.use { old -> CachedSubscription(old.binding, artifact(4, prefix = "203.0.113"), old.validUntil, old.url).use(f.profiles::save) }
+            NodeLatencyObservation.Success(11, 7)
+        }
+        advanceTimeBy(31_000); f.controller.refresh(selection); runCurrent(); advanceUntilIdle()
+        assertNull(f.controller.reading(selection))
     }
 }

@@ -1028,19 +1028,47 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         } catch (_: Exception) { null }
     }
     /** Recheck results before publication; a target never renews a removed or changed registry. */
-    internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget): Boolean = synchronized(lock) {
-        if (authority.choices.none { it.selection === target.selection && !it.info }) return@synchronized false
-        val snapshot = probeSnapshot?.takeIf { it.matchesLocked() && storedDigestMatchesLocked(it.digest) } ?: run {
-            probeSnapshot = null
-            probeSnapshotBuilds++
-            val endpoints = withNodeProbeArtifact { raw, _ -> SafeProxyConfig.probeEndpoints(raw) } ?: return@synchronized false
-            ProbeSnapshot(endpoints).also { probeSnapshot = it }
+    internal fun isCurrentNodeProbeTarget(target: NodeProbeTarget): Boolean {
+        // 1) Under the lock: only capture the version key (and a matching snapshot). No IO, no parse.
+        var cached: ProbeSnapshot? = null
+        val key = synchronized(lock) {
+            if (authority.choices.none { it.selection === target.selection && !it.info }) return false
+            cached = probeSnapshot?.takeIf { it.matchesLocked() }
+            ProbeKey()
         }
-        val index = snapshot.choices.indexOfFirst { it.selection === target.selection }
-        if (index < 0 || snapshot.choices[index].protocol != target.protocol) return@synchronized false
-        val endpoint = snapshot.endpoints.getOrNull(index) ?: return@synchronized false
-        endpoint.endpoint == target.endpoint && endpoint.port == target.port && endpoint.protocol == target.protocol &&
-            probeTransport(endpoint) == target.transport
+        // 2) Off the lock: storage read + digest, or the one full verified read/parse when no snapshot matches.
+        val snapshot = cached?.takeIf { storedDigestMatches(it.digest) } ?: run {
+            probeSnapshotBuilds++
+            val endpoints = PrepTrace.span("probe-artifact") {
+                readNodeProbeArtifact { raw, _ -> SafeProxyConfig.probeEndpoints(raw) }
+            } ?: return false
+            ProbeSnapshot(key, endpoints)
+        }
+        // 3) Under the lock: consistency check against the captured key, then publish.
+        return synchronized(lock) {
+            if (!snapshot.key.sameAs(key) || !snapshot.matchesLocked()) return@synchronized false
+            if (probeSnapshot !== snapshot) probeSnapshot = snapshot
+            val index = snapshot.key.choices.indexOfFirst { it.selection === target.selection }
+            if (index < 0 || snapshot.key.choices[index].protocol != target.protocol) return@synchronized false
+            val endpoint = snapshot.endpoints.getOrNull(index) ?: return@synchronized false
+            endpoint.endpoint == target.endpoint && endpoint.port == target.port && endpoint.protocol == target.protocol &&
+                probeTransport(endpoint) == target.transport
+        }
+    }
+    /** Caller holds the lock. Version stamps the snapshot is valid for. */
+    private inner class ProbeKey {
+        val epoch = authority.epoch
+        val clearVersion = authority.clearVersion
+        val digest = authority.selectionRevision
+        val sourceRevision = authority.selectionSourceRevision
+        val sourceKind = authority.selectionSourceKind
+        val binding = authority.selectionBinding
+        val until = authority.selectionUntil
+        val choices = authority.choices
+        fun sameAs(other: ProbeKey) = epoch == other.epoch && clearVersion == other.clearVersion &&
+            digest === other.digest && sourceRevision == other.sourceRevision && sourceKind == other.sourceKind &&
+            binding == other.binding && until == other.until && choices === other.choices
+        fun currentLocked() = sameAs(ProbeKey())
     }
     /**
      * Immutable, display-only verified latency snapshot: the full read/decrypt/digest/parse runs once and every
@@ -1049,30 +1077,24 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
      * external storage edits are still detected without re-validating/re-parsing the YAML. Any change, clear, source
      * switch or expiry rebuilds it. Never a connection admission: preparation keeps its own fresh read.
      */
-    private inner class ProbeSnapshot(val endpoints: List<SafeProxyConfig.ProbeEndpoint>) {
-        val epoch = authority.epoch
-        val clearVersion = authority.clearVersion
-        val digest = authority.selectionRevision
-        val sourceRevision = authority.selectionSourceRevision
-        val sourceKind = authority.selectionSourceKind
-        val binding = authority.selectionBinding
-        val until = authority.selectionUntil
-        val schema = authority.selectionSchema
-        val choices = authority.choices
+    private inner class ProbeSnapshot(val key: ProbeKey, val endpoints: List<SafeProxyConfig.ProbeEndpoint>) {
+        val digest get() = key.digest
         fun matchesLocked(): Boolean {
             val at = now()
-            return authority.epoch == epoch && authority.clearVersion == clearVersion &&
-                authority.selectionClearVersion == clearVersion && authority.selectionRevision === digest &&
-                authority.selectionSourceRevision == sourceRevision && authority.selectionSourceKind == sourceKind &&
-                authority.selectionBinding == binding && authority.selectionUntil == until &&
-                authority.selectionSchema == SafeProxyConfig.SCHEMA_VERSION && schema == SafeProxyConfig.SCHEMA_VERSION &&
-                authority.choices === choices && authority.selectionStatus == LocalSubscriptionStatus.READY &&
+            return key.currentLocked() && authority.selectionClearVersion == key.clearVersion &&
+                authority.selectionSchema == SafeProxyConfig.SCHEMA_VERSION &&
+                authority.selectionStatus == LocalSubscriptionStatus.READY &&
                 !authority.selectionRequiresRefresh && !authority.manualStorageBlocked && !authority.incompleteClear &&
-                endpoints.size == choices.size && sourceTimeValid(sourceKind, until) && (until == null || until > at)
+                endpoints.size == key.choices.size && sourceTimeValid(key.sourceKind, key.until) &&
+                (key.until == null || key.until > at)
         }
     }
+    @Volatile private var probeSnapshot: ProbeSnapshot? = null
+    /** Test evidence: number of full verified artifact reads made by per-node rechecks. */
+    @Volatile internal var probeSnapshotBuilds = 0
+        private set
     /** Cheap storage recheck: read + SHA-256 only (no validation or YAML parse). Any failure invalidates. */
-    private fun storedDigestMatchesLocked(expected: ByteArray?): Boolean {
+    private fun storedDigestMatches(expected: ByteArray?): Boolean {
         if (expected == null) return false
         return try {
             val bytes = readManualSource()?.use { record ->
@@ -1087,10 +1109,6 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             } finally { bytes.fill(0) }
         } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { false }
     }
-    private var probeSnapshot: ProbeSnapshot? = null
-    /** Test evidence: number of full verified artifact reads made by per-node rechecks. */
-    @Volatile internal var probeSnapshotBuilds = 0
-        private set
     private fun probeTransport(endpoint: SafeProxyConfig.ProbeEndpoint): NodeProbeTransport = when (endpoint.protocol) {
         "ss", "vless" -> NodeProbeTransport.Tcp
         "tuic" -> NodeProbeTransport.Quic

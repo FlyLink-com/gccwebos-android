@@ -93,7 +93,9 @@ import kotlinx.coroutines.flow.first
 /** Source-confirmed origins; constructing a client does not contact production. */
 internal fun productionRepository(context: Context): PortalRepository {
     val policy = OriginPolicy("https://portal.gccwebos.com", setOf("https://sub.gccwebos.com"))
+    com.gccwebos.android.time.TrustedClock.process.install(com.gccwebos.android.time.PrefsTrustedTimeStore(context))
     return PortalRepository(HttpsPortalTransport(policy), EncryptedDeliveryStore(context), policy, SystemClock::elapsedRealtime,
+        now = com.gccwebos.android.time.TrustedClock::now,
         sessions = EncryptedSessionStore(context), profiles = EncryptedLocalProfileStore(context),
         allowHostnamePreparation = BuildConfig.CONNECTION_ENDPOINT_HOSTNAME,
         manualSources = EncryptedManualSourceStore(context),

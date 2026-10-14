@@ -254,7 +254,7 @@ internal fun ConnectionOverview(
     control: ConnectionControlState = ConnectionControlState(),
     onPowerAction: ((ConnectionPowerAction) -> Unit)? = null,
     openRegistration: () -> Unit = openAccount,
-    nowSource: () -> Instant = Instant::now,
+    nowSource: () -> Instant = com.gccwebos.android.time.TrustedClock::now,
     trafficSampler: () -> TrafficCounterSample = ::readAppTrafficCounters,
 ) {
     val snapshot = account.localSubscription

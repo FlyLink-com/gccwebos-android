@@ -118,7 +118,7 @@ internal class ConnectionOwnerService : Service() {
                     result.config.validUntil?.let { until ->
                         expiryTask = scope.launch {
                             // Recheck wall clock so forward jumps and delayed wakeups cannot renew authority.
-                            while (Instant.now() < until) delay(1_000)
+                            while (com.gccwebos.android.time.TrustedClock.now() < until) delay(1_000)
                             synchronized(publication) { if (!destroyed && commandEpoch == epoch) {
                                 (handoff.state.value as? ConnectionOwnerAvailability.Ready)?.owner?.stop()
                             } }

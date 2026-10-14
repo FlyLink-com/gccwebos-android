@@ -114,7 +114,9 @@ private class SecretBuffer : java.io.ByteArrayOutputStream() {
 private fun isolatedClient() = OkHttpClient.Builder().cookieJar(CookieJar.NO_COOKIES)
     .followRedirects(false).followSslRedirects(false).cache(null)
     .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS)
-    .callTimeout(30, TimeUnit.SECONDS).retryOnConnectionFailure(false).build()
+    .callTimeout(30, TimeUnit.SECONDS).retryOnConnectionFailure(false)
+    // Official portal / subscription only: their HTTPS Date anchors subscription-expiry time.
+    .addNetworkInterceptor(com.gccwebos.android.time.TrustedClock.dateInterceptor).build()
 private class BinaryResponse(val status: Int, val bytes: ByteArray, val validUntil: String? = null,
     val userinfo: List<String> = emptyList()) {
     override fun toString() = "BinaryResponse(status=$status)"

@@ -623,11 +623,11 @@ internal fun ResourceCard(state: AccountController, showOperationState: Boolean 
     val resource = if (showReadProgress) state.resource else if (verified)
         state.resource ?: usage.resource.takeIf { usage.authenticated } else null
     val countdownEnabled = verified && !state.busy && state.error == null && resource is Resource.Available
-    val now by produceState(initialValue = Instant.now(), countdownEnabled, resource) {
-        value = Instant.now()
+    val now by produceState(initialValue = com.gccwebos.android.time.TrustedClock.now(), countdownEnabled, resource) {
+        value = com.gccwebos.android.time.TrustedClock.now()
         while (countdownEnabled) {
             delay(1_000)
-            value = Instant.now()
+            value = com.gccwebos.android.time.TrustedClock.now()
         }
     }
     val display = resourcePresentation(state.authenticated, resource, state.busy && showReadProgress, state.error, now)

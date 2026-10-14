@@ -210,7 +210,7 @@ internal class AndroidVpnTunnel(private val context: Context, private val ownerI
 
     private fun current(next: Endpoint): Boolean = synchronized(lock) {
         endpoint === next && next.receipt.isCurrent() &&
-            next.expiry?.let { it > java.time.Instant.now() } != false
+            next.expiry?.let { it > com.gccwebos.android.time.TrustedClock.now() } != false
     }
     private fun vpnNetworks(): List<Network> = if (Build.VERSION.SDK_INT < 30) emptyList() else
         connectivity.allNetworks.filter {

@@ -25,7 +25,9 @@ class NodeLatencyControllerTest {
         var reads = 0
         var saves = 0
         var clears = 0
-        override fun read(): CachedSubscription? { reads++; return memory.read() }
+        @Volatile var gate: java.util.concurrent.CountDownLatch? = null
+        @Volatile var entered: java.util.concurrent.CountDownLatch? = null
+        override fun read(): CachedSubscription? { reads++; entered?.countDown(); gate?.await(); return memory.read() }
         override fun save(value: CachedSubscription) { saves++; memory.save(value) }
         override fun clear() { clears++; memory.clear() }
     }
@@ -358,5 +360,79 @@ class NodeLatencyControllerTest {
         oversized.controller.ensureMeasured(); runCurrent()
         assertEquals(0, oversized.probe.calls.size)
         assertFalse(oversized.controller.busy)
+    }
+
+    @Test fun fullParseCountDoesNotGrowWithNodeCountAndEveryNodeIsProbedExactlyOnce() = runTest {
+        val reads = mutableMapOf<Int, Int>()
+        for (n in listOf(8, 32, 128)) {
+            val f = Fixture(this, count = n); f.import()
+            val readsBefore = f.profiles.reads
+            f.controller.ensureMeasured(); runCurrent(); advanceUntilIdle()
+            assertEquals("probe count exactly N", n, f.probe.calls.size)
+            assertEquals("one verified snapshot for the batch", 1, f.manager.probeSnapshotBuilds)
+            reads[n] = f.profiles.reads - readsBefore
+        }
+        // One storage digest per node (post-probe only); the pre-probe check reuses the version-keyed snapshot.
+        assertTrue("reads=${reads[128]}", reads[128]!! <= 128 + 4)
+    }
+
+    @Test fun configChangeClearAndExpiryRebuildTheSnapshotAndRejectStaleTargets() = runTest {
+        val f = Fixture(this, count = 4); f.import()
+        val targets = f.manager.captureNodeProbeTargets()
+        assertTrue(targets.all { f.manager.isCurrentNodeProbeTarget(it) })
+        assertEquals(1, f.manager.probeSnapshotBuilds)
+        f.time = start.plusSeconds(3601) // expiry
+        assertTrue(targets.none { f.manager.isCurrentNodeProbeTarget(it) })
+        f.time = start
+        f.profiles.read()!!.use { old -> // external storage edit: endpoints moved
+            CachedSubscription(old.binding, artifact(4, prefix = "198.51.100"), old.validUntil, old.url).use(f.profiles::save)
+        }
+        assertTrue(targets.none { f.manager.isCurrentNodeProbeTarget(it) })
+        f.manager.invalidatePending() // version stamp move (clear / source switch) also drops the snapshot
+        val builds = f.manager.probeSnapshotBuilds
+        f.manager.isCurrentNodeProbeTarget(targets[0])
+        assertEquals(builds + 1, f.manager.probeSnapshotBuilds)
+    }
+
+    @Test fun cancelAndNetworkChangeStillRejectLateResults() = runTest {
+        val f = Fixture(this, count = 8); f.import()
+        val gate = CompletableDeferred<Unit>()
+        f.probe.response = { gate.await(); NodeLatencyObservation.Success(10, 7) }
+        f.controller.ensureMeasured(); runCurrent()
+        f.probe.network = 9
+        gate.complete(Unit); runCurrent(); advanceUntilIdle()
+        assertTrue(f.selections().none { f.controller.reading(it) != null })
+    }
+
+    @Test fun stalledStorageDuringSnapshotBuildDoesNotBlockUiLockReaders() = runTest {
+        val f = Fixture(this, count = 8); f.import()
+        val targets = f.manager.captureNodeProbeTargets()
+        val gate = java.util.concurrent.CountDownLatch(1); val entered = java.util.concurrent.CountDownLatch(1)
+        f.profiles.entered = entered; f.profiles.gate = gate
+        val worker = Thread { f.manager.isCurrentNodeProbeTarget(targets[0]) }.apply { start() }
+        try {
+            assertTrue("worker reached storage", entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val started = System.nanoTime()
+            // UI-side reads (row masking, snapshot) take the shared lock; they must not wait for the stalled read.
+            val ui = Thread { f.manager.isNodeProbeTargetRegistryCurrent(targets[1]); f.manager.nodeSelectionSnapshot() }
+            f.profiles.gate = null // the UI snapshot read itself must not stall in this fixture
+            ui.start(); ui.join(2_000)
+            assertFalse("UI read waited on the storage stall", ui.isAlive)
+            assertTrue(System.nanoTime() - started < 2_000_000_000L)
+        } finally { gate.countDown(); worker.join(5_000) }
+    }
+
+    @Test fun accountSwitchAndSourceVersionMoveRejectSnapshotResults() = runTest {
+        val f = Fixture(this, count = 4); f.import()
+        val selection = f.selections()[0]
+        f.probe.response = { f.auth++; NodeLatencyObservation.Success(11, 7) } // account switch mid-probe
+        f.controller.ensureMeasured(selection); runCurrent(); advanceUntilIdle()
+        assertNull(f.controller.reading(selection))
+        f.probe.response = { // source switch mid-probe: a different source's bytes become current
+            f.profiles.read()!!.use { old -> CachedSubscription(old.binding, artifact(4, prefix = "203.0.113"), old.validUntil, old.url).use(f.profiles::save) }
+            NodeLatencyObservation.Success(11, 7)
+        }
+        advanceTimeBy(31_000); f.controller.refresh(selection); runCurrent(); advanceUntilIdle()
+        assertNull(f.controller.reading(selection))
     }
 }

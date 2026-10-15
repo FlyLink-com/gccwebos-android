@@ -1,4 +1,14 @@
-# M0 构建收口记录
+# 构建与验收证据索引
+
+## 当前入口（2026-10-14 UTC）
+
+- [PROJECT_STATUS](PROJECT_STATUS.md) 区分源码、发布、构建、设备与线上证据。
+- [v0.4.3](https://github.com/FlyLink-com/feilian-vpn-releases/releases/tag/v0.4.3) 已公开发布，对应 `495779cf900c69046423c9161a21a10d24da2b99` / versionCode 10；发布声明不等于本轮独立复跑。
+- 云端任务的预算阻塞与 runner 等待分别记录；用户授权本地验证后合并。不把未启动、排队或跳过写成通过。
+- 当前补验属于各 PR 的精确源码，不能套用到后续合成树。文档变更本身仅做 `git diff --check`。
+- 以下完整保留 M0 的精确提交、哈希与失败历史，只描述当时范围。
+
+# M0 构建收口记录（历史）
 
 范围：Android 工程、Debug 构建、JUnit、Lint、测试包编译、签名与安装启动；不接入真实 VPN 或后台。起始基线为 PR #1 的 `dbd4b86700b4ca88eaa0b9bb64caf6201ee6d753`。PR #2 合入 `main@abb7b7c717a5911b88f1883d17cb99e28f3aaaea` 的修复已保留，M0 收口集中在 [PR #3](https://github.com/gccwebos-com/gccwebos-android/pull/3)。本记录不自动合并 main 或发布。
 

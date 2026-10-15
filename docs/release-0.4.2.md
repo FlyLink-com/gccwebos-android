@@ -100,4 +100,3 @@
   约 140,166,918 字节。zipalign -c 4 通过；`aapt dump badging` 确认 package/version；
   `verify_release_policy.py --apk` PASS。此前 #41 未签名/已签名包已移至 `superseded-pre-ui2/`。
 - **未做**：签名、打标签、创建 GitHub Release、装到 OPPO、官网切换。
-

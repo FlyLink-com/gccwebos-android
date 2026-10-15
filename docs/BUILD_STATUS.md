@@ -82,4 +82,3 @@ UI 用例为 `allFourDestinationsRemainAccessible` 和 `realVpnIsExplicitlyUnava
 保留 9 项 Lint 警告及日志中的 Kotlin annotation target、Compose 测试 API 弃用提示；没有通过关闭 Lint 隐藏它们。物理真机、真实 VPN／TUN、后台、节点、支付、推荐归因、正式签名和商店发布均未验收。本轮不自动合并或发布。
 
 [初始 ZIP 的离线诊断与构建阻塞历史](../evidence/initial-build-status.md) 原文保留；其中“未取得 Wrapper／未运行 CI”等属于导入当时的历史，不代表本次已验证基线。
-

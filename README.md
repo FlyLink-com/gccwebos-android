@@ -134,4 +134,3 @@ CI 在 API 36 x86_64 临时模拟器安装同一个已编译 APK，执行显式 
 - [连接协调器合同](docs/connection-coordinator.md)
 - [后台合同边界](docs/backend-contracts.md)
 - [里程碑](docs/roadmap.md)
-

@@ -78,4 +78,3 @@ PR 合并、本地验证、实机验证与公开发布分别记账，详见 [当
 - 两项 Android UI 测试、Gradle/JUnit/Lint、APK 签名和真机测试未运行。
 - 实际 Android 构建在 Wrapper 下载阶段失败：`curl: (6) Could not resolve host: raw.githubusercontent.com`。
 - M0 仍为**实现已推进、Android 构建与接口合同门槛未完成**。
-

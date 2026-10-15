@@ -66,6 +66,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true; buildConfig = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
     lint { abortOnError = true }
     // Go already strips this verified library (-s -w). NDK stripping rewrites ELF
     // metadata even then; preserve its fixed byte identity for every APK variant.
@@ -140,6 +141,9 @@ dependencies {
     implementation("com.google.zxing:core:3.4.1")
     testImplementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation(platform(composeBom))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     androidTestImplementation(platform(composeBom))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

@@ -4,23 +4,24 @@ package com.gccwebos.android.portal
  * Debug-only timing marks for the connection-preparation and configuration-import paths. Release
  * builds never install a sink, so nothing is recorded or logged. Marks carry only a fixed phase
  * name and, for spans, a millisecond duration; never a URL, hostname, address or configuration byte.
+ * As defense in depth, every line is passed through [SensitiveLogRedaction] before the sink.
  */
 internal object PrepTrace {
     @Volatile var sink: ((String) -> Unit)? = null
-    fun mark(phase: String) { sink?.invoke(phase) }
+    fun mark(phase: String) { sink?.invoke(SensitiveLogRedaction.redact(phase)) }
 
     /** Builds the text only when a sink is installed, so release builds never format it. */
-    inline fun markLazy(text: () -> String) { sink?.invoke(text()) }
+    inline fun markLazy(text: () -> String) { sink?.invoke(SensitiveLogRedaction.redact(text())) }
 
     /** Runs [block]; with a sink installed it also records "<phase>-begin" and "<phase>-end +N ms". */
     inline fun <T> span(phase: String, block: () -> T): T {
         val out = sink ?: return block()
-        out("$phase-begin")
+        out(SensitiveLogRedaction.redact("$phase-begin"))
         val start = System.nanoTime()
         try {
             return block()
         } finally {
-            out("$phase-end +${(System.nanoTime() - start) / 1_000_000} ms")
+            out(SensitiveLogRedaction.redact("$phase-end +${(System.nanoTime() - start) / 1_000_000} ms"))
         }
     }
 
@@ -30,7 +31,7 @@ internal object PrepTrace {
         val start = System.nanoTime()
         return synchronized(lock) {
             val waited = (System.nanoTime() - start) / 1_000_000
-            if (waited >= 16) out("$phase-lock-wait +$waited ms thread=${Thread.currentThread().name}")
+            if (waited >= 16) out(SensitiveLogRedaction.redact("$phase-lock-wait +$waited ms thread=${Thread.currentThread().name}"))
             block()
         }
     }

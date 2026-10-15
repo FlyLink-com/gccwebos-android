@@ -17,7 +17,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -34,13 +34,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gccwebos.android.R
 
-internal const val OfficialWebsiteUrl = "https://gccwebos.com"
+internal const val OfficialWebsiteUrl = "https://flinkvpn.com"
 internal const val OfficialWebsiteTitle = "其他平台如何使用我们的订阅"
 internal const val OfficialWebsiteAction = "查看多端导入教程"
 
 /**
  * Compact single-row link to the multi-platform guide on the official website. Bundled presentation only;
- * the fixed website is opened exclusively by an explicit click. Static: no mascot, no looping glow.
+ * the fixed website is opened exclusively by an explicit click. Opaque blue-purple neon gradient with a breathing cyan rim
+ * ([BreathingGlowOverlay]: only while visible and resumed, static under reduce-motion, separate overlay under the text).
  */
 @Composable
 internal fun OfficialWebsiteCard(
@@ -51,11 +52,14 @@ internal fun OfficialWebsiteCard(
 ) {
     val context = LocalContext.current
     var unavailable by remember { mutableStateOf(false) }
-    GlassSurface(modifier.fillMaxWidth().testTag("official-website-card"),
-        edge = BorderStroke(1.dp, Color.White.copy(alpha = .12f)), tint = SolidColor(Color(0xFF0B1426).copy(alpha = .75f))) {
+    val (shown, trackShown) = rememberShownState()
+    GlassSurface(trackShown(modifier.fillMaxWidth()).testTag("official-website-card"),
+        edge = BorderStroke(1.dp, Color.White.copy(alpha = .12f)), tint = OfficialWebsiteGradient) {
+        Box {
+            BreathingGlowOverlay(radius = 22.dp, shown = shown, tag = "official-website-glow")
         Column {
             BoxWithConstraints(Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                .clickable(role = Role.Button, onClickLabel = "访问官网 gccwebos.com") {
+                .clickable(role = Role.Button, onClickLabel = "访问官网 flinkvpn.com") {
                     unavailable = false
                     try {
                         if (opener != null) opener(OfficialWebsiteUrl)
@@ -71,7 +75,7 @@ internal fun OfficialWebsiteCard(
                     Column(textModifier, verticalArrangement = Arrangement.spacedBy(1.dp)) {
                         Text(OfficialWebsiteTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.fillMaxWidth().testTag("official-website-title"))
-                        Text(OfficialWebsiteAction, color = Brand.Cyan, style = MaterialTheme.typography.labelMedium,
+                        Text(OfficialWebsiteAction, color = Brand.Text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
                             modifier = Modifier.fillMaxWidth().testTag("official-website-action"))
                     }
                 }
@@ -94,8 +98,19 @@ internal fun OfficialWebsiteCard(
                 modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 10.dp)
                     .testTag("official-website-error").semantics { liveRegion = LiveRegionMode.Polite })
         }
+        }
     }
 }
+
+/**
+ * Neon blue → indigo → purple (the brand action tokens) under a light [Brand.Background] scrim, fully opaque so the glass
+ * behind never shows through. Light enough to read as neon, dark enough for [Brand.Text] at >= 4.5:1 on every stop,
+ * including under the surface's white top reflection (checked in OfficialWebsiteGradientTest).
+ */
+internal val OfficialWebsiteGradientColors = listOf(Brand.ActionStart, Brand.ActionMiddle, Brand.ActionEnd)
+    .map { Brand.Background.copy(alpha = .20f).compositeOver(it) }
+internal val OfficialWebsiteGradient: androidx.compose.ui.graphics.Brush
+    get() = androidx.compose.ui.graphics.Brush.horizontalGradient(OfficialWebsiteGradientColors)
 
 /** Decorative laptop + tablet + phone cluster, drawn in code (no bitmap, no animation). */
 @Composable

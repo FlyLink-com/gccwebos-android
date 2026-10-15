@@ -51,6 +51,9 @@ import com.gccwebos.android.design.boltPulseActive
 import com.gccwebos.android.design.boltStaticAlpha
 import com.gccwebos.android.design.nodeDisplayName
 import com.gccwebos.android.design.nodeRegion
+import com.gccwebos.android.design.dialog.GccDialog
+import com.gccwebos.android.design.dialog.GccDialogAction
+import com.gccwebos.android.design.dialog.GccDialogIcon
 import com.gccwebos.android.usageMotionEnabled
 import com.gccwebos.android.vpn.SafeProxyConfig
 import kotlinx.coroutines.delay
@@ -565,13 +568,11 @@ internal const val UNKNOWN_NODE_WARNING = "未知节点存在数据泄露风险�
 internal fun selectionNeedsUnknownWarning(kind: ManualSourceKind, alreadySelected: Boolean): Boolean =
     !alreadySelected && kind in setOf(ManualSourceKind.ImportedRemote, ManualSourceKind.ImportedLocal, ManualSourceKind.ExternalRemote)
 
-/** Plain alert (the shared dialog system of #62 is not on this branch). 取消 is the safe default. */
+/** Warning before choosing a node of an unknown (third-party) source, on the shared dialog (#62). 取消 is the safe default. */
 @Composable
 internal fun UnknownNodeDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss,
-        modifier = Modifier.testTag("unknown-node-dialog"),
-        title = { Text("选择未知节点", modifier = Modifier.testTag("unknown-node-title")) },
-        text = { Text(UNKNOWN_NODE_WARNING, modifier = Modifier.testTag("unknown-node-body")) },
-        dismissButton = { TextButton(onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag("unknown-node-cancel")) { Text("取消") } },
-        confirmButton = { TextButton(onConfirm, modifier = Modifier.heightIn(min = 48.dp).testTag("unknown-node-continue")) { Text("继续选择") } })
+    GccDialog(onDismissRequest = onDismiss, title = "选择未知节点", body = UNKNOWN_NODE_WARNING,
+        icon = GccDialogIcon.Warning, testTag = "unknown-node-dialog",
+        primary = GccDialogAction("继续选择", onConfirm, testTag = "unknown-node-continue"),
+        secondary = GccDialogAction("取消", onDismiss, testTag = "unknown-node-cancel"))
 }

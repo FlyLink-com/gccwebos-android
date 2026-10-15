@@ -78,7 +78,18 @@ class OfficialWebsiteCardUiTest {
         compose.onNodeWithTag("official-website-globe", useUnmergedTree = true).assertDoesNotExist()
         compose.runOnIdle { assertEquals(emptyList<String>(), fixture.first) }
         compose.onNodeWithTag("official-website-open").performClick()
-        compose.runOnIdle { assertEquals(listOf("https://gccwebos.com"), fixture.first) }
+        compose.runOnIdle { assertEquals(listOf("https://flinkvpn.com"), fixture.first) }
+    }
+
+    @Test fun theBreathingGlowIsASeparateOverlayThatFillsTheCardAndNeverTakesTouches() {
+        val fixture = Fixture()
+        show(fixture)
+        val card = compose.onNodeWithTag("official-website-card").fetchSemanticsNode().size
+        val glow = compose.onNodeWithTag("official-website-glow", useUnmergedTree = true).fetchSemanticsNode().size
+        assertEquals(card, glow)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(1)
+        compose.onNodeWithTag("official-website-open").performClick()
+        compose.runOnIdle { assertEquals(listOf("https://flinkvpn.com"), fixture.first) }
     }
 
     @Test fun eachExplicitClickUsesTheLatestOpenerWithoutAddingAnotherTouchTarget() {
@@ -92,8 +103,8 @@ class OfficialWebsiteCardUiTest {
         compose.runOnIdle { assertEquals(1, fixture.first.size); assertEquals(0, fixture.second.size) }
         compose.onNodeWithTag("official-website-open").performClick().performClick()
         compose.runOnIdle {
-            assertEquals(listOf("https://gccwebos.com"), fixture.first)
-            assertEquals(listOf("https://gccwebos.com", "https://gccwebos.com"), fixture.second)
+            assertEquals(listOf("https://flinkvpn.com"), fixture.first)
+            assertEquals(listOf("https://flinkvpn.com", "https://flinkvpn.com"), fixture.second)
         }
     }
 
@@ -112,7 +123,7 @@ class OfficialWebsiteCardUiTest {
         compose.runOnIdle { assertEquals(1, fixture.first.size); missing = false }
         compose.onNodeWithTag("official-website-open").assertIsEnabled().performClick()
         compose.onNodeWithTag("official-website-error").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(listOf("https://gccwebos.com", "https://gccwebos.com"), fixture.first) }
+        compose.runOnIdle { assertEquals(listOf("https://flinkvpn.com", "https://flinkvpn.com"), fixture.first) }
     }
 
     @Test fun narrowLargeTextKeepsTheActionReadableAndWholeCardReachable() {
@@ -146,7 +157,7 @@ class OfficialWebsiteCardUiTest {
         compose.onAllNodes(hasClickAction()).assertCountEquals(1)
         compose.onNodeWithTag("official-website-open").performScrollTo().assertIsDisplayed()
             .assertHeightIsAtLeast(48.dp).performClick()
-        compose.runOnIdle { assertEquals(listOf("https://gccwebos.com"), fixture.first) }
+        compose.runOnIdle { assertEquals(listOf("https://flinkvpn.com"), fixture.first) }
     }
 
     @Test fun zeroMotionDurationLeavesTheDecorativeFrameStatic() {

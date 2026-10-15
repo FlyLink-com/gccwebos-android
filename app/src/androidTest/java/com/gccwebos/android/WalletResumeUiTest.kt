@@ -97,9 +97,12 @@ class WalletResumeUiTest {
     private fun createPending() {
         compose.onNodeWithTag("recharge-select-resume_ui_offer").performScrollTo().performClick()
         compose.onNodeWithTag("recharge-selected-pay").performScrollTo().performClick()
-        compose.onNodeWithTag("recharge-confirm").performClick()
         compose.waitUntil(5000) { posts == 1 }
-        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("等待付款或支付确认")
+        // One tap: the order is created and goes straight to its payment entry (figures match the selected offer);
+        // there is no confirmation dialog, 上一笔充值 card or second pay step on the recharge screen.
+        compose.waitUntil(5000) { opens == 1 }
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
+        compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
     }
     private fun stopAndResume() {
         compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
@@ -107,8 +110,6 @@ class WalletResumeUiTest {
     }
     private fun assertSameSessionReturn(hasProfile: Boolean) {
         launch(hasProfile); createPending()
-        compose.onNodeWithTag("recharge-pay").performScrollTo().performClick()
-        compose.onNodeWithTag("payment-open-confirm").performClick()
         compose.runOnIdle { assertEquals(1, opens); assertTrue(account.authenticated); assertEquals(hasProfile, account.localSubscription.hasProfile) }
         val before = reads
         val owner = account.commerceSessionIdentity
@@ -128,8 +129,7 @@ class WalletResumeUiTest {
         }
         compose.waitUntil(5000) { reads > before && account.authenticated && !account.busy }
         compose.onNodeWithTag("mine-back").assertExists()
-        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("等待付款或支付确认")
-        compose.onNodeWithText("到账目标 10 Coins · 订单 resume_ui_order").assertExists()
+        compose.onNodeWithTag("recharge-order").assertDoesNotExist()
         compose.runOnIdle {
             assertSame(owner, account.commerceSessionIdentity)
             assertEquals(1, posts); assertEquals(1, opens)
@@ -157,7 +157,7 @@ class WalletResumeUiTest {
         launch(unknownPending = true)
         stopAndResume(); compose.waitUntil(5000) { account.authenticated && !account.busy }
         compose.onNodeWithTag("mine-back").assertExists()
-        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("提交结果尚未确认，请保留原记录。")
+        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("提交结果尚未确认，可直接重新充值，或点下方查询。")
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, posts); assertEquals(0, reads); assertEquals(0, opens) }
     }

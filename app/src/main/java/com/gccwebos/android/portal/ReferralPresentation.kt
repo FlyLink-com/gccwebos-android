@@ -27,7 +27,7 @@ internal object ReferralPresentation {
 
     fun hero(policy: ReferralPolicy?): Hero = if (policy != null)
         Hero("邀请好友 · 赚 Coins 奖励", "好友通过你的专属链接注册并充值，你就能获得 Coins 奖励")
-    else Hero("邀请好友 · 一起用飞连", "分享你的专属链接，邀请好友一起使用")
+    else Hero("邀请好友 · 一起用飞连VPN", "分享你的专属链接，邀请好友一起使用")
 
     /** Shows origin plus the first/last four characters of the opaque link code. */
     fun maskedLink(url: String): String {
@@ -39,14 +39,14 @@ internal object ReferralPresentation {
     }
 
     /** Neutral share text: no reward promise is made to the invited friend. */
-    fun shareMessage(url: String) = "推荐你试试飞连 VPN，用我的专属链接注册：$url"
+    fun shareMessage(url: String) = "推荐你试试飞连VPN，用我的专属链接注册：$url"
 
     private fun encode(value: String) = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
     fun telegramShareUrl(url: String) =
-        "$TELEGRAM_SHARE?url=${encode(url)}&text=${encode("推荐你试试飞连 VPN，用我的专属链接注册")}"
+        "$TELEGRAM_SHARE?url=${encode(url)}&text=${encode("推荐你试试飞连VPN，用我的专属链接注册")}"
 
-    fun xShareUrl(url: String) = "$X_SHARE?text=${encode("推荐你试试飞连 VPN，用我的专属链接注册")}&url=${encode(url)}"
+    fun xShareUrl(url: String) = "$X_SHARE?text=${encode("推荐你试试飞连VPN，用我的专属链接注册")}&url=${encode(url)}"
 
     /** Only reported fields, all shown as positive counts; no derived totals. */
     fun stats(p: ReferralPerformance): List<Stat> = listOf(

@@ -161,6 +161,13 @@ internal class CommerceController(private val account: AccountController, privat
         ensureCurrentSession()
         require(old == null || old.entries.none { entry -> next.entries.any { it.entryRef == entry.entryRef } })
         ledgerPage = if (old == null) next else WalletLedgerPage(old.entries + next.entries, next.nextCursor)
+        // 订单明细 also lists unpaid recharge orders (the recharge screen never does). An extra read: if it fails, the ledger
+        // itself still shows and an unpaid order simply isn't listed this time.
+        if (!more) {
+            val orders = try { repository().rechargeHistory() } catch (error: CancellationException) { throw error } catch (_: Exception) { null }
+            ensureCurrentSession()
+            if (orders != null) rechargeHistory = orders
+        }
     }
     fun moreOrders() = run {
         val current = orderPage ?: return@run
@@ -229,11 +236,13 @@ internal class CommerceController(private val account: AccountController, privat
             ensureCurrentSession(); purchase = next
         } finally { if (currentOperation()) { pendingPurchase = requireNotNull(repo).pending("purchase") != null; wallet = null } }
     }
-    fun confirmRecharge(offer: RechargeOffer) = run {
+    /** [onCreated] runs right after the server's order is installed, still inside the operation (e.g. to open its payment entry). */
+    fun confirmRecharge(offer: RechargeOffer, onCreated: (RechargeOrder) -> Unit = {}) = run {
         try {
             val next = requireNotNull(repo).recharge(offer)
             ensureCurrentSession()
             recharge = next
+            onCreated(next)
         }
         finally {
             if (currentOperation())
@@ -302,10 +311,15 @@ internal class CommerceController(private val account: AccountController, privat
     }
     fun cancelPurchase() = run { val next = requireNotNull(repo).cancelPurchase(); ensureCurrentSession(); purchase = next; wallet = null }
     fun finishPurchase() = run { requireNotNull(repo).finishPurchase(); ensureCurrentSession(); pendingPurchase = false; purchase = null; wallet = null; account.purchaseReturnRef = null; account.refresh() }
+    /** Drops the pointer to an unpaid order that cannot be paid any more (the server expires it by itself). */
+    fun abandonRecharge(now: Instant = Instant.now()) = run {
+        requireNotNull(repo).abandonRecharge(now); ensureCurrentSession(); pendingRecharge = false; recharge = null
+    }
     fun finishRecharge() = run { requireNotNull(repo).finishRecharge(); ensureCurrentSession(); pendingRecharge = false; recharge = null; wallet = null; walletLoaded = false; quote = null }
     fun currentSession() = account.authenticated && if (identity == null) account.authSessionGeneration == epoch
         else account.commerceSessionIdentity === identity
-    fun canOpenPayment(order: RechargeOrder, now: Instant) = canOperate() && recharge == order &&
+    /** The current order, or a still-payable unpaid order from 订单明细 (the server list carries the same trusted entry). */
+    fun canOpenPayment(order: RechargeOrder, now: Instant) = canOperate() && (recharge == order || rechargeHistory?.contains(order) == true) &&
         order.paymentMethod == "alipay" && order.adapterKey == "xsd_v1" && order.payableAt(now) &&
         order.nextAction?.let { CommerceJson.trustedPaymentRedirect(it.url, order.adapterKey) } == true
     fun cannotOpenPayment() { error = "无法打开付款页面，请保留当前订单并稍后查询，不要重复创建充值。" }
@@ -519,7 +533,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("commerce-error")) }
     }
     if (walletMode) {
-        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, onRecharge, onLedger, embeddedWallet,
+        WalletPanel(account, state, mode, now, paymentOpener ?: { url -> com.gccwebos.android.payment.PaymentPage.open(context, url) }, onRecharge, onLedger, embeddedWallet,
             onBack = onWalletBack, onRechargeRecords = onRechargeRecords)
         return // Wallet never inherits a retained purchase confirmation from another destination.
     } else if (mode == CommerceMode.Plans) {
@@ -528,7 +542,10 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         val planTabIndex = if (catalogCategory == "data_pack") planTerms.size
             else if (catalogCategory == "plan") planTerms.indexOf(period) else -1
         // One sliding capsule highlight; the click handlers are the former chip handlers, unchanged.
-        SlidingTabRow(planTabs, planTabIndex, enabled = !state.busy, onSelect = { index ->
+        // Opaque blue-purple capsule (the nodes switcher's gradient); 年卡 and 流量包 breathe while unselected.
+        val glowTabs = setOfNotNull(planTerms.indexOf(CatalogPeriod.Yearly).takeIf { it >= 0 }, planTerms.size)
+        SlidingTabRow(planTabs, planTabIndex, enabled = !state.busy, containerBrush = SlidingTabGradient,
+            selectedColor = SlidingTabGradientSelected, selectedEdge = SlidingTabGradientSelectedEdge, glowTabs = glowTabs, onSelect = { index ->
             initialSelectionHandled = true; selectedSnapshot = null; selectionNotice = null; state.quote = null
             if (index < planTerms.size) { catalogCategory = "plan"; requestedPeriod = planTerms[index] }
             else catalogCategory = "data_pack"
@@ -586,11 +603,11 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     if (mode == CommerceMode.Orders) {
-        OrderHistoryPanel(account, state)
+        OrderHistoryPanel(account, state, paymentOpener = paymentOpener ?: { url -> com.gccwebos.android.payment.PaymentPage.open(context, url) }, now = now)
         return // History has only read/local-return actions, even if a shared fixture retains a quote.
     }
     if (mode == CommerceMode.Ledger) {
-        LedgerPanel(account, state)
+        LedgerPanel(account, state, paymentOpener = paymentOpener ?: { url -> com.gccwebos.android.payment.PaymentPage.open(context, url) }, now = now)
         return // Read-only history must not inherit a retained purchase confirmation.
     }
     state.quote?.takeIf { visitReady }?.let { quote ->
@@ -599,7 +616,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape,
             title = { Text(if (quote.offer.category == "data_pack") "确认购买${quote.offer.trafficGb} GB流量包" else "确认购买${quote.offer.durationDays}天套餐") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("服务平台：飞连vpn · portal.gccwebos.com")
+                Text("服务：飞连VPN")
                 Text("本次扣除：${formatCoins(quote.amountUnits)}")
                 quote.allocation.forEach { Text("${ledgerCoinType(it.coinType)}：${formatCoins(it.amountUnits)}") }
                 Text("确认后预留：${formatCoins(quote.balances.after.heldCoins)}")
@@ -627,6 +644,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         confirmButton = { TextButton(onClick = { cancelConfirmation = false; state.cancelPurchase() }) { Text("确认取消订单") } },
         dismissButton = { TextButton(onClick = { cancelConfirmation = false }) { Text("返回") } })
 }
+internal const val RECHARGE_EXPIRED_STATUS = "已失效（付款入口已过期）"
 internal fun rechargeStatus(status: String) = when(status) {
     "created" -> "充值订单已创建，支付入口准备中"; "entry_ready", "pending" -> "等待付款或支付确认"
     "payment_verified" -> "支付已核验，Coins 尚待到账"; "credited" -> "Coins 已到账，购买套餐需另行确认"

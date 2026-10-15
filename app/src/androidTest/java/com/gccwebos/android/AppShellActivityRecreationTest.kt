@@ -25,7 +25,7 @@ class AppShellActivityRecreationTest {
         // This enabled AccountChoice entry is guidance, not a production power command.
         // Do not enter the private account form or request a configuration in this real Activity.
         compose.onNodeWithTag("vpn-connect").performScrollTo()
-            .assertTextEquals("开通飞连vpn").assertIsEnabled()
+            .assertTextEquals("开通飞连VPN").assertIsEnabled()
         compose.onNodeWithTag("connection-status").assertTextEquals("未连接")
         compose.onNodeWithTag("connection-node-name", useUnmergedTree = true).assertTextEquals("未选择")
         compose.onNodeWithTag("connection-power").assertDoesNotExist()

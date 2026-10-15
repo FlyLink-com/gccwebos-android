@@ -57,12 +57,14 @@ class CommercePageLifecycleIntegrationTest {
         second.loadWallet(); runCurrent()
         assertTrue(second.pendingRecharge); assertNull(second.recharge); assertEquals(original, recovery.read("fixture_account_a", "recharge"))
         assertEquals(1, calls.count { it.second != null })
-        second.confirmRecharge(offer); runCurrent()
-        assertEquals(1, calls.count { it.second != null }); assertEquals(1, keysCreated)
+        // Only the explicit restore replays the unknown create with its original key.
         second.queryRecharge(); runCurrent()
-        val postKeys = calls.mapNotNull { it.second?.let(::JSONObject)?.getString("idempotencyKey") }
-        assertEquals(listOf("lifecycle_key_1", "lifecycle_key_1"), postKeys)
         assertEquals(1, keysCreated); assertEquals("recharge_fixture_order", second.recharge?.orderRef)
+        // A pending order never blocks a new recharge: it gets its own key and replaces the durable pointer.
+        second.confirmRecharge(offer); runCurrent()
+        val postKeys = calls.mapNotNull { it.second?.let(::JSONObject)?.getString("idempotencyKey") }
+        assertEquals(listOf("lifecycle_key_1", "lifecycle_key_1", "lifecycle_key_2"), postKeys)
+        assertEquals(2, keysCreated); assertEquals("lifecycle_key_2", recovery.read("fixture_account_a", "recharge")?.key)
         assertNull(repository("fixture_account_b").pending("recharge"))
         assertNotNull(recovery.read("fixture_account_a", "recharge"))
     }

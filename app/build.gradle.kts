@@ -15,8 +15,8 @@ android {
         applicationId = "com.gccwebos.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.4.2"
+        versionCode = 10
+        versionName = "0.4.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["connectionAppLabel"] = "@string/app_name"
         val packagedEngine = listOf("arm64-v8a", "x86_64").all {
@@ -42,7 +42,7 @@ android {
                 else -> ".debug"
             }
             versionNameSuffix = if (candidate) "-connection-candidate" else "-debug"
-            if (candidate) manifestPlaceholders["connectionAppLabel"] = "飞连 VPN 测试"
+            if (candidate) manifestPlaceholders["connectionAppLabel"] = "@string/connection_candidate_label"
             val nativeLab = providers.gradleProperty("nativeVpnLab").orNull == "true"
             buildConfigField("boolean", "NATIVE_VPN_LAB", nativeLab.toString())
             val realTun = providers.gradleProperty("nativeTunAcceptance").orNull == "true"

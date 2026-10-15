@@ -97,8 +97,7 @@ class WalletForegroundResumeTest {
         controller.confirmRecharge(CommerceJson.rechargeOffers(CommerceFixtures.rechargeOffers).single()); runCurrent()
         val original = controller.recharge!!
         val flow = RechargeFlowController(f.account, controller) { f.opened += it }
-        flow.reviewPayment(original, now); flow.openPayment(now)
-        flow.reviewPayment(original, now) // A second unconsumed review cannot survive validation.
+        flow.payNow(original, now)
         assertEquals(1, f.posts); assertEquals(1, f.opened.size)
         val epoch = f.account.authSessionGeneration
         val owner = Owner().apply { start(AccountForegroundObserver(f.account)) }
@@ -108,7 +107,6 @@ class WalletForegroundResumeTest {
         assertTrue(f.account.authenticated); assertFalse(f.account.localSubscription.hasProfile)
         assertTrue(f.account.authSessionGeneration > epoch)
         assertTrue("Same-session validation must not orphan the wallet controller", controller.currentSession())
-        flow.openPayment(now)
         controller.pollRecharge()
         assertEquals(original.orderRef, controller.recharge?.orderRef)
         assertTrue(controller.pendingRecharge)
@@ -184,14 +182,14 @@ class WalletForegroundResumeTest {
             val binding = sessionBinding(Secret("wallet_resume_account_a"))
             val pending = f.recovery.read(binding, "recharge")!!
             val flow = RechargeFlowController(f.account, controller) { f.opened += it }
-            flow.reviewPayment(controller.recharge!!, now)
+            val order = controller.recharge!!
             when (failure) {
                 "network" -> f.overview = { throw PortalFailure(PortalFailure.Reason.NETWORK) }
                 "invalid" -> f.overview = { WireResponse(401, "{}") }
                 else -> f.sessions.clear()
             }
             val owner = Owner().apply { start(AccountForegroundObserver(f.account)) }
-            owner.browserReturn(); runCurrent(); flow.openPayment(now)
+            owner.browserReturn(); runCurrent(); flow.payNow(order, now)
             assertFalse(f.account.authenticated); assertNull(f.account.commerceSessionIdentity)
             assertFalse(f.account.retainingCommerceSession); assertFalse(controller.currentSession())
             assertEquals(pending, f.recovery.read(binding, "recharge")); assertEquals(1, f.posts)

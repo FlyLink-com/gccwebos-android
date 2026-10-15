@@ -290,7 +290,7 @@ class MobileParityUiTest {
             AppShell(state, autoLoadCommerce = false)
         }
         compose.waitUntil(10_000) { state.localSubscription.hasProfile && !state.busy }
-        compose.runOnIdle { assertFalse(state.authenticated); assertTrue(calls.isEmpty()); state.logout() }
+        compose.runOnIdle { assertFalse(state.authenticated); assertTrue(calls.isEmpty()); state.cancelAuthentication() }
         compose.waitUntil(10_000) { !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
         compose.onNodeWithTag("nav-Plans").performClick()
@@ -318,10 +318,10 @@ class MobileParityUiTest {
         compose.onNodeWithTag("account-logout").performScrollTo().assertTextEquals("退出登录")
         compose.onNodeWithText("清除本地订阅与登录").assertDoesNotExist()
         compose.onNodeWithTag("account-logout").performClick()
-        compose.onNodeWithTag("logout-title").assertTextEquals("是否退出登录并清除当前设备订阅配置？")
+        compose.onNodeWithTag("logout-title").assertTextEquals("退出登录？")
         compose.onNodeWithTag("logout-confirm").assertTextEquals("退出登录")
         compose.onNodeWithTag("logout-cancel").assertTextEquals("取消")
-        compose.onNodeWithTag("logout-body").assertTextContains("只影响当前设备", substring = true)
+        compose.onNodeWithTag("logout-body").assertTextContains("只清除这台设备", substring = true)
         compose.onNodeWithTag("logout-body").assertTextContains("不会删除或更改服务器上的账户", substring = true)
         compose.onNodeWithTag("logout-body").assertTextContains("你自己导入的配置会保留", substring = true)
         compose.runOnIdle { assertTrue(state.localSubscription.hasProfile); assertNotNull(saved.read()) }
@@ -424,7 +424,7 @@ class MobileParityUiTest {
             assertEquals("", state.password); assertEquals("", state.answer)
             assertNull(state.resource)
             assertEquals("Synthetic account A local node", state.localSubscription.nodes.single().name)
-            assertNull(delivery.value); state.logout()
+            assertNull(delivery.value); state.cancelAuthentication()
         }
         compose.waitUntil(10_000) { !state.authenticated && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
@@ -573,11 +573,9 @@ class MobileParityUiTest {
         compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
         capture("synthetic-alipay-recharge")
         compose.onNodeWithTag("recharge-select-recharge_synthetic").performClick()
-        compose.onNodeWithTag("recharge-selected-pay").assertIsEnabled().performScrollTo().performClick()
-        compose.onNodeWithText("CNY 100.00 → 100 Coins").assertExists()
-        compose.onNodeWithTag("recharge-confirm").assertTextEquals("确认金额并创建订单")
-        compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()
-        compose.onNodeWithTag("recharge-cancel").performClick()
+        compose.onNodeWithTag("recharge-selected-pay").assertIsEnabled().performScrollTo()
+        compose.onNodeWithTag("recharge-payable-amount").assertTextEquals("应付金额：￥100.00")
+        compose.onNodeWithText("确认充值金额").assertDoesNotExist()
         compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
         compose.onNodeWithTag("payment-open-confirm").assertDoesNotExist()

@@ -24,30 +24,28 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.layout.onVisibilityChanged
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.EaseInOutSine
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -212,11 +210,22 @@ internal data class SlidingTab(val title: String, val tag: String)
 @Composable
 internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: Boolean, onSelect: (Int) -> Unit,
                            modifier: Modifier = Modifier, containerColor: Color = SlidingTabGlass, containerBrush: Brush? = null,
-                           selectedColor: Color = SlidingTabSelected, selectedEdge: Color = SlidingTabSelectedEdge) {
+                           selectedColor: Color = SlidingTabSelected, selectedEdge: Color = SlidingTabSelectedEdge,
+                           glowTabs: Set<Int> = emptySet()) {
+    var shown by remember { mutableStateOf(true) }
+    val motion = com.gccwebos.android.rememberUsageMotion(connected = true, shown = shown)
+    val glowPhase = remember { Animatable(0f) }
+    val glowIndices = tabGlowIndices(glowTabs, selectedIndex, tabs.size)
+    val breathing = glowIndices.isNotEmpty() && motion.breathing
+    LaunchedEffect(breathing) {
+        glowPhase.snapTo(0f)
+        if (breathing) glowPhase.animateTo(1f, infiniteRepeatable(tween(TabGlowMillis, easing = EaseInOutSine), RepeatMode.Reverse))
+    }
     val indicator = rememberSlidingIndicator(selectedIndex, tabs.size)
     val haptic = rememberTapHaptic()
     val shape = CircleShape
     Row(modifier.fillMaxWidth().heightIn(min = 52.dp).clip(shape)
+        .onVisibilityChanged(minFractionVisible = .05f) { shown = it }
         .then(if (containerBrush != null) Modifier.background(containerBrush) else Modifier.background(containerColor))
         .slidingIndicator(indicator, tabs.size, selectedColor, corner = 24.dp,
             horizontalInset = 2.dp, verticalInset = 2.dp, edge = selectedEdge)
@@ -233,12 +242,40 @@ internal fun SlidingTabRow(tabs: List<SlidingTab>, selectedIndex: Int, enabled: 
                         onSelect(index) // callers keep their former re-tap behaviour
                     })
                 .testTag(tab.tag).padding(horizontal = 6.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+                // Separate overlay with its own layer, under the label: a pulse frame redraws only this node (the
+                // value is read in the draw phase), never the row, and the label's contrast is untouched.
+                if (index in glowIndices) Box(Modifier.matchParentSize().graphicsLayer().testTag("${tab.tag}-glow").drawBehind {
+                    drawTabGlow(if (breathing) tabGlowLerp(glowPhase.value) else TabGlowAlphaStatic)
+                })
                 Text(tab.title, textAlign = TextAlign.Center, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                     color = if (!enabled) Brand.Muted else Brand.Text)
             }
         }
+    }
+}
+
+/** Breathing hint on unselected tabs: slow pulse of a cyan rim (2.6 s); static when paused, off screen or motion is off. */
+internal const val TabGlowMillis = 2_600
+internal const val TabGlowAlphaMin = 0.30f
+internal const val TabGlowAlphaMax = 0.80f
+internal const val TabGlowAlphaStatic = 0.50f
+/** Faint inner wash behind the label; its worst case is covered by the contrast test. */
+internal const val TabGlowFillAlphaMax = 0.10f
+internal fun tabGlowLerp(fraction: Float): Float = TabGlowAlphaMin + (TabGlowAlphaMax - TabGlowAlphaMin) * fraction.coerceIn(0f, 1f)
+
+/** Tabs that glow: the requested ones that are in range and not currently selected (the selected pill is its own cue). */
+internal fun tabGlowIndices(requested: Set<Int>, selectedIndex: Int, count: Int): Set<Int> =
+    requested.filter { it in 0 until count && it != selectedIndex }.toSet()
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTabGlow(alpha: Float) {
+    val radius = size.height / 2
+    drawRoundRect(Brand.Cyan.copy(alpha = TabGlowFillAlphaMax * alpha), cornerRadius = CornerRadius(radius))
+    for ((width, weight) in listOf(6.dp to .18f, 3.dp to .38f, 1.5.dp to 1f)) {
+        val w = width.toPx(); val inset = w / 2
+        drawRoundRect(Brand.Cyan.copy(alpha = (alpha * weight).coerceIn(0f, 1f)), Offset(inset, inset),
+            Size(size.width - w, size.height - w), CornerRadius(radius - inset), style = androidx.compose.ui.graphics.drawscope.Stroke(w))
     }
 }
 
@@ -348,33 +385,6 @@ internal fun SkeletonCards(count: Int, cardHeight: Dp, modifier: Modifier = Modi
                     }
                 }
             }
-        }
-    }
-}
-
-// ---- 3. Bottom sheet --------------------------------------------------------------------------------------
-
-/**
- * Half-height sheet for light, read-only or navigation-only flows. Swipe down, scrim tap and back all
- * dismiss. [content] receives `close`, which animates the sheet away before [onDismissRequest].
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun GccBottomSheet(onDismissRequest: () -> Unit, modifier: Modifier = Modifier, title: String? = null,
-                            content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-    val dismiss by rememberUpdatedState(onDismissRequest)
-    val close: () -> Unit = remember(sheetState, scope) {
-        { scope.launch { sheetState.hide() }.invokeOnCompletion { dismiss() } }
-    }
-    ModalBottomSheet(onDismissRequest = onDismissRequest, sheetState = sheetState, modifier = modifier,
-        containerColor = Brand.SurfaceRaised, contentColor = Brand.Text,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            title?.let { Text(it, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
-            content(close)
         }
     }
 }

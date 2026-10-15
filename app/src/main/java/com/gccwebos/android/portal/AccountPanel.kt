@@ -38,11 +38,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.gccwebos.android.ResourceCard
 import com.gccwebos.android.design.*
+import com.gccwebos.android.design.dialog.GccDialog
+import com.gccwebos.android.design.dialog.GccDialogAction
+import com.gccwebos.android.design.dialog.GccDialogIcon
+import com.gccwebos.android.design.dialog.GccDialogTone
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.Role
@@ -207,7 +212,7 @@ internal class AccountController(private val repository: PortalRepository, priva
         onSnapshot = { nodeLatency.cancel(); localSubscription = it; nodes = it.nodes; nodeSelection.expireIfNeeded() },
         accountSignedIn = { authenticated },
         nodesChanged = { nodeLatency.cancel(); nodeSelection.expireIfNeeded() },
-        accountNeedsLoad = { accountLoad.request() },
+        accountNeedsLoad = { if (accountLoadEnabled) accountLoad.request() },
         chooseNode = { target ->
             nodeSelection.expireIfNeeded()
             val match = matchNodeTarget(nodeSelection.snapshot.choices, target)
@@ -239,7 +244,9 @@ internal class AccountController(private val repository: PortalRepository, priva
         return true
     }
     /** The user's own retry after a failed account load. */
-    fun retryAccountLoad() { if (authenticated) accountLoad.request(manual = true) }
+    fun retryAccountLoad() { if (authenticated && accountLoadEnabled) accountLoad.request(manual = true) }
+    /** Test seam for display-only fixtures that own no delivery endpoint: false keeps the account from requesting its subscription (always true in the app). */
+    internal var accountLoadEnabled = true
     fun refreshAccountUsage() { if (!manualImport.busy) accountUsage.update() }
     fun cancelAccountUsageUpdate() = accountUsage.cancel()
     private fun clearAccountUsage() {
@@ -718,9 +725,11 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("totp-cancel")) { Text("取消验证") }
         } else {
             OutlinedTextField(state.account, { state.account = it }, label = { Text("账号／邮箱") }, enabled = !state.busy,
-                modifier = Modifier.fillMaxWidth().testTag("login-account"))
+                modifier = Modifier.fillMaxWidth().testTag("login-account")
+                    .semantics { contentType = ContentType.Username + ContentType.EmailAddress })
             OutlinedTextField(state.password, { state.password = it }, label = { Text("密码") }, enabled = !state.busy,
-                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().testTag("login-password"))
+                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().testTag("login-password")
+                    .semantics { contentType = ContentType.Password })
             state.challenge?.let { challenge ->
                 SupportingText(challenge.prompt)
                 OutlinedTextField(state.answer, { state.answer = it }, label = { Text("验证题答案") }, enabled = !state.busy,
@@ -737,20 +746,17 @@ internal fun AccountPanel(state: AccountController, compactLogin: Boolean = fals
 
 /** The one logout action: plain words, this device only, server account untouched. */
 internal const val LOGOUT_LABEL = "退出登录"
-internal const val LOGOUT_TITLE = "是否退出登录并清除当前设备订阅配置？"
-internal const val LOGOUT_BODY = "将退出登录，并清除这台设备上保存的账户订阅配置。只影响当前设备，不会删除或更改服务器上的账户；" +
-    "你自己导入的配置会保留。账户订阅清除后，重新登录即可再次获取。"
+internal const val LOGOUT_TITLE = "退出登录？"
+internal const val LOGOUT_BODY = "只清除这台设备上保存的账户订阅配置，不会删除或更改服务器上的账户；" +
+    "你自己导入的配置会保留，重新登录即可再次获取。"
 internal const val LOGOUT_CONFIRM = "退出登录"
 
 @Composable
 internal fun LogoutDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text(LOGOUT_TITLE, modifier = Modifier.testTag("logout-title")) },
-        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            Text(LOGOUT_BODY, modifier = Modifier.testTag("logout-body"))
-        } },
-        confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("logout-confirm")) { Text(LOGOUT_CONFIRM) } },
-        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("logout-cancel")) { Text("取消") } })
+    GccDialog(onDismissRequest = onDismiss, title = LOGOUT_TITLE, body = LOGOUT_BODY,
+        icon = GccDialogIcon.Warning, tone = GccDialogTone.Danger, testTag = "logout",
+        primary = GccDialogAction(LOGOUT_CONFIRM, onConfirm, testTag = "logout-confirm"),
+        secondary = GccDialogAction("取消", onDismiss, testTag = "logout-cancel"))
 }
 
 internal const val OFFICIAL_REGISTRATION_URL = "https://portal.gccwebos.com/portal/register/"
@@ -781,6 +787,15 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
     // account field the cursor goes to the password field, once the page's enter motion has settled (so the
     // keyboard never opens in the middle of the transition).
     val passwordFocus = remember { FocusRequester() }
+    // System password manager (Android autofill): the app never stores the password. One form, two stable fields.
+    // The Save prompt needs the typed password to still be in the field when the form is committed, but the account
+    // controller wipes its copy the moment 登录 is tapped; this composable-scoped copy keeps the (masked) field filled
+    // while the request runs, is dropped as soon as it ends, and is committed only after a successful sign-in.
+    val autofill = LocalAutofillManager.current
+    var submittedPassword by remember(state) { mutableStateOf("") }
+    LaunchedEffect(state.busy) { if (!state.busy) submittedPassword = "" }
+    LaunchedEffect(state.password) { if (state.password.isNotEmpty()) submittedPassword = "" }
+    DisposableEffect(state, autofill) { onDispose { if (state.authenticated) autofill?.commit() else autofill?.cancel() } }
     LaunchedEffect(state) { state.prefillRememberedAccount() }
     LaunchedEffect(state.accountPrefilled) {
         if (state.accountPrefilled) {
@@ -800,7 +815,7 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
             CompactLoginField(state.account, { state.account = it }, "邮箱", "login-account",
                 enabled = !state.busy, keyboardType = KeyboardType.Email,
                 modifier = Modifier.semantics { contentType = ContentType.Username + ContentType.EmailAddress })
-            CompactLoginField(state.password, { state.password = it }, "密码", "login-password",
+            CompactLoginField(loginPasswordShown(state.password, state.busy, submittedPassword), { state.password = it }, "密码", "login-password",
                 enabled = !state.busy, keyboardType = KeyboardType.Password, password = true,
                 modifier = Modifier.focusRequester(passwordFocus).semantics { contentType = ContentType.Password })
             RememberAccountRow(state.rememberAccount, enabled = !state.busy, onChange = state::updateRememberAccount)
@@ -832,7 +847,7 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
                     modifier = Modifier.testTag(if (state.error != null) "account-error" else "account-status")
                         .semantics { liveRegion = LiveRegionMode.Polite })
             }
-            BrandButton("登录", state::login,
+            BrandButton("登录", { submittedPassword = state.password; state.login() },
                 enabled = !state.busy && !state.challengeLoading && state.challenge != null && state.account.isNotBlank() && normalizedLoginPassword(state.password).isNotEmpty() && state.answer.isNotBlank(),
                 modifier = Modifier.testTag("login-submit"))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -842,6 +857,10 @@ private fun CompactLoginPanel(state: AccountController, onRegister: () -> Unit) 
         }
     }
 }
+
+/** While a sign-in request runs (the controller's own copy is already wiped) the field keeps showing what was typed. */
+internal fun loginPasswordShown(controllerPassword: String, busy: Boolean, submittedCopy: String): String =
+    if (controllerPassword.isEmpty() && busy && submittedCopy.isNotEmpty()) submittedCopy else controllerPassword
 
 /** Longer than the page enter motion (FadeInMillis) so focus, and with it the keyboard, never lands mid-transition. */
 internal const val LoginFocusSettleMillis = 420L

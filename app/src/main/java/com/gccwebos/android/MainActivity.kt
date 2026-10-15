@@ -142,7 +142,7 @@ class MainActivity : ComponentActivity() {
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             if (!bindingFailure) Image(painterResource(R.drawable.brand_robot_avatar), null,
                                 modifier = Modifier.size(52.dp))
-                            Text(if (bindingFailure) "连接服务暂不可用" else "飞连vpn",
+                            Text(if (bindingFailure) "连接服务暂不可用" else "飞连VPN",
                                 modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
@@ -151,6 +151,9 @@ class MainActivity : ComponentActivity() {
                 val control by current.control.collectAsState()
                 val nodeProbe = remember(applicationContext) { com.gccwebos.android.vpn.AndroidNodeLatencyProbe(applicationContext) }
                 AppShell(repositoryOverride = current.repository, connectionControlState = control,
+                    // The production repository is passed as an "override" here, so the store must be named explicitly: otherwise
+                    // 记住账号 would silently fall back to the in-memory store and forget the account on every restart.
+                    rememberedAccountStore = remember(applicationContext) { EncryptedRememberedAccountStore(applicationContext) },
                     nodeLatencyProbe = nodeProbe, openPlansRequest = openPlansRequest,
                     sourceCommitFence = current::commitSourceChange, logoutClearingAccount = current::logoutClearingAccountSubscription,
                     onConnectionPowerAction = { action -> current.power(action) })
@@ -255,18 +258,19 @@ internal fun AppShell(accountOverride: AccountController? = null, autoLoadCommer
     sourceCommitFence: ((() -> Unit) -> Unit) = { error("Connection owner is unavailable") },
     logoutClearingAccount: (suspend () -> Unit)? = null,
     openPlansRequest: Int = 0,
-    renewalReminders: Boolean = autoLoadCommerce) {
+    renewalReminders: Boolean = autoLoadCommerce,
+    rememberedAccountStore: com.gccwebos.android.portal.RememberedAccountStore? = null) {
     val context = LocalContext.current.applicationContext
     // The controller remains outside destinations, preserving in-flight authentication on navigation.
     val account = key(accountOverride, repositoryOverride) {
         val scope = rememberCoroutineScope()
-        remember(accountOverride, repositoryOverride, nodeLatencyProbe) {
+        remember(accountOverride, repositoryOverride, nodeLatencyProbe, rememberedAccountStore) {
             val repository = repositoryOverride ?: productionRepository(context)
             accountOverride ?: AccountController(repository, scope,
                 nodeLatencyProbe = nodeLatencyProbe, sourceCommitFence = sourceCommitFence,
                 logoutClearingAccount = logoutClearingAccount ?: { repository.logoutClearingAccountSubscription() },
                 // Tests that inject their own repository never touch the real Keystore-backed sidecar.
-                rememberedAccounts = if (repositoryOverride == null) EncryptedRememberedAccountStore(context)
+                rememberedAccounts = rememberedAccountStore ?: if (repositoryOverride == null) EncryptedRememberedAccountStore(context)
                     else MemoryRememberedAccountStore())
         }
     }
@@ -581,7 +585,7 @@ private fun BrandHeader() {
         Image(painterResource(R.drawable.brand_robot_avatar), contentDescription = null,
             modifier = Modifier.size(34.dp), contentScale = ContentScale.Fit)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text("飞连vpn", style = MaterialTheme.typography.titleLarge, fontSize = 21.sp,
+            Text("飞连VPN", style = MaterialTheme.typography.titleLarge, fontSize = 21.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.testTag("brand-name"))
             Box(Modifier.width(94.dp).height(2.dp).background(Brush.horizontalGradient(
                 listOf(androidx.compose.ui.graphics.Color(0xFFFF27DF), Brand.Blue, Brand.Cyan))))

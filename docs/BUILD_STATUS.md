@@ -1,11 +1,12 @@
 # 构建与验收证据索引
 
-## 当前入口（2026-10-11 UTC）
+## 当前入口（2026-10-14 UTC）
 
-- [PROJECT_STATUS](PROJECT_STATUS.md) 按源码、合并、本地测试、托管 CI、实机与公开发布分别记录当前进度。
-- [v0.4.2 公开 Release](https://github.com/gccwebos-com/feilian-vpn-releases/releases/tag/v0.4.2) 对应 `0b94a8cee2517624eb6d5a3ac61366ea4d96d361`；其中记录了 1,386 项本地 JVM 测试、签名与 OPPO 升级结果，不是托管 CI 结果。本次未复跑这些验证。
-- 最新核对主干 `724fb7f04c24573a15e50c64b843b39d0012a0e3` 已包含发布后的改动；该 SHA 未查到 Actions 运行，不能继承发布源码或旧 PR 的测试结论。
-- 下文完整保留 M0 的精确 SHA、哈希和失败历史。其“未接入 VPN／后台／未发布”只描述当时的 M0 验收范围；历史 artifact 链接的当前有效性未在本轮重验。
+- [PROJECT_STATUS](PROJECT_STATUS.md) 区分源码、发布、构建、设备与线上证据。
+- [v0.4.3](https://github.com/FlyLink-com/feilian-vpn-releases/releases/tag/v0.4.3) 已公开发布，对应 `495779cf900c69046423c9161a21a10d24da2b99` / versionCode 10；发布声明不等于本轮独立复跑。
+- 云端任务的预算阻塞与 runner 等待分别记录；用户授权本地验证后合并。不把未启动、排队或跳过写成通过。
+- 当前补验属于各 PR 的精确源码，不能套用到后续合成树。文档变更本身仅做 `git diff --check`。
+- 以下完整保留 M0 的精确提交、哈希与失败历史，只描述当时范围。
 
 # M0 构建收口记录（历史）
 

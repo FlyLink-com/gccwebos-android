@@ -2,28 +2,30 @@
 
 原生 Android 客户端，包含连接、节点、套餐、我的四入口。正式包名 `com.gccwebos.android`，最低 Android 8.0（API 26）；真实连接还受系统版本、内核打包与连接准入条件约束。
 
-## 当前进度（2026-10-11 UTC）
+## 当前进度（2026-10-14 UTC）
 
-- **已公开发布**：[v0.4.2](https://github.com/gccwebos-com/feilian-vpn-releases/releases/tag/v0.4.2)，versionCode `9`，发布源码 `0b94a8cee2517624eb6d5a3ac61366ea4d96d361`。完整对应源码请使用 Release 中的专用 `corresponding-source.zip` 附件。
-- **主干已继续开发**：本次核对 `main@724fb7f04c24573a15e50c64b843b39d0012a0e3`，#60、#61、#64–#69 已合并，但不在上述已发布 APK 中；源码仍标 `0.4.2` / `9`，版本字段相同不能证明产物相同。
-- **仍在 Draft**：#26 会话自动续期、#48 LAN DIRECT 路由、#59 应用内更新下载、#62 统一弹窗、#63 应用内支付页。当前正式版会话到期仍需重新登录，更新仍通过浏览器下载。
-- **验收边界**：公开 Release、本地测试记录、托管 CI、实机与线上部署分别记录。本次文档对齐没有重跑 Android 构建或操作设备；最新主干没有对应的托管 Actions 运行，不能沿用旧 SHA 的绿色结果。
+- **已公开发布**：[v0.4.3](https://github.com/FlyLink-com/feilian-vpn-releases/releases/tag/v0.4.3)，versionCode `10`，发布源码 `495779cf900c69046423c9161a21a10d24da2b99`。完整对应源码使用 Release 的 `corresponding-source.zip` 附件。
+- 已包含应用内更新下载、支付页、统一弹窗、记住账号及 FlinkVPN 品牌更新。记住账号仅保存账号输入，不代表访问会话自动续期；已发布版本会话到期仍需登录。
+- 会话续期 #26、LAN DIRECT #48、月卡升降级 #83 及后续修复按各自 PR 验证；本地合并准备不等于这些能力已进入 v0.4.3，也不启用服务端开关。
+- 发布、源码合并、构建、设备与生产验收分别记账。用户已授权以本地检查替代受预算限制的云端 CI；不伪造托管检查结果。
 
-进度与证据以 [PROJECT_STATUS](docs/PROJECT_STATUS.md) 为入口；接下来要做的工作见 [TASKS](TASKS.md)，发布事实见 [0.4.2 发布记录](docs/release-0.4.2.md)，构建证据索引见 [BUILD_STATUS](docs/BUILD_STATUS.md)。历史切片保留在下方，其“未接入／未发布”等措辞仅描述各自当时的范围。
+进度与证据见 [PROJECT_STATUS](docs/PROJECT_STATUS.md)，待办见 [TASKS](TASKS.md)，构建索引见 [BUILD_STATUS](docs/BUILD_STATUS.md)。下方旧切片仅描述当时范围。
 
 ## 历史连接候选记录
 
 > One-click VPN candidate: the service-owned local subscription path now reaches Android consent, a one-shot native TUN process and a VPN-bound traffic probe. Engine libraries must be verified and packaged; connection is enabled on API 30+ where the VPN Network owner can be verified. [Implementation and validation](docs/one-click-vpn-connection.md) · [Windows toolchain](docs/android-development-toolchain.md).
 
+The English product name is FlinkVPN. Chinese UI text stays 飞连VPN; the launcher name is 飞连VPN on Chinese-locale devices and FlinkVPN elsewhere (default). This repository is FlyLink-com/gccwebos-android (org renamed from gccwebos-com). The future open-source release repository will be FlyLink-com/flink-android; no git remote is changed here. Published APKs and corresponding-source archives are currently hosted in FlyLink-com/feilian-vpn-releases.
+
 ## 先前版本记录
 
 以下内容保留各历史切片的状态；当前进度、版本与验收边界见 [PROJECT_STATUS](docs/PROJECT_STATUS.md)。
 
-> 0.4.0 mobile parity baseline: encrypted local-subscription shell with account-only login gates, server-validated native-session restore, actual subscription-node metadata, server-driven wallet/catalog/orders and approved robot/飞连vpn launcher artwork. [Scope and limits](docs/mobile-login-account-parity.md). Production VPN was disabled at this baseline.
+> 0.4.0 mobile parity baseline: encrypted local-subscription shell with account-only login gates, server-validated native-session restore, actual subscription-node metadata, server-driven wallet/catalog/orders and approved robot/FlinkVPN launcher artwork. [Scope and limits](docs/mobile-login-account-parity.md). Production VPN was disabled at this baseline.
 
 > Offline protocol contract v1: bounded SS AEAD, VLESS TCP TLS/Reality, Hysteria2 and TUIC v5 projection; production VPN remains disabled. See [support limits and evidence](docs/offline-protocol-contract.md).
 
-# clash飞连vpn · 0.3.0-commerce-draft
+# 飞连VPN · 0.3.0-commerce-draft
 
 独立叠加草稿：响应式订阅状态、钱包余额与充值、服务器三套餐报价及订单恢复。范围、来源与安全边界见 [订阅与钱包](docs/subscription-wallet-draft.md)。未合并、未发布，不开启生产 VPN；无真实付款测试。
 

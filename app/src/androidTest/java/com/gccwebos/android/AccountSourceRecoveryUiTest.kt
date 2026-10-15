@@ -94,12 +94,13 @@ class AccountSourceRecoveryUiTest {
 
     private fun awaitIdle() { compose.waitUntil(10_000) { idle() } }
 
-    private fun launch(f: Fixture) {
+    /** [autoLoad] false: the account does not fetch its own subscription (#65), to exercise the explicit recovery paths. */
+    private fun launch(f: Fixture, autoLoad: Boolean = true) {
         compose.setContent {
             val scope = rememberCoroutineScope()
             account = remember { AccountController(f.repository, scope, sourceCommitFence = { action ->
                 action(); f.commits.incrementAndGet()
-            }) }
+            }).apply { accountLoadEnabled = autoLoad } }
             LaunchedEffect(account) { account.restore() }
             AppShell(accountOverride = account, repositoryOverride = f.repository,
                 autoLoadCommerce = false, autoRefreshPages = false,
@@ -128,7 +129,8 @@ class AccountSourceRecoveryUiTest {
     }
 
     @Test fun emptySelectionRequiresExplicitAccountRecoveryBeforeOneClickCanImport() {
-        val f = Fixture(); launch(f)
+        // The account's automatic load (#65) is off here: this is the path taken when it has not happened (or failed).
+        val f = Fixture(); launch(f, autoLoad = false)
         compose.runOnIdle {
             assertTrue(account.configurationLibrary.snapshot.items.isEmpty())
             assertEquals(2, f.overviewReads.get())
@@ -181,7 +183,8 @@ class AccountSourceRecoveryUiTest {
     }
 
     @Test fun selectedLocalAndRemoteSourcesNeverExposeAnAccountSwitch() {
-        val f = Fixture(); launch(f)
+        // Automatic account load (#65) is off: this test is about manual sources never reading the account's setup.
+        val f = Fixture(); launch(f, autoLoad = false)
         for (kind in listOf(ManualImportInputKind.Document, ManualImportInputKind.Link)) {
             openMenu()
             compose.runOnIdle {
@@ -208,28 +211,35 @@ class AccountSourceRecoveryUiTest {
         }
     }
 
-    @Test fun busyAccountReadDisablesRecoveryAndCancelKeepsNone() {
-        val f = Fixture(); launch(f); openMenu()
-        compose.onNodeWithTag("manual-use-account").assertIsEnabled()
+    /**
+     * Signed in with nothing selected, the nodes page loads the account's own subscription by itself (#65), so the explicit
+     * 「使用账户订阅」 recovery entry has nothing left to recover; it only appears while a manual source is the active one.
+     * A busy account read still disables every entry of the import menu, and cancelling changes nothing.
+     */
+    @Test fun autoLoadedAccountNeedsNoRecoveryAndABusyAccountReadDisablesTheImportMenu() {
+        val f = Fixture(); launch(f)
+        compose.onNodeWithTag("nav-Lines").performClick()
+        compose.waitUntil(10_000) { f.acknowledgments.get() == 1 && idle() }
+        compose.runOnIdle {
+            assertEquals(1, f.setupReads.get()); assertEquals(1, f.downloads.get())
+            assertTrue(powers.isEmpty())
+        }
+        compose.onNodeWithTag("nodes-import").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("manual-import-host").assertExists()
+        compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
+        compose.onNodeWithTag("manual-import-scan").assertIsEnabled()
         val gate = CompletableDeferred<Unit>()
+        val reads = f.overviewReads.get()
         try {
             compose.runOnIdle { f.overviewGate = gate; account.refreshAccountUsage() }
-            compose.waitUntil(10_000) { account.accountUsage.state.value.busy && f.overviewReads.get() == 3 }
-            compose.onNodeWithTag("manual-use-account").assertIsNotEnabled().performClick()
+            compose.waitUntil(10_000) { account.accountUsage.state.value.busy && f.overviewReads.get() > reads }
+            compose.onNodeWithTag("manual-import-scan").assertIsNotEnabled()
+            compose.onNodeWithTag("manual-import-document").assertIsNotEnabled()
             compose.onNodeWithTag("manual-import-cancel").performClick()
             compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
-            compose.runOnIdle {
-                assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
-                assertEquals(0, f.commits.get()); assertFalse(account.manualImport.busy)
-            }
-            assertUnclaimed(f)
+            compose.runOnIdle { assertFalse(account.manualImport.busy); assertTrue(powers.isEmpty()) }
         } finally { gate.complete(Unit) }
-        awaitIdle(); openMenu()
-        compose.onNodeWithTag("manual-use-account").assertIsEnabled()
-        compose.onNodeWithTag("manual-import-cancel").performClick()
-        compose.runOnIdle {
-            assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
-            assertEquals(0, f.commits.get())
-        }
+        awaitIdle()
+        compose.runOnIdle { assertEquals(1, f.setupReads.get()); assertTrue(powers.isEmpty()) }
     }
 }

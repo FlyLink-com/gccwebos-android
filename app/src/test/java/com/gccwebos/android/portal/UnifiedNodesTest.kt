@@ -204,11 +204,24 @@ class UnifiedNodesTest {
 
     // ---- one list: labels, per-node edits through the controller ----
 
+    @Test fun theSwitcherRowOffersSourceActionsOnlyForOneSource() = runTest {
+        // The 来源 card is gone; its menu moves to the switcher row for exactly one source.
+        val f = Fixture(); f.local("Local Alpha"); f.local("Local Beta")
+        val items = f.items(false)
+        assertEquals(2, items.size)
+        assertNull("全部 has no single source", sourceMenuTarget(items, null))
+        assertEquals(1, sourceMenuTarget(items, items[1].displayKey))
+        assertEquals(0, sourceMenuTarget(items, items[0].displayKey))
+        assertNull("a stale selection offers nothing", sourceMenuTarget(items, "gone"))
+        assertEquals("the only source is always the target", 0, sourceMenuTarget(items.take(1), null))
+        assertNull(sourceMenuTarget(emptyList(), null))
+    }
+
     @Test fun everySourceHasAReadableLabelAndTheAccountIsMarkedReadOnly() = runTest {
         val f = Fixture(); f.seedAccount(); f.remote(); f.local("Local Beta")
         val labels = f.items(true).associate { it.kind to nodeSourceLabel(it) }
         assertEquals("官方 · 只读", labels[ManualSourceKind.LegacyRemote])
-        // A row names its source (short enough never to be cut off); the kind lives on the 来源 card.
+        // A row names its source (short enough never to be cut off); the kind is in 查看.
         val items = f.items(true)
         for (kind in listOf(ManualSourceKind.ExternalRemote, ManualSourceKind.ImportedLocal)) {
             val item = items.first { it.kind == kind }

@@ -1,6 +1,6 @@
 # 一键连接：实现与 OPPO 验证
 
-2026-10-02（America/Los_Angeles）。一键配置解析和 Android VPN 连接已接入。OPPO PFJM10 / Android 13 / API 33 的完整 synthetic SS 用例已通过，使用实际 Activity、本地授权、系统 consent、跨进程 Binder、JNI、TUN 和 VPN Network；测试只允许候选应用流量。随后已安装不含测试 fixture 的独立候选包“飞连 VPN 测试”，普通飞连 VPN 保留。
+2026-10-02（America/Los_Angeles）。一键配置解析和 Android VPN 连接已接入。OPPO PFJM10 / Android 13 / API 33 的完整 synthetic SS 用例已通过，使用实际 Activity、本地授权、系统 consent、跨进程 Binder、JNI、TUN 和 VPN Network；测试只允许候选应用流量。随后已安装不含测试 fixture 的独立候选包“飞连VPN 测试”，普通飞连VPN 保留。
 
 这份证据不代表真实订阅节点或其他协议互通已通过；未正式签名发布或生产部署。B2 P7 仍未通过，P8/P9 未运行，其历史结果与本次连接验证分开记录。
 

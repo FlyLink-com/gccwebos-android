@@ -31,7 +31,7 @@ The browser's seven-day Cookie mode is a separate contract. Its DTO exposes cont
 - Plans/data-pack tabs display only validated server-returned offers. No local catalog, invented price or unpublished package is seeded. Data packs have traffic GB without fabricated duration/monthly quota
 - Shopping, recharge and plan-schedule history preserve payment/fulfillment distinctions. Legacy orders require `?limit=20` with paired `afterCreatedAt`/`afterOrderRef`. Wallet ledger requires `?limit=20` with paired `afterOccurredAt`/`afterEntryRef`; strict deltas, ordering and bound cursors are checked. No other query shapes are admitted
 - Recharge retains version-2 offers, integer money/exponent formatting, original durable operation keys, explicit confirmation, trusted payment URLs and authoritative status refresh. Browser return never implies credited payment
-- User-visible mark is `飞连vpn`; app label is `飞连vpn`. Real API domains, package IDs and technical/license identities remain unchanged
+- English product name and default launcher label are `FlinkVPN`. Chinese UI copy and the Chinese launcher label stay `飞连VPN`. Real API domains, package IDs and technical/license identities remain unchanged
 
 Sources: mobile `src/main.jsx`, `src/login.jsx`, `src/panels.jsx`, `src/mine.jsx`, `src/api/read-client.mjs`, `src/api/current-resource.mjs`, `src/api/upstream/commerce/commerce-client.ts`, and the wallet/recharge clients. Visual tokens remain grounded in `src/style.css`, `src/components/button-tokens.css` and `src/components/alipay-visual.css`; further overall concept design is separately reviewed.
 
@@ -60,7 +60,7 @@ These changes resolve the actionable native flow gaps within the stated scope. T
 
 ## Final branding and interrupted authentication follow-up
 
-The latest user choice replaces all visible marks with `飞连vpn`, including the launcher, hoodie, lounge and native text. Original image identities and mechanically encoded resources are recorded in branding-assets.json.
+English visible marks use `FlinkVPN`. Chinese UI and the Chinese launcher label stay `飞连VPN`. Launcher, hoodie and lounge image wordmarks are unchanged. Original image identities and mechanically encoded resources are recorded in branding-assets.json.
 
 Head b3bb94fe passed Gradle/JUnit/Lint and fresh native host/ABI/release-exclusion stages. API36 stopped before installation on a warm-boot system ANR. API33 ran 59 tests with two fixture/obsolete-gate assertion failures; real-TUN acceptance was not reached. The subsequent correction clears the seeded account before input and asserts the actual no-local signed-out login gate, preserving the rest of both tests. Bounded failure-cleanup now retains UI screenshots without weakening exit status.
 

@@ -25,7 +25,7 @@ Debug / candidate 不属于正式升级链，自动入口同时检查包名与 D
 
 ## 浏览器边界
 
-新版本弹窗仅在用户点击后对精确同源 `/android/releases/<filename>.apk` URL 发出 ACTION_VIEW + CATEGORY_BROWSABLE，不使用 WebView、不下载 APK 到应用目录、不执行安装器、不新增 REQUEST_INSTALL_PACKAGES 或存储权限。初始 URL 不允许查询串、片段、编码路径、目录穿越或外域。交给外部浏览器以后，网页/APK 的重定向、下载和 Android 安装由浏览器/系统管理；App 不能验证下载文件，也不会把展示的 SHA-256 文本声称为已验证。正式发布流程须验证公网 APK 终点和签名链。
+新版本弹窗中的「前往官网下载」仅在用户点击后对精确同源 `/android/releases/<filename>.apk` URL 发出 ACTION_VIEW + CATEGORY_BROWSABLE，不使用 WebView。（正式包另有「下载并安装」应用内下载，见 `docs/in-app-update.md`：只在点击后下载到应用私有缓存，校验 SHA-256、包名、版本和签名后交给系统安装程序；仅新增 REQUEST_INSTALL_PACKAGES，无存储权限。）初始 URL 不允许查询串、片段、编码路径、目录穿越或外域。交给外部浏览器以后，网页/APK 的重定向、下载和 Android 安装由浏览器/系统管理；App 不能验证下载文件，也不会把展示的 SHA-256 文本声称为已验证。正式发布流程须验证公网 APK 终点和签名链。
 
 ## 验证
 

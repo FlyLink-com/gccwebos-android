@@ -91,7 +91,7 @@ class AccountUsageCardUiTest {
         compose.onNodeWithTag("account-usage-refresh").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-used").assertDoesNotExist()
         assertEquals(0, logins.get()); assertEquals(0, registrations.get()); assertEquals(0, primaryActions.get())
-        compose.onNodeWithTag("account-usage-primary").assertTextEquals("开通飞连vpn")
+        compose.onNodeWithTag("account-usage-primary").assertTextEquals("开通飞连VPN")
             .assertHeightIsAtLeast(48.dp).performScrollTo().performClick()
         assertEquals(1, primaryActions.get()); assertEquals(0, logins.get()); assertEquals(0, registrations.get())
         compose.onNodeWithTag("account-usage-login").assertHeightIsAtLeast(48.dp).performScrollTo().performClick()
@@ -107,7 +107,7 @@ class AccountUsageCardUiTest {
         compose.onNodeWithTag("account-usage-no-plan").assertTextEquals("暂无生效套餐")
         compose.onNodeWithTag("account-usage-login").assertDoesNotExist()
         compose.onNodeWithTag("account-usage-register").assertDoesNotExist()
-        compose.onNodeWithTag("account-usage-primary").assertTextEquals("开通飞连vpn").assertIsNotEnabled()
+        compose.onNodeWithTag("account-usage-primary").assertTextEquals("开通飞连VPN").assertIsNotEnabled()
         compose.runOnIdle { fixture.primaryEnabled = true }
         compose.onNodeWithTag("account-usage-primary").assertHeightIsAtLeast(48.dp).performScrollTo().performClick()
         assertEquals(2, primaryActions.get()); assertEquals(0, refreshes.get())

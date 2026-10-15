@@ -73,7 +73,7 @@ class RechargeFlowControllerTest {
             rechargeOffers = listOf(offer)
             rechargeOffersLoaded = true
         }
-        val flow = RechargeFlowController(account, commerce, opener ?: { opened += it })
+        val flow = RechargeFlowController(account, commerce, clock = { now }, opener = opener ?: { opened += it })
         fun installPending(value: RechargeOrder = order) {
             recovery.save("synthetic_account", PendingCommerce("recharge", null, value.offerRef,
                 "synthetic_recharge_key", value.orderRef))
@@ -82,19 +82,18 @@ class RechargeFlowControllerTest {
         }
     }
 
-    @Test fun selectionAndCancellationStayLocalWithoutCreatingOrClearingRecovery() = runTest {
+    @Test fun tappingRechargeCreatesTheOrderAndOpensPaymentAtOnceWithNoDialogStep() = runTest {
         val fixture = Fixture(this)
-        fixture.flow.select(offer)
-        assertEquals(offer, fixture.flow.selectedOffer)
-        fixture.flow.cancelSelection()
-        fixture.flow.confirmSelection()
-        runCurrent()
-        assertNull(fixture.flow.selectedOffer)
-        assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty())
-        assertEquals(0, fixture.recovery.clears); assertFalse(fixture.commerce.pendingRecharge)
+        fixture.flow.rechargeNow(offer); runCurrent()
+        assertEquals(1, fixture.calls.count { it.path == "/api/portal/coins/recharge/orders" })
+        assertEquals(listOf(requireNotNull(order.nextAction).url), fixture.opened)
+        assertEquals(order.orderRef, fixture.flow.requestedPaymentFor)
+        assertNull(fixture.flow.error)
+        // There is no confirmation or review state left on the controller at all.
+        assertTrue(RechargeFlowController::class.java.declaredFields.none { it.name in setOf("selectedOffer", "paymentReview") })
     }
 
-    @Test fun everyChangedOfferSnapshotRequiresReselectionWithoutPosting() = runTest {
+    @Test fun everyChangedOfferSnapshotStopsBeforePostingAndAsksForReselection() = runTest {
         val replacements = listOf(
             emptyList(), listOf(offer.copy(offerRef = "recharge_fixture_new")),
             listOf(offer.copy(quoteVersion = 2)), listOf(offer.copy(paidCoinUnits = 11)),
@@ -103,20 +102,18 @@ class RechargeFlowControllerTest {
         )
         for (replacement in replacements) {
             val fixture = Fixture(this)
-            fixture.flow.select(offer)
             fixture.commerce.rechargeOffers = replacement
-            fixture.flow.confirmSelection(); runCurrent()
-            assertNull(fixture.flow.selectedOffer); assertNotNull(fixture.flow.error)
-            assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty())
+            fixture.flow.rechargeNow(offer); runCurrent()
+            assertNotNull(fixture.flow.error)
+            assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty()); assertTrue(fixture.opened.isEmpty())
         }
     }
 
-    @Test fun repeatedConfirmationPostsOnceWithKeyDurableBeforeResponse() = runTest {
+    @Test fun repeatedTapsPostOnceWithKeyDurableBeforeResponse() = runTest {
         val release = CompletableDeferred<Unit>()
         val fixture = Fixture(this, beforeCreate = { release.await() })
-        fixture.flow.select(offer)
-        fixture.flow.confirmSelection(); fixture.flow.confirmSelection(); runCurrent()
-        assertTrue(fixture.commerce.busy); assertNull(fixture.flow.selectedOffer)
+        fixture.flow.rechargeNow(offer); fixture.flow.rechargeNow(offer); runCurrent()
+        assertTrue(fixture.commerce.busy)
         assertEquals(1, fixture.calls.size)
         val pending = requireNotNull(fixture.repo.pending("recharge"))
         assertEquals("synthetic_recharge_key", pending.key); assertNull(pending.resultRef)
@@ -125,15 +122,72 @@ class RechargeFlowControllerTest {
         assertEquals(offer.offerRef, submitted.getString("offerRef"))
         assertEquals(pending.key, submitted.getString("idempotencyKey"))
         release.complete(Unit); runCurrent()
-        fixture.flow.confirmSelection(); runCurrent()
-        assertEquals(1, fixture.calls.size); assertFalse(fixture.commerce.busy)
+        assertEquals(1, fixture.calls.size); assertEquals(1, fixture.opened.size)
         assertTrue(fixture.commerce.pendingRecharge)
         assertEquals(order.orderRef, fixture.repo.pending("recharge")?.resultRef)
         assertTrue(fixture.recovery.saved.all { it.key == pending.key }); assertEquals(0, fixture.recovery.clears)
     }
 
-    @Test fun unreadOrUnreadySessionAndPendingRechargeCannotSelectOrConfirm() = runTest {
-        for (gate in listOf("unread", "auth", "restoring", "foreground", "busy", "pending", "method")) {
+    @Test fun aPendingUnpaidRechargeNeverBlocksStartingANewOne() = runTest {
+        val fixture = Fixture(this)
+        // An earlier order is still awaiting payment (its entry may well be expired).
+        fixture.recovery.save("synthetic_account", PendingCommerce("recharge", null, offer.offerRef, "older_key", "recharge_older_order"))
+        fixture.commerce.pendingRecharge = true
+        fixture.flow.rechargeNow(offer); runCurrent()
+        assertEquals(1, fixture.calls.count { it.path == "/api/portal/coins/recharge/orders" })
+        // The new order replaces the local pointer; the server keeps the older one in its history.
+        assertEquals("synthetic_recharge_key", fixture.repo.pending("recharge")?.key)
+        assertEquals(order.orderRef, fixture.repo.pending("recharge")?.resultRef)
+        assertEquals(order.orderRef, fixture.commerce.recharge?.orderRef)
+    }
+
+    @Test fun aPayableUnpaidOrderListedInOrderDetailsOpensItsEntryDirectlyWithNoReviewAndNoRequest() = runTest {
+        val fixture = Fixture(this)
+        // Not the current local order (that pointer was replaced by a newer recharge); it only lives in 订单明细.
+        fixture.commerce.rechargeHistory = listOf(order)
+        assertNull(fixture.commerce.recharge)
+        assertTrue(fixture.commerce.canOpenPayment(order, now))
+        fixture.flow.payNow(order, now)
+        assertEquals(listOf(requireNotNull(order.nextAction).url), fixture.opened)
+        assertEquals(order.orderRef, fixture.flow.requestedPaymentFor)
+        assertTrue("paying never creates or posts anything", fixture.calls.isEmpty())
+    }
+
+    @Test fun payNowOnAnOrderThatCannotBePaidOpensNothing() = runTest {
+        val fixture = Fixture(this)
+        fixture.commerce.rechargeHistory = listOf(order)
+        fixture.flow.payNow(order, order.expiresAt)           // past its own expiry
+        fixture.flow.payNow(order.copy(orderRef = "recharge_other"), now) // not in the list
+        assertTrue(fixture.opened.isEmpty()); assertNull(fixture.flow.requestedPaymentFor); assertNotNull(fixture.flow.error)
+    }
+
+    @Test fun aNewOrderWhoseServerFiguresDifferFromTheSelectedOfferOpensNothingAndShowsOneInlineMessage() = runTest {
+        val fixture = Fixture(this)
+        // The server prices the order differently from what the user selected: never open an unseen amount.
+        val shown = offer.copy(amountMinor = offer.amountMinor + 100)
+        fixture.commerce.rechargeOffers = listOf(shown)
+        fixture.flow.rechargeNow(shown); runCurrent()
+        assertTrue(fixture.opened.isEmpty()); assertNull(fixture.flow.requestedPaymentFor)
+        val message = requireNotNull(fixture.flow.error)
+        assertFalse(Regex("https?:|xsd8866|gccwebos|\\.com", RegexOption.IGNORE_CASE).containsMatchIn(message))
+        // The order is kept (idempotent record) so it can be paid from 订单明细 where its own amount is shown.
+        assertEquals(order.orderRef, fixture.commerce.recharge?.orderRef)
+        assertTrue(fixture.commerce.pendingRecharge)
+    }
+
+    @Test fun anOrderThatIsNotListedExpiredOrWithoutAnEntryIsNeverPayable() = runTest {
+        val fixture = Fixture(this)
+        fixture.commerce.rechargeHistory = listOf(order)
+        assertFalse("unknown order", fixture.commerce.canOpenPayment(order.copy(orderRef = "recharge_other"), now))
+        assertFalse("past the order expiry", fixture.commerce.canOpenPayment(order, order.expiresAt))
+        fixture.commerce.rechargeHistory = listOf(order.copy(nextAction = null))
+        assertFalse("no payment entry", fixture.commerce.canOpenPayment(order.copy(nextAction = null), now))
+        fixture.commerce.rechargeHistory = listOf(order.copy(status = "credited"))
+        assertFalse("already paid", fixture.commerce.canOpenPayment(order.copy(status = "credited"), now))
+    }
+
+    @Test fun unreadOrUnreadySessionCannotStartARecharge() = runTest {
+        for (gate in listOf("unread", "auth", "restoring", "foreground", "busy", "method")) {
             val fixture = Fixture(this)
             when (gate) {
                 "unread" -> fixture.commerce.rechargeOffersLoaded = false
@@ -141,55 +195,14 @@ class RechargeFlowControllerTest {
                 "restoring" -> fixture.account.restoring = true
                 "foreground" -> fixture.account.foregroundCheckPending = true
                 "busy" -> fixture.commerce.busy = true
-                "pending" -> fixture.commerce.pendingRecharge = true
                 "method" -> fixture.commerce.rechargeOffers = listOf(offer.copy(paymentMethods = listOf("wechat_pay")))
             }
-            fixture.flow.select(offer); fixture.flow.confirmSelection(); runCurrent()
-            assertNull(fixture.flow.selectedOffer)
-            assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty())
-        }
-        for (gate in listOf("unread", "restoring", "foreground", "busy", "pending")) {
-            val fixture = Fixture(this)
-            fixture.flow.select(offer)
-            when (gate) {
-                "unread" -> fixture.commerce.rechargeOffersLoaded = false
-                "restoring" -> fixture.account.restoring = true
-                "foreground" -> fixture.account.foregroundCheckPending = true
-                "busy" -> fixture.commerce.busy = true
-                "pending" -> fixture.commerce.pendingRecharge = true
-            }
-            fixture.flow.confirmSelection(); runCurrent()
-            assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty())
+            fixture.flow.rechargeNow(offer); runCurrent()
+            assertTrue(fixture.calls.isEmpty()); assertTrue(fixture.recovery.saved.isEmpty()); assertTrue(fixture.opened.isEmpty())
         }
     }
 
-    @Test fun dismissingReviewPreservesPendingOrderAndNeverInvokesOpener() = runTest {
-        val fixture = Fixture(this)
-        fixture.installPending()
-        val before = fixture.repo.pending("recharge")
-        fixture.flow.reviewPayment(order, now)
-        assertEquals(order, fixture.flow.paymentReview)
-        fixture.flow.dismissPayment(); fixture.flow.openPayment(now)
-        assertNull(fixture.flow.paymentReview); assertNull(fixture.flow.requestedPaymentFor)
-        assertTrue(fixture.opened.isEmpty()); assertTrue(fixture.calls.isEmpty())
-        assertEquals(before, fixture.repo.pending("recharge")); assertEquals(1, fixture.recovery.saved.size)
-        assertEquals(0, fixture.recovery.clears); assertEquals("entry_ready", fixture.commerce.recharge?.status)
-    }
-
-    @Test fun repeatedOpenConsumesOneReviewAndOnlyRecordsRequestedOpening() = runTest {
-        val fixture = Fixture(this)
-        fixture.installPending()
-        val before = fixture.repo.pending("recharge")
-        fixture.flow.reviewPayment(order, now)
-        fixture.flow.openPayment(now); fixture.flow.openPayment(now)
-        assertEquals(1, fixture.opened.size); assertNull(fixture.flow.paymentReview)
-        assertEquals(order.orderRef, fixture.flow.requestedPaymentFor)
-        assertEquals(order, fixture.commerce.recharge); assertNull(fixture.commerce.wallet)
-        assertEquals(before, fixture.repo.pending("recharge")); assertEquals(0, fixture.recovery.clears)
-        assertTrue(fixture.calls.isEmpty())
-    }
-
-    @Test fun unsafeActionAndBothExpiryBoundariesOrUpdatedOrderNeverOpen() = runTest {
+    @Test fun anUnsafeOrExpiredOrderFromOrderDetailsNeverOpens() = runTest {
         val action = requireNotNull(order.nextAction)
         val invalid = listOf(
             order.copy(expiresAt = now), order.copy(nextAction = PaymentRedirect(action.url, now)),
@@ -201,57 +214,38 @@ class RechargeFlowControllerTest {
         )
         for (value in invalid) {
             val fixture = Fixture(this)
-            fixture.installPending(value)
-            fixture.flow.reviewPayment(value, now); fixture.flow.openPayment(now)
-            assertNull(fixture.flow.paymentReview); assertNull(fixture.flow.requestedPaymentFor)
+            fixture.commerce.rechargeHistory = listOf(value)
+            fixture.flow.payNow(value, now)
+            assertNull(fixture.flow.requestedPaymentFor)
             assertNotNull(fixture.flow.error); assertTrue(fixture.opened.isEmpty()); assertTrue(fixture.calls.isEmpty())
-        }
-        for (value in listOf(order.copy(expiresAt = now.plusSeconds(1)),
-            order.copy(nextAction = PaymentRedirect(action.url, now.plusSeconds(1))))) {
-            val fixture = Fixture(this)
-            fixture.installPending(value); fixture.flow.reviewPayment(value, now)
-            assertEquals(value, fixture.flow.paymentReview)
-            fixture.flow.openPayment(now.plusSeconds(1))
-            assertTrue(fixture.opened.isEmpty()); assertNotNull(fixture.flow.error)
         }
         for (gate in listOf("restoring", "foreground", "busy")) {
             val fixture = Fixture(this)
-            fixture.installPending(); fixture.flow.reviewPayment(order, now)
+            fixture.commerce.rechargeHistory = listOf(order)
             when (gate) {
                 "restoring" -> fixture.account.restoring = true
                 "foreground" -> fixture.account.foregroundCheckPending = true
                 "busy" -> fixture.commerce.busy = true
             }
-            fixture.flow.openPayment(now)
-            assertNull(fixture.flow.paymentReview); assertTrue(fixture.opened.isEmpty())
+            fixture.flow.payNow(order, now)
+            assertTrue(fixture.opened.isEmpty())
         }
-        val fixture = Fixture(this)
-        fixture.installPending(); fixture.flow.reviewPayment(order, now)
-        fixture.commerce.recharge = order.copy(status = "credited")
-        fixture.flow.openPayment(now)
-        assertTrue(fixture.opened.isEmpty()); assertNotNull(fixture.flow.error)
     }
 
-    @Test fun changedGenerationAndDisposedOrFailedOpenerCannotReviveLocalConfirmation() = runTest {
-        val selected = Fixture(this)
-        selected.flow.select(offer); selected.account.authSessionGeneration++
-        selected.flow.confirmSelection(); runCurrent()
-        assertTrue(selected.calls.isEmpty()); assertTrue(selected.recovery.saved.isEmpty())
-
-        val reviewed = Fixture(this)
-        reviewed.installPending(); reviewed.flow.reviewPayment(order, now)
-        reviewed.account.authSessionGeneration++; reviewed.flow.openPayment(now)
-        assertTrue(reviewed.opened.isEmpty()); assertNull(reviewed.flow.requestedPaymentFor)
-        assertEquals(order, reviewed.commerce.recharge)
+    @Test fun changedGenerationAndDisposedOrFailedOpenerCannotReviveAnything() = runTest {
+        val tapped = Fixture(this)
+        tapped.account.authSessionGeneration++
+        tapped.flow.rechargeNow(offer); runCurrent()
+        assertTrue(tapped.calls.isEmpty()); assertTrue(tapped.recovery.saved.isEmpty())
 
         var openerCalls = 0
         val failed = Fixture(this, opener = { openerCalls++; throw IllegalStateException("Synthetic opener failure") })
-        failed.installPending(); failed.flow.reviewPayment(order, now)
-        failed.flow.openPayment(now); failed.flow.openPayment(now)
+        failed.commerce.rechargeHistory = listOf(order)
+        failed.flow.payNow(order, now)
         assertEquals(1, openerCalls); assertNull(failed.flow.requestedPaymentFor)
         assertNotNull(failed.flow.error); assertFalse(failed.flow.error!!.contains(requireNotNull(order.nextAction).url))
-        failed.flow.dispose(); failed.flow.reviewPayment(order, now); failed.flow.select(offer); failed.flow.openPayment(now)
-        assertNull(failed.flow.paymentReview); assertNull(failed.flow.selectedOffer); assertNull(failed.flow.error)
+        failed.flow.dispose(); failed.flow.payNow(order, now); failed.flow.rechargeNow(offer); runCurrent()
+        assertNull(failed.flow.error); assertNull(failed.flow.requestedPaymentFor)
         assertEquals(1, openerCalls); assertTrue(failed.calls.isEmpty()); assertEquals(0, failed.recovery.clears)
     }
 }

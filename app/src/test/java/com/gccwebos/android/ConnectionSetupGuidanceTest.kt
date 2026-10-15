@@ -37,6 +37,36 @@ class ConnectionSetupGuidanceTest {
         assertTrue(choice.enabled)
     }
 
+    @Test fun signedOutWithAnImportedSourceAndNoNodeOffersChooseNodeNotPurchase() {
+        val kinds = com.gccwebos.android.portal.ManualSourceKind.values()
+        for (kind in kinds) {
+            val manual = kind in setOf(com.gccwebos.android.portal.ManualSourceKind.ImportedLocal,
+                com.gccwebos.android.portal.ManualSourceKind.ImportedRemote, com.gccwebos.android.portal.ManualSourceKind.ExternalRemote)
+            assertEquals("$kind no node", manual, connectionChoosesNodeFirst(false, kind, hasSelectedNode = false))
+            assertFalse("$kind with a node", connectionChoosesNodeFirst(false, kind, hasSelectedNode = true))
+            assertFalse("$kind signed in", connectionChoosesNodeFirst(true, kind, hasSelectedNode = false))
+        }
+        val choose = connectionSetupGuidance(false, false, null, missing, now, true, chooseNode = true)
+        assertEquals(ConnectionSetupAction.ChooseNode, choose.action)
+        assertEquals("选择节点", choose.label)
+        assertTrue(choose.enabled)
+        assertFalse("busy account keeps it disabled", connectionSetupGuidance(false, false, null, missing, now, true, busy = true, chooseNode = true).enabled)
+        assertFalse("not operable keeps it disabled", connectionSetupGuidance(false, false, null, missing, now, false, chooseNode = true).enabled)
+        // Without the flag the signed-out guidance is unchanged.
+        assertEquals("开通飞连VPN", connectionSetupGuidance(false, false, null, missing, now, true).label)
+        // A signed-in account never gets it, even when asked.
+        assertEquals(ConnectionSetupAction.Plans, connectionSetupGuidance(true, true, Resource.None, missing, now, true, chooseNode = true).action)
+    }
+
+    @Test fun chooseNodeDispatchOpensTheNodesTabOnlyAndIsInertWhenDisabled() {
+        var nodes = 0
+        val g = ConnectionSetupGuidance(ConnectionSetupAction.ChooseNode, "选择节点", true)
+        assertTrue(dispatchConnectionSetup(g, { fail("account") }, { fail("plans") }, { fail("sync") }, { nodes++ }))
+        assertEquals(1, nodes)
+        assertFalse(dispatchConnectionSetup(g.copy(enabled = false), { fail("account") }, { fail("plans") }, { fail("sync") }, { nodes++ }))
+        assertEquals(1, nodes)
+    }
+
     @Test fun availableWithoutLocalConfigurationOffersOnlyExplicitSync() {
         for (setup in listOf(true, false)) {
             val sync = guidance(available(setup))
@@ -92,15 +122,16 @@ class ConnectionSetupGuidanceTest {
 
     @Test fun dispatcherCallsOnlyTheSelectedEnabledCallback() {
         for (action in ConnectionSetupAction.entries) for (enabled in listOf(false, true)) {
-            var accounts = 0; var plans = 0; var syncs = 0
+            var accounts = 0; var plans = 0; var syncs = 0; var chooses = 0
             val dispatched = dispatchConnectionSetup(ConnectionSetupGuidance(action, "synthetic", enabled),
-                onAccountChoice = { accounts++ }, onPlans = { plans++ }, onSync = { syncs++ })
+                onAccountChoice = { accounts++ }, onPlans = { plans++ }, onSync = { syncs++ }, onChooseNode = { chooses++ })
             val actionable = enabled && action != ConnectionSetupAction.None
             assertEquals(actionable, dispatched)
-            assertEquals(if (actionable) 1 else 0, accounts + plans + syncs)
+            assertEquals(if (actionable) 1 else 0, accounts + plans + syncs + chooses)
             assertEquals(if (enabled && action == ConnectionSetupAction.AccountChoice) 1 else 0, accounts)
             assertEquals(if (enabled && action == ConnectionSetupAction.Plans) 1 else 0, plans)
             assertEquals(if (enabled && action == ConnectionSetupAction.SyncSubscription) 1 else 0, syncs)
+            assertEquals(if (enabled && action == ConnectionSetupAction.ChooseNode) 1 else 0, chooses)
         }
     }
 

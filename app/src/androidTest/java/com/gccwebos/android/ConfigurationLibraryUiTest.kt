@@ -93,7 +93,14 @@ class ConfigurationLibraryUiTest {
         }
     }
 
+    /** The 来源 card is gone: a source's actions sit on the switcher row once its tab is selected (or it is the only source). */
+    private fun selectSource(index: Int) {
+        if (compose.onAllNodesWithTag("configuration-menu-$index").fetchSemanticsNodes().isEmpty())
+            compose.onNodeWithTag("unified-filter-$index").performClick()
+    }
+
     private fun menu(index: Int, action: String) {
+        selectSource(index)
         compose.onNodeWithTag("configuration-menu-$index").performScrollTo().performClick()
         compose.onNodeWithTag("configuration-$action-$index").performClick()
     }
@@ -106,9 +113,12 @@ class ConfigurationLibraryUiTest {
 
     @Test fun allConfigurationsRemainVisibleAndEveryNodeOfEverySourceIsChosenInOneTap() {
         launch()
-        compose.onNodeWithTag("configuration-group-0").assertExists()
+        compose.onNodeWithTag("unified-filter-0").assertExists()
         compose.onNodeWithTag("library-active-name").assertTextEquals("合成配置")
-        compose.onNodeWithTag("configuration-group-2").assertExists()
+        compose.onNodeWithTag("unified-filter-2").assertExists()
+        // The 来源 card is removed outright.
+        compose.onNodeWithTag("unified-sources").assertDoesNotExist()
+        compose.onNodeWithTag("configuration-group-0").assertDoesNotExist()
         // No expanding and no separate "选择配置" step: the other sources' nodes are rows of the same list.
         compose.onNodeWithTag("configuration-toggle-2").assertDoesNotExist()
         compose.onNodeWithTag("configuration-activate-2").assertDoesNotExist()
@@ -328,6 +338,7 @@ class ConfigurationLibraryUiTest {
 
     @Test fun accountConfigurationHasOnlyMetadataView() {
         launch()
+        selectSource(0)
         compose.onNodeWithTag("configuration-menu-0").performClick()
         compose.onNodeWithTag("configuration-rename-0").assertDoesNotExist()
         compose.onNodeWithTag("configuration-replace-0").assertDoesNotExist()
@@ -377,6 +388,7 @@ class ConfigurationLibraryUiTest {
         compose.runOnIdle { busy = true }
         compose.onNodeWithTag("nodes-import").assertIsNotEnabled()
         compose.onNodeWithTag("nodes-latency-refresh").assertIsNotEnabled()
+        selectSource(2)
         compose.onNodeWithTag("configuration-menu-2").assertIsNotEnabled()
         compose.runOnIdle { busy = false; snapshot = snapshot.copy(storageError = true) }
         compose.onNodeWithTag("nodes-import").assertIsNotEnabled()
@@ -401,7 +413,7 @@ class ConfigurationLibraryUiTest {
         launch()
         compose.onNodeWithTag("configuration-unselected").assertTextEquals("未选择配置")
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().assertHasClickAction()
-        (0..2).forEach { compose.onNodeWithTag("configuration-group-$it").assertExists() }
+        (0..2).forEach { compose.onNodeWithTag("unified-filter-$it").assertExists() }
         compose.onNodeWithTag("library-active-fixture").assertDoesNotExist()
         // The heading row still carries 排序 and 延迟测试: the saved sources' own nodes can be measured without an active one.
         compose.onNodeWithTag("nodes-latency-refresh").assertIsEnabled()
@@ -439,7 +451,7 @@ class ConfigurationLibraryUiTest {
         // 取消: nothing is chosen, the dialog closes.
         compose.onNodeWithTag("configuration-node-2-0").performScrollTo().performClick()
         compose.onNodeWithTag("unknown-node-dialog").assertIsDisplayed()
-        compose.onNodeWithTag("unknown-node-body", useUnmergedTree = true).assertTextEquals("未知节点存在数据泄露风险，请谨慎选择")
+        compose.onNodeWithTag("unknown-node-dialog-body", useUnmergedTree = true).assertTextEquals("未知节点存在数据泄露风险，请谨慎选择")
         compose.onNodeWithTag("unknown-node-cancel").assertHeightIsAtLeast(48.dp).performClick()
         compose.onNodeWithTag("unknown-node-dialog").assertDoesNotExist()
         compose.runOnIdle { assertTrue(chosen.isEmpty()) }

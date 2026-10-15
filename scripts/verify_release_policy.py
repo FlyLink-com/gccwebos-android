@@ -59,8 +59,8 @@ def verify_update_boundary(manifest_xml: str, paths_xml: str) -> None:
 def verify_configuration(source: str) -> None:
     """Deliberately narrow checks for this project's single release build type."""
     assert re.search(r'applicationId\s*=\s*"com\.gccwebos\.android"', source), "Official package changed"
-    assert re.search(r'versionCode\s*=\s*9\b', source), "Stable versionCode must be 9"
-    assert re.search(r'versionName\s*=\s*"0\.4\.2"', source), "Stable versionName must be 0.4.2"
+    assert re.search(r'versionCode\s*=\s*10\b', source), "Stable versionCode must be 10"
+    assert re.search(r'versionName\s*=\s*"0\.4\.3"', source), "Stable versionName must be 0.4.3"
     # The release block must stay unconditional; nested property-controlled gates are rejected.
     match = re.search(r'\brelease\s*\{([^{}]*)\}', source)
     assert match, "Missing unconditional release build type"

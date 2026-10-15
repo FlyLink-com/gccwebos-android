@@ -18,7 +18,14 @@ internal class NodeSelectionController(private val manager: LocalSubscriptionMan
     private val scope: CoroutineScope, private val authGeneration: () -> Long,
     private val allowed: () -> Boolean = { true },
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Upper bound for one node-list refresh; a hung read ends as a recoverable error instead of endless loading. */
+    private val refreshTimeoutMillis: Long = RefreshTimeoutMillis,
     private val onSnapshot: (LocalSubscriptionSnapshot) -> Unit = {}) {
+    companion object {
+        const val RefreshTimeoutMillis = 45_000L
+        const val RefreshTimeoutMessage = "加载节点超时，请检查网络后重试"
+        const val RefreshFailedMessage = "加载节点失败，请重试"
+    }
     var snapshot by mutableStateOf(NodeSelectionSnapshot(LocalSubscriptionStatus.MISSING))
         private set
     var busy by mutableStateOf(false)
@@ -73,7 +80,7 @@ internal class NodeSelectionController(private val manager: LocalSubscriptionMan
         busy = true; message = null; localReadOnly = false
         task = scope.launch {
             try {
-                val value = manager.refresh()
+                val value = kotlinx.coroutines.withTimeout(refreshTimeoutMillis) { manager.refresh() }
                 coroutineContext.ensureActive()
                 if (request != generation || account != authGeneration()) return@launch
                 val previous = snapshot.selected
@@ -81,7 +88,13 @@ internal class NodeSelectionController(private val manager: LocalSubscriptionMan
                 onSnapshot(value)
                 if (previous != null && snapshot.selected == null && snapshot.status == LocalSubscriptionStatus.READY)
                     message = "配置已变化，请重新选择节点。"
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                if (request == generation) { manager.invalidatePending(); message = RefreshTimeoutMessage }
             } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) {
+                // Never let a refresh failure escape the page scope; the list stays recoverable via 重试.
+                if (request == generation) message = RefreshFailedMessage
+            }
             finally { if (request == generation) busy = false }
         }
     }

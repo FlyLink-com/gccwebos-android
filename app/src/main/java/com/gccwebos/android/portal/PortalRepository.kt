@@ -33,8 +33,9 @@ class PortalRepository(private val transport: PortalTransport, private val store
     manualSources: ManualSourceStore? = null,
     externalSubscription: SubscriptionSource = ManualSubscriptionTransport(),
     nodeChoices: NodeChoiceStore? = null,
-    nodeOverrides: NodeOverrideStore? = null) {
-    val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now,
+    nodeOverrides: NodeOverrideStore? = null,
+    authority: LocalSubscriptionAuthority = LocalSubscriptionAuthority.process) {
+    val localSubscriptions = LocalSubscriptionManager(store, profiles, subscription, policy, now, authority = authority,
         allowHostnamePreparation = allowHostnamePreparation, manualSources = manualSources, externalSource = externalSubscription,
         nodeChoices = nodeChoices, nodeOverrides = nodeOverrides)
     private val mutex = Mutex()
@@ -619,9 +620,15 @@ class PortalRepository(private val transport: PortalTransport, private val store
             try { sessions.clear() } catch (_: Exception) { }
         }
         kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            // Each required step runs independently: a session-store failure must never skip the account
+            // source revocation or the owner (tunnel) stop. The first failure is preserved and rethrown only
+            // after every step was attempted, so logout is reported complete only when all of them succeeded.
+            var failure: Throwable? = null
             try { mutex.withLock { invalidateImport(); session = null; totpExpiry = null; sessions.clear() } }
-            catch (_: PortalFailure) { throw PortalFailure(PortalFailure.Reason.STORAGE) }
-            localSubscriptions.clearAccountSubscription(ownerCleanup, commitFence)
+            catch (error: Exception) { failure = PortalFailure(PortalFailure.Reason.STORAGE) }
+            try { localSubscriptions.clearAccountSubscription(ownerCleanup, commitFence) }
+            catch (error: Throwable) { if (failure == null) failure = error else failure.addSuppressed(error) }
+            failure?.let { throw it } // Caller keeps the retry entry; a retry re-runs every idempotent step.
         }
     }
     /** Account logout does not unlink a previously acknowledged local subscription capability. */

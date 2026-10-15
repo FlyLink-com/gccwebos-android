@@ -1401,8 +1401,16 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
     suspend fun clearAccountSubscription(ownerCleanup: suspend () -> Unit, commitFence: ((() -> Unit) -> Unit)) {
         if (manualSources !is LibraryManualSourceStore) return unlinkAndAwait(ownerCleanup, commitFence)
         var observer: (() -> Unit)? = null
-        val clearVersion: Long
-        val accountActive: Boolean
+        var clearVersion = 0L
+        // Retry path: a previous failed logout left the manager storage-blocked. Unblock only when the library is
+        // readable again; the clear below re-validates and re-blocks on any new failure.
+        synchronized(lock) {
+            if (authority.manualStorageBlocked && !authority.incompleteClear) try {
+                manualSources.readLibrary()?.use { authority.manualStorageBlocked = false }
+            } catch (_: Exception) { }
+        }
+        // In-memory fallback when the library itself cannot be read: assume the account is active if it was selected.
+        var accountActive = synchronized(lock) { authority.selectionSourceKind == ManualSourceKind.LegacyRemote }
         try {
             synchronized(lock) {
                 accountActive = readLibrary().use { it.selector == ConfigurationSelector.Account }
@@ -1419,7 +1427,21 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             }
         } catch (_: Exception) {
             synchronized(lock) { authority.manualStorageBlocked = true; invalidateSelections(LocalSubscriptionStatus.STORAGE_ERROR) }
-            throw PortalFailure(PortalFailure.Reason.STORAGE)
+            // Admission is already revoked (STORAGE_ERROR + blocked); an active account owner must still be stopped.
+            // A manually imported active source (accountActive == false) is never stopped here.
+            val original = PortalFailure(PortalFailure.Reason.STORAGE)
+            try { observer?.invoke() } catch (e: Exception) { original.addSuppressed(e) }
+            observer = null
+            if (accountActive) {
+                try { ownerCleanup() } catch (e: Exception) { original.addSuppressed(e) }
+                // Persistent pending-revoke marker: the selector leaves Account in its own store, so a restart never
+                // re-admits account bytes that could not be deleted. A retry finishes the data clear.
+                try { persistAccountDeselected() } catch (e: Exception) { original.addSuppressed(e) }
+                // Last-resort durable marker when the profile cannot be deleted: overwrite it with an expired,
+                // URL-less, INVALID_LINK tombstone (also wipes the account bytes). A restart cannot admit it.
+                try { tombstoneAccountProfile() } catch (e: Exception) { original.addSuppressed(e) }
+            }
+            throw original
         } finally { observer?.invoke() } // Never call the owner while holding the capability lock.
         if (!accountActive) return
         ownerCleanup() // Stops the tunnel / removes prepared material of the account source.
@@ -1442,6 +1464,25 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
             }
         } }
         if (!completed) throw PortalFailure(PortalFailure.Reason.STORAGE)
+    }
+    private fun tombstoneAccountProfile() = synchronized(lock) {
+        if (profiles.read()?.use { true } != true) return@synchronized
+        CachedSubscription("revoked", "proxies: []\n".toByteArray(), Instant.EPOCH, null,
+            LocalSubscriptionStatus.INVALID_LINK).use(profiles::save)
+    }
+    private fun persistAccountDeselected() = synchronized(lock) {
+        // Direct store read: the manager is already storage-blocked by the failure that brought us here.
+        val store = manualSources as? LibraryManualSourceStore ?: return@synchronized
+        (store.readLibrary() ?: return@synchronized).use { library ->
+            if (library.selector != ConfigurationSelector.Account) return@use
+            val nextRevision = UUID.randomUUID().toString()
+            ConfigurationLibrary(entries = library.entries, selector = ConfigurationSelector.None,
+                selectorRevision = nextRevision).use { next ->
+                writeLibrary(next)
+                authority.selectionSourceKind = ManualSourceKind.None
+                authority.selectionSourceRevision = nextRevision
+            }
+        }
     }
     private fun rememberObservation(kind: LocalSubscriptionStatus) {
         if (kind !in setOf(LocalSubscriptionStatus.EXPIRED, LocalSubscriptionStatus.INVALID_LINK)) return

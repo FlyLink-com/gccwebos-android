@@ -1,5 +1,6 @@
 package com.gccwebos.android.portal
 
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -26,17 +27,43 @@ class LogoutClearsAccountSubscriptionTest {
         override fun clear() { value = null }
     }
 
+    private class FlakySessions(val backing: MemorySessionStore = MemorySessionStore()) : SessionStore {
+        var failuresLeft = 0; var clearCalls = 0
+        override fun read() = backing.read()
+        override fun save(value: SavedSession) = backing.save(value)
+        override fun clear() { clearCalls++; if (failuresLeft > 0) { failuresLeft--; throw PortalFailure(PortalFailure.Reason.STORAGE) }; backing.clear() }
+    }
+
+    private class FlakyProfiles(val backing: MemoryLocalProfileStore = MemoryLocalProfileStore()) : LocalProfileStore {
+        var failClear = false
+        override fun read() = backing.read()
+        override fun save(value: CachedSubscription) = backing.save(value)
+        override fun clear() { if (failClear) throw PortalFailure(PortalFailure.Reason.STORAGE); backing.clear() }
+    }
+
+    private class FlakyLibrary(val backing: MemoryManualSourceStore = MemoryManualSourceStore()) : LibraryManualSourceStore {
+        var failReads = false
+        var failLibraryWrites = false
+        private fun check() { if (failReads) throw PortalFailure(PortalFailure.Reason.STORAGE) }
+        override fun read(): ManualSourceRecord? { check(); return backing.read() }
+        override fun save(record: ManualSourceRecord) = backing.save(record)
+        override fun readLibrary(): ConfigurationLibrary? { check(); return backing.readLibrary() }
+        override fun saveLibrary(library: ConfigurationLibrary) {
+            if (failLibraryWrites) throw PortalFailure(PortalFailure.Reason.STORAGE); backing.saveLibrary(library)
+        }
+    }
+
     private inner class Fixture {
         val delivery = Delivery()
-        val profiles = MemoryLocalProfileStore()
-        val sessions = MemorySessionStore().apply { save(saved) }
-        val sources = MemoryManualSourceStore()
+        val profiles = FlakyProfiles()
+        val sessions = FlakySessions().apply { save(saved) }
+        val sources = FlakyLibrary()
         val choices = MemoryNodeChoiceStore()
         val repo = PortalRepository(object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?) = error("No Portal requests")
         }, delivery, OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { 0 }, { now },
             SubscriptionSource { yaml("Account node") }, profiles = profiles, sessions = sessions, manualSources = sources,
-            nodeChoices = choices)
+            nodeChoices = choices, authority = LocalSubscriptionAuthority()) // isolated: failures must not leak process state
         val manager get() = repo.localSubscriptions
         suspend fun seedAccountAndImport(vararg imported: String) {
             manager.remember(yaml("Account node"), url, now.plusSeconds(3600))
@@ -107,5 +134,121 @@ class LogoutClearsAccountSubscriptionTest {
         assertNull(f.sessions.read()); assertNull(f.delivery.value); assertNull(f.profiles.read())
         assertTrue(f.items().isEmpty())
         assertEquals(LocalSubscriptionStatus.MISSING, f.manager.snapshot().status)
+    }
+
+    private suspend fun assertStorageFailure(block: suspend () -> Unit) {
+        try { block(); fail("Logout with a storage failure was reported complete") }
+        catch (failure: PortalFailure) { assertEquals(PortalFailure.Reason.STORAGE, failure.reason) }
+    }
+
+    @Test fun secondSessionClearFailureStillStopsTheConnectedAccountOwnerAndRevokesTheSource() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.sessions.failuresLeft = 2 // first (synchronous) and second (mutex) clear both fail
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals("owner stop must not be short-circuited", 1, ownerStops)
+        assertNull(f.profiles.read()); assertNull(f.delivery.value)
+        assertTrue(f.items().none { it.kind == ManualSourceKind.LegacyRemote })
+        assertNotEquals(ManualSourceKind.LegacyRemote, f.manager.sourceKind())
+        assertNotEquals(LocalSubscriptionStatus.READY, f.manager.snapshot().status)
+    }
+
+    @Test fun persistentSessionFailureIsReportedEveryTimeAndRetrySucceedsAndFullyClears() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.sessions.failuresLeft = 4
+        var ownerStops = 0
+        repeat(2) { assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) } }
+        assertNotNull("session still stored, so logout is not complete", f.sessions.read())
+        f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() })
+        assertNull(f.sessions.read()); assertNull(f.profiles.read()); assertNull(f.delivery.value)
+        assertTrue(f.items().none { it.kind == ManualSourceKind.LegacyRemote })
+        assertEquals(setOf("Local Alpha"), f.imported().flatMap { it.nodes }.map { it.name }.toSet())
+        assertTrue(ownerStops >= 1)
+    }
+
+    @Test fun restartAfterFailedLogoutDoesNotReadmitTheAccountSource() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.sessions.failuresLeft = 2
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(commitFence = { it() }) }
+        val restarted = LocalSubscriptionManager(f.delivery, f.profiles, SubscriptionSource { error("No network") },
+            OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { now }, LocalSubscriptionAuthority(),
+            manualSources = f.sources)
+        restarted.restore()
+        assertNotEquals(ManualSourceKind.LegacyRemote, restarted.sourceKind())
+        assertTrue(restarted.configurationLibrarySnapshot().items.none { it.kind == ManualSourceKind.LegacyRemote })
+    }
+
+    @Test fun sessionFailureWithAManualImportActiveNeverStopsOrDeletesTheImport() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha")
+        f.sessions.failuresLeft = 2
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals(0, ownerStops)
+        val kept = f.imported().single(); assertTrue(kept.active)
+        assertEquals(LocalSubscriptionStatus.READY, f.manager.snapshot().status)
+    }
+
+    @Test fun cancelledCallerStillCompletesTheOwnerStop() = runTest {
+        val f = Fixture(); f.seedAccountAndImport(); f.activateAccount()
+        f.sessions.failuresLeft = 2
+        var ownerStops = 0
+        val job = launch { try { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) } catch (_: PortalFailure) { } }
+        job.cancel(); job.join()
+        // Either the call never started (nothing changed) or NonCancellable cleanup finished the stop.
+        if (f.profiles.read() == null) assertEquals(1, ownerStops)
+    }
+
+    @Test fun accountDataClearFailureStopsOwnerAndPersistsRevocationAcrossRestart() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.profiles.failClear = true
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals(1, ownerStops)
+        assertNotNull("fixture: cached account config could not be deleted", f.profiles.read())
+        val restarted = LocalSubscriptionManager(f.delivery, f.profiles, SubscriptionSource { error("No network") },
+            OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { now }, LocalSubscriptionAuthority(),
+            manualSources = f.sources)
+        restarted.restore()
+        assertNotEquals("pending-revoked account must not be re-admitted", ManualSourceKind.LegacyRemote, restarted.sourceKind())
+        assertNotEquals(LocalSubscriptionStatus.READY, restarted.snapshot().status)
+        // Retry once storage recovers completes the logout.
+        f.profiles.failClear = false
+        f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() })
+        assertNull(f.profiles.read()); assertNull(f.sessions.read())
+        assertEquals(setOf("Local Alpha"), f.imported().flatMap { it.nodes }.map { it.name }.toSet())
+    }
+
+    @Test fun unreadableConfigListStillStopsTheConnectedAccountOwner() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.sources.failReads = true // the library cannot tell which source is active
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals("in-memory selection says account: owner must stop", 1, ownerStops)
+        assertNotEquals(LocalSubscriptionStatus.READY, f.manager.snapshot().status)
+        f.sources.failReads = false
+        f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() })
+        assertNull(f.sessions.read()); assertNull(f.profiles.read())
+        assertEquals(setOf("Local Alpha"), f.imported().flatMap { it.nodes }.map { it.name }.toSet())
+    }
+
+    @Test fun unreadableConfigListWithImportActiveDoesNotStopTheImport() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha")
+        f.sources.failReads = true
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals(0, ownerStops)
+    }
+
+    @Test fun doubleStorageFailureStillNeverReadmitsTheAccountAfterRestart() = runTest {
+        val f = Fixture(); f.seedAccountAndImport("Local Alpha"); f.activateAccount()
+        f.profiles.failClear = true; f.sources.failLibraryWrites = true
+        var ownerStops = 0
+        assertStorageFailure { f.repo.logoutClearingAccountSubscription(ownerCleanup = { ownerStops++ }, commitFence = { it() }) }
+        assertEquals(1, ownerStops)
+        val restarted = LocalSubscriptionManager(f.delivery, f.profiles, SubscriptionSource { error("No network") },
+            OriginPolicy("https://portal.invalid", setOf("https://sub.invalid")), { now }, LocalSubscriptionAuthority(),
+            manualSources = f.sources)
+        restarted.restore()
+        assertNotEquals(LocalSubscriptionStatus.READY, restarted.snapshot().status)
     }
 }

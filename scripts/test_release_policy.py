@@ -17,13 +17,15 @@ class ReleasePolicyTests(unittest.TestCase):
         policy.verify_configuration(self.source)
 
     def test_release_cannot_revert_to_previous_or_candidate_version(self):
-        for old, new in [('versionCode = 9', 'versionCode = 8'),
-                         ('versionCode = 9', 'versionCode = 7'),
-                         ('versionName = "0.4.2"', 'versionName = "0.4.1"'),
-                         ('versionName = "0.4.2"', 'versionName = "0.4.0"'),
-                         ('versionName = "0.4.2"', 'versionName = "0.4.0-rc.1"')]:
-            with self.subTest(new=new), self.assertRaises(AssertionError):
-                policy.verify_configuration(self.source.replace(old, new))
+        for old, new in [('versionCode = 10', 'versionCode = 9'),
+                         ('versionCode = 10', 'versionCode = 8'),
+                         ('versionName = "0.4.3"', 'versionName = "0.4.2"'),
+                         ('versionName = "0.4.3"', 'versionName = "0.4.1"'),
+                         ('versionName = "0.4.3"', 'versionName = "0.4.3-rc.1"')]:
+            with self.subTest(new=new):
+                self.assertIn(old, self.source, "Version mutation must change the current source")
+                with self.assertRaises(AssertionError):
+                    policy.verify_configuration(self.source.replace(old, new))
 
     def test_every_release_flag_is_enforced(self):
         prefix, release = self.source.split('        release {', 1)

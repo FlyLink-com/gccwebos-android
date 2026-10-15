@@ -53,6 +53,8 @@ internal data class ConnectionControlState(
     val revision: Long = 0,
     /** Display-only: the node the running session was prepared for. Published only with Connected. */
     val activeNode: com.gccwebos.android.core.PreparedNodeLabel? = null,
+    /** Display-only: the owner is automatically restarting after an unexpected engine stop. */
+    val autoRecovering: Boolean = false,
 )
 
 internal data class ConnectionOverviewPresentation(
@@ -104,6 +106,7 @@ internal fun connectionOverviewPresentation(
             LocalSubscriptionStatus.STORAGE_ERROR -> "本地存储异常"
             else -> error("Local error requires an explicit local status")
         }
+        control.autoRecovering && control.phase in setOf(ConnectionPhase.Failed, ConnectionPhase.Connecting) -> "正在自动重连…"
         control.phase == ConnectionPhase.Failed -> when (control.failure) {
             ConnectionFailure.NetworkUnavailable -> "无网络"
             ConnectionFailure.ResourceUnavailable -> "订阅资源不可用"
@@ -118,6 +121,7 @@ internal fun connectionOverviewPresentation(
         else -> ""
     }
     val tone = when {
+        control.autoRecovering && !localError -> ConnectionVisualTone.Connecting
         localError || control.phase == ConnectionPhase.Failed -> ConnectionVisualTone.Error
         control.phase == ConnectionPhase.Connecting || control.phase == ConnectionPhase.Disconnecting -> ConnectionVisualTone.Connecting
         control.phase == ConnectionPhase.Connected -> ConnectionVisualTone.Connected

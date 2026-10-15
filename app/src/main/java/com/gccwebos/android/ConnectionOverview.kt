@@ -64,7 +64,25 @@ internal data class ConnectionOverviewPresentation(
     val usageText: String = "暂不可用",
     val action: ConnectionPowerAction = ConnectionPowerAction.None,
     val powerLabel: String = "连接暂不可用",
+    /** One actionable sentence under a failure / local-error title; null when nothing is wrong. Display only. */
+    val recoveryHint: String? = null,
 )
+
+/** User-facing next step for a failed connection or unusable local configuration. Pure mapping; never a command. */
+internal fun connectionRecoveryHint(phase: ConnectionPhase, failure: ConnectionFailure?,
+    status: LocalSubscriptionStatus): String? = when (status) {
+    LocalSubscriptionStatus.EXPIRED -> "续费或更新订阅后即可继续连接"
+    LocalSubscriptionStatus.RETRY_REQUIRED -> "请检查网络后，在节点页点「重试」重新加载"
+    LocalSubscriptionStatus.INVALID_LINK -> "订阅链接已失效，请在账户页重新获取订阅"
+    LocalSubscriptionStatus.UNSUPPORTED -> "该配置暂不支持，请更换或重新导入配置"
+    LocalSubscriptionStatus.STORAGE_ERROR -> "请重试；仍失败可重新导入配置或重新登录"
+    else -> if (phase != ConnectionPhase.Failed) null else when (failure) {
+        ConnectionFailure.NetworkUnavailable -> "请检查 Wi-Fi 或移动数据，恢复后点「重试连接」"
+        ConnectionFailure.ResourceUnavailable -> "当前节点暂不可用，请换一个节点或更新订阅后重试"
+        ConnectionFailure.ReadFailed -> "读取配置失败，请在节点页重新加载后重试"
+        ConnectionFailure.Other, null -> "连接意外中断，请点「重试连接」；多次失败可换一个节点"
+    }
+}
 
 /** Account usage is absent: it cannot prove usage belongs to this local capability.
  * READY is configuration evidence only; it can never produce Connecting or Connected.
@@ -147,8 +165,10 @@ internal fun connectionOverviewPresentation(
             else -> "连接暂不可用"
         }
     }
+    val recoveryHint = if (localError || control.phase == ConnectionPhase.Failed)
+        connectionRecoveryHint(control.phase, control.failure, status) else null
     return ConnectionOverviewPresentation(status, title, connectionText, tone, countdown,
-        action = action, powerLabel = powerLabel)
+        action = action, powerLabel = powerLabel, recoveryHint = recoveryHint)
 }
 
 /**
@@ -484,6 +504,8 @@ internal fun ConnectionOverview(
                 else -> null
             }
             ConnectionNotice(account, account.authSessionGeneration, notice)
+            if (notice?.second == "connection-failure" || (notice?.second == "connection-read-error" && localReadRecovery))
+                local.recoveryHint?.let { ConnectionRecoveryHintLine(it) }
             if (preparationRequest?.let(account::isConnectionPreparationPending) == true) TextButton({
                 preparationRequest?.let(account::cancelConnectionPreparation)
                 preparationRequest = null
@@ -700,3 +722,10 @@ internal const val ConnectionBalancedPageFraction = 0.66f
 /** C12: "上次延迟测试" for a real reading, otherwise the neutral "延迟" ("延迟 —" / "延迟 超时"). */
 internal fun connectionNodeLatencyLabel(observation: NodeLatencyObservation?): String =
     if (observation is NodeLatencyObservation.Success) "上次延迟测试" else "延迟"
+
+/** The single actionable line under a connection failure / local error notice. */
+@Composable
+internal fun ConnectionRecoveryHintLine(hint: String) {
+    Text(hint, color = Brand.Muted, fontSize = 12.sp,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).testTag("connection-recovery-hint"))
+}

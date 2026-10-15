@@ -684,10 +684,14 @@ class LocalSubscriptionManager(private val delivery: DeliveryStore, private val 
         var targetSource: ManualSourceRecord? = null
         var staged: ManualSourceRecord? = null
         try {
-            require(owned.size in 1..SafeProxyConfig.MAX_BYTES)
-            val text = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(owned)).toString().trim()
-            require(text.isNotEmpty() && '\u0000' !in text)
+            if (owned.isEmpty()) throw ManualImportInputRejected(ManualImportInputRejected.Reason.EMPTY)
+            if (owned.size > SafeProxyConfig.MAX_BYTES) throw ManualImportInputRejected(ManualImportInputRejected.Reason.TOO_LARGE)
+            val text = try {
+                Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(owned)).toString().trim()
+            } catch (_: java.nio.charset.CharacterCodingException) { throw ManualImportInputRejected(ManualImportInputRejected.Reason.ENCODING) }
+            if (text.isEmpty()) throw ManualImportInputRejected(ManualImportInputRejected.Reason.EMPTY)
+            if ('\u0000' in text) throw ManualImportInputRejected(ManualImportInputRejected.Reason.ENCODING)
             var replacementActive = false
             if (replacement != null) synchronized(lock) { readLibrary().use { library ->
                 requireLibraryHandle(replacement, library)

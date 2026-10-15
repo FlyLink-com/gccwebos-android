@@ -137,18 +137,7 @@ internal class ManualImportController(
                 throw cancel
             }
             catch (failure: Exception) {
-                if (ticket === value) error = if (failure is UnsupportedManualSubscriptionLink) "暂不支持此订阅链接"
-                else if (failure is ManualSubscriptionRedirect) "订阅链接需要跳转，请使用直连链接"
-                else if (failure is ManualSubscriptionMetadataFailure) "订阅有效期信息无效"
-                else if (failure is com.gccwebos.android.vpn.UnsafeProxyConfiguration) "配置格式或协议不受支持"
-                else when ((failure as? PortalFailure)?.reason) {
-                    PortalFailure.Reason.STORAGE -> "本地配置暂不可用"
-                    PortalFailure.Reason.NETWORK -> "订阅下载失败或超过 ${com.gccwebos.android.manualimport.ImportReadBudgetSeconds} 秒未响应，请检查网络后重试"
-                    PortalFailure.Reason.SUBSCRIPTION_UNAVAILABLE -> "订阅不可用或未提供有效期"
-                    PortalFailure.Reason.SUBSCRIPTION_EXPIRED -> "订阅已过期"
-                    PortalFailure.Reason.SUBSCRIPTION_REVOKED -> "订阅链接不可访问"
-                    else -> if (failure is IllegalStateException) "请先断开连接后再导入" else "配置不可用"
-                }
+                if (ticket === value) error = manualImportErrorMessage(failure)
             }
         }
         task = work

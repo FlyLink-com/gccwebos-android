@@ -254,4 +254,28 @@ class PortalRepositoryTest {
         assertEquals(count,wire.calls.size)
         assertNotEquals(oldBinding,repo.commerceSessionBinding())
     }
+
+    @Test fun anOptionalCommerceRouteAnswering401Or404NeverEndsTheSession() = runTest {
+        val wire = Wire(); val repo = PortalRepository(wire,Store(),policy,{0},{now})
+        login(repo,wire)
+        // A disabled feature falls through to the protected fallback (401) or an absent route (404).
+        for (status in listOf(401, 404)) {
+            // #772 answers a disabled feature with a plain string error body.
+            wire.replies += WireResponse(status, "{\"error\":\"Unauthorized\"}")
+            assertEquals(status, repo.commerceOptional("/api/portal/commerce/plan-switch/state").status)
+        }
+        // The session is still alive: the ordinary commerce read works and a real 401 there still expires it.
+        wire.replies += WireResponse(200, "{}")
+        assertEquals(200, repo.commerce("/api/portal/commerce/model").status)
+        wire.replies += WireResponse(401, "{}")
+        try { repo.commerce("/api/portal/commerce/model"); fail() } catch (f: PortalFailure) { assertEquals(PortalFailure.Reason.SESSION_EXPIRED, f.reason) }
+    }
+    @Test fun anOptionalCommerceReadIsLimitedToTheCommercePathsWithoutAQuery() = runTest {
+        val wire = Wire(); val repo = PortalRepository(wire,Store(),policy,{0},{now}); login(repo,wire)
+        val count = wire.calls.size
+        for (path in listOf("/api/portal/coins/wallet", "/api/portal/commerce/plan-switch/state?x=1", "/api/portal/security/current")) {
+            try { repo.commerceOptional(path); fail(path) } catch (_: PortalFailure) { }
+        }
+        assertEquals(count, wire.calls.size)
+    }
 }

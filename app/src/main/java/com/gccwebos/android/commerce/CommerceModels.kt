@@ -109,6 +109,23 @@ data class CoinBalance(val bonusCoins: Long, val paidCoins: Long, val rewardCoin
     }
 }
 data class QuoteBalances(val before: CoinBalance, val after: CoinBalance)
+enum class PlanSwitchKind(val wire: String) {
+    Renewal("renewal"), UpgradeInPlace("upgrade_inplace"), UpgradeRestart("upgrade_restart"), DowngradeScheduled("downgrade_scheduled");
+    val isUpgrade get() = this == UpgradeInPlace || this == UpgradeRestart
+}
+/**
+ * The server's plan-change pricing of one quote or order. [chargeUnits] is the price BEFORE the account discount (the
+ * quote's amount is the discounted figure); [effectiveAt] is set for a scheduled downgrade (when the current card ends).
+ */
+data class PlanSwitch(val kind: PlanSwitchKind, val creditUnits: Long, val chargeUnits: Long, val effectiveAt: Instant?,
+    val cancelsPendingDowngrade: Boolean)
+enum class PlanSwitchAction { CurrentRenew, Upgrade, Downgrade, Unavailable }
+data class PlanSwitchOffer(val offerRef: String, val action: PlanSwitchAction, val chargeUnits: Long?, val creditUnits: Long?,
+    val effectiveAt: Instant?, val reasonCode: String?)
+data class PlanSwitchCurrent(val offerRef: String, val validUntil: Instant)
+data class PlanSwitchPending(val toOfferRef: String, val effectiveAt: Instant)
+/** GET plan-switch/state: advisory display data; the server re-prices and re-checks every quote and confirmation. */
+data class PlanSwitchState(val current: PlanSwitchCurrent?, val pending: PlanSwitchPending?, val offers: List<PlanSwitchOffer>)
 data class QuoteTransition(val flowKind: String, val scheduledFor: Instant)
 data class Quote(
     val quoteRef: String,
@@ -121,6 +138,8 @@ data class Quote(
     val balances: QuoteBalances,
     val expiresAt: Instant,
     val transition: QuoteTransition?,
+    /** Present only when the server prices this quote as a plan change (renew / upgrade / scheduled downgrade). */
+    val planSwitch: PlanSwitch? = null,
 ) {
     fun purchasableAt(now: Instant) = purchaseAvailability == "available" && now < expiresAt
 }
@@ -143,6 +162,7 @@ sealed interface PurchaseResult {
         val cancelUntil: Instant,
         val createdAt: Instant,
         val updatedAt: Instant,
+        val planSwitch: PlanSwitch? = null,
     ) : PurchaseResult {
         override val ref get() = orderRef
         override val model get() = CommerceModel.LEGACY

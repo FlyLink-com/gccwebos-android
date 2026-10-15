@@ -197,4 +197,65 @@ class CommerceRepositoryTest {
         try{repo.recharge(topup.copy(paymentMethods=listOf("paypal")));fail()}catch(_:IllegalArgumentException){}
         assertTrue(wire.calls.isEmpty())
     }
+
+    private val planState = """{"current":{"offerRef":"offer_fixture_plan","validUntil":"2026-10-30T00:00:00.000Z"},"pendingSwitch":null,"offers":[
+        {"offerRef":"offer_fixture_plan","action":"current_renew","chargeUnits":10,"creditUnits":0,"effectiveAt":null,"reasonCode":null}]}"""
+    private fun optionalRepository(wire: Wire, optional: suspend (String) -> WireResponse, store: Store = Store()) =
+        CommerceRepository(wire::request, store, "account_a", {now}, {"operation_fixture"}, optional)
+
+    @Test fun planChangeStateIsReadOnlyForTheLegacyModelAndNeverThrowsForADisabledFeature() = runTest {
+        val wire = Wire(); val paths = mutableListOf<String>()
+        val answers = ArrayDeque(listOf(WireResponse(200, planState), WireResponse(404, "{}"), WireResponse(401, """{"error":"Unauthorized"}"""),
+            WireResponse(409, """{"error":{"code":"wallet_first_deferred_required","retryable":false}}"""),
+            WireResponse(409, """{"error":{"code":"plan_switch_precheck_unavailable"}}"""), WireResponse(200, "not json"),
+            WireResponse(503, "")))
+        val repo = optionalRepository(wire, { path -> paths += path; answers.removeFirst() })
+        assertNull(repo.planSwitchState()) // the model is not loaded yet
+        load(repo, wire)
+        assertEquals("offer_fixture_plan", repo.planSwitchState()!!.current!!.offerRef)
+        repeat(6) { assertNull(repo.planSwitchState()) } // 404, a string-error 401, both 409s, garbage and 503 all mean "no plan change"
+        assertEquals(List(7) { "/api/portal/commerce/plan-switch/state" }, paths)
+        assertEquals(1, wire.calls.size) // only the model read went through the ordinary (session-ending) request path
+    }
+
+    @Test fun aPlainStringErrorBodyNeverCrashesAnOrdinaryCommerceCall() = runTest {
+        val wire = Wire(); val store = Store(); val repo = repository(wire, store); load(repo, wire)
+        wire.replies += WireResponse(409, """{"error":"Unauthorized"}""")
+        try { repo.purchase(quote); fail() } catch (failure: CommerceFailure) { assertEquals("unconfirmed", failure.code); assertEquals(409, failure.status) }
+        // An unreadable code is ambiguous, so the durable key stays for the user-triggered query.
+        assertNotNull(repo.pending("purchase"))
+    }
+
+    @Test fun theWalletFirstModelAndAHostWithoutTheOptionalReadNeverAskForPlanChanges() = runTest {
+        val wire = Wire(); var asked = false
+        val deferred = optionalRepository(wire, { asked = true; WireResponse(200, planState) })
+        load(deferred, wire, deferred = true)
+        assertNull(deferred.planSwitchState()); assertFalse(asked)
+        val plain = repository(Wire(), Store())
+        assertNull(plain.planSwitchState())
+    }
+
+    @Test fun everyPlanChangeRefusalClearsTheDurableKeyBecauseNoOrderWasCreated() = runTest {
+        for (code in PlanSwitchRejections) {
+            val wire = Wire(); val store = Store(); val repo = repository(wire, store); load(repo, wire)
+            wire.replies += WireResponse(409, """{"error":{"code":"$code"}}""")
+            try { repo.purchase(quote); fail(code) } catch (failure: CommerceFailure) { assertEquals(code, failure.code); assertEquals(409, failure.status) }
+            assertNull(code, repo.pending("purchase"))
+        }
+        // An unknown 409 on the create stays ambiguous and keeps the key for the user-triggered query.
+        val wire = Wire(); val store = Store(); val repo = repository(wire, store); load(repo, wire)
+        wire.replies += WireResponse(409, """{"error":{"code":"something_new"}}""")
+        try { repo.purchase(quote); fail() } catch (_: CommerceFailure) { }
+        assertNotNull(repo.pending("purchase"))
+    }
+
+    @Test fun aPlanChangeQuoteIsConfirmedWithTheSameQuoteReferenceAndKey() = runTest {
+        val wire = Wire(); val store = Store(); val repo = repository(wire, store); load(repo, wire)
+        val upgrade = quote.copy(planSwitch = PlanSwitch(PlanSwitchKind.UpgradeInPlace, 0, 10, null, false))
+        wire.replies += WireResponse(201, CommerceFixtures.order)
+        repo.purchase(upgrade)
+        assertEquals("/api/portal/commerce/orders", wire.calls.last().path)
+        assertEquals("operation_fixture", wire.calls.last().key)
+        assertEquals("quote_fixture_plan", JSONObject(wire.calls.last().body!!).getString("quoteRef"))
+    }
 }

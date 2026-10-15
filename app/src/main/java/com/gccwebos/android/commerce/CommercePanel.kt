@@ -31,6 +31,8 @@ import com.gccwebos.android.portal.PortalFailure
 import com.gccwebos.android.portal.ReferralController
 import com.gccwebos.android.portal.ReferralPanel
 import com.gccwebos.android.design.*
+import com.gccwebos.android.design.dialog.GccDialog
+import com.gccwebos.android.design.dialog.GccDialogAction
 import com.gccwebos.android.shouldCancelLoginOnBack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -66,6 +68,8 @@ internal class CommerceController(private val account: AccountController, privat
     var rechargeOffersLoaded by mutableStateOf(false)
     var rechargeOffersError by mutableStateOf<String?>(null)
     var quote by mutableStateOf<Quote?>(null)
+    /** Advisory plan-change display state; null when the server does not offer plan changes (feature off) or on any doubt. */
+    var planSwitch by mutableStateOf<PlanSwitchState?>(null)
     var purchase by mutableStateOf<PurchaseResult?>(null)
     var recharge by mutableStateOf<RechargeOrder?>(null)
     var pendingPurchase by mutableStateOf(false)
@@ -86,11 +90,11 @@ internal class CommerceController(private val account: AccountController, privat
     /** A validation pause revokes old confirmations without deleting account-scoped recovery. */
     fun pauseForAuthentication() {
         operation++; requestJob?.cancel(); requestJob = null; busy = false
-        quote = null; recharge = null
+        quote = null; recharge = null; planSwitch = null
     }
     /** Catalog reads never wait for wallet, recharge offers, or recharge recovery. */
     fun loadCatalog() = run {
-        catalogLoaded = false; commerceModel = null; offers = emptyList(); quote = null; purchase = null
+        catalogLoaded = false; commerceModel = null; offers = emptyList(); quote = null; purchase = null; planSwitch = null
         val r = repository()
         // Preserve an existing purchase before exposing a new checkout action. An unknown
         // create is never replayed by navigation; currentPurchase only reads a known result.
@@ -98,6 +102,27 @@ internal class CommerceController(private val account: AccountController, privat
         readPart({ r.currentPurchase() }) { purchase = it }
         readPart({ r.loadModel() }) { commerceModel = it }
         if (commerceModel != null) readPart({ r.offers() }) { offers = it; catalogLoaded = true }
+        if (catalogLoaded) readPlanSwitch(r)
+    }
+    /** Best effort: any failure just shows the ordinary catalog (the server still decides every quote and confirmation). */
+    private suspend fun readPlanSwitch(r: CommerceRepository) {
+        val value = try { r.planSwitchState() } catch (failure: CancellationException) { throw failure } catch (_: Exception) { null }
+        ensureCurrentSession()
+        planSwitch = value
+    }
+    /**
+     * Quiet re-read while a scheduled downgrade is being applied. Unlike [loadCatalog] it never raises [busy] (the list stays
+     * usable) and an unreadable answer keeps what is on screen instead of replacing it.
+     */
+    suspend fun pollPlanSwitch() {
+        if (busy || !canOperate() || !catalogLoaded || repo == null) return
+        withContext(ReadEpoch(account.authSessionGeneration)) {
+            try {
+                val value = requireNotNull(repo).planSwitchState()
+                ensureCurrentSession()
+                if (!busy && value != null) planSwitch = value
+            } catch (failure: CancellationException) { throw failure } catch (_: Exception) { }
+        }
     }
     fun load() = run {
         orderPage = null; rechargeHistory = null; transitions = null; catalogLoaded = false; commerceModel = null
@@ -149,7 +174,14 @@ internal class CommerceController(private val account: AccountController, privat
                     ensureCurrentSession()
                     if (account.authSessionGeneration != generation) throw CancellationException("Account changed")
                 }
-            }, storage, binding)
+            }, storage, binding, optionalRequest = { path ->
+                ensureCurrentSession()
+                val generation = account.authSessionGeneration
+                account.commerceOptional(path, session).also {
+                    ensureCurrentSession()
+                    if (account.authSessionGeneration != generation) throw CancellationException("Account changed")
+                }
+            })
         }
         return requireNotNull(repo)
     }
@@ -310,7 +342,13 @@ internal class CommerceController(private val account: AccountController, privat
         }
     }
     fun cancelPurchase() = run { val next = requireNotNull(repo).cancelPurchase(); ensureCurrentSession(); purchase = next; wallet = null }
-    fun finishPurchase() = run { requireNotNull(repo).finishPurchase(); ensureCurrentSession(); pendingPurchase = false; purchase = null; wallet = null; account.purchaseReturnRef = null; account.refresh() }
+    fun finishPurchase() = run {
+        requireNotNull(repo).finishPurchase(); ensureCurrentSession(); pendingPurchase = false; purchase = null; wallet = null
+        account.purchaseReturnRef = null
+        // The card, its expiry and any scheduled downgrade just changed; read them again with the account.
+        if (catalogLoaded) readPlanSwitch(requireNotNull(repo))
+        account.refresh()
+    }
     /** Drops the pointer to an unpaid order that cannot be paid any more (the server expires it by itself). */
     fun abandonRecharge(now: Instant = Instant.now()) = run {
         requireNotNull(repo).abandonRecharge(now); ensureCurrentSession(); pendingRecharge = false; recharge = null
@@ -349,10 +387,15 @@ internal class CommerceController(private val account: AccountController, privat
                     "quote_expired", "quote_stale" -> "报价已失效，请重新获取报价后再确认购买。"
                     "insufficient_coins" -> "钱包余额不足，请充值到账后重新获取报价。"
                     "wallet_not_active" -> "钱包暂不可用于购买，请核对钱包状态。"
-                    "offer_unavailable" -> "此套餐当前不可购买，请刷新套餐列表。"
+                    // While a card is active the server refuses every other ordinary offer with this same code.
+                    "offer_unavailable" -> if (planSwitch?.current != null) PLAN_ACTIVE_TEXT else "此套餐当前不可购买，请刷新套餐列表。"
                     "storage" -> "本机恢复记录不可用，已停止新建订单，请先核对已有订单。"
-                    else -> "订单尚未确认，请沿用原记录查询，不要重新付款。"
+                    else -> planSwitchErrorText(failure.code)?.takeIf { failure.status == 409 }
+                        ?: "订单尚未确认，请沿用原记录查询，不要重新付款。"
                 }
+                // A refused plan change means the card list is out of date: read it again so the cards and the dock agree.
+                if (failure.status == 409 && (failure.code in PlanSwitchRejections || failure.code == "offer_unavailable") && catalogLoaded)
+                    try { readPlanSwitch(requireNotNull(repo)) } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) {}
             }
             catch (_: Exception) { ensureCurrentSession(); error = "操作尚未确认，请重试查询；已有记录会沿用原订单，不会另建一笔。" }
             finally { if (operation == sequence) { busy = false; requestJob = null } }
@@ -409,7 +452,10 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     var now by remember { mutableStateOf(Instant.now()) }
     val accountReady = state.canOperate()
     val period = requestedPeriod ?: selectedSnapshot?.offer?.let(::catalogPeriod) ?: initialCatalogPeriod(displayOffers)
+    // Plan-change labels per card (empty when the server offers none): the card list, dock and dialog read the same map.
+    val switchCards = if (mode == CommerceMode.Plans && state.currentSession()) planSwitchCards(state.planSwitch, now, shownOfferRefs = displayOffers.map { it.offerRef }) else emptyMap()
     fun currentSelectedOffer(): Offer? = selectedSnapshot?.takeIf { selection ->
+        switchCards[selection.offer.offerRef]?.selectable != false &&
         mode == CommerceMode.Plans && state.catalogLoaded && state.canOperate() && !state.pendingPurchase &&
             selection.accountGeneration == account.authSessionGeneration && selection.offer.category == catalogCategory &&
             (catalogCategory != "plan" || catalogPeriod(selection.offer) == period) &&
@@ -425,8 +471,11 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
     val showPurchase = mode == CommerceMode.Plans && account.authenticated && !account.restoring &&
         !account.foregroundCheckPending && state.catalogLoaded && state.currentSession() && !state.pendingPurchase &&
         state.offers.any { it.category == catalogCategory && (catalogCategory != "plan" || catalogPeriod(it) == period) }
+    val selectedSwitch = selectedOffer?.let { switchCards[it.offerRef] }
     val purchaseSummary = if (showPurchase) CatalogPurchaseSummary(selectedOffer?.title?.zh,
-        selectedOffer?.baseCoinUnits?.let(::formatCoins), visitReady && selectedOffer != null && !state.busy && state.canOperate(), state.busy) else null
+        selectedSwitch?.dockPrice ?: selectedOffer?.baseCoinUnits?.let(::formatCoins),
+        visitReady && selectedOffer != null && !state.busy && state.canOperate(), state.busy,
+        selectedSwitch?.dockAction ?: "立即购买") else null
     if (dock != null && mode == CommerceMode.Plans) {
         SideEffect { dock.show(dockOwner, purchaseSummary, continuePurchase) }
         DisposableEffect(dock, dockOwner) { onDispose { dock.clear(dockOwner) } }
@@ -484,6 +533,15 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         }
     }
     LaunchedEffect(Unit) { while(true) { now = Instant.now(); kotlinx.coroutines.delay(1000) } }
+    // A scheduled downgrade whose date has passed is still being applied: read the state every few seconds for about a
+    // minute (stopping as soon as the server clears it, or when this page goes away) so the cards unlock by themselves.
+    val applying = mode == CommerceMode.Plans && state.planSwitch?.applying(now) == true
+    LaunchedEffect(state, applying) {
+        if (applying) repeat(PLAN_APPLYING_POLLS) {
+            kotlinx.coroutines.delay(PLAN_APPLYING_POLL_MILLIS)
+            state.pollPlanSwitch()
+        }
+    }
     // A browser return is merely a reason to reread. It never confirms, creates or pays an order.
     val lifecycle = (LocalActivity.current as? ComponentActivity)?.lifecycle
     DisposableEffect(lifecycle, state, autoLoad, mode) {
@@ -570,8 +628,11 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
                         Text(if (key.category == "data_pack") "暂无可购流量包" else "暂无可购套餐",
                             style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("catalog-empty"))
                     }
+                    if (!state.pendingPurchase && key.category == "plan") planSwitchBanner(state.planSwitch, displayOffers, now)?.let { banner ->
+                        PlanSwitchBannerCard(banner)
+                    }
                     if (!state.pendingPurchase && shownOffers.isNotEmpty()) {
-                        CatalogOfferList(shownOffers, selectedOffer, category = key.category,
+                        CatalogOfferList(shownOffers, selectedOffer, category = key.category, switchCards = switchCards,
                             enabled = visitReady && state.catalogLoaded && !state.busy && state.canOperate(),
                             onSelect = { offer -> if (!state.busy && state.canOperate() && state.catalogLoaded && state.offers.any { it == offer }) {
                                 initialSelectionHandled = true; state.quote = null; selectionNotice = null
@@ -611,9 +672,37 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         return // Read-only history must not inherit a retained purchase confirmation.
     }
     state.quote?.takeIf { visitReady }?.let { quote ->
+        val switchIssue = planSwitchQuoteIssue(switchCards[quote.offer.offerRef], quote)
         val valid = quote.purchasableAt(now) && state.canOperate() && !state.pendingPurchase &&
-            selectedOffer == quote.offer && state.catalogLoaded && state.offers.any { it == quote.offer }
-        AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape,
+            selectedOffer == quote.offer && state.catalogLoaded && state.offers.any { it == quote.offer } && switchIssue == null
+        val confirm = {
+            if (!state.busy && state.canOperate() && !state.pendingPurchase && state.quote === quote &&
+                quote.purchasableAt(Instant.now()) && selectedSnapshot?.accountGeneration == account.authSessionGeneration &&
+                selectedSnapshot?.offer == quote.offer && state.catalogLoaded &&
+                state.offers.any { it == quote.offer } && planSwitchQuoteIssue(switchCards[quote.offer.offerRef], quote) == null) state.confirmPurchase()
+        }
+        val change = planSwitchDialog(quote)
+        if (change != null) GccDialog(onDismissRequest = { if (!state.busy) state.quote = null }, title = change.title,
+            testTag = "plan-switch-dialog", secure = false, dismissOnOutsideTap = false,
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    change.lines.forEachIndexed { index, line ->
+                        Text(line, color = Brand.Text, modifier = Modifier.testTag("plan-switch-line-$index"))
+                    }
+                    quote.allocation.forEach { Text("${ledgerCoinType(it.coinType)}：${formatCoins(it.amountUnits)}", color = Brand.Muted) }
+                    Text("报价有效至：${localTime(quote.expiresAt)}", color = Brand.Muted)
+                    quote.offer.importantNotices.zh.forEach { Text(it, color = Brand.Muted) }
+                    if (!valid) Text(when {
+                        switchIssue != null -> switchIssue
+                        quote.expiresAt <= now -> "报价已过期，请关闭后重新获取"
+                        quote.purchaseAvailability != "available" -> "余额不足，尚缺 ${formatCoins(quote.shortfallUnits)}。请前往我的充值，再重新获取报价。"
+                        else -> "商品或账户已变化，请重新获取报价"
+                    }, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("plan-switch-invalid"))
+                }
+            },
+            primary = GccDialogAction(change.confirm, confirm, enabled = valid && !state.busy, testTag = "purchase-confirm"),
+            secondary = GccDialogAction("取消", { state.quote = null }, enabled = !state.busy, testTag = "purchase-cancel"))
+        else AlertDialog(onDismissRequest = { if(!state.busy) state.quote = null }, containerColor = Brand.SurfaceRaised, shape = Brand.Shape,
             title = { Text(if (quote.offer.category == "data_pack") "确认购买${quote.offer.trafficGb} GB流量包" else "确认购买${quote.offer.durationDays}天套餐") },
             text = { Column(Modifier.heightIn(max = 350.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("服务：飞连VPN")
@@ -625,6 +714,7 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
                 quote.transition?.let { Text("服务器安排生效时间：${localTime(it.scheduledFor)}") }
                 quote.offer.importantNotices.zh.forEach { Text(it) }
                 if(!valid) Text(when {
+                    switchIssue != null -> switchIssue
                     quote.expiresAt <= now -> "报价已过期，请关闭后重新获取"
                     quote.purchaseAvailability != "available" -> "余额不足，尚缺 ${formatCoins(quote.shortfallUnits)}。请前往我的充值，再重新获取报价。"
                     else -> "商品或账户已变化，请重新获取报价"
@@ -644,6 +734,9 @@ internal fun CommercePanel(account: AccountController, mode: CommerceMode, state
         confirmButton = { TextButton(onClick = { cancelConfirmation = false; state.cancelPurchase() }) { Text("确认取消订单") } },
         dismissButton = { TextButton(onClick = { cancelConfirmation = false }) { Text("返回") } })
 }
+/** About a minute: 15 reads, four seconds apart. */
+internal const val PLAN_APPLYING_POLLS = 15
+internal const val PLAN_APPLYING_POLL_MILLIS = 4_000L
 internal const val RECHARGE_EXPIRED_STATUS = "已失效（付款入口已过期）"
 internal fun rechargeStatus(status: String) = when(status) {
     "created" -> "充值订单已创建，支付入口准备中"; "entry_ready", "pending" -> "等待付款或支付确认"
@@ -652,7 +745,7 @@ internal fun rechargeStatus(status: String) = when(status) {
     else -> "需要对账，请勿重复付款"
 }
 internal fun purchaseStatus(value: PurchaseResult): String = when(value) {
-    is PurchaseResult.Order -> {
+    is PurchaseResult.Order -> planSwitchOrderStatus(value) ?: run {
         val payment = when(value.paymentStatus) {
             "held" -> "Coins 已预留"; "capture_pending" -> "扣款处理中"; "captured" -> "已扣款"
             "cancelled" -> "已取消"; "capture_failed" -> "扣款未完成"; else -> "需要对账"
@@ -847,6 +940,17 @@ private fun MineSignedOutPanel(account: AccountController, onLogin: () -> Unit, 
             MineRowDivider()
             MineMenuRow("关于与更新", "mine-more", subtitle = mineVersionLabel(com.gccwebos.android.BuildConfig.VERSION_NAME)) { about = true }
         }
+        }
+    }
+}
+
+/** The active card and, while one is scheduled, the 待生效 downgrade; both come from the server state, never from local rules. */
+@Composable
+internal fun PlanSwitchBannerCard(banner: PlanSwitchBanner) {
+    BrandCard(Modifier.testTag("plan-switch-banner")) {
+        banner.current?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Brand.Text, modifier = Modifier.testTag("plan-switch-current")) }
+        banner.pending?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = Brand.Cyan, modifier = Modifier.testTag("plan-switch-pending"))
         }
     }
 }

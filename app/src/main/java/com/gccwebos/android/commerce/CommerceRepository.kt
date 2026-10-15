@@ -22,16 +22,36 @@ interface CommerceRecovery {
     fun save(binding: String, value: PendingCommerce)
     fun clear(binding: String, kind: String)
 }
+/** HTTP 409 codes the server answers for a plan change that did not create an order. */
+internal val PlanSwitchRejections = setOf("plan_switch_authority_mode_unsupported", "plan_switch_commerce_model_unsupported",
+    "plan_switch_authority_row_present", "plan_switch_credit_exceeds_price", "plan_switch_state_changed",
+    "plan_switch_application_pending", "plan_switch_already_scheduled", "plan_switch_upgrade_window_closed",
+    "plan_switch_cycle_misaligned", "plan_switch_precheck_unavailable")
 class CommerceFailure(val code: String, val status: Int = 0) : Exception("Commerce operation not confirmed")
 
 /** Session-scoped coordinator; resume is read-only. An ambiguous mutation keeps the exact durable key. */
 class CommerceRepository(private val request: suspend (String, String?, String?) -> WireResponse,
     private val recovery: CommerceRecovery, private val binding: String,
-    private val now: () -> Instant = Instant::now, private val newKey: () -> String = { UUID.randomUUID().toString() }) {
+    private val now: () -> Instant = Instant::now, private val newKey: () -> String = { UUID.randomUUID().toString() },
+    /** GET that treats 401/404 as an ordinary answer (never an expired session); null when the host cannot offer it. */
+    private val optionalRequest: (suspend (String) -> WireResponse)? = null) {
     private val mutex = Mutex()
     private var model: CommerceModel? = null
     suspend fun loadModel(): CommerceModel = CommerceJson.model(call("/api/portal/commerce/model")).also { model = it }
     suspend fun offers(): List<Offer> = CommerceJson.offers(call(requireNotNull(model).offersPath))
+    /**
+     * Advisory plan-change display state. Null means "show the ordinary catalog": the feature is off on the server
+     * (the route is absent and may answer 404 or a protected 401), the account is not eligible, the commerce model is
+     * not the legacy one, or the answer is not a well-formed state. It never throws for those cases and a 401 here never
+     * ends the sign-in (the catalog reads themselves prove the session).
+     */
+    suspend fun planSwitchState(): PlanSwitchState? {
+        if (model != CommerceModel.LEGACY) return null
+        val read = optionalRequest ?: return null
+        val response = read("/api/portal/commerce/plan-switch/state")
+        if (response.status != 200) return null
+        return try { CommerceJson.planSwitchState(response.body) } catch (_: IllegalArgumentException) { null }
+    }
     suspend fun wallet(): Wallet = CommerceJson.wallet(call("/api/portal/coins/wallet"))
     suspend fun rechargeOffers(): List<RechargeOffer> = CommerceJson.rechargeOffers(call("/api/portal/coins/recharge/offers"))
     suspend fun purchaseHistory(selected: CommerceModel): Pair<OrderPage?, List<PurchaseResult.Deferred>?> {
@@ -126,7 +146,9 @@ class CommerceRepository(private val request: suspend (String, String?, String?)
             JSONObject().put("quoteRef", record.inputRef).toString(), record.key, setOf(201)), selected) }
         catch (failure: CommerceFailure) {
             // These authoritative pre-order rejections cannot have committed a purchase.
-            if ((failure.status == 409 && failure.code in setOf("quote_expired", "quote_stale", "offer_unavailable")) ||
+            // The plan-change 409s are decided before any order exists (state changed, window closed, already scheduled, ...).
+            if ((failure.status == 409 && (failure.code in setOf("quote_expired", "quote_stale", "offer_unavailable") ||
+                    failure.code in PlanSwitchRejections)) ||
                 (failure.status == 423 && failure.code in setOf("insufficient_coins", "wallet_not_active")))
                 recovery.clear(binding, "purchase")
             throw failure

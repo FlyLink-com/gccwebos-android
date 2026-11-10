@@ -30,8 +30,8 @@
     "sha1_official": "87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b",
     "sha256_downloaded": "4abbbcdc842f3d4879206e9695d52709603e52dd68d3c1fff04b3b5e7a308ecf"
   },
-  "go_mod_sha256": "4d43f64f4a247b387d69064957a818027bc805fb40462ba5fc28608678448025",
-  "go_sum_sha256": "c2a24109c2bba3591f93812f0bb601d2b5a4da91782a4b7bb84143882afbea90",
+  "go_mod_sha256": "de9c64f3fe8c3f6b1cc1f91943d39b592137b3b1808bf75cdc561b54920a058d",
+  "go_sum_sha256": "bfa0242eab4f4d2d52843642f55f5b921eb17007cca6afaca1a49ee3c6d035d6",
   "build_tags": [
     "cmfa",
     "with_gvisor"

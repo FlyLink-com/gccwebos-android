@@ -145,7 +145,7 @@ class ConfigurationLibraryFlowUiTest {
             assertEquals(2, commits.get())
         }
         compose.onNodeWithTag("nodes-group-title", useUnmergedTree = true).assertTextEquals("节点列表")
-        compose.onNodeWithTag("unified-filter-0", useUnmergedTree = true).assertTextEquals("未知1")
+        compose.onNodeWithTag("unified-filter-0").assertTextEquals("未知1")
         // Both saved configurations are rows of the one list; the inactive one is chosen with a single tap.
         compose.onNodeWithTag("configuration-node-0-0").performScrollTo().assertHasClickAction()
         // A background library refresh replaces every opaque handle; the rows must stay.

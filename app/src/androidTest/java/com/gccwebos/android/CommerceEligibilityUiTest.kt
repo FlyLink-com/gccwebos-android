@@ -307,7 +307,7 @@ class CommerceEligibilityUiTest {
         }
         compose.waitUntil(5000) { commerceReads.size == 4 && !commerce.busy }
         assertLoaded(CommerceMode.Wallet)
-        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("提交结果尚未确认，请保留原记录。")
+        compose.onNodeWithTag("recharge-status").performScrollTo().assertTextEquals("提交结果尚未确认，可直接重新充值，或点下方查询。")
         compose.runOnIdle {
             assertTrue(commerce.pendingRecharge); assertSame(pending, recovery.pending)
             assertEquals(expectedReads(CommerceMode.Wallet) + expectedReads(CommerceMode.Wallet), commerceReads.map { it.first })

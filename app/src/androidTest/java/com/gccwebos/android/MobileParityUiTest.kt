@@ -334,6 +334,7 @@ class MobileParityUiTest {
         compose.onNodeWithTag("logout-confirm").performClick()
         compose.waitUntil(10_000) { !state.localSubscription.hasProfile && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
+        compose.waitUntilExactlyOneExists(hasTestTag("login-screen"), 10_000)
         compose.onNodeWithTag("login-screen").assertExists()
         compose.runOnIdle {
             assertFalse(state.authenticated); assertNull(state.authenticatedAccountId); assertNull(state.displayEmail)

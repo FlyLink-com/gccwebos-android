@@ -57,10 +57,10 @@ jobs:
           retention-days: 7
   validate:
     if: "!startsWith(github.head_ref || github.ref_name, 'codex/lucky-e2b-')"
-    runs-on: gcc-android-api36-4core
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - name: Verify dedicated API36 runner capacity
+      - name: Verify GitHub-hosted API36 runner capacity
         shell: bash
         run: |
           set -euo pipefail

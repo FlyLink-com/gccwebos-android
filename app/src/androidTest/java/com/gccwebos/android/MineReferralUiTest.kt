@@ -195,7 +195,7 @@ class MineReferralUiTest {
         compose.onNodeWithTag("referral-hero-title").assertTextEquals("邀请好友 · 赚 Coins 奖励")
         compose.onNodeWithTag("referral-rule-attribution").performScrollTo().assertTextContains("47 天内注册有效")
         compose.onNodeWithTag("referral-rule-confirmation").performScrollTo().assertTextContains("9 天确认期")
-        compose.onNodeWithTag("referral-link-masked").performScrollTo().assertTextEquals("portal.gccwebos.com/r/" + path.removePrefix("/r/").take(4) + "…" + path.takeLast(4))
+        compose.onNodeWithTag("referral-link-masked", useUnmergedTree = true).performScrollTo().assertTextEquals("portal.gccwebos.com/r/" + path.removePrefix("/r/").take(4) + "…" + path.takeLast(4))
         compose.runOnIdle { assertTrue(copied.isEmpty()); assertEquals(listOf(ReferralJson.PROFILE, ReferralJson.PERFORMANCE), requests.map { it.first }) }
         compose.onNodeWithTag("referral-copy").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(listOf("https://portal.gccwebos.com$path"), copied); assertEquals(2, requests.size); assertTrue(requests.all { it.second == null }); assertTrue(opened.isEmpty()) }

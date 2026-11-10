@@ -2,12 +2,18 @@
 # Sourced by disposable-emulator scripts. No device state is cleared or reused here.
 FRESH_STORE_CLASS='com.gccwebos.android.SelectedNodeActivityRecreationTest'
 # Camera/SAF and same-signature upgrade fixtures require separate explicit device
-# arguments/packages. Their five tests are not hosted-suite passes or skips.
-MANUAL_OPT_IN_CLASSES='com.gccwebos.android.ManualImportDeviceFlowTest,com.gccwebos.android.portal.ManualImportUpgradeTest'
+# arguments/packages; the BoltPulse capture additionally needs a real foreground
+# window and frame timing. Their six tests are not hosted-suite passes or skips.
+MANUAL_OPT_IN_CLASSES='com.gccwebos.android.ManualImportDeviceFlowTest,com.gccwebos.android.portal.ManualImportUpgradeTest,com.gccwebos.android.BoltPulseDeviceEvidenceTest'
+# The installer-handoff test mutates REQUEST_INSTALL_PACKAGES; Android restarts
+# the app process when that op changes, which aborted the main batch mid-suite.
+# The method is excluded from the main batch and run alone, last, by the
+# entrypoint scripts, judged by the evidence notes it writes.
+HANDOFF_METHOD='com.gccwebos.android.InAppUpdateDeviceEvidenceTest#theRealHandOffReachesTheSystemInstallerWhichIsThenCancelled'
 INSTRUMENTATION_DEADLINE=''
 
 instrumentation_exclusions() {
-  printf '%s\n' "$FRESH_STORE_CLASS,$MANUAL_OPT_IN_CLASSES${1:+,$1}"
+  printf '%s\n' "$FRESH_STORE_CLASS,$MANUAL_OPT_IN_CLASSES,$HANDOFF_METHOD${1:+,$1}"
 }
 
 instrumentation_begin() {

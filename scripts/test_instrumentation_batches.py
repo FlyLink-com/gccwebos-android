@@ -15,7 +15,10 @@ spec.loader.exec_module(verify)
 BASH = os.environ.get('M0_TEST_BASH') or shutil.which('bash')
 HELPER = ROOT / 'instrumentation-batches.sh'
 MANUAL = {'com.gccwebos.android.ManualImportDeviceFlowTest',
-          'com.gccwebos.android.portal.ManualImportUpgradeTest'}
+          'com.gccwebos.android.portal.ManualImportUpgradeTest',
+          'com.gccwebos.android.BoltPulseDeviceEvidenceTest'}
+HANDOFF = {'com.gccwebos.android.InAppUpdateDeviceEvidenceTest#'
+           'theRealHandOffReachesTheSystemInstallerWhichIsThenCancelled'}
 REAL_TUN = 'com.gccwebos.android.vpn.RealTunAcceptanceTest'
 
 
@@ -93,7 +96,7 @@ class BudgetAndPartitionTests(unittest.TestCase):
             result = self.shell('instrumentation_exclusions\ninstrumentation_exclusions "' + REAL_TUN + '"\n', directory)
         self.assertEqual(result.returncode, 0, result.stderr)
         m0, native = [set(line.split(',')) for line in result.stdout.splitlines()]
-        self.assertEqual(m0, {verify.FRESH_CLASS} | MANUAL)
+        self.assertEqual(m0, {verify.FRESH_CLASS} | MANUAL | HANDOFF)
         self.assertEqual(native, m0 | {REAL_TUN})
         eligible = {verify.FRESH_CLASS, 'other.Class', 'native.JniClass'}
         self.assertEqual((eligible - native) | {verify.FRESH_CLASS}, eligible)

@@ -201,6 +201,23 @@ if [ "${REQUIRE_REAL_TUN:-false}" = true ]; then
   adb pull "/sdcard/Android/data/$APP_ID/files/real-tun-evidence" "$OUT/" > "$OUT/real-tun-pull.log"
   python3 scripts/verify_real_tun_acceptance.py "$OUT/real-tun-instrumentation.log" "$OUT/real-tun-evidence/result.json"
 fi
+# Installer-handoff evidence runs alone, after every other batch. The test
+# mutates REQUEST_INSTALL_PACKAGES and Android restarts the app process on any
+# change to that op; inside the main batch that restart aborted the whole
+# suite. Pre-grant the op so the test's own grant is a no-op. Its finally
+# restores the default and may end the process after the assertions, so this
+# batch is judged by the focus evidence the test writes, not the runner
+# summary (which may report the by-design process restart instead).
+log 'Running installer-handoff evidence test in isolation'
+adb shell appops set "$APP_ID" REQUEST_INSTALL_PACKAGES allow
+timeout 300 "$ADB" -s emulator-5554 shell am instrument -w -r \
+  -e class "$HANDOFF_METHOD" "$TEST_RUNNER" \
+  | tee "$OUT/instrumentation-handoff.log" | tee -a "$OUT/instrumentation-all.log" || true
+adb pull "/sdcard/Android/data/$APP_ID/files/ui-evidence/07-handoff-focus.txt" "$OUT/" > "$OUT/handoff-evidence-pull.log" 2>&1 || true
+grep -Eiq 'installer|appdetail|InstallGrant|InstallStart' "$OUT/07-handoff-focus.txt" || {
+  log 'FAIL: installer-handoff evidence does not show the system installer in focus'
+  exit 1
+}
 log 'Relaunching after tests'
 adb shell am start -W -n "$ACTIVITY" > "$OUT/relaunch.log"
 sleep 2

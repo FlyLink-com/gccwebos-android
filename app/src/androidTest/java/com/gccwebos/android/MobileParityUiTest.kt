@@ -334,7 +334,9 @@ class MobileParityUiTest {
         compose.onNodeWithTag("logout-confirm").performClick()
         compose.waitUntil(10_000) { !state.localSubscription.hasProfile && !state.busy }
         compose.onNodeWithTag("nav-Connect").assertExists()
-        compose.onNodeWithTag("login-screen").assertExists()
+        // Post-logout landing is the signed-out Mine surface; the standalone
+        // LoginScreen is composed only after the login entry is tapped.
+        compose.onNodeWithTag("mine-signed-out").assertExists()
         compose.runOnIdle {
             assertFalse(state.authenticated); assertNull(state.authenticatedAccountId); assertNull(state.displayEmail)
             assertNull(profiles.read()); assertNull(saved.read()); assertNull(delivery.record)

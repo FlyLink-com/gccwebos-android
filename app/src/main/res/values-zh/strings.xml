@@ -2,4 +2,17 @@
 <resources>
     <string name="app_name">飞连VPN</string>
     <string name="connection_candidate_label">飞连VPN 测试</string>
+    <string name="tab_connect">连接</string>
+    <string name="tab_lines">节点</string>
+    <string name="tab_plans">套餐</string>
+    <string name="tab_orders">订单</string>
+    <string name="tab_profile">我的</string>
+    <string name="not_integrated">未接入测试环境</string>
+    <string name="connection_explanation">生产 VPN 链路仍在验证中。本版本不建立 VPN 隧道。</string>
+    <string name="lines_explanation">线路来自当前订阅解析；不展示虚构节点与延迟。</string>
+    <string name="plans_explanation">套餐和报价以服务器返回为准。</string>
+    <string name="profile_explanation">账号、订阅、钱包余额与充值，一处管理。</string>
+    <string name="unknown_usage">剩余流量：未采集
+有效期：待后台确认</string>
+    <string name="build_stage">原生功能测试版 · 0.4.0</string>
 </resources>

@@ -115,7 +115,7 @@ class OrderHistoryUiTest {
         compose.onNodeWithTag("history-detail-${plan.ref}").performScrollTo().performClick()
         compose.onNodeWithTag("history-transition-state").assertTextEquals("已生效")
         compose.onNodeWithTag("history-scheduled-for").assertExists()
-        compose.onNodeWithText("服务器未提供").assertExists()
+        compose.onNodeWithText("尚未提供").assertExists()
         compose.onNodeWithTag("history-detail-back").performClick()
         compose.onNodeWithTag("orders-recharge").performScrollTo().performClick()
         compose.onNodeWithText("USD 12.345").assertExists()

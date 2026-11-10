@@ -21,7 +21,7 @@ class ManualImportProgressUiTest {
     }
 
     @Test fun readingShowsAnIndeterminateBarAndStepOneOfThree() {
-        show(ImportStage.Reading)
+        show(ImportStage.Reading, scale = 1f)
         compose.onNodeWithTag("manual-import-stage").assertTextContains("正在读取订阅", substring = true)
             .assertTextContains("第 1/3 步", substring = true)
         compose.onNodeWithTag("manual-import-bar-indeterminate").assertExists()
@@ -48,7 +48,7 @@ class ManualImportProgressUiTest {
     }
 
     @Test fun beforeAnyStageIsReportedTheBarIsStillIndeterminate() {
-        show(null)
+        show(null, scale = 1f)
         compose.onNodeWithTag("manual-import-stage").assertTextContains("正在准备", substring = true)
         compose.onNodeWithTag("manual-import-bar-indeterminate").assertExists()
     }

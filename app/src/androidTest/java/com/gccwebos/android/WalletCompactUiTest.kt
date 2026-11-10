@@ -129,8 +129,10 @@ class WalletCompactUiTest {
             state.busy = false; state.walletError = null; state.walletLoaded = true
             state.wallet = Wallet("not_created", 0, 0, 0, 0, 0, 0, 0)
         }
-        tags.forEach { compose.onNodeWithTag(it).assertTextEquals("0 Coins") }
         compose.onNodeWithTag("wallet-status").assertTextEquals("钱包尚未创建")
+        openDetails()
+        tags.forEach { compose.onNodeWithTag(it).assertTextEquals("0 Coins") }
+        closeDetails()
         assertNoSideEffects()
     }
 

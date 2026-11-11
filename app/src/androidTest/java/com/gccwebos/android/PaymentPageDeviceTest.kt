@@ -155,11 +155,27 @@ class PaymentPageDeviceTest {
 
     /** A tapped link to a host the chain has not established is refused, and a refused top-level navigation shows the full-page error, not the sub-frame notice. */
     @Test fun aTappedLinkToAnUntrustedHttpsHostIsBlockedWithTheFullPageError() {
-        test("tap-new-host").use {
+        test("tap-new-host").use { scenario ->
             compose.waitUntilExactlyOneExists(hasTestTag("payment-web"), 5_000)
             compose.waitUntilDoesNotExist(hasTestTag("payment-loading"), 10_000)
-            tapOnWebView(it, 220)
-            compose.waitUntilExactlyOneExists(hasTestTag("payment-error"), 10_000)
+            // The synthetic tap only lands once the window actually holds focus and the page has
+            // finished loading; without this gate the injection races the window's focus gain
+            // (run 43046389464 shows the focus entry immediately before the successful block).
+            compose.waitUntil(10_000) {
+                var ready = false
+                scenario.onActivity { activity ->
+                    val view = findWebView(activity.window.decorView)
+                    ready = view != null && view.hasWindowFocus() && view.progress == 100
+                }
+                ready
+            }
+            tapOnWebView(scenario, 220)
+            // One repeat tap if the first injection was still swallowed: the refusal is synchronous
+            // once a navigation starts, so a second tap can only re-attempt the same blocked link.
+            if (runCatching { compose.waitUntilExactlyOneExists(hasTestTag("payment-error"), 3_000) }.isFailure) {
+                tapOnWebView(scenario, 220)
+                compose.waitUntilExactlyOneExists(hasTestTag("payment-error"), 10_000)
+            }
             compose.onNodeWithTag("payment-blocked").assertDoesNotExist()
             compose.onNodeWithTag("payment-handed-off").assertDoesNotExist()
             assertNull(resumedFakeAlipay())

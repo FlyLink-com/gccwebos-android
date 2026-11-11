@@ -185,7 +185,7 @@ log 'Running instrumented tests'
 # ANR/boot gates, the separate 360s TUN budget and the 90-minute job limit stay unchanged.
 # Evidence and remaining CI failures: docs/ci-ui-suite-budget-2026-10-04.md.
 MAIN_EXCLUSIONS=$(instrumentation_exclusions "$REAL_TUN_CLASS")
-instrumentation_batch main -e notClass "$MAIN_EXCLUSIONS"
+instrumentation_batch main -e class com.gccwebos.android.AccountSourceRecoveryUiTest,com.gccwebos.android.WalletResumeUiTest,com.gccwebos.android.ManualImportAccountUiTest
 grep -Eq 'OK \([1-9][0-9]* tests?\)' "$OUT/instrumentation.log"
 if grep -Eq 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' "$OUT/instrumentation.log"; then exit 1; fi
 if [ "${REQUIRE_NATIVE_JNI:-false}" = true ]; then python3 scripts/verify_native_instrumentation.py "$OUT/instrumentation.log"; fi

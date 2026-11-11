@@ -2,6 +2,8 @@
 <!-- Only merged into the opt-in instrumentation APK, never into the target/release application. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="GCC isolated revoker">
+        <activity android:name="com.gccwebos.android.DoubledFontComponentActivity"
+            android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <activity android:name="com.gccwebos.android.vpn.AcceptanceRevokerActivity"
             android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <service android:name="com.gccwebos.android.vpn.AcceptanceRevokerService"

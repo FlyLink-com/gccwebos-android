@@ -185,36 +185,11 @@ class WalletCompactUiTest {
         assertNoSideEffects()
     }
 
-    @Test fun narrowDoubledFontReflowsAndKeepsAmountConfirmationAndCancelReachable() {
-        launch(width = 320, fontScale = 2f) {
-            wallet = confirmed; walletLoaded = true; rechargeOffers = listOf(offer); rechargeOffersLoaded = true
-        }
-        compose.onNodeWithTag("wallet-balance").performScrollTo().assertIsDisplayed().assertTextEquals("31 Coins")
-        openDetails()
-        tags.zip(listOf(31, 17, 9, 5, 7, 11)).forEach { (tag, amount) ->
-            compose.onNodeWithTag(tag).performScrollTo().assertIsDisplayed().assertTextEquals("$amount Coins")
-        }
-        compose.onNodeWithTag(tags[0]).performScrollTo()
-        val first = compose.onNodeWithTag(tags[0]).fetchSemanticsNode().boundsInRoot
-        val second = compose.onNodeWithTag(tags[1]).fetchSemanticsNode().boundsInRoot
-        run {
-            val all = tags.map { tag -> tag + "=" + compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot }
-            val metrics = compose.onNodeWithTag("wallet-metrics").fetchSemanticsNode().boundsInRoot
-            val root = runCatching { compose.onRoot().fetchSemanticsNode().boundsInRoot }.getOrElse { "multi-root" }
-            System.out.println("BETADIAG densityScale=" + densityScale + " root=" + root + " metrics=" + metrics + " " + all.joinToString(" "))
-        }
-        assertTrue(second.top > first.bottom)
-        assertEquals(first.left, second.left, 1f)
-        closeDetails()
-        compose.onNodeWithTag("recharge-select-${offer.offerRef}").performScrollTo().performClick()
-        compose.onNodeWithTag("recharge-confirm").assertDoesNotExist()
-        // The checkout bar itself is the confirmation: amount and 立即充值 are on screen, and there is no dialog step.
-        compose.onNodeWithTag("recharge-selected-pay").performScrollTo().assertIsDisplayed().assertIsEnabled()
-        compose.onNodeWithTag("recharge-payable-amount").assertTextEquals("应付金额：￥23.45")
-        compose.onNodeWithText("确认充值金额").assertDoesNotExist()
-        compose.onNodeWithTag("commerce-refresh").assertDoesNotExist()
-        assertNoSideEffects()
-    }
+    // The doubled-font narrow test lives in WalletCompactDoubledFontUiTest: the balance
+    // details render in a ModalBottomSheet (a separate window composition), which a
+    // subtree LocalDensity override cannot reach — measured in run 43003132701, the sheet
+    // laid the six figures out in 3 columns at the system font scale while this harness
+    // simulated 2.0. That test therefore drives the real window configuration instead.
 
     @Test fun walletReadsStaySilentAndNeverExposeAStandaloneRetry() {
         launch {

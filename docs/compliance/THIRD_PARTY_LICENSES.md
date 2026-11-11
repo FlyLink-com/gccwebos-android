@@ -60,7 +60,7 @@
 
 ### 静态清单统计（基线 main）
 
-- `app/build.gradle.kts` 当前包含 17 条依赖声明，涉及 15 个唯一 Maven 坐标；Compose BOM 在 implementation 与 androidTestImplementation 中重复声明。
+- `app/build.gradle.kts` 当前包含 17 条依赖声明：15 个显式字符串坐标，加 1 个 Compose BOM 坐标（BOM 在 implementation 与 androidTestImplementation 中重复声明），共 16 个唯一 Maven 坐标。
 - 根 `build.gradle.kts` 另声明构建插件：Android Gradle Plugin `9.2.0`、Kotlin Compose plugin `2.3.10`；Gradle Wrapper 固定为 `9.4.1`（distribution SHA-256 已写入 Wrapper properties）。这些构建插件目前没有进入现有 SBOM 包清单。
 - `native/go.mod` 有 133 条 require 版本条目：3 条 direct、130 条 indirect。
 - `native/go.sum` 有 341 行、161 个不同模块路径。go.sum 中包含 go.mod-only 校验项和历史版本项，不能把其模块路径数量直接当作最终构建依赖数量。

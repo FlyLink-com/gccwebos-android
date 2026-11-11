@@ -38,12 +38,20 @@ class ManualImportAccountUiTest {
         }
         val manual = ManualSourceRecord(kind = ManualSourceKind.None).use { MemoryManualSourceStore(it) }
         val reads = AtomicInteger()
+        val modelReads = AtomicInteger()
         val downloads = AtomicInteger()
         var downloadGate: CompletableDeferred<Unit>? = null
         var remoteExpiry: Instant? = now.plusSeconds(600)
         var remoteUsage: SubscriptionUsageReport? = null
         val repository = PortalRepository(object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                // The account's own load path (#65) negotiates the delivery mode via
+                // commerce/model; that read belongs to the account, never to a manual
+                // import, and is served + counted so any extra traffic still fails.
+                if (path == "/api/portal/commerce/model") {
+                    assertNull(body); assertNotNull(session); modelReads.incrementAndGet()
+                    return WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                }
                 assertEquals("/api/portal/resources/current/overview", path)
                 assertNull(body); assertNotNull(session); reads.incrementAndGet()
                 return WireResponse(200, if (available) """{"resource":{"state":"available",
@@ -181,6 +189,7 @@ class ManualImportAccountUiTest {
             assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
             assertNull(account.localSubscription.validUntil); assertTrue(actions.isEmpty())
             assertEquals(2, f.reads.get())
+            System.out.println("ISOCALIB phase1 reads=" + f.reads.get() + " model=" + f.modelReads.get() + " downloads=" + f.downloads.get())
         }
         compose.onNodeWithTag("manual-import-cancel").performClick()
         compose.onNodeWithTag("nav-Connect").performClick()
@@ -192,6 +201,7 @@ class ManualImportAccountUiTest {
             assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
             assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
             assertNull(account.localSubscription.validUntil)
+            System.out.println("ISOCALIB phase2 reads=" + f.reads.get() + " model=" + f.modelReads.get() + " downloads=" + f.downloads.get())
             assertEquals(1, f.downloads.get()); assertTrue(actions.isEmpty())
             assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(account.localSubscription, now,
                 ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)).action)

@@ -13,7 +13,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Creator, assignment/license and public redistribution permission not evidenced in repository."
+      "reason": "Creator, assignment/license and public redistribution permission not evidenced in repository.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "db10674181c719f7092ac79877e6c07d28e51d07784c11d6854efac201c4b704",
+      "observedSizeBytes": 235380,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_robot_welcome.webp",
@@ -26,7 +30,12 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Two repository manifests disagree on bundled SHA-256; actual file hash and rights chain must be verified."
+      "reason": "Actual bytes match docs/branding-assets.json but disagree with docs/native-ui-assets.json. The stale declaration must be reconciled separately; copyright and redistribution rights remain unverified.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "233826f3ff968ae47d1cdb2ac09deca9fa9c45544a5a2868c14ab1605451acbd",
+      "observedSizeBytes": 188612,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_BRANDING_MANIFEST; NATIVE_UI_MANIFEST_CONFLICTS",
+      "manifestHashReconciliation": "branding-assets.json matches the recomputed bytes; native-ui-assets.json does not."
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_lounge.webp",
@@ -39,7 +48,12 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Two repository manifests disagree on bundled SHA-256; actual file hash and rights chain must be verified."
+      "reason": "Actual bytes match docs/branding-assets.json but disagree with docs/native-ui-assets.json. The stale declaration must be reconciled separately; copyright and redistribution rights remain unverified.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "c65141cff0eade9152db6be673e53d8537e77948cd8d2291d6a54b7157fe8134",
+      "observedSizeBytes": 279522,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_BRANDING_MANIFEST; NATIVE_UI_MANIFEST_CONFLICTS",
+      "manifestHashReconciliation": "branding-assets.json matches the recomputed bytes; native-ui-assets.json does not."
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_robot_avatar.png",
@@ -51,7 +65,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Private source repository and supplemental source are not proof of public redistribution rights."
+      "reason": "Private source repository and supplemental source are not proof of public redistribution rights.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a",
+      "observedSizeBytes": 57119,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_wordmark.png",
@@ -64,7 +82,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Wordmark copyright and trademark ownership/permission must be documented."
+      "reason": "The path is declared by native-ui-assets.json but is absent from the Android repository tree at this audited commit. It is not verified as a bundled asset; source/rights evidence remains HOLD.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": null,
+      "observedSizeBytes": null,
+      "hashVerificationStatus": "MISSING_AT_DECLARED_PATH"
     },
     {
       "path": "app/src/main/res/drawable/brand_arrow.xml",
@@ -75,7 +97,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
-      "reason": "Source provenance exists; license/assignment evidence absent."
+      "reason": "Source provenance exists; license/assignment evidence absent.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "7a2606ccb728f8737fdbc785f9a37047239761604aba21f847959df30b80281b",
+      "observedSizeBytes": 502,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable/brand_globe.xml",
@@ -86,7 +112,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
-      "reason": "Source provenance exists; license/assignment evidence absent."
+      "reason": "Source provenance exists; license/assignment evidence absent.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "01b2fb12a6097dd4298d0175fdcbea4c08fb81b79651edfe91a3681a22035a1b",
+      "observedSizeBytes": 994,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable/brand_lock.xml",
@@ -97,7 +127,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
-      "reason": "Source provenance exists; license/assignment evidence absent."
+      "reason": "Source provenance exists; license/assignment evidence absent.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "547ec3d94684fdc2160005c551aff388e2752619d3745e5f3e4d6bcfe8648428",
+      "observedSizeBytes": 827,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable/brand_plane.xml",
@@ -108,7 +142,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
-      "reason": "Source provenance exists; license/assignment evidence absent."
+      "reason": "Source provenance exists; license/assignment evidence absent.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "bbaa5885756b0ada92d0de583bf58a0052c87565c6f9ba2701d5e7c1a2ade258",
+      "observedSizeBytes": 516,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable/brand_receipt.xml",
@@ -119,7 +157,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
-      "reason": "Source provenance exists; license/assignment evidence absent."
+      "reason": "Source provenance exists; license/assignment evidence absent.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "3c78c9a5adb5ac572efc1636c9ffdee3c3e1dc35507b40548aa04c0a15773290",
+      "observedSizeBytes": 825,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable/brand_shield.xml",
@@ -130,7 +172,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
-      "reason": "Source provenance exists; license/assignment evidence absent."
+      "reason": "Source provenance exists; license/assignment evidence absent.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "e2be147e2d3271d03857b5d332674062957ba7b33c8c37a115bab6bc78c82553",
+      "observedSizeBytes": 728,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable/brand_user.xml",
@@ -141,7 +187,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
-      "reason": "Source provenance exists; license/assignment evidence absent."
+      "reason": "Source provenance exists; license/assignment evidence absent.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "5375dd92a23e2a97bea7196aa71210fbb60ad129509edc30e516df2a42589670",
+      "observedSizeBytes": 749,
+      "hashVerificationStatus": "ACTUAL_BYTES_MATCH_DECLARED_HASH"
     },
     {
       "path": "app/src/main/res/drawable/brand_alipay.xml",
@@ -150,7 +200,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and any third-party trademark use have not been identified."
+      "reason": "Source/author and any third-party trademark use have not been identified.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "4f60ec4e5521bd9dc74032af00b4adc2a24dd86b60b0b4ba1e02b5f28b3bfd4f",
+      "observedSizeBytes": 1658,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_help.xml",
@@ -159,7 +213,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and license evidence missing."
+      "reason": "Source/author and license evidence missing.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "5aaa77b48c514776fdf91c9df39f1eb217a9c35135880159192b2ef0b33bfeb5",
+      "observedSizeBytes": 786,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_lightning.xml",
@@ -168,7 +226,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and license evidence missing."
+      "reason": "Source/author and license evidence missing.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "3a6a88c9f355b308ddbfaabe05d71d28101b9e6b2e22f8418c4c472fac94e53e",
+      "observedSizeBytes": 466,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_link.xml",
@@ -177,7 +239,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and license evidence missing."
+      "reason": "Source/author and license evidence missing.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "49ea228a40940a2e1bfd32e3b57e9c7646f2dd1e2da6af61e291267d4a97614b",
+      "observedSizeBytes": 862,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_paper_plane.xml",
@@ -186,7 +252,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and license evidence missing."
+      "reason": "Source/author and license evidence missing.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "9e2d67d044800cb6190acdca6e4125094c88c151620e09aa2c0aafb2a47c0042",
+      "observedSizeBytes": 648,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_refresh.xml",
@@ -195,7 +265,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and license evidence missing."
+      "reason": "Source/author and license evidence missing.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "f10190e9e8d2f44e4bb27c66d9b8b1a3dc820cceb1a1876b6856b40deccf6289",
+      "observedSizeBytes": 530,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_share.xml",
@@ -204,7 +278,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and license evidence missing."
+      "reason": "Source/author and license evidence missing.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "abe42a69680f03899dd0d9436dcb39276853470eeae37806e126ee780953a0d0",
+      "observedSizeBytes": 1230,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_telegram.xml",
@@ -213,7 +291,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and any third-party trademark use have not been identified."
+      "reason": "Source/author and any third-party trademark use have not been identified.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "c9301553538ba936740f99962da38fc5de7071866104004fb350d9515243b90a",
+      "observedSizeBytes": 1083,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable/brand_wallet.xml",
@@ -222,7 +304,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and license evidence missing."
+      "reason": "Source/author and license evidence missing.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "6497e0a1479163d7b8e717303ccb831d3eb5da7ac71600b6ff567f9c09e061ea",
+      "observedSizeBytes": 795,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_wallet_coin.webp",
@@ -231,7 +317,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and original source file are not documented."
+      "reason": "Source/author and original source file are not documented.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "0850e23ec65b32ae26eb24dc56f0e79f7562c35eff589c74d530120989f2580e",
+      "observedSizeBytes": 53228,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_welcome_wave.webp",
@@ -240,7 +330,11 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and original source file are not documented."
+      "reason": "Source/author and original source file are not documented.",
+      "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+      "verifiedBundledSha256": "7775cd97a77448abae9e5108affda0ceb26a257100e7f1bcf3958dd871a8eb02",
+      "observedSizeBytes": 360442,
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_PRIOR_HASH_DECLARATION"
     }
   ],
   "approvalFieldsRequired": [
@@ -254,5 +348,20 @@
     "verifiedBundledSha256",
     "reviewer",
     "reviewDate"
-  ]
+  ],
+  "byteAudit": {
+    "auditedAt": "2026-11-10",
+    "auditedCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
+    "method": "SHA-256 recomputed from decoded repository file bytes at the exact commit; Git blob object IDs were not used as file hashes.",
+    "scope": "All paths listed in this register under app/src/main/res/drawable and drawable-nodpi.",
+    "observedAssetCount": 22,
+    "missingAssetCount": 1,
+    "manifestHashConflictCount": 2,
+    "sourceAssetHashesReverified": false,
+    "limitations": [
+      "The original exec-*.png source files named in docs/branding-assets.json are not part of this Android repository tree; sourceSha256 declarations were not independently rechecked.",
+      "A matching byte hash proves file identity only. It does not prove authorship, copyright ownership, redistribution permission, modification permission, or trademark permission.",
+      "No asset is approved for public redistribution by this byte audit."
+    ]
+  }
 }

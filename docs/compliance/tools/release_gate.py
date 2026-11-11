@@ -53,6 +53,25 @@ def evaluate(root: Path) -> dict:
         blockers.append("ASSET_HASH_VERIFICATION_FAILED")
     if audit.get("unregisteredBrandAssets"):
         blockers.append("UNREGISTERED_BRAND_ASSETS")
+    registered_asset_failures = [
+        x for x in audit.get("registeredAssetChecks", [])
+        if x.get("status") != "MATCH"
+    ]
+    if registered_asset_failures:
+        blockers.append("REGISTERED_ASSET_FILE_OR_HASH_UNVERIFIED")
+
+    required_asset_fields = assets.get("approvalFieldsRequired", [])
+    incomplete_approved_assets = []
+    for asset in assets.get("assets", []):
+        if asset.get("rightsStatus") == "APPROVED":
+            missing = [field for field in required_asset_fields if not asset.get(field)]
+            if missing:
+                incomplete_approved_assets.append({
+                    "path": asset.get("path"),
+                    "missingFields": missing,
+                })
+    if incomplete_approved_assets:
+        blockers.append("ASSET_APPROVAL_EVIDENCE_INCOMPLETE")
     held_assets = [
         x.get("path") for x in assets.get("assets", [])
         if x.get("rightsStatus") != "APPROVED" or x.get("publicRedistributionAuthorized") is not True
@@ -75,6 +94,9 @@ def evaluate(root: Path) -> dict:
         "unresolvedDependencyLicenseCount": audit.get("unknownLicenseCount", 0),
         "assetHashFailureCount": len(bad_hashes),
         "assetManifestConflictCount": len(audit.get("assetManifestConflicts", [])),
+        "registeredAssetCheckFailureCount": len(registered_asset_failures),
+        "missingRegisteredAssetCount": sum(1 for x in audit.get("registeredAssetChecks", []) if x.get("status") == "MISSING"),
+        "approvedAssetEvidenceFailureCount": len(incomplete_approved_assets),
         "unregisteredBrandAssetCount": len(audit.get("unregisteredBrandAssets", [])),
         "note": "A BLOCKED result is expected until legal rights, exact release SBOM, assets and corresponding-source evidence are approved.",
     }

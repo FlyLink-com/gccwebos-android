@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from audit import (
     normalize_spdx,
     parse_go_mod,
     parse_gradle_dependencies,
+    registered_asset_file_checks,
 )
 
 
@@ -67,6 +69,31 @@ require (
             self.assertEqual(len(checks), 2)
             self.assertEqual(len(conflicts), 1)
             self.assertEqual(conflicts[0]["status"], "CONFLICT")
+
+
+    def test_registered_asset_file_checks_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "assets").mkdir()
+            content = b"fixture"
+            expected = hashlib.sha256(content).hexdigest()
+            (root / "assets/match.bin").write_bytes(content)
+            (root / "assets/mismatch.bin").write_bytes(content)
+            (root / "assets/unpinned.bin").write_bytes(content)
+            register = {
+                "assets": [
+                    {"path": "assets/match.bin", "verifiedBundledSha256": expected},
+                    {"path": "assets/mismatch.bin", "declaredSha256": "0" * 64},
+                    {"path": "assets/unpinned.bin"},
+                    {"path": "assets/missing.bin", "declaredSha256": "1" * 64},
+                ]
+            }
+            checks = registered_asset_file_checks(root, register)
+            status = {item["path"]: item["status"] for item in checks}
+            self.assertEqual(status["assets/match.bin"], "MATCH")
+            self.assertEqual(status["assets/mismatch.bin"], "MISMATCH")
+            self.assertEqual(status["assets/unpinned.bin"], "UNPINNED")
+            self.assertEqual(status["assets/missing.bin"], "MISSING")
 
 
 if __name__ == "__main__":

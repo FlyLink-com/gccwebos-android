@@ -225,6 +225,48 @@ def asset_manifest_checks(root: Path) -> tuple[list[dict], list[dict]]:
     return checks, conflicts
 
 
+def registered_asset_file_checks(root: Path, register: dict) -> list[dict]:
+    """Verify that every registered bundled asset exists and matches its pinned hashes."""
+    checks = []
+    hash_fields = (
+        "declaredBundledSha256",
+        "secondManifestSha256",
+        "declaredSha256",
+        "verifiedBundledSha256",
+    )
+    for item in register.get("assets", []):
+        path = item.get("path")
+        if not path:
+            continue
+        file_path = root / path
+        expected_hashes = [
+            {"field": field, "sha256": item[field]}
+            for field in hash_fields
+            if item.get(field)
+        ]
+        if not file_path.is_file():
+            actual = None
+            size = None
+            status = "MISSING"
+        else:
+            actual = sha256_bytes(file_path.read_bytes())
+            size = file_path.stat().st_size
+            if not expected_hashes:
+                status = "UNPINNED"
+            elif any(actual != entry["sha256"] for entry in expected_hashes):
+                status = "MISMATCH"
+            else:
+                status = "MATCH"
+        checks.append({
+            "path": path,
+            "actualSha256": actual,
+            "actualSizeBytes": size,
+            "expectedHashes": expected_hashes,
+            "status": status,
+        })
+    return checks
+
+
 def find_unregistered_brand_assets(root: Path, register: dict) -> list[str]:
     registered = {x.get("path") for x in register.get("assets", [])}
     discovered = set()
@@ -359,6 +401,7 @@ def run_audit(root: Path, out_dir: Path) -> dict:
     asset_checks, asset_conflicts = asset_manifest_checks(root)
     register = read_json(root / "docs/compliance/asset-rights-register.json", {"assets": []})
     unregistered_assets = find_unregistered_brand_assets(root, register)
+    registered_asset_checks = registered_asset_file_checks(root, register)
 
     unknown_components = [
         {"ecosystem": x["ecosystem"], "name": x["name"], "version": x.get("version"), "scope": x["scope"]}
@@ -377,6 +420,7 @@ def run_audit(root: Path, out_dir: Path) -> dict:
         "bridgeSourceFiles": bridge_files,
         "assetHashChecks": asset_checks,
         "assetManifestConflicts": asset_conflicts,
+        "registeredAssetChecks": registered_asset_checks,
         "unregisteredBrandAssets": unregistered_assets,
         "limitations": [
             "Gradle dependencies are declared coordinates, not a resolved releaseRuntimeClasspath.",
@@ -413,6 +457,8 @@ def main() -> int:
         "assetHashChecks": len(audit["assetHashChecks"]),
         "assetManifestConflicts": len(audit["assetManifestConflicts"]),
         "unregisteredBrandAssets": len(audit["unregisteredBrandAssets"]),
+        "registeredAssetCheckFailures": sum(1 for x in audit["registeredAssetChecks"] if x["status"] != "MATCH"),
+        "missingRegisteredAssets": sum(1 for x in audit["registeredAssetChecks"] if x["status"] == "MISSING"),
     }, ensure_ascii=False, indent=2))
     return 0
 

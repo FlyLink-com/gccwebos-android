@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0.0",
+  "project": "FlyLink VPN Android",
+  "repository": "FlyLink-com/gccwebos-android",
+  "baselineCommit": "c19d5bf57388b427a5e8248d838cbf3e87b39d47",
+  "targetProjectLicense": "GPL-3.0-only",
+  "publicationStatus": "NOT_PUBLISHED",
+  "copyrightHolder": {
+    "displayName": "FlyLink-com project copyright holder",
+    "legalName": null,
+    "jurisdiction": null,
+    "verificationStatus": "UNVERIFIED",
+    "evidence": []
+  },
+  "codeOwnership": {
+    "status": "UNVERIFIED",
+    "coversAllOriginalFiles": false,
+    "employeeAndContractorAssignmentsVerified": false,
+    "historicalContributorsReviewed": false
+  },
+  "commercialRelicensing": {
+    "futureOptionPreserved": true,
+    "currentlyAuthorized": false,
+    "requiredInstrument": "CLA or equivalent written assignment/license expressly allowing commercial relicensing",
+    "requiresAuthorityFromEveryRelevantCopyrightHolder": true,
+    "scope": "Only original code for which the project copyright holder has documented sublicensing/relicensing authority",
+    "thirdPartyComponentsExcluded": true,
+    "gplContributionsExcludedUnlessSeparateCommercialRightsAreObtained": true
+  },
+  "fileLevelLicenses": {
+    "native/bridge/*.go": "GPL-3.0-or-later; preserve existing SPDX headers and verify file copyright chain",
+    "native/third_party/mihomo": "GPL-3.0-only at pinned upstream commit; local patch must be documented",
+    "native/source-lock.json": "legacy GPL-3.0 normalized to GPL-3.0-only for SPDX reporting only"
+  },
+  "releaseRequirements": {
+    "rootLicensePublished": false,
+    "legalEntityVerified": false,
+    "originalCodeOwnershipVerified": false,
+    "contributorCommercialRelicensingAuthorityVerified": false,
+    "allRuntimeAndBuildDependencyLicensesVerified": false,
+    "assetRightsApproved": false,
+    "trademarkReviewApproved": false,
+    "exactReleaseSbomGenerated": false,
+    "correspondingSourcePackageVerified": false,
+    "gplv3InstallationInformationReviewed": false,
+    "legalReviewApproved": false
+  },
+  "policy": {
+    "unknownLicenseIsBlocking": true,
+    "unapprovedAssetIsBlocking": true,
+    "sourceOrHashMismatchIsBlocking": true,
+    "preserveUpstreamNotices": true,
+    "doNotChangeThirdPartySpdxHeadersWithoutAuthority": true,
+    "doNotPublishRootLicenseBeforeRightsReview": true
+  }
+}

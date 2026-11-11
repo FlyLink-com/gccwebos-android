@@ -6,10 +6,13 @@
   "targetProjectLicense": "GPL-3.0-only",
   "publicationStatus": "NOT_PUBLISHED",
   "copyrightHolder": {
-    "displayName": "FlyLink-com project copyright holder",
+    "displayName": null,
     "legalName": null,
     "jurisdiction": null,
     "verificationStatus": "UNVERIFIED",
+    "publicDisclosureStatus": "NOT_PUBLICLY_DISCLOSED",
+    "publicDisclosureDecision": "DEFERRED_PENDING_LEGAL_REVIEW",
+    "internalVerificationRequiredBeforeRelease": true,
     "evidence": []
   },
   "codeOwnership": {
@@ -51,6 +54,17 @@
     "sourceOrHashMismatchIsBlocking": true,
     "preserveUpstreamNotices": true,
     "doNotChangeThirdPartySpdxHeadersWithoutAuthority": true,
-    "doNotPublishRootLicenseBeforeRightsReview": true
+    "doNotPublishRootLicenseBeforeRightsReview": true,
+    "publicOrganizationIsNotCopyrightEvidence": true,
+    "legalIdentityMayRemainUnpublishedDuringDraft": true,
+    "internalLegalIdentityVerificationRequiredBeforeRelease": true,
+    "publicCopyrightNoticeWordingRequiresLegalReview": true
+  },
+  "publicProjectOrganization": {
+    "name": "FlyLink-com",
+    "identityType": "GitHub organization account",
+    "role": "PUBLIC_PROJECT_MAINTAINER_ONLY",
+    "copyrightOwnershipClaimed": false,
+    "legalEntityIdentityClaimed": false
   }
 }

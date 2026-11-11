@@ -4,6 +4,14 @@
 
 本目录建立 Android 仓库的许可证、第三方依赖、品牌资产权利链和发行放行门禁。目标主许可证为 **GPL-3.0-only**，但在版权主体、贡献者权利、依赖许可证和品牌素材授权全部核实前，不得添加根目录 LICENSE，不得把本仓库描述为已经完成 GPL 授权。
 
+## 公开维护组织与版权主体区分
+
+- 公开项目维护组织：`FlyLink-com`（GitHub organization account），角色仅为公开项目维护与协作入口。
+- 该组织名称不构成版权归属证明，不代表已确认的法定主体，也不推断其与 `gccltd` 为同一法律主体。
+- 本 Draft 暂不公开法定版权主体名称和司法辖区；`license-policy.json` 中 `copyrightHolder.legalName` 与 `jurisdiction` 保持 `null`，`publicDisclosureStatus` 为 `NOT_PUBLICLY_DISCLOSED`，`verificationStatus` 仍为 `UNVERIFIED`。
+- 暂不公开是披露策略，不是权属核验豁免。正式发行前仍须通过适当的内部证据核实版权主体及其授权范围；不得把敏感主体文件提交到公开仓库。
+- 发行时版权声明、许可证页面是否以及如何标示权利主体，须由最终法律审查确定。在审查批准前，不得把 `FlyLink-com` 写成版权所有者。
+
 ## 本次范围
 
 - 仓库：FlyLink-com/gccwebos-android

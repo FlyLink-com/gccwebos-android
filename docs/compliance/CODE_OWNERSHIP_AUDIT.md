@@ -134,7 +134,7 @@
 - 对 PR #17、#21、#47、#59 的 review submissions 进行独立复核：#17 0 条、#21 0 条、#47 1 条 `COMMENTED`（由 PR 作者账号提交，不是独立批准）、#59 0 条。该抽样不代表对其他 PR 的审查情况作出推断。
 - 主分支树中未找到 `CODEOWNERS`、`CONTRIBUTING.md`、DCO、CLA、`AUTHORS` 或 `.mailmap`；存在 `native/LICENSE`，但没有仓库根目录 `LICENSE`。
 
-### 9 条未关联 GitHub 人类账号的提交完整 SHA
+### 9 条未关联 GitHub 用户账号的提交完整 SHA
 
 | 作者元数据 | 完整 Commit | 影响范围摘要 | 关联 PR |
 |---|---|---|---|

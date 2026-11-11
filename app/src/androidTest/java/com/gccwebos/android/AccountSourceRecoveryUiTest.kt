@@ -213,10 +213,12 @@ class AccountSourceRecoveryUiTest {
             compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
                 account.localSubscription.status == LocalSubscriptionStatus.READY }
             val expected = if (kind == ManualImportInputKind.Document) ManualSourceKind.ImportedLocal else ManualSourceKind.ImportedRemote
-            // Let the visit settle: the account row auto-activates (#65) without any fetch.
+            // A fresh visit to the nodes page is what settles it: the panel visit
+            // auto-activates the account row (#65, once per visit) because the import
+            // chose no node. That activation fetches nothing (load disabled here).
+            openMenu()
             compose.waitUntil(10_000) { idle() &&
                 account.localSubscription.sourceKind == ManualSourceKind.LegacyRemote }
-            openMenu()
             compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
             compose.onNodeWithTag("manual-import-cancel").performClick()
             compose.runOnIdle {

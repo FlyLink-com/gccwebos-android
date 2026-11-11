@@ -61,15 +61,24 @@
         "sha256": "233826f3ff968ae47d1cdb2ac09deca9fa9c45544a5a2868c14ab1605451acbd",
         "matchesCurrentBytes": true
       },
-      "sourceRepository": "gccltd/gccwebos-mobile (private)",
-      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
-      "sourcePath": "public/complete/characters/robot-welcome.webp",
-      "sourceGitBlob": "be17a2b3cbafbc8a3876122584489a08ebeb31b0",
-      "sourceSizeBytes": 360442,
+      "sourceRepository": null,
+      "sourceCommit": null,
+      "sourcePath": null,
+      "sourceGitBlob": null,
+      "sourceSizeBytes": null,
       "bundledSizeBytes": 188612,
       "sourceByteIdenticalToBundled": false,
       "originalSourceFileSearchStatus": "exec-dc856b78-f156-4cbc-b9c5-99f97890d7f6.png not located in current project-library search",
-      "sourceEvidenceNote": "The private repository source file exists, but it is not byte-identical to the Android resource. No verified transformation record connects the source repository file to the current 188612-byte Android file. The 360442-byte native-ui manifest hash instead matches brand_welcome_wave.webp."
+      "sourceEvidenceNote": "The declared original source file exec-dc856b78-f156-4cbc-b9c5-99f97890d7f6.png was not located in the current project-library search. The previously assigned private-repository candidate is a different 360442-byte asset that exactly matches brand_welcome_wave.webp, not this 188612-byte Android resource. No verified source/transformation chain for this asset is currently established.",
+      "candidateMisassignedSource": {
+        "repository": "gccltd/gccwebos-mobile (private)",
+        "commit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+        "path": "public/complete/characters/robot-welcome.webp",
+        "gitBlob": "be17a2b3cbafbc8a3876122584489a08ebeb31b0",
+        "sizeBytes": 360442,
+        "exactByteMatchToAndroidAsset": "app/src/main/res/drawable-nodpi/brand_welcome_wave.webp",
+        "notByteIdenticalToThisAsset": true
+      }
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_lounge.webp",
@@ -116,7 +125,7 @@
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Private source repository and supplemental source are not proof of public redistribution rights.",
+      "reason": "The Android file exactly matches gccwebos-ui-source.zip. That source archive has no general license/assignment and the creator and public redistribution permission are not evidenced.",
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a",
       "observedSizeBytes": 57119,
@@ -633,7 +642,14 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "4274b8e42cd16acf3281b187481715b73f75b596d474733710f5d4821f6c354c",
       "observedSizeBytes": 360442,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/complete/characters/robot-welcome.webp",
+      "sourceGitBlob": "be17a2b3cbafbc8a3876122584489a08ebeb31b0",
+      "sourceSizeBytes": 360442,
+      "sourceByteIdenticalToRepository": true,
+      "sourceEvidenceNote": "The 360442-byte source in gccwebos-ui-complete.zip is Git-blob-identical to public/complete/characters/robot-welcome.webp at the pinned private mobile repository commit. It is also byte-identical to the Android brand_welcome_wave.webp, confirming that native-ui-assets.json assigns this source hash to the wrong Android path."
     }
   ],
   "approvalFieldsRequired": [
@@ -711,10 +727,11 @@
     "keyFindings": [
       "The robot avatar source mapping was corrected to the supplemental archive; the similarly named private repository image is a different byte variant.",
       "brand_wallet_coin.webp and brand_welcome_wave.webp have exact byte-identical source files in gccwebos-ui-complete.zip.",
-      "brand_robot_welcome.webp and brand_lounge.webp are not byte-identical to their private repository source files; their transformation records remain incomplete.",
       "brand_wordmark.png exists in the private source repository but is absent at the declared Android bundle path.",
       "Ant Design MIT and Simple Icons CC0 evidence were found for the Alipay and Telegram artwork respectively; trademark rights remain separate.",
-      "No source or creator record was found for brand_lightning.xml, brand_link.xml or brand_paper_plane.xml."
+      "No source or creator record was found for brand_lightning.xml, brand_link.xml or brand_paper_plane.xml.",
+      "The 360442-byte robot-welcome.webp source is Git-blob-identical between gccwebos-ui-complete.zip and gccwebos-mobile@091ee6e8, and byte-identical to Android brand_welcome_wave.webp; it is not the source of the 188612-byte brand_robot_welcome.webp.",
+      "The original source file declared for brand_robot_welcome.webp (exec-dc856b78-f156-4cbc-b9c5-99f97890d7f6.png) was not located; its source chain remains unresolved."
     ],
     "limitations": [
       "Archive and source hashes prove byte identity or provenance only; they do not prove authorship, copyright ownership, assignment, license scope or trademark permission.",

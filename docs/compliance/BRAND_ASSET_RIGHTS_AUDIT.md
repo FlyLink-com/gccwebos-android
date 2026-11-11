@@ -43,7 +43,7 @@ Git 提交作者字段（例如 `gccltd.co`）只是提交元数据，不是创�
 | Android 资源 | 找到的来源 | 字节核验 | 当前判断 |
 |---|---|---|---|
 | `launcher_user_robot.webp` | Library 原图 `exec-f4715170-d344-42a8-a784-96641cb37afa.png` | 原图 SHA-256 `23aee444e690afa3be9a42d36d226648d218c884ccd7aad5e26f0558afcc351a` 与 branding manifest 的 sourceSha256 一致；源图 1,481,957 bytes，打包资源 235,380 bytes | 找到原始文件并确认来源哈希；创作者、转让/许可、商标权仍未知 |
-| `brand_robot_welcome.webp` | `gccwebos-mobile@091ee6e8/public/complete/characters/robot-welcome.webp`；Git blob `be17a2b3cbafbc8a3876122584489a08ebeb31b0` | 私有仓库源文件 360,442 bytes；Android 文件 188,612 bytes，非字节一致 | 源路径可追溯，但转换/裁切记录不完整；登记的 `exec-dc856...` 原图尚未在当前 Library 搜索中找到 |
+| `brand_robot_welcome.webp` | 登记的原图 `exec-dc856b78-f156-4cbc-b9c5-99f97890d7f6.png` 尚未找到 | Android 文件 188,612 bytes；原始 sourceSha256 尚未独立复核 | 目前没有可靠来源链。此前候选私有仓库文件实际对应 `brand_welcome_wave.webp`，不能再归到本资源 |
 | `brand_lounge.webp` | `gccwebos-mobile@091ee6e8/public/scenes/home-lounge.webp`；Git blob `8d3c46bf99b07d5c8c44cc88558a6d86e941ed93` | 源文件 293,430 bytes；Android 文件 279,522 bytes，非字节一致 | 源路径可追溯，但转换记录和登记的 `exec-bec4...` 原图尚未复核 |
 | `brand_robot_avatar.png` | `gccwebos-ui-source.zip/gccwebos-ui-kit/assets/characters/robot-avatar.png` | 源文件 57,119 bytes，SHA-256 `c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a`，与 Android 文件完全一致 | 已修正原登记的来源映射。私有仓库中同名头像是另一份 57,624-byte 文件，不是本 Android 文件的字节来源 |
 | `brand_wordmark.png` | `gccwebos-mobile@091ee6e8/public/complete/brand/gccwebos-wordmark.png`；Git blob `9256d1d0c4024ea30a28da1d2e49f467ab9c8ad8` | 源文件 19,710 bytes；Android 登记路径不存在 | 源文件存在，但当前 Android 包内缺失；需确认是否仍计划打包 |
@@ -80,9 +80,9 @@ Git 提交作者字段（例如 `gccltd.co`）只是提交元数据，不是创�
 | Android 资源 | 来源 | 字节核验 | 当前判断 |
 |---|---|---|---|
 | `brand_wallet_coin.webp` | `gccwebos-ui-complete.zip/assets/icons/wallet-coin.webp` | SHA-256 `274cbeb16788b1f0d08cd6a663d2e1a52485d90a7687d2d84bcc6a185ad72d22`，与 Android 文件完全一致 | 来源包说明为新绘制的独立矢量 UI 资产；没有创作者/权利转让/许可证明 |
-| `brand_welcome_wave.webp` | `gccwebos-ui-complete.zip/assets/characters/robot-welcome.webp` | SHA-256 `4274b8e42cd16acf3281b187481715b73f75b596d474733710f5d4821f6c354c`，与 Android 文件完全一致 | 来源包说明它由 `robot-wave-static.png` 上半身裁切得到；源图的作者和权利链仍未证明 |
+| `brand_welcome_wave.webp` | `gccwebos-ui-complete.zip/assets/characters/robot-welcome.webp`；同时对应 `gccwebos-mobile@091ee6e8/public/complete/characters/robot-welcome.webp`（Git blob `be17a2b3cbafbc8a3876122584489a08ebeb31b0`） | SHA-256 `4274b8e42cd16acf3281b187481715b73f75b596d474733710f5d4821f6c354c`，与 Android 文件完全一致；同一源文件也与私有仓库 Git blob 完全一致 | 来源包说明它由 `robot-wave-static.png` 上半身裁切得到；技术来源已交叉确认，但源图作者和权利链仍未证明 |
 
-这也解释了 manifest 冲突：360,442-byte / `4274b8...` 的文件实际对应 `brand_welcome_wave.webp`，而不是当前 188,612-byte 的 `brand_robot_welcome.webp`。
+这也确认了 manifest 冲突：360,442-byte / `4274b8...` 的文件来自私有 mobile 仓库的 `robot-welcome.webp`，实际对应 Android `brand_welcome_wave.webp`，而不是当前 188,612-byte 的 `brand_robot_welcome.webp`。后者登记的 `exec-dc856...` 原图仍未找到。
 
 ### E. 尚未识别来源的自绘矢量
 

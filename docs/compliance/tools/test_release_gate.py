@@ -168,10 +168,10 @@ class ReleaseGateTests(unittest.TestCase):
 
             notice = root / "app/src/main/assets/licenses/Ant-Design-Alipay-MIT.txt"
             notice.parent.mkdir(parents=True)
-            notice.write_text("MIT License\\nCopyright (c) 2018-present Ant UED\\n", encoding="utf-8")
+            notice.write_text("MIT License\nCopyright (c) 2018-present Ant UED\n", encoding="utf-8")
             result_with_notice = evaluate(root)
             self.assertNotIn("ALIPAY_ASSET_MIT_NOTICE_NOT_PACKAGED", result_with_notice["blockers"])
-            self.assertTrue(result_with_notice["alipayAssetLicenseNoticePackaged")
+            self.assertTrue(result_with_notice["alipayAssetLicenseNoticePackaged"])
 
 if __name__ == "__main__":
     unittest.main()

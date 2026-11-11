@@ -141,11 +141,15 @@ class ManualImportAccountUiTest {
             assertFalse(account.authenticated); assertNull(account.accountUsage.state.value.resource)
             assertEquals(LocalSourceValidity.LocalNoServerExpiry, account.localSubscription.validity)
             assertNull(account.localSubscription.validUntil)
-            // A local file has no subscription-reported usage, so the signed-out card stays unknown.
+            // A local file has no subscription-reported usage.
             assertNull(account.localSubscription.usage)
             assertEquals(0, f.reads.get()); assertEquals(0, f.downloads.get()); assertTrue(actions.isEmpty())
         }
-        compose.onNodeWithTag("account-usage-remaining").performScrollTo().assertTextEquals("暂未获取")
+        // Current contract (AppShellTest C10/C11): signed-out + READY local config with no
+        // subscription-reported usage hides the account usage card entirely — there is no
+        // "暂未获取" card to scroll to in this state.
+        compose.onNodeWithTag("account-usage-card").assertDoesNotExist()
+        compose.onNodeWithTag("account-usage-remaining").assertDoesNotExist()
         compose.onNodeWithTag("subscription-usage-source").assertDoesNotExist()
         compose.onNodeWithTag("vpn-connect").performClick()
         compose.runOnIdle { assertEquals(listOf(ConnectionPowerAction.Connect), actions) }

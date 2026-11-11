@@ -126,7 +126,8 @@ class WalletRechargeUiTest {
         compose.onNodeWithTag("recharge-amount-card").performScrollTo().assertIsDisplayed()
     }
     @Test fun anExpiredUnpaidOrderNeverBlocksStartingANewRecharge() {
-        launch { pendingRecharge = true; recharge = order.copy(nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH)) }
+        launch { pendingRecharge = true; recharge = order.copy(nextAction = PaymentRedirect(order.nextAction!!.url, Instant.EPOCH))
+            rechargeOffers = listOf(offer); rechargeOffersLoaded = true }
         compose.onNodeWithTag("recharge-order").assertDoesNotExist()
         compose.onNodeWithTag("recharge-pay").assertDoesNotExist()
         // The amount grid and the checkout bar stay available beside the old order.

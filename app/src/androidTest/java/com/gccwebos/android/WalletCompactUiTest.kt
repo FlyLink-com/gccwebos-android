@@ -197,6 +197,12 @@ class WalletCompactUiTest {
         compose.onNodeWithTag(tags[0]).performScrollTo()
         val first = compose.onNodeWithTag(tags[0]).fetchSemanticsNode().boundsInRoot
         val second = compose.onNodeWithTag(tags[1]).fetchSemanticsNode().boundsInRoot
+        run {
+            val all = tags.map { tag -> tag + "=" + compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot }
+            val metrics = compose.onNodeWithTag("wallet-metrics").fetchSemanticsNode().boundsInRoot
+            val root = runCatching { compose.onRoot().fetchSemanticsNode().boundsInRoot }.getOrElse { "multi-root" }
+            System.out.println("BETADIAG densityScale=" + densityScale + " root=" + root + " metrics=" + metrics + " " + all.joinToString(" "))
+        }
         assertTrue(second.top > first.bottom)
         assertEquals(first.left, second.left, 1f)
         closeDetails()

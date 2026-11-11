@@ -150,7 +150,10 @@ class WalletResumeUiTest {
         compose.onNodeWithTag("mine-welcome").assertExists()
         compose.onNodeWithTag("mine-back").assertDoesNotExist()
         compose.onNodeWithTag("recharge-order").assertDoesNotExist()
-        compose.runOnIdle { assertNotNull(recovery.read(binding, "recharge")); assertEquals(1, posts); assertEquals(0, opens) }
+        compose.runOnIdle { assertNotNull(recovery.read(binding, "recharge")); assertEquals(1, posts)
+            // Creation opened the payment entry exactly once (immediate-open behavior);
+            // neither account replacement may open it again.
+            assertEquals(1, opens) }
     }
 
     @Test fun unknownPendingResumeKeepsTheWalletWithoutPostingOrOpeningPayment() {

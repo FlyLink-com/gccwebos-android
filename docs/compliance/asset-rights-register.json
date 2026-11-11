@@ -25,6 +25,15 @@
         "bytes": 235380,
         "sha256": "db10674181c719f7092ac79877e6c07d28e51d07784c11d6854efac201c4b704",
         "matchesCurrentBytes": true
+      },
+      "sourceEvidence": {
+        "kind": "project-library-original-file",
+        "sourceFile": "exec-f4715170-d344-42a8-a784-96641cb37afa.png",
+        "sourceSizeBytes": 1481957,
+        "sourceSha256": "23aee444e690afa3be9a42d36d226648d218c884ccd7aad5e26f0558afcc351a",
+        "sourceSha256MatchesDeclaredSourceSha256": true,
+        "sourceLocated": true,
+        "note": "The original source file was located in the project file library and its SHA-256 exactly matches sourceSha256 in the branding manifest. This establishes byte identity only; creator, assignment and public redistribution rights remain unverified."
       }
     },
     {
@@ -51,7 +60,16 @@
         "bytes": 188612,
         "sha256": "233826f3ff968ae47d1cdb2ac09deca9fa9c45544a5a2868c14ab1605451acbd",
         "matchesCurrentBytes": true
-      }
+      },
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/complete/characters/robot-welcome.webp",
+      "sourceGitBlob": "be17a2b3cbafbc8a3876122584489a08ebeb31b0",
+      "sourceSizeBytes": 360442,
+      "bundledSizeBytes": 188612,
+      "sourceByteIdenticalToBundled": false,
+      "originalSourceFileSearchStatus": "exec-dc856b78-f156-4cbc-b9c5-99f97890d7f6.png not located in current project-library search",
+      "sourceEvidenceNote": "The private repository source file exists, but it is not byte-identical to the Android resource. No verified transformation record connects the source repository file to the current 188612-byte Android file. The 360442-byte native-ui manifest hash instead matches brand_welcome_wave.webp."
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_lounge.webp",
@@ -77,14 +95,23 @@
         "bytes": 279522,
         "sha256": "c65141cff0eade9152db6be673e53d8537e77948cd8d2291d6a54b7157fe8134",
         "matchesCurrentBytes": true
-      }
+      },
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/scenes/home-lounge.webp",
+      "sourceGitBlob": "8d3c46bf99b07d5c8c44cc88558a6d86e941ed93",
+      "sourceSizeBytes": 293430,
+      "bundledSizeBytes": 279522,
+      "sourceByteIdenticalToBundled": false,
+      "originalSourceFileSearchStatus": "exec-bec4b3e4-cf6f-4b4c-8734-4bcbf12d2607.png not located in current project-library search",
+      "sourceEvidenceNote": "The private repository source file exists, but its byte count differs from the Android resource. The conversion/crop record and original source image have not been reverified."
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_robot_avatar.png",
       "kind": "raster-brand-character",
-      "sourceRepository": "gccltd/gccwebos-mobile (private)",
-      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
-      "sourcePath": "assets/characters/robot-avatar.png (supplemental asset source noted in native-ui-reference.md)",
+      "sourceRepository": null,
+      "sourceCommit": null,
+      "sourcePath": "gccwebos-ui-kit/assets/characters/robot-avatar.png",
       "declaredSha256": "c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a",
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
@@ -101,7 +128,23 @@
         "bytes": 57119,
         "sha256": "c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a",
         "matchesCurrentBytes": true
-      }
+      },
+      "sourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6"
+      },
+      "sourceSha256": "c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a",
+      "sourceSizeBytes": 57119,
+      "sourceByteIdenticalToBundled": true,
+      "alternateRepositoryReference": {
+        "repository": "gccltd/gccwebos-mobile (private)",
+        "commit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+        "path": "public/complete/characters/robot-avatar.png",
+        "gitBlob": "7a6398ed32f7fa068dfbeb9fcfc6231250e63e52",
+        "sizeBytes": 57624,
+        "byteIdenticalToBundled": false
+      },
+      "sourceEvidenceNote": "Corrected source mapping: the Android resource exactly matches the file in gccwebos-ui-source.zip. The similarly named private-repository asset is a different 57624-byte variant and is not the byte-identical source."
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_wordmark.png",
@@ -118,7 +161,11 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": null,
       "observedSizeBytes": null,
-      "hashVerificationStatus": "MISSING_AT_DECLARED_PATH"
+      "hashVerificationStatus": "MISSING_AT_DECLARED_PATH",
+      "sourceSizeBytes": 19710,
+      "sourceExists": true,
+      "androidBundlePathPresent": false,
+      "sourceEvidenceNote": "The source file exists in the private repository, but the declared Android bundle path is absent at the audited Head. Do not treat it as currently bundled."
     },
     {
       "path": "app/src/main/res/drawable/brand_arrow.xml",
@@ -141,6 +188,15 @@
         "bytes": 502,
         "sha256": "7a2606ccb728f8737fdbc785f9a37047239761604aba21f847959df30b80281b",
         "matchesCurrentBytes": true
+      },
+      "sourcePath": "public/complete/icons/arrow.svg",
+      "sourceGitBlob": "018ccf2ff50c8ea13d5592061550bc5b158c9e1d",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found.",
+      "supplementalSourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6",
+        "sourcePath": "gccwebos-ui-kit/assets/icons/arrow.svg",
+        "note": "Corresponding vector geometry also exists in the supplemental UI source archive."
       }
     },
     {
@@ -164,6 +220,15 @@
         "bytes": 994,
         "sha256": "01b2fb12a6097dd4298d0175fdcbea4c08fb81b79651edfe91a3681a22035a1b",
         "matchesCurrentBytes": true
+      },
+      "sourcePath": "public/complete/icons/globe.svg",
+      "sourceGitBlob": "6bddea06d82d8b4433fb61d954fc2400d5fec3ed",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found.",
+      "supplementalSourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6",
+        "sourcePath": "gccwebos-ui-kit/assets/icons/globe.svg",
+        "note": "Corresponding vector geometry also exists in the supplemental UI source archive."
       }
     },
     {
@@ -187,6 +252,15 @@
         "bytes": 827,
         "sha256": "547ec3d94684fdc2160005c551aff388e2752619d3745e5f3e4d6bcfe8648428",
         "matchesCurrentBytes": true
+      },
+      "sourcePath": "public/complete/icons/lock.svg",
+      "sourceGitBlob": "c692d75bbc5e7c4f36b604931b423a5d2ac400d3",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found.",
+      "supplementalSourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6",
+        "sourcePath": "gccwebos-ui-kit/assets/icons/lock.svg",
+        "note": "Corresponding vector geometry also exists in the supplemental UI source archive."
       }
     },
     {
@@ -210,6 +284,15 @@
         "bytes": 516,
         "sha256": "bbaa5885756b0ada92d0de583bf58a0052c87565c6f9ba2701d5e7c1a2ade258",
         "matchesCurrentBytes": true
+      },
+      "sourcePath": "public/complete/icons/plane.svg",
+      "sourceGitBlob": "c7a463e7df5d0e73e9383e90c86b2f08c267d055",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found.",
+      "supplementalSourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6",
+        "sourcePath": "gccwebos-ui-kit/assets/icons/plane.svg",
+        "note": "Corresponding vector geometry also exists in the supplemental UI source archive."
       }
     },
     {
@@ -233,6 +316,15 @@
         "bytes": 825,
         "sha256": "3c78c9a5adb5ac572efc1636c9ffdee3c3e1dc35507b40548aa04c0a15773290",
         "matchesCurrentBytes": true
+      },
+      "sourcePath": "public/complete/icons/receipt.svg",
+      "sourceGitBlob": "85378e66d6b0659772d851c111a6dbc4fada1df8",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found.",
+      "supplementalSourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6",
+        "sourcePath": "gccwebos-ui-kit/assets/icons/receipt.svg",
+        "note": "Corresponding vector geometry also exists in the supplemental UI source archive."
       }
     },
     {
@@ -256,6 +348,15 @@
         "bytes": 728,
         "sha256": "e2be147e2d3271d03857b5d332674062957ba7b33c8c37a115bab6bc78c82553",
         "matchesCurrentBytes": true
+      },
+      "sourcePath": "public/complete/icons/shield.svg",
+      "sourceGitBlob": "b51cf4c889a30224af0b3adaf98339bd022d3e16",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found.",
+      "supplementalSourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6",
+        "sourcePath": "gccwebos-ui-kit/assets/icons/shield.svg",
+        "note": "Corresponding vector geometry also exists in the supplemental UI source archive."
       }
     },
     {
@@ -279,16 +380,34 @@
         "bytes": 749,
         "sha256": "5375dd92a23e2a97bea7196aa71210fbb60ad129509edc30e516df2a42589670",
         "matchesCurrentBytes": true
+      },
+      "sourcePath": "public/complete/icons/user.svg",
+      "sourceGitBlob": "0a677cb3a399cfa6ba1ca92fe62d54591a3d4789",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found.",
+      "supplementalSourceArchive": {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6",
+        "sourcePath": "gccwebos-ui-kit/assets/icons/user.svg",
+        "note": "Corresponding vector geometry also exists in the supplemental UI source archive."
       }
     },
     {
       "path": "app/src/main/res/drawable/brand_alipay.xml",
       "kind": "vector-icon-or-brand-mark",
-      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "sourceEvidence": {
+        "kind": "third-party-upstream-vector",
+        "sourceArchive": {
+          "name": "gccwebos-alipay-visual-kit.zip",
+          "sha256": "40b42b01ff99cc1a002becbaa476043c4430836df2608502e04f620bbb913c49"
+        },
+        "sourcePath": "gccwebos-alipay-visual-kit/upstream/ant-design-alipay.svg",
+        "sourceSha256": "59a62ddba239115f4f372d1fe10b3aa855c2aaff832ae928e4d7737781dcf8f3",
+        "sourceGitOrArchiveNote": "The Android VectorDrawable retains the Ant Design Alipay path geometry; the XML is a native wrapper."
+      },
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and any third-party trademark use have not been identified.",
+      "reason": "Ant Design MIT source and license evidence have been located. The required MIT notice is not currently present in app/src/main/assets/licenses, and Alipay trademark use remains a separate pending review.",
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "4f60ec4e5521bd9dc74032af00b4adc2a24dd86b60b0b4ba1e02b5f28b3bfd4f",
       "observedSizeBytes": 1658,
@@ -300,6 +419,14 @@
         "bytes": 1658,
         "sha256": "4f60ec4e5521bd9dc74032af00b4adc2a24dd86b60b0b4ba1e02b5f28b3bfd4f",
         "matchesCurrentBytes": true
+      },
+      "licenseEvidence": {
+        "license": "MIT",
+        "copyright": "Copyright (c) 2018-present Ant UED",
+        "licenseFilePath": "gccwebos-alipay-visual-kit/upstream/LICENSE-ant-design.txt",
+        "licenseFileSha256": "5d367fb0a07340571542eb4ee8eb1add62d37b71bad6786a57c2e9a86bf76c70",
+        "noticeRequiredInCopies": "Include the copyright notice and permission notice in all copies or substantial portions.",
+        "noticePresentInAndroidAppAssets": false
       }
     },
     {
@@ -313,7 +440,12 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "5aaa77b48c514776fdf91c9df39f1eb217a9c35135880159192b2ef0b33bfeb5",
       "observedSizeBytes": 786,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/complete/icons/help.svg",
+      "sourceGitBlob": "55fd41773c644e5af8f8be276ff04b25f0288ea7",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found."
     },
     {
       "path": "app/src/main/res/drawable/brand_lightning.xml",
@@ -326,7 +458,9 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "3a6a88c9f355b308ddbfaabe05d71d28101b9e6b2e22f8418c4c472fac94e53e",
       "observedSizeBytes": 466,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceEvidenceStatus": "NOT_IDENTIFIED",
+      "sourceEvidenceNote": "No upstream source file, source package, creator record or license evidence was identified in the reviewed repository and project-library materials. Keep HOLD until original authorship or licensed source is documented."
     },
     {
       "path": "app/src/main/res/drawable/brand_link.xml",
@@ -339,7 +473,9 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "49ea228a40940a2e1bfd32e3b57e9c7646f2dd1e2da6af61e291267d4a97614b",
       "observedSizeBytes": 862,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceEvidenceStatus": "NOT_IDENTIFIED",
+      "sourceEvidenceNote": "No upstream source file, source package, creator record or license evidence was identified in the reviewed repository and project-library materials. Keep HOLD until original authorship or licensed source is documented."
     },
     {
       "path": "app/src/main/res/drawable/brand_paper_plane.xml",
@@ -352,7 +488,9 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "c14cf735880d14b78ba91bd15d902b38d684d0407afef4b825b7391755b9a2b2",
       "observedSizeBytes": 648,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceEvidenceStatus": "NOT_IDENTIFIED",
+      "sourceEvidenceNote": "No upstream source file, source package, creator record or license evidence was identified in the reviewed repository and project-library materials. Keep HOLD until original authorship or licensed source is documented."
     },
     {
       "path": "app/src/main/res/drawable/brand_refresh.xml",
@@ -365,7 +503,12 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "8855c84653e2f23c0246a41e45e0c8c4767df2b6ff7e06af9dcc8c1e7db2eb6b",
       "observedSizeBytes": 530,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/complete/icons/refresh.svg",
+      "sourceGitBlob": "3643f6826e6aee188b16a37979edb89b9823fed2",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found."
     },
     {
       "path": "app/src/main/res/drawable/brand_share.xml",
@@ -378,16 +521,29 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "5f25212e680c17ea81d3f60c3f0450e6008ce7b9a638fca2cf60dc8469867332",
       "observedSizeBytes": 1230,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/complete/icons/share.svg",
+      "sourceGitBlob": "5b80bd04fd3a722920ba9927b7df33d4ebd6222c",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found."
     },
     {
       "path": "app/src/main/res/drawable/brand_telegram.xml",
       "kind": "vector-icon-or-brand-mark",
-      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "sourceEvidence": {
+        "upstream": "Simple Icons Telegram SVG",
+        "upstreamGitBlob": "c46b0ed7098557205510d115000c08cb83af9106",
+        "license": "CC0-1.0",
+        "licenseGitBlob": "70d4a7b6740c5d9b594ff2fc27d3ea7e89413185",
+        "noticePath": "docs/licenses/Simple-Icons-NOTICE.txt",
+        "sourceDocumentation": "docs/TELEGRAM_CHANNEL_ASSETS.md",
+        "note": "The site record identifies this as the Simple Icons rendition, not an official Telegram downloadable logo pack. CC0 does not grant Telegram trademark rights."
+      },
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and any third-party trademark use have not been identified.",
+      "reason": "CC0 evidence for the Simple Icons icon artwork is recorded in the private site repository. Telegram trademark/brand-use review remains pending; do not imply Telegram endorsement.",
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "4f48560d551036e98b33c2d8f43b78edac952dae0eabdf789c993f04b2718d39",
       "observedSizeBytes": 1083,
@@ -399,7 +555,11 @@
         "bytes": 1083,
         "sha256": "4f48560d551036e98b33c2d8f43b78edac952dae0eabdf789c993f04b2718d39",
         "matchesCurrentBytes": true
-      }
+      },
+      "sourceRepository": "gccltd/gccwebos-site (private)",
+      "sourceCommit": "409e2cfe9f97a14a8c305d37640bd651a643001a",
+      "sourcePath": "public/assets/telegram/telegram-brand.svg",
+      "sourceGitBlob": "791e8fb8ccab1b606c45676d050c4a675702fdf0"
     },
     {
       "path": "app/src/main/res/drawable/brand_wallet.xml",
@@ -412,16 +572,31 @@
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "ade556bae492b3efd5d52834b1dad98ec874864c0b7cc19e626dcbac61cf7a2a",
       "observedSizeBytes": 795,
-      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY"
+      "hashVerificationStatus": "ACTUAL_BYTES_HASHED; NO_HISTORICAL_SNAPSHOT_ENTRY",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/complete/icons/wallet.svg",
+      "sourceGitBlob": "691efede466248963a4ed117525cd8ce6b5109a5",
+      "sourceEvidenceNote": "Source SVG exists at the pinned private repository commit. The Android VectorDrawable is a native wrapper/format conversion, not byte-identical to the SVG. No repository-wide license or separate written public redistribution grant was found."
     },
     {
       "path": "app/src/main/res/drawable-nodpi/brand_wallet_coin.webp",
       "kind": "raster-illustration",
-      "sourceEvidence": "Not listed in current branding manifests",
+      "sourceEvidence": {
+        "kind": "project-vector-asset",
+        "sourceArchive": {
+          "name": "gccwebos-ui-complete.zip",
+          "sha256": "b745151a666c6495ab5bb3a5299a498efa9c64bbd4e30cda08ca6171f72da3a4"
+        },
+        "sourcePath": "gccwebos-ui-complete/assets/icons/wallet-coin.webp",
+        "sourceSha256": "274cbeb16788b1f0d08cd6a663d2e1a52485d90a7687d2d84bcc6a185ad72d22",
+        "sourceByteIdenticalToBundled": true,
+        "provenanceNote": "The archive provenance describes this as a new independent vector UI asset, not cropped from a design-board screenshot. Creator identity, assignment and license are not recorded."
+      },
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "Source/author and original source file are not documented.",
+      "reason": "Exact source file located in gccwebos-ui-complete.zip and byte hash matches the Android asset. The archive contains no general license or rights assignment; creator and public redistribution permission remain unverified.",
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "274cbeb16788b1f0d08cd6a663d2e1a52485d90a7687d2d84bcc6a185ad72d22",
       "observedSizeBytes": 53228,
@@ -438,11 +613,23 @@
     {
       "path": "app/src/main/res/drawable-nodpi/brand_welcome_wave.webp",
       "kind": "raster-illustration",
-      "sourceEvidence": "Not listed in current branding manifests",
+      "sourceEvidence": {
+        "kind": "derived-project-asset",
+        "sourceArchive": {
+          "name": "gccwebos-ui-complete.zip",
+          "sha256": "b745151a666c6495ab5bb3a5299a498efa9c64bbd4e30cda08ca6171f72da3a4"
+        },
+        "sourcePath": "gccwebos-ui-complete/assets/characters/robot-welcome.webp",
+        "sourceSha256": "4274b8e42cd16acf3281b187481715b73f75b596d474733710f5d4821f6c354c",
+        "sourceByteIdenticalToBundled": true,
+        "derivedFrom": "gccwebos-ui-complete/assets/characters/robot-wave-static.png",
+        "transformation": "upper body crop [300,105,738,535]",
+        "provenanceNote": "The source archive describes the source as a previously delivered static wave image; it does not include an author/assignment or redistribution license."
+      },
       "rightsStatus": "HOLD",
       "publicRedistributionAuthorized": false,
       "trademarkReview": "PENDING",
-      "reason": "The actual 360442-byte SHA-256 matches the stale hash/size currently assigned to brand_robot_welcome.webp in docs/native-ui-assets.json; this is recorded as a likely path-mapping issue, not a rights approval.",
+      "reason": "Exact source file located in gccwebos-ui-complete.zip; its hash is the same 360442-byte declaration that native-ui-assets.json incorrectly associates with brand_robot_welcome.webp. Source identity is established, rights are not.",
       "hashVerifiedAtCommit": "4fb8179a7dd82560c4a523d897417550a8bef06f",
       "verifiedBundledSha256": "4274b8e42cd16acf3281b187481715b73f75b596d474733710f5d4821f6c354c",
       "observedSizeBytes": 360442,
@@ -484,5 +671,55 @@
       "limitation": "This proves byte continuity with the archived source snapshot only; it does not prove authorship, assignment, license, redistribution, modification, or trademark rights."
     },
     "sha256TestVector": "abc -> ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  },
+  "sourceAudit": {
+    "auditDate": "2026-11-10",
+    "reviewedArchives": [
+      {
+        "name": "gccwebos-ui-source.zip",
+        "sha256": "587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6"
+      },
+      {
+        "name": "gccwebos-ui-complete.zip",
+        "sha256": "b745151a666c6495ab5bb3a5299a498efa9c64bbd4e30cda08ca6171f72da3a4"
+      },
+      {
+        "name": "gccwebos_robot_source.zip",
+        "sha256": "3584b13aa0faf49465e9fa3cf661d5a2a285fe7152f68fe6fe29a1dbce5d3512"
+      },
+      {
+        "name": "gccwebos-alipay-visual-kit.zip",
+        "sha256": "40b42b01ff99cc1a002becbaa476043c4430836df2608502e04f620bbb913c49"
+      }
+    ],
+    "privateSourceRepositories": [
+      {
+        "repository": "gccltd/gccwebos-mobile",
+        "commit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+        "visibility": "private",
+        "githubDetectedLicense": null,
+        "rootLicenseFileFound": false
+      },
+      {
+        "repository": "gccltd/gccwebos-site",
+        "commit": "409e2cfe9f97a14a8c305d37640bd651a643001a",
+        "visibility": "private",
+        "githubDetectedLicense": null,
+        "rootLicenseFileFound": false
+      }
+    ],
+    "keyFindings": [
+      "The robot avatar source mapping was corrected to the supplemental archive; the similarly named private repository image is a different byte variant.",
+      "brand_wallet_coin.webp and brand_welcome_wave.webp have exact byte-identical source files in gccwebos-ui-complete.zip.",
+      "brand_robot_welcome.webp and brand_lounge.webp are not byte-identical to their private repository source files; their transformation records remain incomplete.",
+      "brand_wordmark.png exists in the private source repository but is absent at the declared Android bundle path.",
+      "Ant Design MIT and Simple Icons CC0 evidence were found for the Alipay and Telegram artwork respectively; trademark rights remain separate.",
+      "No source or creator record was found for brand_lightning.xml, brand_link.xml or brand_paper_plane.xml."
+    ],
+    "limitations": [
+      "Archive and source hashes prove byte identity or provenance only; they do not prove authorship, copyright ownership, assignment, license scope or trademark permission.",
+      "No legal contract, assignment, creator declaration or project-wide public redistribution grant was found in the reviewed materials.",
+      "All 23 assets remain HOLD and publicRedistributionAuthorized=false."
+    ]
   }
 }

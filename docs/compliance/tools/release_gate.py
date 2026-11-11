@@ -72,6 +72,22 @@ def evaluate(root: Path) -> dict:
                 })
     if incomplete_approved_assets:
         blockers.append("ASSET_APPROVAL_EVIDENCE_INCOMPLETE")
+    pending_trademark_assets = [
+        x for x in assets.get("assets", [])
+        if x.get("trademarkReview") not in ("APPROVED", "NOT_APPLICABLE")
+    ]
+    if pending_trademark_assets or not requirements.get("brandTrademarkReviewApproved"):
+        blockers.append("BRAND_TRADEMARK_REVIEW_NOT_APPROVED")
+
+    alipay_resource = root / "app/src/main/res/drawable/brand_alipay.xml"
+    alipay_notice = root / "app/src/main/assets/licenses/Ant-Design-Alipay-MIT.txt"
+    alipay_notice_valid = False
+    if alipay_notice.is_file():
+        notice_text = alipay_notice.read_text(encoding="utf-8", errors="replace")
+        alipay_notice_valid = "MIT License" in notice_text and "Ant UED" in notice_text
+    if alipay_resource.is_file() and not alipay_notice_valid:
+        blockers.append("ALIPAY_ASSET_MIT_NOTICE_NOT_PACKAGED")
+
     held_assets = [
         x.get("path") for x in assets.get("assets", [])
         if x.get("rightsStatus") != "APPROVED" or x.get("publicRedistributionAuthorized") is not True
@@ -91,6 +107,8 @@ def evaluate(root: Path) -> dict:
         "publicationStatus": policy.get("publicationStatus"),
         "blockers": sorted(set(blockers)),
         "heldAssetCount": len(held_assets),
+        "pendingTrademarkReviewCount": len(pending_trademark_assets),
+        "alipayAssetLicenseNoticePackaged": alipay_notice_valid,
         "unresolvedDependencyLicenseCount": audit.get("unknownLicenseCount", 0),
         "assetHashFailureCount": len(bad_hashes),
         "assetManifestConflictCount": len(audit.get("assetManifestConflicts", [])),

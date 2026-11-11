@@ -34,3 +34,13 @@
 - 不能因 GPL 组件存在，就未经法律分析断言所有独立 Android UI 文件必然具有相同版权范围；但 JNI 与原生引擎的组合分发须按保守口径准备对应源码。
 - 开发、测试、可选、运行时依赖必须分层；锁文件包数量不等于 APK 实际打包数量。
 - 任何许可证字段缺失或 NOASSERTION 均为待核项，不得自动推断为 MIT 或 Apache-2.0。
+
+
+## 品牌图形素材的第三方许可
+
+| 素材 | 上游来源 | 已知许可证 | 当前发行处理 |
+|---|---|---|---|
+| Alipay 图形路径（`brand_alipay.xml`） | Ant Design Alipay 原始 SVG 路径；来源包 `gccwebos-alipay-visual-kit.zip` | MIT；版权声明为 Ant UED | 已找到许可证文本，但 Android 的 `app/src/main/assets/licenses` 尚未包含该 MIT 声明；发布前必须随发行物附带。支付宝商标使用仍需独立审查，当前资产继续 HOLD。 |
+| Telegram 图形（`brand_telegram.xml`） | Simple Icons Telegram SVG；官网来源记录及 NOTICE | CC0-1.0（按 Simple Icons 上游许可证记录） | CC0 仅涉及图形作品版权，不授予 Telegram 商标权；不得声称 Telegram 背书或认证，品牌使用审查仍待完成。 |
+
+说明：上述第三方图形许可证只覆盖对应图形作品，不代表其商标、品牌名称或其他项目素材也获得授权。

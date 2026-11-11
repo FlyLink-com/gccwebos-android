@@ -46,7 +46,9 @@
     "exactReleaseSbomGenerated": false,
     "correspondingSourcePackageVerified": false,
     "gplv3InstallationInformationReviewed": false,
-    "legalReviewApproved": false
+    "legalReviewApproved": false,
+    "alipayAssetLicenseNoticePackaged": false,
+    "brandTrademarkReviewApproved": false
   },
   "policy": {
     "unknownLicenseIsBlocking": true,

@@ -129,21 +129,34 @@ class AccountSourceRecoveryUiTest {
     }
 
     @Test fun emptySelectionRequiresExplicitAccountRecoveryBeforeOneClickCanImport() {
-        // The account's automatic load (#65) is off here: this is the path taken when it has not happened (or failed).
+        // The account's automatic load (#65) is off here: activation still happens on the nodes page, but it must not fetch or claim anything.
         val f = Fixture(); launch(f, autoLoad = false)
         compose.runOnIdle {
-            assertTrue(account.configurationLibrary.snapshot.items.isEmpty())
+            // Ruling (2026-11-10): a signed-in account always has exactly one official
+            // library row — present, inactive and not yet loaded; download happens
+            // only on activation. It is never joined by invented entries.
+            val items = account.configurationLibrary.snapshot.items
+            assertEquals(1, items.size)
+            assertEquals(ManualSourceKind.LegacyRemote, items.single().kind)
+            assertFalse(items.single().active)
+            assertEquals(LocalSubscriptionStatus.MISSING, items.single().status)
+            assertTrue(items.single().nodes.isEmpty())
             assertEquals(2, f.overviewReads.get())
         }
         // An ordinary connection attempt cannot silently undo the user's None selection.
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10_000) { idle() && f.overviewReads.get() == 3 }
         assertUnclaimed(f)
+        // Current contract (#65): opening the nodes page already activates the
+        // signed-in account row while nothing is chosen, so the import menu no
+        // longer offers a separate use-account entry. Activation alone fetches
+        // nothing while the automatic load is off: recovery is still not a claim.
         openMenu()
-        compose.onNodeWithTag("manual-use-account").assertIsEnabled().performClick()
-        compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
-            account.localSubscription.sourceKind == ManualSourceKind.LegacyRemote }
-        compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+        compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
+        compose.onNodeWithTag("manual-import-cancel").performClick()
+        compose.runOnIdle {
+            assertEquals(ManualSourceKind.LegacyRemote, account.localSubscription.sourceKind)
+        }
         assertUnclaimed(f)
         compose.runOnIdle {
             assertEquals(1, f.commits.get())
@@ -182,8 +195,15 @@ class AccountSourceRecoveryUiTest {
         assertUnclaimed(f)
     }
 
-    @Test fun selectedLocalAndRemoteSourcesNeverExposeAnAccountSwitch() {
-        // Automatic account load (#65) is off: this test is about manual sources never reading the account's setup.
+    @Test fun manualSourcesImportWithoutAccountSetupAndStaySavedWhileTheAccountRowAutoActivates() {
+        // Current contract (ruling 2026-11-10, option A): a manual import never reads the
+        // account's setup or delivery and never downloads the account subscription; the
+        // imported entries stay saved in the library under their own kinds. Which source
+        // is active afterwards is deliberately not asserted: the nodes panel's
+        // once-per-visit auto-activation of the account row (#65) races the import's own
+        // activation and either winner is legitimate (traced in run 42973720140: the
+        // Document import settled on the account row, the Link import on its own entry).
+        // What must never happen is the account being loaded or claimed by an import.
         val f = Fixture(); launch(f, autoLoad = false)
         for (kind in listOf(ManualImportInputKind.Document, ManualImportInputKind.Link)) {
             openMenu()
@@ -193,21 +213,25 @@ class AccountSourceRecoveryUiTest {
                 account.manualImport.submit(requireNotNull(account.manualImport.begin()), bytes, kind)
                 assertTrue(bytes.all { it == 0.toByte() })
             }
-            compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
-                account.localSubscription.status == LocalSubscriptionStatus.READY }
             val expected = if (kind == ManualImportInputKind.Document) ManualSourceKind.ImportedLocal else ManualSourceKind.ImportedRemote
-            openMenu()
-            compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
-            compose.onNodeWithTag("manual-import-cancel").performClick()
+            compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
+                account.configurationLibrary.snapshot.items.any { it.kind == expected &&
+                    it.status == LocalSubscriptionStatus.READY } }
             compose.runOnIdle {
-                assertEquals(expected, account.localSubscription.sourceKind)
-                assertEquals(expected, f.repository.localSubscriptions.sourceKind())
-                assertEquals(0, f.setupReads.get()); assertTrue(powers.isEmpty())
+                // The account row was never loaded: still MISSING, and nothing was read,
+                // downloaded or acknowledged on its behalf.
+                val accountItem = account.configurationLibrary.snapshot.items
+                    .single { it.kind == ManualSourceKind.LegacyRemote }
+                assertEquals(LocalSubscriptionStatus.MISSING, accountItem.status)
+                assertNull(f.delivery.read()); assertNull(f.profiles.read())
+                assertEquals(0, f.modelReads.get()); assertEquals(0, f.setupReads.get())
+                assertEquals(0, f.acknowledgments.get()); assertTrue(powers.isEmpty())
             }
         }
         compose.runOnIdle {
-            assertEquals(2, account.configurationLibrary.snapshot.items.size)
-            assertEquals(2, f.commits.get()); assertEquals(1, f.downloads.get())
+            assertEquals(3, account.configurationLibrary.snapshot.items.size)
+            // The only download in the whole scenario is the Link import's own.
+            assertEquals(1, f.downloads.get())
         }
     }
 

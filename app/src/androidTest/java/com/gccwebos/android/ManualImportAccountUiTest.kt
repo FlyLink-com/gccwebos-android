@@ -38,12 +38,20 @@ class ManualImportAccountUiTest {
         }
         val manual = ManualSourceRecord(kind = ManualSourceKind.None).use { MemoryManualSourceStore(it) }
         val reads = AtomicInteger()
+        val modelReads = AtomicInteger()
         val downloads = AtomicInteger()
         var downloadGate: CompletableDeferred<Unit>? = null
         var remoteExpiry: Instant? = now.plusSeconds(600)
         var remoteUsage: SubscriptionUsageReport? = null
         val repository = PortalRepository(object : PortalTransport {
             override suspend fun request(path: String, body: String?, session: Secret?): WireResponse {
+                // The account's own load path (#65) negotiates the delivery mode via
+                // commerce/model; that read belongs to the account, never to a manual
+                // import, and is served + counted so any extra traffic still fails.
+                if (path == "/api/portal/commerce/model") {
+                    assertNull(body); assertNotNull(session); modelReads.incrementAndGet()
+                    return WireResponse(200, """{"commerceModel":"wallet_first_unique_v1"}""")
+                }
                 assertEquals("/api/portal/resources/current/overview", path)
                 assertNull(body); assertNotNull(session); reads.incrementAndGet()
                 return WireResponse(200, if (available) """{"resource":{"state":"available",
@@ -177,22 +185,30 @@ class ManualImportAccountUiTest {
         compose.onNodeWithTag("manual-import-error").assertTextEquals("订阅不可用或未提供有效期")
         compose.runOnIdle {
             assertTrue(account.accountUsage.state.value.resource is Resource.Available)
-            assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
+            // The nodes-page visit auto-activated the account row (#65) and its load
+            // negotiated the delivery model once — served and counted by the fixture —
+            // yet the account delivered nothing: still MISSING, with no expiry anywhere.
+            // The rejected import borrowed none of it; its only download is its own.
+            // (Calibration run 42950446054: reads=3, model=1, downloads=1.)
+            assertEquals(ManualSourceKind.LegacyRemote, f.repository.localSubscriptions.sourceKind())
             assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
             assertNull(account.localSubscription.validUntil); assertTrue(actions.isEmpty())
-            assertEquals(2, f.reads.get())
+            assertEquals(3, f.reads.get()); assertEquals(1, f.modelReads.get())
+            assertEquals(1, f.downloads.get())
         }
         compose.onNodeWithTag("manual-import-cancel").performClick()
         compose.onNodeWithTag("nav-Connect").performClick()
-        // This shared tag also identifies explicit account preparation when no config exists.
-        // Exercising it must never borrow account expiry, switch the None selector or power VPN.
+        // This shared tag also identifies explicit account preparation.
+        // Exercising it re-runs the account load negotiation but must still deliver
+        // nothing, borrow no expiry for the rejected import and never power the VPN.
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
-        compose.waitUntil(10_000) { f.reads.get() == 3 && !account.busy }
+        compose.waitUntil(10_000) { f.reads.get() == 4 && !account.busy }
         compose.runOnIdle {
-            assertEquals(ManualSourceKind.None, f.repository.localSubscriptions.sourceKind())
+            // (Calibration run 42950446054: reads=4, model=2, downloads=1.)
+            assertEquals(ManualSourceKind.LegacyRemote, f.repository.localSubscriptions.sourceKind())
             assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
             assertNull(account.localSubscription.validUntil)
-            assertEquals(1, f.downloads.get()); assertTrue(actions.isEmpty())
+            assertEquals(2, f.modelReads.get()); assertEquals(1, f.downloads.get()); assertTrue(actions.isEmpty())
             assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(account.localSubscription, now,
                 ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)).action)
         }

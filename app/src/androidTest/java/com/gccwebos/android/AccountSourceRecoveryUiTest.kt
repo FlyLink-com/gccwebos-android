@@ -132,7 +132,15 @@ class AccountSourceRecoveryUiTest {
         // The account's automatic load (#65) is off here: this is the path taken when it has not happened (or failed).
         val f = Fixture(); launch(f, autoLoad = false)
         compose.runOnIdle {
-            assertTrue(account.configurationLibrary.snapshot.items.isEmpty())
+            // Ruling (2026-11-10): a signed-in account always has exactly one official
+            // library row — present, inactive and not yet loaded; download happens
+            // only on activation. It is never joined by invented entries.
+            val items = account.configurationLibrary.snapshot.items
+            assertEquals(1, items.size)
+            assertEquals(ManualSourceKind.LegacyRemote, items.single().kind)
+            assertFalse(items.single().active)
+            assertEquals(LocalSubscriptionStatus.MISSING, items.single().status)
+            assertTrue(items.single().nodes.isEmpty())
             assertEquals(2, f.overviewReads.get())
         }
         // An ordinary connection attempt cannot silently undo the user's None selection.

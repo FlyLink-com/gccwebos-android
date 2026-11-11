@@ -123,3 +123,42 @@
 ## 八、最终裁决
 
 本轮仅完成 Git 历史和代码来源盘点，没有把任何 GitHub 账号、AI 工具或仓库组织认定为版权主体。原创代码权属、历史贡献者审查、员工/承包商转让和商业再授权继续 BLOCKED。根目录 LICENSE 不发布；PR #105 继续 Draft。
+
+
+## GitHub API 独立交叉核验（2026-11-10 PST）
+
+### 提交与 PR 统计复核
+
+- 通过 GitHub commits API 分页读取基线 `main @ c19d5bf57388b427a5e8248d838cbf3e87b39d47` 的完整历史，共 315 条提交：306 条关联 GitHub 账号 `gccltd`，9 条提交作者没有关联 GitHub 用户账号。
+- 通过 GitHub pulls API 分页读取全部 PR，共 105 个；其中 82 个已合并。105 个 PR 的作者账号均为 `gccltd`。PR 作者账号不等于每个 commit 的作者，也不能替代作者/雇员/外包权利证明。
+- 对 PR #17、#21、#47、#59 的 review submissions 进行独立复核：#17 0 条、#21 0 条、#47 1 条 `COMMENTED`（由 PR 作者账号提交，不是独立批准）、#59 0 条。该抽样不代表对其他 PR 的审查情况作出推断。
+- 主分支树中未找到 `CODEOWNERS`、`CONTRIBUTING.md`、DCO、CLA、`AUTHORS` 或 `.mailmap`；存在 `native/LICENSE`，但没有仓库根目录 `LICENSE`。
+
+### 9 条未关联 GitHub 人类账号的提交完整 SHA
+
+| 作者元数据 | 完整 Commit | 影响范围摘要 | 关联 PR |
+|---|---|---|---|
+| Grok Bot (local test merge) | `3092be8e4ee82b1d0f262579f8a830921cfd68cc` | 新增 APK 下载/续传、SHA-256/包名/版本/签名校验及系统安装交接；涉及应用源码、测试、Manifest、更新文档和发布校验脚本 | #59 |
+| Grok Bot (local test merge) | `87f9cf7e9086af336004379384313eb6d45f792e` | APK 更新设备验收测试 | #59 |
+| merge-check | `1dc7f9ad661d01c47ff879cbda030b36f218b56f` | MainActivity、本地订阅、节点选择控制器/面板及测试 | #47 |
+| Codex Local UI | `7ab50f36275c1f7af53c0a4fc1a20cd7df097083` | 欢迎/用量 UI、账户/钱包/订单页面、品牌资源和相关测试 | #21 |
+| Codex local UI | `ebd90b2cab495989d441def84a69598cc713dcb3` | 四入口导航、连接页、节点选择和测试 | #17 |
+| Codex local UI | `b526a28d8aa2c0741691838cb1cc4408e5ce123b` | 连接核心组件、钱包/我的页和测试 | #17 |
+| Codex | `0f5f28c3c9e94bb9c64e8b97d521bf2d2cd37bd0` | RemoteCopySupervisor、相关测试及文档 | #17 |
+| Codex | `6a1cffc06b10d543d114cc072c0537395186a7fc` | 连接页、水滴入口、钱包/邀请页和 UI 测试 | #17 |
+| Ethan | `1bc34c20fb30e3abb35e1e56de38e0da907f691c` | 仅更新 `docs/release-0.4.2.md` 发布草案 | 无 |
+
+### 文件级许可证声明复核
+
+- 对基线仓库进行 `SPDX-License-Identifier` 搜索，命中 8 个 `native/bridge` 代码文件，声明为 `GPL-3.0-or-later`。
+- `native/bridge/callbacks.h` 是第 9 个 bridge 代码文件；实际文件内容没有 SPDX 或版权人声明。
+- 对 `Copyright` 搜索未发现 Android Kotlin/Java 应用源码文件头的版权声明。该搜索结果不能证明作者身份，也不能作为补写版权头的依据。
+- `native/patches/0001-owned-tun-fd.patch` 的作者、版权和许可证仍需单独确认；提交账号仅是 Git 元数据，不是补丁作者或权利人的证明。
+
+### 裁决不变
+
+- `gccltd` 账号的 306 条提交仍需内部确认实际操作人、其与法定版权主体的关系及成果归属。
+- Codex、Codex Local UI、Grok Bot、merge-check 的 8 条源码/测试提交必须确认实际人类操作人、AI 工具使用/生成来源、人工修改审查及第三方代码来源；不能把工具名当作版权主体。
+- Ethan 的文档贡献需要确认其身份关系及该文档的许可/成果归属范围；该提交没有被归类为产品源码贡献。
+- 在取得员工/承包商成果转让、贡献者书面授权或等效权利证明前，Android 原创代码权属保持 `UNVERIFIED`，商业再授权保持 `NOT AUTHORIZED`。
+- 本轮只补充审计证据，不修改任何应用源码、native bridge、补丁或许可证头；不运行 CI、Gradle、Go build 或 APK 编译。

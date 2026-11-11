@@ -1,8 +1,5 @@
 package com.gccwebos.android
 
-import android.content.Context
-import android.content.res.Configuration
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,23 +16,6 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import java.time.Instant
-
-/**
- * A test activity whose window configuration carries fontScale 2.0, the way a real
- * device with doubled system font presents it. The balance-details bottom sheet is a
- * separate window composition: a subtree LocalDensity override (the harness in
- * WalletCompactUiTest) never reaches it — measured in run 43003132701, the sheet laid
- * the six balance figures out in 3 columns at the system font scale while the subtree
- * simulated 2.0 — so the doubled-font arrangement contract can only be exercised
- * through the window configuration itself. Declared in src/acceptanceTest's manifest.
- */
-class DoubledFontComponentActivity : ComponentActivity() {
-    override fun attachBaseContext(newBase: Context) {
-        val config = Configuration(newBase.resources.configuration)
-        config.fontScale = 2f
-        super.attachBaseContext(newBase.createConfigurationContext(config))
-    }
-}
 
 /** Offline DTO fixtures and local callbacks only. No account, recharge, or payment request may escape. */
 class WalletCompactDoubledFontUiTest {

@@ -110,3 +110,38 @@ Git 提交作者字段（例如 `gccltd.co`）只是提交元数据，不是创�
 ## 六、最终裁决
 
 本轮只建立来源证据和发行门禁，不批准任何品牌素材公开再分发。23 项全部继续 HOLD。根目录 LICENSE 不发布；PR #105 保持 Draft；不合并、不部署、不签名、不发布 APK。
+
+
+## 补充素材包逐字节检查（2026-11-10 PST）
+
+### 精确版本与方法
+
+- 本轮对项目资料库中的原始归档 ZIP 直接计算 SHA-256；以下结果与此前登记的四个来源包哈希一致，并新增核验机器人母版交付包。
+- PR #105 从 `d15fe95ccb057dfb9265891512fc1c7bf9413ea5` 到当前 Head `d855c1e3339836b0e1fa8fa16b47d96ca45d32d0` 共增加 2 个提交、0 个落后提交；GitHub compare 显示改动全部限于 `docs/compliance/**`，没有 Android 资源或应用源码变更。因此原素材字节审计基线未被这两个后续提交改变。
+- SHA-256 只能验证归档文件身份和字节连续性，不证明创作者、版权归属、转让或公开再分发授权。
+
+| 归档 | 字节数 | ZIP 条目 | SHA-256 |
+|---|---:|---:|---|
+| `gccwebos-ui-complete.zip` | 32,013,725 | 101 | `b745151a666c6495ab5bb3a5299a498efa9c64bbd4e30cda08ca6171f72da3a4` |
+| `gccwebos-ui-source.zip` | 5,096,280 | 40 | `587fea436107222e290566d7855ec4c38c23b1f2481298ce1c0ca24539d6c8d6` |
+| `gccwebos_robot_source.zip` | 10,737,936 | 45 | `3584b13aa0faf49465e9fa3cf661d5a2a285fe7152f68fe6fe29a1dbce5d3512` |
+| `gccwebos-alipay-visual-kit.zip` | 3,239,442 | 72 | `40b42b01ff99cc1a002becbaa476043c4430836df2608502e04f620bbb913c49` |
+| `gccwebos-mobile-master.zip` | 536,948 | 7 | `3a6eaf013e8495df31ec414134475c228882cb8edc1724e39ab094fc5ac1db88` |
+
+### 归档内部权利材料检查
+
+1. **`gccwebos-ui-complete.zip`**：包含 README、asset manifest、asset provenance、source audit 和总 manifest；未发现通用 LICENSE、COPYING、NOTICE、作者声明或权利转让文件。内部来源说明把 gccwebos 字标标为“重建版、非原始品牌母稿”，把 wallet coin 标为新制作的独立矢量 UI 资产；机器人母版/静态挥手图记为此前交付，场景图记为参考图裁切或延展。这些记录描述制作和加工过程，不是授权。
+2. **`gccwebos-ui-source.zip`**：README 明确说明这是根据参考效果重新实现的可运行前端，不是从截图恢复的原始项目源码；字标为重建素材，不是品牌原始矢量母稿。归档没有通用许可证或权利转让文件。
+3. **`gccwebos_robot_source.zip`**：`source_manifest.json` 将其定义为基于图片重建提示词；输入是五张用户提供的参考图副本，不是原始生成记录。文件明确说明没有原始模型、骨骼、贴图、灯光工程、相机参数、随机种子或生成模型信息。提示词与组合脚本是本次新写内容。该包没有作者声明、版权转让或公开再分发许可；“由用户提供参考图”不等于证明用户是原始作者或权利人。
+4. **`gccwebos-mobile-master.zip`**：包含机器人母版 PNG、README 和 manifest。manifest 把 `未来霓虹科技吉祥机器人.png` 记为源图，并列出 SHA-256 `f6f0ad6245ec62cabc545cb0cfc35cba939e135ee0bc95548464417d319933d1`；该源图本身不在此 ZIP 内，本轮按文件名检索也未定位到原图。包内没有作者声明、许可证或权利转让文件。
+5. **`gccwebos-alipay-visual-kit.zip`**：包含 Ant Design 上游 `alipay.svg` 路径副本及 `upstream/LICENSE-ant-design.txt`，许可证为 MIT，版权声明为 Ant UED。包内 README/provenance 明确说明这是 Ant Design 发布的支付宝图标路径，不是另行取得的支付宝品牌母稿。MIT 许可只支持该上游图形路径的许可链；支付宝商标和品牌使用仍须独立审查，并须把所需 MIT notice 放入 Android 发行资产。
+6. **私有来源仓库**：`gccltd/gccwebos-mobile@091ee6e82bb768333dcc23eaaf725c1fd07ba243` 的 README 标明其为 Private source repository；该固定提交的根目录 `LICENSE` 路径不存在。私有仓库中的文件路径和提交历史不能替代作者声明、雇佣/外包成果转让或 GPL 公开再分发授权。仓库外合同或授权文件是否存在，本轮无法据此判断。
+7. **Telegram 图形**：私有 site 仓库固定记录 `gccltd/gccwebos-site@409e2cfe9f97a14a8c305d37640bd651a643001a` 的 `docs/TELEGRAM_CHANNEL_ASSETS.md` 将图形来源指向 Simple Icons，并记录 CC0-1.0 来源及 NOTICE。此证据只针对图形作品，不授予 Telegram 商标权，也不代表官方背书。
+
+### 结论与处置
+
+- 本轮新增核验没有找到可将任何项目自有品牌素材从 HOLD 改为 APPROVED 的作者、版权转让、书面许可或公开再分发授权证据。
+- 23 项资产仍全部为 `HOLD`，`publicRedistributionAuthorized=false`；不得据此发布或分发任何未批准品牌素材。
+- 对无法补齐来源和授权的资产，发行方案只能是继续隔离或替换为权利链清晰的素材；不得通过改写 manifest、仅补哈希或把私有仓库改为公开来“补足”权利。
+- 后续必须按资产/资产组补齐：创作者或实际权利人、原始文件/生成记录、员工或外包成果归属文件、允许 GPL 公开再分发及修改的书面授权范围、必要的商标审查。商业双重授权仍须另外取得所有相关版权人的明确再授权权利。
+- 本次补充只更新审计文档；不修改图片、应用源码、manifest 状态、根目录 LICENSE 或发行物；不运行 CI、Gradle、Go build 或 APK 编译；PR #105 继续 OPEN / DRAFT / BLOCKED。

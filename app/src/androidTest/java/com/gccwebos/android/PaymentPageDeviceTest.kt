@@ -43,9 +43,14 @@ class PaymentPageDeviceTest {
         Intent(context, PaymentTestActivity::class.java).putExtra(PaymentPage.EXTRA_URL, pinned).putExtra("scenario", scenario)
             .also { intent -> extras.forEach { intent.putExtra(it.first, it.second) } })
 
-    private fun resumedFakeAlipay(): FakeAlipayActivity? =
-        ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
-            .filterIsInstance<FakeAlipayActivity>().firstOrNull()
+    private fun resumedFakeAlipay(): FakeAlipayActivity? {
+        var found: FakeAlipayActivity? = null
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            found = ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED)
+                .filterIsInstance<FakeAlipayActivity>().firstOrNull()
+        }
+        return found
+    }
 
     private fun awaitFakeAlipay(): FakeAlipayActivity {
         var found: FakeAlipayActivity? = null
@@ -63,6 +68,13 @@ class PaymentPageDeviceTest {
         var found: WebView? = null
         scenario.onActivity { found = findWebView(it.window.decorView) }
         return found!!
+    }
+
+    /** WebView state is read on the main thread, where the WebView lives. */
+    private fun webViewUrl(scenario: ActivityScenario<PaymentTestActivity>): String? {
+        var url: String? = null
+        scenario.onActivity { url = findWebView(it.window.decorView)?.url }
+        return url
     }
 
     /** A real input-pipeline tap, so a link navigation carries the user gesture the policy checks. */
@@ -134,7 +146,7 @@ class PaymentPageDeviceTest {
      */
     @Test fun scriptNavigationToANewHttpsHostExtendsTheChain() {
         test("other-origin").use { scenario ->
-            compose.waitUntil(10_000) { webView(scenario).url?.startsWith("https://example.com/") == true }
+            compose.waitUntil(10_000) { webViewUrl(scenario)?.startsWith("https://example.com/") == true }
             compose.onNodeWithTag("payment-blocked").assertDoesNotExist()
             compose.onNodeWithTag("payment-handed-off").assertDoesNotExist()
             assertNull(resumedFakeAlipay())
@@ -145,6 +157,7 @@ class PaymentPageDeviceTest {
     @Test fun aTappedLinkToAnUntrustedHttpsHostIsBlockedWithTheFullPageError() {
         test("tap-new-host").use {
             compose.waitUntilExactlyOneExists(hasTestTag("payment-web"), 5_000)
+            compose.waitUntilDoesNotExist(hasTestTag("payment-loading"), 10_000)
             tapOnWebView(it, 220)
             compose.waitUntilExactlyOneExists(hasTestTag("payment-error"), 10_000)
             compose.onNodeWithTag("payment-blocked").assertDoesNotExist()
@@ -156,6 +169,17 @@ class PaymentPageDeviceTest {
     /** A sub-frame may only load established hosts; a refused sub-frame shows the inline `payment-blocked` notice and the page itself stays. */
     @Test fun aSubframeToAnUntrustedHostIsBlockedWithTheInlineNotice() {
         test("iframe-other-origin").use {
+            compose.waitUntilExactlyOneExists(hasTestTag("payment-blocked"), 10_000)
+            compose.onNodeWithTag("payment-error").assertDoesNotExist()
+            compose.onNodeWithTag("payment-web").assertExists()
+            compose.onNodeWithTag("payment-handed-off").assertDoesNotExist()
+            assertNull(resumedFakeAlipay())
+        }
+    }
+
+    /** Same contract for a sub-frame that is part of the initial page (a gateway page's own iframe), as opposed to one injected by script. */
+    @Test fun aStaticSubframeToAnUntrustedHostIsBlockedWithTheInlineNotice() {
+        test("iframe-static-other-origin").use {
             compose.waitUntilExactlyOneExists(hasTestTag("payment-blocked"), 10_000)
             compose.onNodeWithTag("payment-error").assertDoesNotExist()
             compose.onNodeWithTag("payment-web").assertExists()

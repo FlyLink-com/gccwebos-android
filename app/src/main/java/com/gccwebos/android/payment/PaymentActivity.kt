@@ -95,6 +95,31 @@ open class PaymentActivity : ComponentActivity() {
                                            params: FileChooserParams?): Boolean { callback?.onReceiveValue(null); return true }
         }
         view.webViewClient = object : WebViewClient() {
+            /**
+             * Sub-frame document loads never reach shouldOverrideUrlLoading on this WebView (measured on the
+             * API 33 emulator: parser-inserted and script-created iframes alike loaded an unestablished host with
+             * no override call), so the policy's sub-frame rule — frames may only load established hosts — is
+             * enforced here instead. A request counts as a sub-frame document when it is not for the main frame
+             * and its Accept header asks for HTML; images, scripts and other subresources are not policed here.
+             * A refused frame gets an empty document and the same inline notice the override path would show.
+             * Deep links are left alone: the override callback does fire for those and owns the hand-off.
+             */
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (request.isForMainFrame) return null
+                val accept = request.requestHeaders["Accept"] ?: return null
+                if (!accept.contains("text/html")) return null
+                val url = request.url?.toString() ?: return null
+                return when (val decision = policy?.decide(url, mainFrame = false) ?: PaymentNavigation.Block(BlockReason.MalformedUrl)) {
+                    PaymentNavigation.Allow -> null
+                    is PaymentNavigation.Alipay -> null
+                    is PaymentNavigation.Block -> {
+                        debugLog("intercept-block reason=${decision.reason} scheme=${request.url.scheme} host=${request.url.host}")
+                        if (decision.reason == BlockReason.OtherOrigin) state.blockedOrigin = true
+                        WebResourceResponse("text/html", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+                    }
+                }
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                 when (val decision = policy?.decide(request.url.toString(), mainFrame = request.isForMainFrame,
                     redirect = request.isRedirect, userGesture = request.hasGesture()) ?: PaymentNavigation.Block(BlockReason.MalformedUrl)) {

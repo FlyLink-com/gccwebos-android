@@ -1,0 +1,258 @@
+{
+  "schemaVersion": "1.0.0",
+  "status": "HOLD",
+  "policy": "Every bundled brand asset requires documented author/source, chain of title, public redistribution permission, modification scope, trademark review, and a verified hash before release.",
+  "assets": [
+    {
+      "path": "app/src/main/res/drawable-nodpi/launcher_user_robot.webp",
+      "kind": "raster-brand-character",
+      "sourceManifest": "docs/branding-assets.json",
+      "sourceFile": "exec-f4715170-d344-42a8-a784-96641cb37afa.png",
+      "sourceSha256": "23aee444e690afa3be9a42d36d226648d218c884ccd7aad5e26f0558afcc351a",
+      "declaredBundledSha256": "db10674181c719f7092ac79877e6c07d28e51d07784c11d6854efac201c4b704",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Creator, assignment/license and public redistribution permission not evidenced in repository."
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_robot_welcome.webp",
+      "kind": "raster-brand-character",
+      "sourceManifest": "docs/branding-assets.json; docs/native-ui-assets.json",
+      "sourceFile": "exec-dc856b78-f156-4cbc-b9c5-99f97890d7f6.png",
+      "sourceSha256": "75a37db74b6357f1fad8ebfb2ea600d9b8fe6e50741a2134d36d81913cddf26c",
+      "declaredBundledSha256": "233826f3ff968ae47d1cdb2ac09deca9fa9c45544a5a2868c14ab1605451acbd",
+      "secondManifestSha256": "4274b8e42cd16acf3281b187481715b73f75b596d474733710f5d4821f6c354c",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Two repository manifests disagree on bundled SHA-256; actual file hash and rights chain must be verified."
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_lounge.webp",
+      "kind": "raster-scene-art",
+      "sourceManifest": "docs/branding-assets.json; docs/native-ui-assets.json",
+      "sourceFile": "exec-bec4b3e4-cf6f-4b4c-8734-4bcbf12d2607.png",
+      "sourceSha256": "c3b030b4f12835dd31a2525005fe9e65e92a9bb3ee5b76dc8d23036e9e8f7ad7",
+      "declaredBundledSha256": "c65141cff0eade9152db6be673e53d8537e77948cd8d2291d6a54b7157fe8134",
+      "secondManifestSha256": "f5a891007163f856822ece297a51802f46c3f865a5a971407096dd2bdcf8d5f0",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Two repository manifests disagree on bundled SHA-256; actual file hash and rights chain must be verified."
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_robot_avatar.png",
+      "kind": "raster-brand-character",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "assets/characters/robot-avatar.png (supplemental asset source noted in native-ui-reference.md)",
+      "declaredSha256": "c93f7529fe0b8cf419f1f77f6680ca0c25dd8c2c1bf4abd6b649408684f0757a",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Private source repository and supplemental source are not proof of public redistribution rights."
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_wordmark.png",
+      "kind": "wordmark",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "sourcePath": "public/complete/brand/gccwebos-wordmark.png",
+      "sourceGitBlob": "9256d1d0c4024ea30a28da1d2e49f467ab9c8ad8",
+      "declaredSha256": "86d0228b90c47fed1bbd136bbf7f584da30e3a325bbc9b662ca217d36f36fbb4",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Wordmark copyright and trademark ownership/permission must be documented."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_arrow.xml",
+      "kind": "vector-icon",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "declaredSha256": "7a2606ccb728f8737fdbc785f9a37047239761604aba21f847959df30b80281b",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
+      "reason": "Source provenance exists; license/assignment evidence absent."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_globe.xml",
+      "kind": "vector-icon",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "declaredSha256": "01b2fb12a6097dd4298d0175fdcbea4c08fb81b79651edfe91a3681a22035a1b",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
+      "reason": "Source provenance exists; license/assignment evidence absent."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_lock.xml",
+      "kind": "vector-icon",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "declaredSha256": "547ec3d94684fdc2160005c551aff388e2752619d3745e5f3e4d6bcfe8648428",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
+      "reason": "Source provenance exists; license/assignment evidence absent."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_plane.xml",
+      "kind": "vector-icon",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "declaredSha256": "bbaa5885756b0ada92d0de583bf58a0052c87565c6f9ba2701d5e7c1a2ade258",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
+      "reason": "Source provenance exists; license/assignment evidence absent."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_receipt.xml",
+      "kind": "vector-icon",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "declaredSha256": "3c78c9a5adb5ac572efc1636c9ffdee3c3e1dc35507b40548aa04c0a15773290",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
+      "reason": "Source provenance exists; license/assignment evidence absent."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_shield.xml",
+      "kind": "vector-icon",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "declaredSha256": "e2be147e2d3271d03857b5d332674062957ba7b33c8c37a115bab6bc78c82553",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
+      "reason": "Source provenance exists; license/assignment evidence absent."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_user.xml",
+      "kind": "vector-icon",
+      "sourceRepository": "gccltd/gccwebos-mobile (private)",
+      "sourceCommit": "091ee6e82bb768333dcc23eaaf725c1fd07ba243",
+      "declaredSha256": "5375dd92a23e2a97bea7196aa71210fbb60ad129509edc30e516df2a42589670",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "NOT_APPLICABLE_PENDING_REVIEW",
+      "reason": "Source provenance exists; license/assignment evidence absent."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_alipay.xml",
+      "kind": "vector-icon-or-brand-mark",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and any third-party trademark use have not been identified."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_help.xml",
+      "kind": "vector-icon",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and license evidence missing."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_lightning.xml",
+      "kind": "vector-icon",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and license evidence missing."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_link.xml",
+      "kind": "vector-icon",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and license evidence missing."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_paper_plane.xml",
+      "kind": "vector-icon",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and license evidence missing."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_refresh.xml",
+      "kind": "vector-icon",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and license evidence missing."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_share.xml",
+      "kind": "vector-icon",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and license evidence missing."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_telegram.xml",
+      "kind": "vector-icon-or-brand-mark",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and any third-party trademark use have not been identified."
+    },
+    {
+      "path": "app/src/main/res/drawable/brand_wallet.xml",
+      "kind": "vector-icon",
+      "sourceEvidence": "Not listed in native-ui-assets.json",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and license evidence missing."
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_wallet_coin.webp",
+      "kind": "raster-illustration",
+      "sourceEvidence": "Not listed in current branding manifests",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and original source file are not documented."
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/brand_welcome_wave.webp",
+      "kind": "raster-illustration",
+      "sourceEvidence": "Not listed in current branding manifests",
+      "rightsStatus": "HOLD",
+      "publicRedistributionAuthorized": false,
+      "trademarkReview": "PENDING",
+      "reason": "Source/author and original source file are not documented."
+    }
+  ],
+  "approvalFieldsRequired": [
+    "creatorOrRightsHolder",
+    "sourceUrlOrOriginalFile",
+    "chainOfTitleEvidence",
+    "licenseOrWrittenPermission",
+    "redistributionScope",
+    "modificationPermission",
+    "trademarkReview",
+    "verifiedBundledSha256",
+    "reviewer",
+    "reviewDate"
+  ]
+}

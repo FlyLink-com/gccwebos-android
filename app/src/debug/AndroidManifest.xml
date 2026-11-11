@@ -19,6 +19,8 @@
             <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />
         </service>
         <!-- Debug-only payment-page test seam (local HTML under the pinned origin) and a stand-in for the Alipay app. -->
+        <!-- Debug-only seam for the doubled-font wallet arrangement test. -->
+        <activity android:name=".DoubledFontComponentActivity" android:exported="true" />
         <activity android:name=".payment.PaymentTestActivity" android:exported="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|uiMode|density" />
         <activity android:name=".payment.FakeAlipayActivity" android:exported="true">

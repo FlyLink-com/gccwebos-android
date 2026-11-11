@@ -44,3 +44,13 @@
 | Telegram 图形（`brand_telegram.xml`） | Simple Icons Telegram SVG；官网来源记录及 NOTICE | CC0-1.0（按 Simple Icons 上游许可证记录） | CC0 仅涉及图形作品版权，不授予 Telegram 商标权；不得声称 Telegram 背书或认证，品牌使用审查仍待完成。 |
 
 说明：上述第三方图形许可证只覆盖对应图形作品，不代表其商标、品牌名称或其他项目素材也获得授权。
+
+
+## Mihomo 原生源码与补丁的实际布局
+
+- `native/source-lock.json` 固定 Mihomo v1.19.31、上游 commit `ab405bad5beeeac8b003bb01f60f134f6df54471` 和归档 SHA-256 `adb7a6e4207e8ca44567330e1d563163112787d3044d848305b2bfeff0282590`。
+- Mihomo 源码不在当前 Git tree 中。构建时由 `native/scripts/prepare.sh` 下载、校验并解压到 `native/third_party/mihomo`，再应用 `native/patches/0001-owned-tun-fd.patch`；`native/.gitignore` 明确排除生成的 `/third_party/`。
+- 上游 Mihomo 的许可证为 GPL-3.0。补丁必须随对应源码包提供，并由法律审查确认其衍生作品范围和权利链。
+- 补丁文件本身没有作者、版权或 SPDX 头；提交记录只能把它关联到 GitHub 账号，不能替代补丁作者/权利转让证明。
+- `cmfa_reference` 在 source lock 中为 `compiled: false`；目前保留 `CMFA-GPL-3.0.txt` 不代表该参考源码被编译或随 APK 分发。
+

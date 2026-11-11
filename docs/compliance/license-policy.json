@@ -19,7 +19,68 @@
     "status": "UNVERIFIED",
     "coversAllOriginalFiles": false,
     "employeeAndContractorAssignmentsVerified": false,
-    "historicalContributorsReviewed": false
+    "historicalContributorsReviewed": false,
+    "gitHistoryAudit": {
+      "baseline": "main@c19d5bf57388b427a5e8248d838cbf3e87b39d47",
+      "commitsReviewed": 315,
+      "commitDateRangeUtc": [
+        "2026-09-30",
+        "2026-10-15"
+      ],
+      "githubLinkedAuthorAccounts": 1,
+      "githubLinkedCommitCount": 306,
+      "primaryLinkedAccount": "gccltd",
+      "unlinkedCommitCount": 9,
+      "unlinkedAuthorGroups": [
+        {
+          "author": "Codex",
+          "commitCount": 2,
+          "sourceCodeCommits": 2
+        },
+        {
+          "author": "Codex Local UI / Codex local UI",
+          "commitCount": 3,
+          "sourceCodeCommits": 3
+        },
+        {
+          "author": "Grok Bot (local test merge)",
+          "commitCount": 2,
+          "sourceCodeCommits": 1
+        },
+        {
+          "author": "merge-check",
+          "commitCount": 1,
+          "sourceCodeCommits": 1
+        },
+        {
+          "author": "Ethan",
+          "commitCount": 1,
+          "sourceCodeCommits": 0
+        }
+      ],
+      "pullRequestsReviewed": 105,
+      "mergedPullRequests": 82,
+      "pullRequestAuthorAccounts": [
+        "gccltd"
+      ],
+      "interpretation": "GIT_METADATA_ONLY_NOT_COPYRIGHT_OR_ASSIGNMENT_PROOF",
+      "status": "PRELIMINARY"
+    },
+    "trackedCodeScope": {
+      "kotlinFiles": 391,
+      "javaFiles": 10,
+      "gradleKotlinScriptFiles": 4,
+      "goFiles": 6,
+      "cFiles": 2,
+      "headerFiles": 1,
+      "totalCodeFiles": 414,
+      "androidKotlinJavaFilesHaveSpdxHeaders": false,
+      "nativeBridgeFiles": 9,
+      "nativeBridgeFilesWithSpdx": 8,
+      "nativeBridgeFilesMissingSpdx": [
+        "native/bridge/callbacks.h"
+      ]
+    }
   },
   "commercialRelicensing": {
     "futureOptionPreserved": true,
@@ -31,9 +92,13 @@
     "gplContributionsExcludedUnlessSeparateCommercialRightsAreObtained": true
   },
   "fileLevelLicenses": {
-    "native/bridge/*.go": "GPL-3.0-or-later; preserve existing SPDX headers and verify file copyright chain",
-    "native/third_party/mihomo": "GPL-3.0-only at pinned upstream commit; local patch must be documented",
-    "native/source-lock.json": "legacy GPL-3.0 normalized to GPL-3.0-only for SPDX reporting only"
+    "native/bridge/*.go": "GPL-3.0-or-later; existing SPDX identifiers are present; copyright holder and authority still unverified.",
+    "native/bridge/*.c": "GPL-3.0-or-later; existing SPDX identifiers are present; copyright holder and authority still unverified.",
+    "native/bridge/callbacks.h": "NOASSERTION at baseline; missing SPDX identifier; release-blocking until rights holder and file license are verified.",
+    "native/patches/0001-owned-tun-fd.patch": "Patch applied to pinned upstream Mihomo GPL-3.0 source; patch file has no author/copyright/SPDX header; patch authorship and rights scope remain unverified.",
+    "native/third_party/mihomo (generated, not tracked)": "Not present in the Git tree; native/scripts/prepare.sh downloads the pinned upstream archive from native/source-lock.json and generates this ignored build-time directory.",
+    "native/source-lock.json": "Build provenance lock for external Mihomo source; not a license grant or copyright ownership record.",
+    "native/LICENSE": "GPL-3.0 license text in the native subtree; not a project copyright-holder notice and not a root LICENSE."
   },
   "releaseRequirements": {
     "rootLicensePublished": false,
@@ -48,7 +113,9 @@
     "gplv3InstallationInformationReviewed": false,
     "legalReviewApproved": false,
     "alipayAssetLicenseNoticePackaged": false,
-    "brandTrademarkReviewApproved": false
+    "brandTrademarkReviewApproved": false,
+    "bridgeSourceFilesSpdxComplete": false,
+    "nativePatchOwnershipVerified": false
   },
   "policy": {
     "unknownLicenseIsBlocking": true,

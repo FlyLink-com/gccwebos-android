@@ -72,6 +72,15 @@ def evaluate(root: Path) -> dict:
                 })
     if incomplete_approved_assets:
         blockers.append("ASSET_APPROVAL_EVIDENCE_INCOMPLETE")
+    bridge_source_license_failures = [
+        x for x in audit.get("bridgeSourceFiles", [])
+        if not x.get("license") or x.get("license") == "NOASSERTION"
+    ]
+    if bridge_source_license_failures or not requirements.get("bridgeSourceFilesSpdxComplete"):
+        blockers.append("BRIDGE_SOURCE_FILE_LICENSE_UNDECLARED")
+    if not requirements.get("nativePatchOwnershipVerified"):
+        blockers.append("NATIVE_PATCH_RIGHTS_UNVERIFIED")
+
     pending_trademark_assets = [
         x for x in assets.get("assets", [])
         if x.get("trademarkReview") not in ("APPROVED", "NOT_APPLICABLE")
@@ -108,6 +117,8 @@ def evaluate(root: Path) -> dict:
         "blockers": sorted(set(blockers)),
         "heldAssetCount": len(held_assets),
         "pendingTrademarkReviewCount": len(pending_trademark_assets),
+        "bridgeSourceLicenseFailureCount": len(bridge_source_license_failures),
+        "nativePatchOwnershipVerified": requirements.get("nativePatchOwnershipVerified") is True,
         "alipayAssetLicenseNoticePackaged": alipay_notice_valid,
         "unresolvedDependencyLicenseCount": audit.get("unknownLicenseCount", 0),
         "assetHashFailureCount": len(bad_hashes),

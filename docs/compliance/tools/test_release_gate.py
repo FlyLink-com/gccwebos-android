@@ -126,6 +126,52 @@ class ReleaseGateTests(unittest.TestCase):
             self.assertIn("BRAND_TRADEMARK_REVIEW_NOT_APPROVED", result["blockers"])
             self.assertEqual(result["pendingTrademarkReviewCount"], 1)
 
+    def test_bridge_source_file_without_spdx_blocks_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            compliance = root / "docs/compliance"
+            generated = compliance / "generated"
+            generated.mkdir(parents=True)
+            policy = {
+                "targetProjectLicense": "GPL-3.0-only",
+                "publicationStatus": "NOT_PUBLISHED",
+                "copyrightHolder": {"legalName": None, "verificationStatus": "UNVERIFIED"},
+                "codeOwnership": {},
+                "commercialRelicensing": {},
+                "releaseRequirements": {
+                    "bridgeSourceFilesSpdxComplete": False,
+                    "nativePatchOwnershipVerified": False,
+                    "brandTrademarkReviewApproved": True,
+                    "contributorCommercialRelicensingAuthorityVerified": False,
+                    "correspondingSourcePackageVerified": False,
+                    "gplv3InstallationInformationReviewed": False,
+                    "legalReviewApproved": False,
+                },
+            }
+            assets = {"approvalFieldsRequired": [], "assets": []}
+            audit = {
+                "sbomScope": "manifest-only",
+                "unknownLicenseCount": 0,
+                "bridgeSourceFiles": [
+                    {"path": "native/bridge/callbacks.h", "license": "NOASSERTION"}
+                ],
+                "assetManifestConflicts": [],
+                "assetHashChecks": [],
+                "unregisteredBrandAssets": [],
+                "registeredAssetChecks": [],
+            }
+            (compliance / "license-policy.json").write_text(json.dumps(policy), encoding="utf-8")
+            (compliance / "asset-rights-register.json").write_text(json.dumps(assets), encoding="utf-8")
+            (generated / "license-audit.json").write_text(json.dumps(audit), encoding="utf-8")
+
+            result = evaluate(root)
+
+            self.assertEqual(result["status"], "BLOCKED")
+            self.assertIn("BRIDGE_SOURCE_FILE_LICENSE_UNDECLARED", result["blockers"])
+            self.assertIn("NATIVE_PATCH_RIGHTS_UNVERIFIED", result["blockers"])
+            self.assertEqual(result["bridgeSourceLicenseFailureCount"], 1)
+            self.assertFalse(result["nativePatchOwnershipVerified"])
+
     def test_alipay_icon_requires_mit_notice_in_android_assets(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

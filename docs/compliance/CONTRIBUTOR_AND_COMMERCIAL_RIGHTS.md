@@ -23,6 +23,38 @@
 
 GitHub 组织名、仓库可见性、提交账号或项目内部决定本身均不能替代版权转让或许可证明。
 
+## Android 仓库历史贡献与权属核验（2026-11-10 初审）
+
+以下统计基于 `main @ c19d5bf57388b427a5e8248d838cbf3e87b39d47` 的 GitHub 历史快照，不等同于版权归属结论：
+
+- 检查了 315 条 main 提交，时间范围为 2026-09-30 至 2026-10-15。
+- 306 条提交关联到同一个 GitHub 账号 `gccltd`；另有 9 条提交作者没有关联 GitHub 账号。
+- 9 条未关联提交的作者元数据为：Codex 2 条、Codex Local UI/Codex local UI 3 条、Grok Bot 2 条、merge-check 1 条、Ethan 1 条。其中 8 条涉及产品源码/测试，Ethan 的提交只修改 `docs/release-0.4.2.md`。
+- 仓库共检索到 105 个 PR，其中 82 个已合并；PR 作者账号均为 `gccltd`。PR 作者和提交作者是不同概念，不能因 PR 由该账号创建就推断所有提交的法律权利都归该账号或某个公司。
+- 相关未关联提交分别出现在 PR #17（Codex/Codex Local UI）、PR #21（Codex Local UI）、PR #47（merge-check）、PR #59（Grok Bot）。Ethan 的文档提交没有关联 PR。
+- 抽查 PR #17、#21、#47、#59：#17、#21、#59 未发现 review timeline；#47 只有 `gccltd` 的 comment-only review，不是独立批准。
+- 仓库树中未找到 `CODEOWNERS`、`CONTRIBUTING`、DCO、CLA、AUTHORS 或 `.mailmap` 文件。
+
+GitHub 账号、提交者邮箱、AI 工具名和 PR 作者只能证明版本控制元数据。它们不能证明自然人作者身份、雇佣/外包成果归属、版权转让或商业再授权权利。尤其是工具标记为 Codex、Grok Bot、merge-check 的提交，需要补齐实际操作人、生成/修改来源、人工审查和是否包含第三方代码的记录；不能把工具名直接当作版权主体。
+
+### 原生代码范围与许可证头
+
+- 基线树共识别 414 个代码文件：391 个 Kotlin、10 个 Java、4 个 Gradle Kotlin DSL、6 个 Go、2 个 C、1 个 C header。
+- `app/src/main` 的 Kotlin/Java 文件没有找到 SPDX 或版权归属头；不能仅凭 GitHub 提交账号补写版权声明。
+- `native/bridge` 有 9 个代码文件，其中 8 个已有 `GPL-3.0-or-later` SPDX 头；`native/bridge/callbacks.h` 没有 SPDX 头，也没有版权人声明。
+- `native/patches/0001-owned-tun-fd.patch` 在 Git 历史中由 `gccltd` 账号提交，但补丁文件本身没有作者、版权或 SPDX 声明；它修改固定版本的 GPL-3.0 Mihomo 源码，补丁权利链仍需核验。
+- Mihomo 源码并未提交在 Git 路径 `native/third_party/mihomo`。该目录由 `native/scripts/prepare.sh` 根据 `native/source-lock.json` 下载固定上游归档并生成，且被 `native/.gitignore` 排除。准确上游 commit 为 `ab405bad5beeeac8b003bb01f60f134f6df54471`，归档 SHA-256 为 `adb7a6e4207e8ca44567330e1d563163112787d3044d848305b2bfeff0282590`。
+- `cmfa_reference` 在 source lock 中标记为 `compiled: false`；保留 GPL 文本不代表 CMFA 源码被编译或分发。
+
+### 当前结论
+
+- 原创代码权属：UNVERIFIED。
+- 雇员/承包商成果转让：UNVERIFIED。
+- 历史贡献者审查：未完成。
+- AI/自动化工具提交的实际操作人及来源记录：未完成。
+- 商业再授权：NOT AUTHORIZED。
+- 新增代码贡献：在贡献协议和权利链规则建立前，不接受会改变版权归属或商业授权范围的实质性贡献。
+
 ## DCO 与 CLA
 
 DCO 主要是贡献者对其提交权利和来源作出声明；它本身不当然授予项目主体将贡献改用闭源商业许可证再授权的权利。

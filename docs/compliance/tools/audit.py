@@ -29,7 +29,7 @@ GRADLE_CONFIGS = {
 KNOWN_MAVEN_LICENSES = {
     "com.journeyapps:zxing-android-embedded": "Apache-2.0",
     "com.google.zxing:core": "Apache-2.0",
-    "org.json:json": "LicenseRef-Public-Domain",
+    "org.json:json": "NOASSERTION",
     "junit:junit": "EPL-1.0",
 }
 
@@ -81,12 +81,12 @@ def parse_gradle_dependencies(text: str) -> list[dict]:
                 "scope": GRADLE_CONFIGS[configuration],
                 "direct": True,
                 "license": KNOWN_MAVEN_LICENSES.get(key, "NOASSERTION"),
-                "licenseStatus": "VERIFIED_FROM_BUNDLED_ATTRIBUTION" if key in (
-                    "com.journeyapps:zxing-android-embedded",
-                    "com.google.zxing:core",
-                    "org.json:json",
-                    "junit:junit",
-                ) else "PENDING_UPSTREAM_VERIFICATION",
+                "licenseStatus": {
+                    "com.journeyapps:zxing-android-embedded": "VERIFIED_BUNDLED_APACHE_LICENSE",
+                    "com.google.zxing:core": "VERIFIED_BUNDLED_APACHE_LICENSE",
+                    "org.json:json": "VERIFIED_UPSTREAM_PUBLIC_DOMAIN",
+                    "junit:junit": "VERIFIED_UPSTREAM_EPL_METADATA",
+                }.get(key, "PENDING_UPSTREAM_VERIFICATION"),
                 "source": "app/build.gradle.kts",
             })
         if "platform(composeBom)" in stripped and bom_coordinate:
@@ -244,7 +244,9 @@ def component_purl(component: dict) -> str | None:
         base = "pkg:maven/" + quote(component["group"], safe=".-_") + "/" + quote(component["artifact"], safe=".-_")
         return base + ("@" + quote(component["version"], safe=".-_+") if component.get("version") else "")
     if component["ecosystem"] == "golang":
-        base = "pkg:golang/" + quote(component["name"], safe="/.-_~!")
+        # Go module paths escape uppercase ASCII as ! followed by lowercase.
+        escaped = "".join(("!" + ch.lower()) if ch.isupper() else ch for ch in component["name"])
+        base = "pkg:golang/" + quote(escaped, safe="/.-_~!")
         return base + ("@" + quote(component["version"], safe=".-_+") if component.get("version") else "")
     return None
 

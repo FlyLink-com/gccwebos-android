@@ -54,3 +54,42 @@
 - 补丁文件本身没有作者、版权或 SPDX 头；提交记录只能把它关联到 GitHub 账号，不能替代补丁作者/权利转让证明。
 - `cmfa_reference` 在 source lock 中为 `compiled: false`；目前保留 `CMFA-GPL-3.0.txt` 不代表该参考源码被编译或随 APK 分发。
 
+
+
+## 完整传递依赖 SBOM 范围复核（2026-11-10 PST）
+
+### 静态清单统计（基线 main）
+
+- `app/build.gradle.kts` 当前包含 17 条依赖声明，涉及 15 个唯一 Maven 坐标；Compose BOM 在 implementation 与 androidTestImplementation 中重复声明。
+- 根 `build.gradle.kts` 另声明构建插件：Android Gradle Plugin `9.2.0`、Kotlin Compose plugin `2.3.10`；Gradle Wrapper 固定为 `9.4.1`（distribution SHA-256 已写入 Wrapper properties）。这些构建插件目前没有进入现有 SBOM 包清单。
+- `native/go.mod` 有 133 条 require 版本条目：3 条 direct、130 条 indirect。
+- `native/go.sum` 有 341 行、161 个不同模块路径。go.sum 中包含 go.mod-only 校验项和历史版本项，不能把其模块路径数量直接当作最终构建依赖数量。
+- `native/source-lock.json` 固定 Go `1.27.1`、Mihomo `v1.19.31` 的 commit/archive SHA-256，以及 build tags `cmfa`、`with_gvisor`；CMFA reference 明确为 `compiled=false`。
+- 主分支树没有发现 `gradle.lockfile` 或 Gradle dependency verification metadata；没有已保存的 Gradle 解析报告或 Go module graph 证据。
+
+### 当前 audit.py 的实际能力边界
+
+现有 `docs/compliance/tools/audit.py` 的源代码确认：
+
+1. Gradle 部分只读取 `app/build.gradle.kts` 中可匹配的直接声明，并对少量 Maven 坐标使用硬编码许可证映射；不会执行 Gradle dependency resolution，不会读取完整 BOM/POM 传递依赖，也不会解析 Android Gradle Plugin/Kotlin Compose plugin 的构建依赖。
+2. Go 部分只解析 `native/go.mod` 的 require 条目和 `native/source-lock.json` 中的 Mihomo 锁定记录；不读取 `native/go.sum`，不调用 `go list -m all`、`go mod graph` 或 `go mod download -json`，也不检查每个下载模块中的 LICENSE/COPYING/NOTICE 文件。
+3. 除已知的少量 Maven 坐标和 Mihomo 外，许可证保持 `NOASSERTION`；不会通过包名猜测许可证。
+4. SPDX 输出将包的 `licenseConcluded`、`copyrightText`、`downloadLocation` 保持为 `NOASSERTION`，关系目前只有文档描述关系，尚未生成真实的 `DEPENDS_ON` 依赖边。
+
+因此当前产物是**manifest-level inventory**，不是完整 Gradle/Go 传递依赖 SBOM，也不是与实际 APK ABI 和构建标签一一对应的发行 SBOM。
+
+### 完整 SBOM 的必需解析范围
+
+正式生成前，必须在固定 commit 和可复核工具链下分别采集：
+
+- Gradle：`releaseRuntimeClasspath`、`debugRuntimeClasspath`、`testRuntimeClasspath`、`androidTestRuntimeClasspath`、必要的 compile classpath，以及 root/app `buildEnvironment`；保存完整依赖树、精确版本、POM/上游许可证来源和解析日志。
+- Go：使用锁定的 Go `1.27.1` 采集 `go list -m -json all`、`go mod graph`、`go mod download -json all`；按 `cmfa,with_gvisor` 构建标签核对实际模块图，并对下载模块逐项扫描 LICENSE/COPYING/NOTICE 与上游 SPDX/许可证元数据。
+- Native：单独记录 Mihomo 固定 commit、归档 SHA-256、本地 TUN FD patch 的 SHA-256、GPL-3.0 上游许可证和 patch 权利状态；CMFA 继续按 reference-only 处理，除非后续证据证明实际编译或分发。
+- SPDX：生成精确版本和 purl、直接/传递关系、scope、文件哈希、许可证原文来源及 NOASSERTION 未决列表；不得把 build/test/dev-only 组件混入 release runtime 组件，也不得把测试依赖误报为 APK 内组件。
+
+### 本轮执行边界与状态
+
+- 本轮只做静态清单和工具能力审查，没有执行 Gradle 依赖解析、Go module 下载或许可证扫描。
+- 当前执行环境没有 Gradle 安装和外部网络；系统 Go 为 `1.23.2`，低于项目锁定的 `1.27.1`。因此不能用当前环境结果冒充精确工具链解析结果。
+- 没有运行 CI、Gradle build、Go build、APK 编译，也没有修改依赖版本、go.mod/go.sum、source-lock 或构建脚本。
+- 完整传递依赖 SBOM：`BLOCKED / NOT GENERATED`。当前 manifest-level SBOM 仅作为预审清单保留，所有未核许可证项继续 `NOASSERTION`。

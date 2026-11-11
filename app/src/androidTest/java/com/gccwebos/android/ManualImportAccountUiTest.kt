@@ -185,24 +185,32 @@ class ManualImportAccountUiTest {
         compose.onNodeWithTag("manual-import-error").assertTextEquals("订阅不可用或未提供有效期")
         compose.runOnIdle {
             assertTrue(account.accountUsage.state.value.resource is Resource.Available)
-            System.out.println("ISOCALIB phase1 reads=" + f.reads.get() + " model=" + f.modelReads.get() + " downloads=" + f.downloads.get() +
-                " kind=" + f.repository.localSubscriptions.sourceKind() + " status=" + account.localSubscription.status +
-                " validUntil=" + account.localSubscription.validUntil + " actions=" + actions.size)
-            assertTrue(actions.isEmpty())
+            // The nodes-page visit auto-activated the account row (#65) and its load
+            // negotiated the delivery model once — served and counted by the fixture —
+            // yet the account delivered nothing: still MISSING, with no expiry anywhere.
+            // The rejected import borrowed none of it; its only download is its own.
+            // (Calibration run 42950446054: reads=3, model=1, downloads=1.)
+            assertEquals(ManualSourceKind.LegacyRemote, f.repository.localSubscriptions.sourceKind())
+            assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+            assertNull(account.localSubscription.validUntil); assertTrue(actions.isEmpty())
+            assertEquals(3, f.reads.get()); assertEquals(1, f.modelReads.get())
+            assertEquals(1, f.downloads.get())
         }
         compose.onNodeWithTag("manual-import-cancel").performClick()
         compose.onNodeWithTag("nav-Connect").performClick()
-        // This shared tag also identifies explicit account preparation when no config exists.
-        // Exercising it must never borrow account expiry, switch the None selector or power VPN.
+        // This shared tag also identifies explicit account preparation.
+        // Exercising it re-runs the account load negotiation but must still deliver
+        // nothing, borrow no expiry for the rejected import and never power the VPN.
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
-        compose.waitUntil(10_000) { !account.busy }
+        compose.waitUntil(10_000) { f.reads.get() == 4 && !account.busy }
         compose.runOnIdle {
-            System.out.println("ISOCALIB phase2 reads=" + f.reads.get() + " model=" + f.modelReads.get() + " downloads=" + f.downloads.get() +
-                " kind=" + f.repository.localSubscriptions.sourceKind() + " status=" + account.localSubscription.status +
-                " validUntil=" + account.localSubscription.validUntil + " actions=" + actions.size +
-                " presentation=" + connectionOverviewPresentation(account.localSubscription, now,
-                    ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)).action)
-            assertTrue(actions.isEmpty())
+            // (Calibration run 42950446054: reads=4, model=2, downloads=1.)
+            assertEquals(ManualSourceKind.LegacyRemote, f.repository.localSubscriptions.sourceKind())
+            assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+            assertNull(account.localSubscription.validUntil)
+            assertEquals(2, f.modelReads.get()); assertEquals(1, f.downloads.get()); assertTrue(actions.isEmpty())
+            assertEquals(ConnectionPowerAction.None, connectionOverviewPresentation(account.localSubscription, now,
+                ConnectionControlState(ConnectionPhase.Disconnected, canConnect = true)).action)
         }
         compose.onNodeWithText("已连接", substring = false).assertDoesNotExist()
     }

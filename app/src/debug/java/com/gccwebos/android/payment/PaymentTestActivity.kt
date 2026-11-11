@@ -40,8 +40,9 @@ class PaymentTestActivity : PaymentActivity() {
             "file" -> "location.href='file:///data/local/tmp/x.html';"
             else -> ""
         }
+        val extra = if (scenario == "iframe-static-other-origin") "<iframe src='https://example.com/frame'></iframe>" else ""
         val html = """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
-            <body style="font:18px sans-serif;padding:24px"><h2>Local payment test page</h2><p>scenario: $scenario</p>
+            <body style="font:18px sans-serif;padding:24px"><h2>Local payment test page</h2><p>scenario: $scenario</p>$extra
             <p>This page is served from the app, not from the gateway.</p>
             <script>setTimeout(function(){ $action }, 700);</script></body>"""
         view.loadDataWithBaseURL(url, html, "text/html", "utf-8", null)

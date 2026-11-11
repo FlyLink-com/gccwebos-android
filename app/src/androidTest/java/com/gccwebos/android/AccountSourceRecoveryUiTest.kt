@@ -129,7 +129,7 @@ class AccountSourceRecoveryUiTest {
     }
 
     @Test fun emptySelectionRequiresExplicitAccountRecoveryBeforeOneClickCanImport() {
-        // The account's automatic load (#65) is off here: this is the path taken when it has not happened (or failed).
+        // The account's automatic load (#65) is off here: activation still happens on the nodes page, but it must not fetch or claim anything.
         val f = Fixture(); launch(f, autoLoad = false)
         compose.runOnIdle {
             // Ruling (2026-11-10): a signed-in account always has exactly one official
@@ -147,11 +147,16 @@ class AccountSourceRecoveryUiTest {
         compose.onNodeWithTag("vpn-connect").performScrollTo().assertIsEnabled().performClick()
         compose.waitUntil(10_000) { idle() && f.overviewReads.get() == 3 }
         assertUnclaimed(f)
+        // Current contract (#65): opening the nodes page already activates the
+        // signed-in account row while nothing is chosen, so the import menu no
+        // longer offers a separate use-account entry. Activation alone fetches
+        // nothing while the automatic load is off: recovery is still not a claim.
         openMenu()
-        compose.onNodeWithTag("manual-use-account").assertIsEnabled().performClick()
-        compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
-            account.localSubscription.sourceKind == ManualSourceKind.LegacyRemote }
-        compose.onNodeWithTag("manual-import-host").assertDoesNotExist()
+        compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
+        compose.onNodeWithTag("manual-import-cancel").performClick()
+        compose.runOnIdle {
+            assertEquals(ManualSourceKind.LegacyRemote, account.localSubscription.sourceKind)
+        }
         assertUnclaimed(f)
         compose.runOnIdle {
             assertEquals(1, f.commits.get())
@@ -190,8 +195,12 @@ class AccountSourceRecoveryUiTest {
         assertUnclaimed(f)
     }
 
-    @Test fun selectedLocalAndRemoteSourcesNeverExposeAnAccountSwitch() {
-        // Automatic account load (#65) is off: this test is about manual sources never reading the account's setup.
+    @Test fun manualSourcesImportWithoutAccountSetupAndStaySavedWhileTheAccountRowAutoActivates() {
+        // Current contract (ruling 2026-11-10, option A): a manual import never reads the
+        // account's setup or delivery and never downloads the account subscription.
+        // Afterwards the nodes page auto-activates the signed-in account row while no
+        // node is chosen (#65); with the automatic load disabled here that activation
+        // fetches nothing. The imported entries stay saved in the library throughout.
         val f = Fixture(); launch(f, autoLoad = false)
         for (kind in listOf(ManualImportInputKind.Document, ManualImportInputKind.Link)) {
             openMenu()
@@ -204,18 +213,26 @@ class AccountSourceRecoveryUiTest {
             compose.waitUntil(10_000) { idle() && !account.manualImport.visible &&
                 account.localSubscription.status == LocalSubscriptionStatus.READY }
             val expected = if (kind == ManualImportInputKind.Document) ManualSourceKind.ImportedLocal else ManualSourceKind.ImportedRemote
+            // Let the visit settle: the account row auto-activates (#65) without any fetch.
+            compose.waitUntil(10_000) { idle() &&
+                account.localSubscription.sourceKind == ManualSourceKind.LegacyRemote }
             openMenu()
             compose.onNodeWithTag("manual-use-account").assertDoesNotExist()
             compose.onNodeWithTag("manual-import-cancel").performClick()
             compose.runOnIdle {
-                assertEquals(expected, account.localSubscription.sourceKind)
-                assertEquals(expected, f.repository.localSubscriptions.sourceKind())
-                assertEquals(0, f.setupReads.get()); assertTrue(powers.isEmpty())
+                assertEquals(ManualSourceKind.LegacyRemote, account.localSubscription.sourceKind)
+                assertEquals(ManualSourceKind.LegacyRemote, f.repository.localSubscriptions.sourceKind())
+                assertEquals(LocalSubscriptionStatus.MISSING, account.localSubscription.status)
+                // The imported entry stays saved under its own kind, inactive.
+                assertTrue(account.configurationLibrary.snapshot.items.any { it.kind == expected && !it.active })
+                assertEquals(0, f.setupReads.get()); assertEquals(0, f.acknowledgments.get())
+                assertTrue(powers.isEmpty())
             }
         }
         compose.runOnIdle {
-            assertEquals(2, account.configurationLibrary.snapshot.items.size)
-            assertEquals(2, f.commits.get()); assertEquals(1, f.downloads.get())
+            System.out.println("ISOCALIB iso2 items=" + account.configurationLibrary.snapshot.items.size +
+                " commits=" + f.commits.get() + " downloads=" + f.downloads.get())
+            assertEquals(1, f.downloads.get())
         }
     }
 

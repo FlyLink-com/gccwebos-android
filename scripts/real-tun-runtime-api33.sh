@@ -213,7 +213,7 @@ adb shell appops set "$APP_ID" REQUEST_INSTALL_PACKAGES allow
 timeout 300 "$ADB" -s emulator-5554 shell am instrument -w -r \
   -e class "$HANDOFF_METHOD" "$TEST_RUNNER" \
   | tee "$OUT/instrumentation-handoff.log" | tee -a "$OUT/instrumentation-all.log" || true
-adb pull "/sdcard/Android/data/$APP_ID/files/ui-evidence/07-handoff-focus.txt" "$OUT/" > "$OUT/handoff-evidence-pull.log" 2>&1 || true
+adb pull "/sdcard/Android/data/$APP_ID/files/ui-evidence/in-app-update/07-handoff-focus.txt" "$OUT/" > "$OUT/handoff-evidence-pull.log" 2>&1 || true
 grep -Eiq 'installer|appdetail|InstallGrant|InstallStart' "$OUT/07-handoff-focus.txt" || {
   log 'FAIL: installer-handoff evidence does not show the system installer in focus'
   exit 1

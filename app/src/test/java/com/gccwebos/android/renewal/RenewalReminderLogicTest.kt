@@ -45,6 +45,30 @@ class RenewalReminderLogicTest {
         assertEquals(2L, renewalReminder(resource(now.plus(Duration.ofHours(25))), now)?.daysLeft)
     }
 
+    @Test fun daysLeftRoundsUpAtWholeDayBoundaries() {
+        // Fixed clock: every case pins both instants, so no wall-clock date can move the result.
+        assertEquals(3L, daysLeftCeil(now.plus(Duration.ofDays(3)), now))
+        assertEquals(4L, daysLeftCeil(now.plus(Duration.ofDays(3)).plusSeconds(1), now))
+        assertEquals(3L, daysLeftCeil(now.plus(Duration.ofDays(3)).minusSeconds(1), now))
+        assertEquals(1L, daysLeftCeil(now.plusSeconds(1), now))
+        assertEquals(0L, daysLeftCeil(now, now))
+        assertEquals(0L, daysLeftCeil(now.minusSeconds(1), now))
+        assertEquals(7L, daysLeftCeil(now.plus(Duration.ofDays(7)), now))
+        assertEquals(8L, daysLeftCeil(now.plus(Duration.ofDays(7)).plusSeconds(1), now))
+    }
+
+    @Test fun threeDaysExactlyRendersThreeDaysNotFour() {
+        val exact = renewalReminder(resource(now.plus(Duration.ofDays(3))), now)!!
+        assertEquals(ReminderKind.Expiring, exact.kind)
+        assertEquals(3L, exact.daysLeft)
+        assertTrue(popupBody(exact, sh).contains("剩余 3 天"))
+        assertEquals("套餐剩余 3 天到期，点击续费", bannerText(exact))
+        // The old device fixture added an extra hour on top of the 3 days; ceil turns that into 4.
+        // That arithmetic — not the product — is what the flaky device assertion tripped over.
+        val plusHour = renewalReminder(resource(now.plus(Duration.ofDays(3)).plusSeconds(3600)), now)!!
+        assertEquals(4L, plusHour.daysLeft)
+    }
+
     @Test fun expiredResourceIsReportedAsExpired() {
         val expired = renewalReminder(resource(now.minusSeconds(1)), now)
         assertEquals(ReminderKind.Expired, expired?.kind)

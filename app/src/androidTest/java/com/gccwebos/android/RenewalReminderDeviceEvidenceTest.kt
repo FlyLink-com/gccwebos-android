@@ -50,7 +50,9 @@ class RenewalReminderDeviceEvidenceTest {
 
     private fun expiring(scope: CoroutineScope, days: Long, usage: Usage? = null) = offlineUiAccount(scope).apply {
         val now = Instant.now()
-        resource = Resource.Available("resource_" + "a".repeat(64), "synthetic", now.plusSeconds(days * 86400 + 3600), false,
+        // Exactly `days` days: daysLeftCeil rounds up, so an extra hour would make days=3 render
+        // as 4 (the old `+ 3600` here). The fixture's `days` must mean the rendered count.
+        resource = Resource.Available("resource_" + "a".repeat(64), "synthetic", now.plusSeconds(days * 86400), false,
             usage ?: Usage(100L shl 30, 20L shl 30, 80L shl 30, "measured", now), 30, 100.0)
     }
 
@@ -116,7 +118,7 @@ class RenewalReminderDeviceEvidenceTest {
             Thread.sleep(2500)
         }
         compose.waitUntil(15_000) { runCatching { compose.onAllNodesWithTag("renewal-popup").fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false) }
-        compose.onNodeWithTag("renewal-popup-body").assertTextContains("3", substring = true)
+        compose.onNodeWithTag("renewal-popup-body").assertTextContains("剩余 3 天", substring = true)
         screenshot("02-popup-after-permission-prompt")
         compose.onNodeWithTag("renewal-popup-close").performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("renewal-banner").fetchSemanticsNodes().isNotEmpty() }
@@ -227,7 +229,7 @@ class RenewalNotificationDeviceTest {
     @After fun after() { prefs.clear(); alarms.cancel(); alarms.dismissPosted() }
 
     private fun available(now: Instant, days: Long) = Resource.Available("resource_" + "a".repeat(64), "synthetic",
-        now.plusSeconds(days * 86400 + 3600), false, Usage(100L shl 30, 20L shl 30, 80L shl 30, "measured", now), 30, 100.0)
+        now.plusSeconds(days * 86400), false, Usage(100L shl 30, 20L shl 30, 80L shl 30, "measured", now), 30, 100.0)
 
     @Test fun dailyTwentyHundredBeijingAlarmIsScheduledPostedOnceAndClearedOnSignOut() {
         val now = Instant.now()

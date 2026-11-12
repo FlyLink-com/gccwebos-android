@@ -101,6 +101,13 @@ open class PaymentActivity : ComponentActivity() {
                     PaymentNavigation.Allow -> {
                         debugLog("allow main=${request.isForMainFrame} redirect=${request.isRedirect} gesture=${request.hasGesture()} " +
                             "scheme=${request.url.scheme} host=${request.url.host} hops=${policy?.hops}")
+                        // A new top-level page starts here, on the UI thread, before any of its
+                        // sub-frame requests can be intercepted — so this is where a stale
+                        // blocked-origin notice from the previous page is cleared. It must not be
+                        // cleared in onPageStarted: the intercept callback runs on an IO thread
+                        // and can land first (re-run 43177233053: block 08:16:44.491, start
+                        // 08:16:44.494), which wiped the notice for the page it belonged to.
+                        if (request.isForMainFrame) state.blockedOrigin = false
                         false
                     }
                     is PaymentNavigation.Alipay -> {
@@ -120,7 +127,10 @@ open class PaymentActivity : ComponentActivity() {
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 debugLog("started host=${url?.let { Uri.parse(it).host }}")
                 state.failure = null
-                state.blockedOrigin = false
+                // No blockedOrigin reset here on purpose: the sub-frame intercept runs on an IO
+                // thread and can land before this start event (see the Allow branch above, where
+                // a stale notice is cleared instead). `failure` is safe to reset: every writer
+                // of it runs on this same UI thread.
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
@@ -177,6 +187,7 @@ open class PaymentActivity : ComponentActivity() {
     private fun retry() {
         val view = webView ?: run { finish(); return }
         state.failure = null
+        state.blockedOrigin = false
         state.progress = 0
         state.pageShown = false
         policy?.restart() // A reload of the gateway entry is a new chain.
